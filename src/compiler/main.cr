@@ -515,6 +515,10 @@ fn corec_main() -> int:
     // from a cold build, so optional programs disable the cache.
     if g_optrep_on != 0:
         cache_enabled = 0
+    // The debug legacy-if mode changes generated IR without changing the cache
+    // key, so a warm default entry would silently override the flag.
+    if cli_has("legacy-if") != 0:
+        cache_enabled = 0
     // Hidden mutation hook: skip intern-journal replay on load to reproduce the
     // original defect. Real builds never set it.
     if cli_has("inject-cir-skip-journal") != 0:

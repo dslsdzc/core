@@ -372,7 +372,7 @@ def _write_source(tmp, source, name):
     return src
 
 
-def _build_source(tmp, src, out_name, cwd, legacy_if=True):
+def _build_source(tmp, src, out_name, cwd, legacy_if=False):
     """Build a static ELF + .ccr from an existing source path."""
     elf = tmp / f"{out_name}.elf"
     r = _run([COREC, "build", src, "-o", elf, "--static"], cwd=cwd,
@@ -2031,6 +2031,24 @@ def test_if_lowers_to_match_cases():
                             legacy_if=False)
 
 
+def test_legacy_if_flag_bypasses_warm_cache():
+    """A warm entry made by default MATCH lowering must not feed --legacy-if."""
+    source = """fn main() -> int:
+    x := 1
+    if x == 1:
+        return 42
+    return 0
+"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _clean_cache(tmp)
+        default = _build_ccr(tmp, source, "legacy_cache", cwd=tmp, legacy_if=False)
+        assert _match_nodes(default), "default if did not become MATCH"
+        legacy = _build_ccr(tmp, source, "legacy_cache", cwd=tmp, legacy_if=True)
+        assert _match_nodes(legacy) == [], "legacy-if reused a MATCH cache entry"
+        assert _branch_nodes(legacy), "legacy-if did not restore IR_BRANCH"
+
+
 def test_enum_match_is_one_match_with_enum_cases():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -2739,7 +2757,7 @@ def _assert_tampered_rebuild(tmp, src, entry, data, tag, base_elf, base_ccr,
 
 
 def _assert_match_cold_warm(tmp, source, base, expected, fns,
-                            include_if=False, legacy_if=True):
+                            include_if=False, legacy_if=False):
     """Cold and warm static builds must match exactly and every entry must hit.
 
     `fns` maps function name -> expected per-MATCH case counts. With
@@ -2809,6 +2827,7 @@ def test_case_model_is_semantic_before_lower():
         r = _run(
             [COREC, "ccr", src, "-o", ccr, "--dump-case-model"],
             cwd=tmp,
+            legacy_if=False,
         )
         assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
         before, after = _case_model_counts(r.stdout)
@@ -2843,6 +2862,7 @@ def test_case_model_is_semantic_before_lower():
         rw = _run(
             [COREC, "ccr", src, "-o", warm_ccr, "--dump-case-model"],
             cwd=tmp,
+            legacy_if=False,
         )
         assert rw.returncode == 0, f"warm corec ccr failed: {rw.stdout}\n{rw.stderr}"
         warm_before, warm_after = _case_model_counts(rw.stdout)
@@ -2931,8 +2951,12 @@ def test_cir_cache_nested_match_case_order():
         )
         nested = snaps["pick"]["matches"]
         assert [m["count"] for m in nested] == [3, 2]
-        rows = _parse_case(segment(Path(str(tmp / "warm.elf") + ".ccr").read_bytes(), CASE_TAG))
-        assert len(rows) == 5, rows
+        warm_data = Path(str(tmp / "warm.elf") + ".ccr").read_bytes()
+        warm_nodes = _nod_records(warm_data)
+        assert [
+            len(_match_rows(warm_data, warm_nodes[i]))
+            for i in _pattern_match_nodes(warm_data)
+        ] == [3, 2]
 
 
 def test_cir_cache_warm_restore_remaps_shifted_case_targets():
@@ -3132,8 +3156,9 @@ def test_cir_cache_rebases_stale_case_start_with_nod_rewrite():
         assert warm_ccr.read_bytes() == base_ccr_bytes, "warm .ccr differs from cold"
         assert _run_elf(warm_elf) == 42
 
-        nodes = _nod_records(warm_ccr.read_bytes())
-        match_nodes = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+        warm_data = warm_ccr.read_bytes()
+        nodes = _nod_records(warm_data)
+        match_nodes = _pattern_match_nodes(warm_data)
         assert len(match_nodes) == 2, match_nodes
         assert nodes[match_nodes[0]][3] == 0, nodes[match_nodes[0]]
         assert nodes[match_nodes[1]][3] == 3, nodes[match_nodes[1]]
