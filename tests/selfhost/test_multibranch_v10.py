@@ -2738,14 +2738,16 @@ def _assert_tampered_rebuild(tmp, src, entry, data, tag, base_elf, base_ccr,
     assert _run_elf(out_elf) == expected, tag
 
 
-def _assert_match_cold_warm(tmp, source, base, expected, fns):
+def _assert_match_cold_warm(tmp, source, base, expected, fns,
+                            include_if=False, legacy_if=True):
     """Cold and warm static builds must match exactly and every entry must hit.
 
-    `fns` maps function name -> expected per-MATCH case counts.
+    `fns` maps function name -> expected per-MATCH case counts. With
+    `include_if`, if-derived MATCHes are part of the expected count.
     """
     _clean_cache(tmp)
     src = _write_source(tmp, source, base)
-    cold_elf, cold_ccr = _build_source(tmp, src, "cold", tmp)
+    cold_elf, cold_ccr = _build_source(tmp, src, "cold", tmp, legacy_if=legacy_if)
     entries = {fn: _cache_entry(tmp, fn) for fn in fns}
     before = {fn: entry.read_bytes() for fn, entry in entries.items()}
     stamps = {fn: _entry_stamp(entry) for fn, entry in entries.items()}
@@ -2756,7 +2758,7 @@ def _assert_match_cold_warm(tmp, source, base, expected, fns):
         _assert_snapshot_case_section(snaps[fn], before[fn], counts)
     cold_data = cold_ccr.read_bytes()
     cold_nodes = _nod_records(cold_data)
-    pattern_nodes = _pattern_match_nodes(cold_data)
+    pattern_nodes = _match_nodes(cold_data) if include_if else _pattern_match_nodes(cold_data)
     assert sum(cold_nodes[m][4] for m in pattern_nodes) == sum(
         sum(c) for c in fns.values()
     )
@@ -2764,7 +2766,7 @@ def _assert_match_cold_warm(tmp, source, base, expected, fns):
         _assert_targets_are_labels(cold_data, _match_rows(cold_data, cold_nodes[match_idx]))
 
     time.sleep(0.02)
-    warm_elf, warm_ccr = _build_source(tmp, src, "warm", tmp)
+    warm_elf, warm_ccr = _build_source(tmp, src, "warm", tmp, legacy_if=legacy_if)
     for fn in fns:
         assert _entry_stamp(entries[fn]) == stamps[fn], (
             f"{fn}: warm build did not hit the cache"
@@ -2865,6 +2867,31 @@ def test_cir_cache_restores_match_cases_cold_warm():
         )
         # The old rejection path would never save this entry at all.
         assert snaps["pick"]["instr_count"] > 0
+
+
+def test_cir_cache_restores_if_cases_cold_warm():
+    """If-derived CASE ranges survive the warm CIR cache and stay MATCH."""
+    source = """fn main() -> int:
+    x := 2
+    if x == 1:
+        return 10
+    if x == 2:
+        return 20
+    return 30
+"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        snaps = _assert_match_cold_warm(
+            tmp,
+            source,
+            "if_cache",
+            20,
+            {"main": [2, 2]},
+            include_if=True,
+            legacy_if=False,
+        )
+        assert snaps["main"]["instr_count"] > 0
+        assert snaps["main"]["match_count"] == 2
 
 
 def test_cir_cache_two_match_functions_disjoint_ranges():
