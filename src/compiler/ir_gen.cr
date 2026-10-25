@@ -798,6 +798,15 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
     if node < 0:
         return oe_boxed()
     k := ast_kind(node)
+    if k == EXPR_BLOCK:
+        // An if branch is a block; its representation is the last value's, not
+        // the default boxed encoding.
+        stmt_start := ast_a(node)
+        stmt_count := ast_b(node)
+        if stmt_count > 0:
+            last := cell_load(g_block_stmts, (stmt_start + stmt_count - 1) * 8)
+            return rep_enc_of_expr(last, val_var)
+        return oe_boxed()
     if k == EXPR_ENUM_CONSTRUCTOR:
         nm := istr_get(ast_a(node))
         if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0:
