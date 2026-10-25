@@ -2942,16 +2942,41 @@ fn gen_expr(node: int) -> int:
             lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, then_lbl, 0)
             emit(IR_MATCH, -1, cond_var, case_base, 2, 0)
             g_cir_has_match = 1
+        result_var : ., mut = -1
+        result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
-        gen_expr(then_node)
+        then_val := gen_expr(then_node)
+        then_val = force_if_thunk(then_val)
+        if else_node >= 0 && then_val >= 0:
+            result_var = new_ir_var("if_res", irv_type(then_val))
+            emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(then_val))
+            if g_optrep_on != 0:
+                result_rep = new_ir_var("if_res_rep", TI_INT)
+                emit(IR_CONST, result_rep, 1, 0, 0, TI_INT)
+                irv_set_rep(result_var, result_rep)
+            emit(IR_STORE, -1, result_var, then_val, 0, 0)
+            if result_rep >= 0:
+                emit_rep_set(result_rep, rep_enc_of_expr(then_node, then_val))
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         if else_node >= 0:
             emit(IR_LABEL, -1, else_lbl, 0, 0, 0)
-            gen_expr(else_node)
+            else_val := gen_expr(else_node)
+            else_val = force_if_thunk(else_val)
+            if result_var < 0 && else_val >= 0:
+                result_var = new_ir_var("if_res", irv_type(else_val))
+                emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(else_val))
+                if g_optrep_on != 0:
+                    result_rep = new_ir_var("if_res_rep", TI_INT)
+                    emit(IR_CONST, result_rep, 1, 0, 0, TI_INT)
+                    irv_set_rep(result_var, result_rep)
+            if result_var >= 0 && else_val >= 0:
+                emit(IR_STORE, -1, result_var, else_val, 0, 0)
+                if result_rep >= 0:
+                    emit_rep_set(result_rep, rep_enc_of_expr(else_node, else_val))
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
         sg_pop()
-        return -1
+        return result_var
 
     // Loop
     if ast_kind(node) == EXPR_LOOP:

@@ -1931,6 +1931,36 @@ IF_MATCH_FIXTURES = [
         0,
     ),
     (
+        "if_expr_int",
+        """fn main() -> int:
+    x := if true:
+        1
+    else:
+        2
+    if x == 1:
+        return 42
+    return 0
+""",
+        42,
+        2,
+        0,
+    ),
+    (
+        "if_expr_str",
+        """fn main() -> int:
+    s := if true:
+        "a"
+    else:
+        "b"
+    if str_len(s) == 1:
+        return 42
+    return 0
+""",
+        42,
+        2,
+        0,
+    ),
+    (
         "if_bool_var",
         """fn main() -> int:
     b := true
