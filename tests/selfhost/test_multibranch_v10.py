@@ -2152,6 +2152,104 @@ def test_all_condition_branches_use_match_cases():
             _assert_program(tmp, source, expected, opts=(0, 2), name=name)
 
 
+IF_TYPE_FIXTURES = [
+    (
+        "if_bool_result",
+        """fn main() -> int:
+    b := if true:
+        true
+    else:
+        false
+    if b:
+        return 42
+    return 0
+""",
+        42,
+    ),
+    (
+        "if_char_result",
+        """fn main() -> int:
+    c := if true:
+        'A'
+    else:
+        'B'
+    if c == 'A':
+        return 42
+    return 0
+""",
+        42,
+    ),
+    (
+        "if_dex_result",
+        """fn main() -> int:
+    d := if true:
+        1.0
+    else:
+        2.0
+    if d == 1.0:
+        return 42
+    return 0
+""",
+        42,
+    ),
+    (
+        "if_struct_result",
+        """struct P:
+    x: int
+    y: int
+fn main() -> int:
+    p := if true:
+        P { x = 1, y = 2 }
+    else:
+        P { x = 3, y = 4 }
+    return p.x + p.y
+""",
+        3,
+    ),
+    (
+        "if_tuple_result",
+        """fn main() -> int:
+    t := if true:
+        (1, 2)
+    else:
+        (3, 4)
+    return (t . 0) + (t . 1)
+""",
+        3,
+    ),
+    (
+        "if_optional_bare_result",
+        """fn main() -> int:
+    o : int? = if true:
+        1
+    else:
+        2
+    x := o?
+    return x + 41
+""",
+        42,
+    ),
+    (
+        "if_return_result",
+        """fn main() -> int:
+    return if true:
+        42
+    else:
+        0
+""",
+        42,
+    ),
+]
+
+
+def test_if_expression_result_types():
+    """if-expression result slots keep bool/char/dex/struct/tuple/optional forms."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, expected in IF_TYPE_FIXTURES:
+            _assert_program(tmp, source, expected, opts=(0, 2), name=name)
+
+
 def test_enum_match_is_one_match_with_enum_cases():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
