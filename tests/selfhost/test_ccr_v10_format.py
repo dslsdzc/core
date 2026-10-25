@@ -613,7 +613,9 @@ def _build_v10(tmp: Path, source: str = E2E_SOURCE, name: str = "e2e"):
     src = tmp / f"{name}.cr"
     ccr = tmp / f"{name}.ccr"
     src.write_text(source, encoding="utf-8")
-    r = _run([COREC, "ccr", src, "-o", ccr])
+    # This suite pins the container shape, not the if lowering. Keep the
+    # prelude's ifs on IR_BRANCH so the empty-CASE assertions stay meaningful.
+    r = _run([COREC, "ccr", src, "-o", ccr, "--legacy-if"])
     assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
     return ccr.read_bytes()
 
