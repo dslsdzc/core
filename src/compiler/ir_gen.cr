@@ -1796,7 +1796,7 @@ fn is_hotpatch_func(name_idx: int) -> int:
         if fi_name(i) == name_idx:
             fn_node := fi_ast_node(i)
             if fn_node >= 0:
-                hotpatch_ver := ast_int_val(fn_node) / 256
+                hotpatch_ver := (ast_int_val(fn_node) % 65536) / 256
                 if hotpatch_ver > 0:
                     count = count + 1
         i = i + 1

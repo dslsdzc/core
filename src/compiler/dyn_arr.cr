@@ -681,6 +681,11 @@ fn fi_param_count(n: int) -> int:
     return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT)
 fn fi_return_type(n: int) -> int:
     return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE)
+fn fn_node_is_pub(node: int) -> int:
+    if node < 0:
+        return 0
+    return (ast_int_val(node) / 65536) % 2
+
 fn fi_ast_node(n: int) -> int:
     return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE)
 fn fi_generic_count(n: int) -> int:

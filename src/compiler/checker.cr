@@ -1514,7 +1514,7 @@ fn collect_decls():
             break
         name_idx := fi_name(i)
         fn_node := fi_ast_node(i)
-        hotpatch_ver := ast_int_val(fn_node) / 256
+        hotpatch_ver := (ast_int_val(fn_node) % 65536) / 256
         rt := fi_return_type(i)
         rt_ti := TI_UNIT
         // For generic functions, skip return type resolution (depends on call site)
@@ -1595,7 +1595,7 @@ fn collect_decls():
                 existing_node := sym_node(existing_si)
                 existing_is_hotpatch : ., mut = 0
                 if existing_node >= 0 && ast_kind(existing_node) == EXPR_FN:
-                    existing_is_hotpatch = ast_int_val(existing_node) / 256
+                    existing_is_hotpatch = (ast_int_val(existing_node) % 65536) / 256
                 if existing_is_hotpatch == 0:
                     fn_name_str := istr_get(name_idx)
                     check_error(EC_N_DUPLICATE, "Duplicate function definition '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node))
