@@ -1007,7 +1007,7 @@ fn main() -> int:
 
 # Composite sub-patterns are allocated before the outer EXPR_ENUMPAT node, so
 # they are not contiguous from ast_b. These fixtures pin both orders and a
-# deeper nesting; all must be rejected rather than matched as a bare variant.
+# deeper nesting; payload roots are recovered by walking the allocation order.
 MATCH_NESTED_SECOND_BYPASS_SOURCE = """enum Inner:
     X(int), Y(int)
 
@@ -1052,7 +1052,98 @@ fn f(o: Outer) -> int:
         _ => 2
 
 fn main() -> int:
+    if f(A(X(Y(Z(5))))) != 1:
+        return 10
     return f(B())
+"""
+
+MATCH_NESTED_COMPOSITE_SOURCE = """struct Point:
+    x: int
+    y: int
+
+enum Inner:
+    X(int), Y(int)
+
+enum Outer:
+    A(Inner, Inner), B
+
+enum WithPoint:
+    V(Point), W
+
+struct Holder:
+    e: Inner
+
+enum L3:
+    Z(int)
+
+enum L2:
+    P(L3)
+
+enum L1:
+    Q(L2)
+
+enum Deep:
+    A(L1), B
+
+fn pick_second(o: Outer) -> int:
+    return match o:
+        A(x, X(y)) => y,
+        _ => 9
+
+fn pick_first(o: Outer) -> int:
+    return match o:
+        A(X(y), x) => y,
+        _ => 9
+
+fn pick_point(p: WithPoint) -> int:
+    return match p:
+        V(Point { x = 1, y = yy }) => yy,
+        _ => 9
+
+fn pick_holder(h: Holder) -> int:
+    return match h:
+        Holder { e = X(y) } => y,
+        _ => 9
+
+fn deep(o: Deep) -> int:
+    return match o:
+        A(Q(P(Z(z)))) => z,
+        _ => 9
+
+fn main() -> int:
+    if pick_second(A(Y(1), X(2))) != 2:
+        return 1
+    if pick_second(A(Y(1), Y(2))) != 9:
+        return 2
+    if pick_first(A(X(3), Y(4))) != 3:
+        return 3
+    if pick_first(A(Y(3), X(4))) != 9:
+        return 4
+    if pick_point(V(Point { x = 1, y = 7 })) != 7:
+        return 5
+    if pick_point(V(Point { x = 2, y = 7 })) != 9:
+        return 6
+    if pick_holder(Holder { e = X(8) }) != 8:
+        return 7
+    if pick_holder(Holder { e = Y(8) }) != 9:
+        return 8
+    t1 := (X(5), 3)
+    v1 := match t1:
+        (X(y), z) => y + z,
+        _ => 9
+    if v1 != 8:
+        return 9
+    t2 := (Y(5), 3)
+    v2 := match t2:
+        (X(y), z) => y + z,
+        _ => 9
+    if v2 != 9:
+        return 10
+    if deep(A(Q(P(Z(11))))) != 11:
+        return 11
+    if deep(B()) != 9:
+        return 12
+    return 42
 """
 
 MATCH_MULTI_PAYLOAD_BIND_SOURCE = """enum Pair:
@@ -2604,27 +2695,17 @@ def test_nested_literal_payload_matches():
         )
 
 
-def test_nested_composite_payload_bypass_is_rejected():
+def test_nested_composite_payload_matches():
     cases = [
-        ("nested_second", MATCH_NESTED_SECOND_BYPASS_SOURCE),
-        ("nested_first", MATCH_NESTED_FIRST_BYPASS_SOURCE),
-        ("nested_deep", MATCH_NESTED_DEEP_BYPASS_SOURCE),
+        ("nested_second", MATCH_NESTED_SECOND_BYPASS_SOURCE, 1),
+        ("nested_first", MATCH_NESTED_FIRST_BYPASS_SOURCE, 1),
+        ("nested_deep", MATCH_NESTED_DEEP_BYPASS_SOURCE, 2),
+        ("nested_composite", MATCH_NESTED_COMPOSITE_SOURCE, 42),
     ]
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        needles = ["error[TM09]", "Nested match patterns are not supported"]
-        for name, source in cases:
-            _assert_compile_rejected(tmp, source, name, needles)
-            # `run` shares the same checker; the interpreter must reject the
-            # pattern too, not silently return one of the divergent values.
-            run = _run([COREC, "run", source], cwd=BASE)
-            text = run.stdout + run.stderr
-            assert run.returncode == 1, (
-                f"{name}: interpreter accepted a nested payload pattern: "
-                f"rc={run.returncode}: {text}"
-            )
-            for needle in needles:
-                assert needle in text, f"{name}: interpreter missing {needle!r}: {text}"
+        for name, source, expected in cases:
+            _assert_program(tmp, source, expected, opts=(0, 2), name=name)
 
 
 def test_multi_payload_ident_bindings_work():

@@ -1276,6 +1276,34 @@ fn sh_match_pat_subtree_start(p: int) -> int:
                         return s
     return p
 
+// Enum payload 第 i 个子模式的根节点。parser 只把首个子模式存进 ast_b，
+// 后续子模式 parse 后丢弃返回值；但每个子模式的子树都是连续分配、且根是子树里
+// 最后分配的节点（子先父后），因此可以从外层节点前一个节点反向切出各子树：
+//   end = pat_node；root = end - 1；end = subtree_start(root)；重复。
+// 返回 -1 = 下标越界/布局不可恢复（fail closed）。
+fn sh_match_payload_root(pat_node: int, i: int) -> int:
+    if pat_node < 0 || i < 0:
+        return -1
+    count := ast_c(pat_node)
+    if i >= count:
+        return -1
+    end : ., mut = pat_node
+    j : ., mut = count - 1
+    loop:
+        if j < i:
+            return -1
+        root := end - 1
+        if root <= 0 || root >= pat_node:
+            return -1
+        if j == i:
+            return root
+        s := sh_match_pat_subtree_start(root)
+        if s < 0 || s >= end:
+            return -1
+        end = s
+        j = j - 1
+    return -1
+
 // Enum payload 内的首个 refutable 节点（-1 = 全部为 ident/wildcard）。
 // 扫描区间 = [首个子模式子树起点, pat_node)。parser 在分配外层节点前连续分配
 // 完整 payload 子树，因此该区间覆盖所有子模式，包括“复合子模式不在首位”的
@@ -1375,35 +1403,41 @@ fn grow_cov_bits(needed: int):
         z = z + 1
     g_cov_bits = nb
     g_cov_cap = nc
-// 进入一次 match 覆盖收集：返回当前长度（供 mc_end 回退）
+// 进入一次 match 覆盖收集：新层位图从当前长度之后开始，返回
+// (saved * 65536 + old_base) 供 mc_end 同时恢复长度和基址。
 fn mc_begin() -> int:
-    return g_cov_len
+    old := g_cov_base
+    saved := g_cov_len
+    g_cov_base = saved
+    return saved * 65536 + old
 fn mc_add(vi: int):
     if vi < 0:
         return
-    grow_cov_bits(vi / 8 + 1)
-    if vi + 1 > g_cov_len:
-        g_cov_len = vi + 1
-    b := cell_load8(g_cov_bits, vi / 8)
+    actual := g_cov_base + vi
+    grow_cov_bits(actual / 8 + 1)
+    if actual + 1 > g_cov_len:
+        g_cov_len = actual + 1
+    b := cell_load8(g_cov_bits, actual / 8)
     pw : ., mut = 1
-    k : ., mut = vi % 8
+    k : ., mut = actual % 8
     loop:
         if k <= 0:
             break
         pw = pw * 2
         k = k - 1
     if (b / pw) % 2 == 0:
-        cell_store_byte(g_cov_bits, vi / 8, b + pw)
+        cell_store_byte(g_cov_bits, actual / 8, b + pw)
 fn mc_has(vi: int) -> int:
     if vi < 0:
         return 0
-    if vi >= g_cov_len:
+    actual := g_cov_base + vi
+    if actual >= g_cov_len:
         return 0
-    if vi / 8 >= g_cov_cap:
+    if actual / 8 >= g_cov_cap:
         return 0
-    b := cell_load8(g_cov_bits, vi / 8)
+    b := cell_load8(g_cov_bits, actual / 8)
     pw : ., mut = 1
-    k : ., mut = vi % 8
+    k : ., mut = actual % 8
     loop:
         if k <= 0:
             break
@@ -1422,14 +1456,17 @@ fn mc_first_missing(count: int) -> int:
     return -1
 // 退出：清零本层用过的位并回退长度（嵌套安全）
 fn mc_end(saved: int):
-    i : ., mut = saved
+    base := saved / 65536
+    old_base := saved % 65536
+    i : ., mut = base
     loop:
         if i >= g_cov_len:
             break
         if i / 8 < g_cov_cap:
             cell_store_byte(g_cov_bits, i / 8, 0)
         i = i + 1
-    g_cov_len = saved
+    g_cov_len = base
+    g_cov_base = old_base
 
 // Coverage bit for the legacy selftest API, limited to domains of at most 62
 // variants: bit(vi) = 2^vi, built by doubling because the language has no shift.

@@ -1824,6 +1824,114 @@ fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
         return ft
     return structpat_subst_ti(si, ft, scrut_ti)
 
+// ─── Enum payload sub-patterns ───
+// Validate literal/composite sub-patterns of an enum variant pattern against the
+// variant's declared payload types. Nested enum patterns recurse; struct/tuple
+// patterns are fully validated by their own checkers. Unsupported/unknown shapes
+// are rejected with TM09 (fail closed) instead of matching only the outer tag.
+// Malformed/foreign variant names are left to the coverage logic (which reports
+// the variant mismatch); this function returns 0 for them.
+fn check_enum_payload_patterns(match_ti: int, pat: int) -> int:
+    if pat < 0 || ast_kind(pat) != EXPR_ENUMPAT:
+        return 0
+    c := ast_c(pat)
+    if c <= 0:
+        return 0
+    ea := find_enum_row_of(match_ti)
+    vi : ., mut = -1
+    if ea >= 0:
+        vi = sh_match_pat_variant(match_ti, pat)
+    opt_inner : ., mut = -1
+    if vi < 0 && get_type_kind(match_ti) == TYP_OPTIONAL:
+        if sh_match_opt_pat(match_ti, pat) == 0:
+            opt_inner = get_type_data(match_ti)
+    if vi < 0 && opt_inner < 0:
+        return 0
+    vcount : ., mut = 0
+    if vi >= 0:
+        vcount = ei_variant_type_count(ea, vi)
+    else:
+        vcount = 1
+    bad : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return bad
+        sub := sh_match_payload_root(pat, i)
+        if sub < 0:
+            check_error(EC_TM_NESTED,
+                "Nested match patterns are not supported yet",
+                ast_line(pat), ast_col(pat))
+            return 1
+        k := ast_kind(sub)
+        if k == EXPR_IDENT || k == EXPR_WILDCARD:
+            i = i + 1
+            continue
+        ft : ., mut = -1
+        if i < vcount:
+            if vi >= 0:
+                tn := ei_variant_type_node(ea, vi, i)
+                if tn >= 0:
+                    ft = res_type_node(tn)
+            else:
+                ft = opt_inner
+        if ft < 0:
+            check_error(EC_TS_FIELD_TYPE,
+                "Match pattern has more payload sub-patterns than the variant declares",
+                ast_line(sub), ast_col(sub))
+            bad = 1
+            i = i + 1
+            continue
+        if ti_has_generic_param(ft) != 0:
+            check_error(EC_TS_FIELD_TYPE,
+                "Enum payload has an unresolved generic type; use a wildcard or binding arm",
+                ast_line(sub), ast_col(sub))
+            bad = 1
+            i = i + 1
+            continue
+        if opt_inner >= 0 && (k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT || k == EXPR_ENUMPAT):
+            // Nested optional payloads still need representation-aware lowering;
+            // keep composite sub-patterns rejected until that path exists.
+            check_error(EC_TM_NESTED,
+                "Nested match patterns are not supported yet",
+                ast_line(sub), ast_col(sub))
+            bad = 1
+        else if k == EXPR_STRUCTPAT:
+            if check_struct_pattern(sub, ft) != 0:
+                bad = 1
+        else if k == EXPR_TUPLEPAT:
+            if check_tuple_pattern(sub, ft) != 0:
+                bad = 1
+        else if k == EXPR_ENUMPAT:
+            if find_enum_row_of(ft) < 0:
+                check_error(EC_TS_FIELD_TYPE,
+                    "Nested enum pattern requires an enum payload, got " + type_display(ft),
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+            else if check_enum_payload_patterns(ft, sub) != 0:
+                bad = 1
+        else if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
+            if get_type_kind(ft) == TYP_OPTIONAL:
+                check_error(EC_TS_FIELD_TYPE,
+                    "Enum payload has an optional type; use a wildcard or binding arm",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+            else:
+                st := infer_expr(sub)
+                verdict := type_compat_strict(st, ft)
+                if verdict != 1:
+                    diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                        "Enum payload pattern: expected " + type_display(ft) + ", got " + type_display(st),
+                        ast_line(sub), ast_col(sub))
+                    bad = 1
+        else:
+            check_error(EC_TM_NESTED,
+                "Nested match patterns are not supported yet",
+                ast_line(sub), ast_col(sub))
+            bad = 1
+        i = i + 1
+    return bad
+
 // ─── Struct match pattern（Task 5b1）───
 // EXPR_STRUCTPAT layout: a = struct name ni, b = first wrapper, c = field count.
 // wrapper.a = subpattern, wrapper.b = field name ni. Validate the pattern against
@@ -1953,6 +2061,15 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
                 else if k == EXPR_TUPLEPAT:
                     if check_tuple_pattern(sub, ft) != 0:
                         bad = 1
+                else if k == EXPR_ENUMPAT:
+                    if find_enum_row_of(ft) < 0:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " is not an enum; nested enum pattern is not valid",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                    else if check_enum_payload_patterns(ft, sub) != 0:
+                        bad = 1
                 else:
                     check_error(EC_TM_NESTED,
                         "Nested match patterns are not supported yet",
@@ -1960,6 +2077,57 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
                     bad = 1
         i = i + 1
     return bad
+
+// Bind ident subpatterns inside an enum payload. Each binding gets the declared
+// payload type; composite sub-patterns recurse. Foreign variants are ignored
+// (coverage already diagnosed them).
+fn bind_enum_pattern_idents(pat: int, scrut_ti: int):
+    if pat < 0:
+        return
+    c := ast_c(pat)
+    if c <= 0:
+        return
+    ea := find_enum_row_of(scrut_ti)
+    vi : ., mut = -1
+    if ea >= 0:
+        vi = sh_match_pat_variant(scrut_ti, pat)
+    opt_inner : ., mut = -1
+    if vi < 0 && get_type_kind(scrut_ti) == TYP_OPTIONAL:
+        if sh_match_opt_pat(scrut_ti, pat) == 0:
+            opt_inner = get_type_data(scrut_ti)
+    // 无法解析枚举/可选行时仍绑定顶层 ident（旧行为）：scrutinee 类型可能因
+    // 别的错误（如切片下标 TK01）不可用，但绑定臂体不应额外制造 N01。
+    resolved : ., mut = 1
+    if vi < 0 && opt_inner < 0:
+        resolved = 0
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        sub := sh_match_payload_root(pat, i)
+        if sub < 0:
+            break
+        ft : ., mut = -1
+        if resolved == 0:
+            ft = TI_INT
+        else if vi >= 0:
+            tn := ei_variant_type_node(ea, vi, i)
+            if tn >= 0:
+                ft = res_type_node(tn)
+        else:
+            ft = opt_inner
+        k := ast_kind(sub)
+        if k == EXPR_IDENT:
+            nn := ast_int_val(sub)
+            if str_eq(istr_get(nn), "_") == 0:
+                def_sym(nn, SYM_LOCAL, ft, -1)
+        else if k == EXPR_STRUCTPAT:
+            bind_struct_pattern_idents(sub, ft)
+        else if k == EXPR_TUPLEPAT:
+            bind_tuple_pattern_idents(sub, ft)
+        else if k == EXPR_ENUMPAT:
+            bind_enum_pattern_idents(sub, ft)
+        i = i + 1
 
 // Bind the ident subpatterns of a validated struct pattern. Each binding gets
 // the declared type of its field. `_` and literal subpatterns bind nothing.
@@ -1993,6 +2161,8 @@ fn bind_struct_pattern_idents(pat: int, scrut_ti: int):
                     bind_struct_pattern_idents(sub, ft)
                 else if k == EXPR_TUPLEPAT:
                     bind_tuple_pattern_idents(sub, ft)
+                else if k == EXPR_ENUMPAT:
+                    bind_enum_pattern_idents(sub, ft)
         i = i + 1
 
 // ─── Tuple match pattern（Task 5b2）───
@@ -2094,6 +2264,14 @@ fn check_tuple_pattern(pat: int, scrut_ti: int) -> int:
             else if k == EXPR_TUPLEPAT:
                 if check_tuple_pattern(sub, ft) != 0:
                     bad = 1
+            else if k == EXPR_ENUMPAT:
+                if find_enum_row_of(ft) < 0:
+                    check_error(EC_TS_FIELD_TYPE,
+                        "Tuple pattern element " + int_str(i) + " is not an enum; nested enum pattern is not valid",
+                        ast_line(sub), ast_col(sub))
+                    bad = 1
+                else if check_enum_payload_patterns(ft, sub) != 0:
+                    bad = 1
             else:
                 check_error(EC_TM_NESTED,
                     "Nested match patterns are not supported yet",
@@ -2133,6 +2311,8 @@ fn bind_tuple_pattern_idents(pat: int, scrut_ti: int):
                     bind_struct_pattern_idents(sub, et)
                 else if k == EXPR_TUPLEPAT:
                     bind_tuple_pattern_idents(sub, et)
+                else if k == EXPR_ENUMPAT:
+                    bind_enum_pattern_idents(sub, et)
         i = i + 1
 
 // 类型里是否仍含未实例化的泛型参数（TYP_GENERIC_PARAM，可嵌套在数组 / 指针 / 引用 /
@@ -3995,15 +4175,10 @@ fn infer_expr(node: int) -> int:
                     m_wild = 1
                     m_pats = tt_cons(tt_top(), m_pats)
                 else if pk == 2:
-                    // 嵌套子模式只在 Task 5b 完整支持；ident/`_` 之外的模式
-                    // （字面量、嵌套枚举、struct…）现在不得静默当成“变体匹配”。
-                    // 子模式节点不一定连续（parser 先分配复合子模式的后代），
-                    // 因此扫描整个 payload 子树区间，而不是 ast_b + i。
-                    bad_nested := sh_match_payload_bad(arm_pat)
-                    if bad_nested >= 0:
-                        check_error(EC_TM_NESTED,
-                            "Nested match patterns are not supported yet",
-                            ast_line(bad_nested), ast_col(bad_nested))
+                    // 嵌套子模式按载荷声明类型递归校验。子模式根不能靠 ast_b+i
+                    // 取得（parser 只存首个子模式，复合子模式的后代又先分配），
+                    // 用 ty_shadow 的 payload 根恢复；不可恢复/不支持的形态 fail closed。
+                    if check_enum_payload_patterns(match_ti, arm_pat) != 0:
                         m_unmappable = 1
                     vi := sh_match_pat_variant(match_ti, arm_pat)
                     vt : ., mut = -1
@@ -4065,19 +4240,9 @@ fn infer_expr(node: int) -> int:
             push_scope()
             if arm_pat >= 0:
                 if ast_kind(arm_pat) == EXPR_ENUMPAT:
-                    // Bind sub-patterns
-                    sub_pat := ast_b(arm_pat)
-                    sub_count := ast_c(arm_pat)
-                    spi : ., mut = 0
-                    spn : ., mut = sub_pat
-                    loop:
-                        if spi >= sub_count:
-                            break
-                        if spn >= 0:
-                            if ast_kind(spn) == EXPR_IDENT:
-                                def_sym(ast_int_val(spn), SYM_LOCAL, TI_INT, -1)
-                            spn = spn + 1
-                        spi = spi + 1
+                    // Enum variant payload bindings, including nested enum/struct/
+                    // tuple sub-patterns. Each binding gets its declared payload type.
+                    bind_enum_pattern_idents(arm_pat, match_ti)
                 if ast_kind(arm_pat) == EXPR_STRUCTPAT:
                     // Struct pattern field bindings: each ident subpattern gets the
                     // declared field type (Task 5b1).
@@ -4136,6 +4301,9 @@ fn infer_expr(node: int) -> int:
         if m_dup >= 0:
             check_error(EC_TM_REDUNDANT, "Redundant match arm", ast_line(m_dup), ast_col(m_dup))
         mc_end(mc_save)   // 容量批 T3：覆盖位图出栈（清零本层位 + 回退长度）
+        // Cache the inferred scrutinee type on the MATCH node for IR lowering.
+        // +1 keeps 0 as the "absent" sentinel because TI_INT itself is 0.
+        ast_set_data(node, match_ti + 1)
         return res
 
     if ast_kind(node) == EXPR_LET:
