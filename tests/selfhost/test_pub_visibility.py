@@ -115,6 +115,68 @@ fn main() -> int:
 """
 
 
+# Cross-library fixture. Written into src/stdlib for the duration of the test so
+# the module is owned by @std; removed in a finally block.
+FIXTURE = """enum HiddenEnum:
+    HA, HB
+
+enum ShownEnum, pub:
+    SA, SB
+
+interface HiddenIface:
+    fn hiddenPing(&self) -> int
+
+interface ShownIface, pub:
+    fn shownPing(&self) -> int
+
+type HiddenAlias = int
+type ShownAlias = int, pub
+"""
+
+FIXTURE_NAME = "zz_pub_visibility_fixture.cr"
+
+HIDDEN_IMPL_SOURCE = """import zz_pub_visibility_fixture
+
+struct P:
+    n: int
+
+impl HiddenIface for P:
+    fn hiddenPing(&self) -> int:
+        return self.n
+
+fn main() -> int:
+    return 0
+"""
+
+SHOWN_IMPL_SOURCE = """import zz_pub_visibility_fixture
+
+struct P:
+    n: int
+
+impl ShownIface for P:
+    fn shownPing(&self) -> int:
+        return self.n + 41
+
+fn main() -> int:
+    p := P { n = 1 }
+    return p.shownPing()
+"""
+
+HIDDEN_ALIAS_SOURCE = """import zz_pub_visibility_fixture
+
+fn main() -> int:
+    x : HiddenAlias = 1
+    return x
+"""
+
+SHOWN_ALIAS_SOURCE = """import zz_pub_visibility_fixture
+
+fn main() -> int:
+    x : ShownAlias = 41
+    return x + 1
+"""
+
+
 def _build(tmp, name, source):
     src = tmp / f"{name}.cr"
     src.write_text(source, encoding="utf-8")
@@ -153,6 +215,35 @@ def test_hidden_types_methods_and_globals():
             assert want in text, (name, text)
 
 
+def test_cross_library_enum_interface_alias():
+    fixture = BASE / "src" / "stdlib" / FIXTURE_NAME
+    fixture.write_text(FIXTURE, encoding="utf-8")
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            # Hidden constructs fail at name resolution.
+            for name, source, want in (
+                ("hidden_enum", "import zz_pub_visibility_fixture\nfn main() -> int:\n    x : HiddenEnum = HA()\n    return 0\n", "error[N01]"),
+                ("hidden_impl", HIDDEN_IMPL_SOURCE, "error[N01]"),
+                ("hidden_alias", HIDDEN_ALIAS_SOURCE, "error[N01]"),
+            ):
+                built, _ = _build(tmp, name, source)
+                text = built.stdout + built.stderr
+                assert built.returncode == 1, (name, text)
+                assert want in text, (name, text)
+            # Public constructs remain usable across libraries.
+            for name, source in (
+                ("shown_enum", "import zz_pub_visibility_fixture\nfn main() -> int:\n    x : ShownEnum = SA()\n    return 42\n"),
+                ("shown_impl", SHOWN_IMPL_SOURCE),
+                ("shown_alias", SHOWN_ALIAS_SOURCE),
+            ):
+                built, elf = _build(tmp, name, source)
+                assert built.returncode == 0, (name, built.stdout + built.stderr)
+                assert _run([str(elf)]).returncode == 42, name
+    finally:
+        fixture.unlink(missing_ok=True)
+
+
 def test_stdlib_internal_is_hidden():
     run = _run([str(COREC), "run", HIDDEN_SOURCE])
     text = run.stdout + run.stderr
@@ -165,5 +256,6 @@ if __name__ == "__main__":
     test_pub_export_and_same_library_internal()
     test_public_types_methods_and_globals()
     test_hidden_types_methods_and_globals()
+    test_cross_library_enum_interface_alias()
     test_stdlib_internal_is_hidden()
     print("PUB VISIBILITY PASS")

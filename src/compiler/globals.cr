@@ -250,6 +250,9 @@ g_iface_cap : int, mut
 g_impl_for : string, mut
 g_impl_for_count : int, mut
 g_impl_for_cap : int, mut
+// Declaration line per impl edge. Kept out of .ccr: it is frontend metadata
+// used only to attribute visibility diagnostics to the impl site.
+g_impl_for_line : string, mut
 g_generic_constr : string, mut
 g_generic_constr_count : int, mut
 g_generic_constr_cap : int, mut
@@ -747,6 +750,9 @@ fn register_plugin_rtype(ns_ni: int, name_ni: int, data: int) -> int:
 // res_imports, parse_all, and check_all, and removes stale diagnostics when a parse
 // failure skips check_all. g_open_docs persists across checks and is not cleared.
 fn reset_frontend_state():
+    // String globals must be valid empty strings: library lookup reads them
+    // before the CLI/LSP sets a source name.
+    g_source_name = ""
     g_token_count = 0
     g_ast_count = 0
     g_error_count = 0

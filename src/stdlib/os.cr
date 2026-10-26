@@ -1,6 +1,7 @@
 // os.cr: operating system interface library.
 // Provides process commands and environment access.
 // Pure Core implementation using Linux system calls through syscall3 and syscall4.
+import io
 
 // Structure used to build an execve argv array.
 // Layout: four consecutive 8-byte values. d = 0 is the null terminator.

@@ -641,6 +641,15 @@ fn res_imports():
                                 print("!! import fail: ")
                                 println(import_fileid)
                 if str_len(content) > 0:
+                    // Dependency direction is a property of the import edge, not
+                    // only of symbol lookup: reject the load itself so a library
+                    // cannot pull in code from a layer it may not depend on.
+                    from_lib := lib_lookup_path(g_source_name)
+                    to_lib := lib_lookup_path(path)
+                    if lib_can_import(from_lib, to_lib) == 0:
+                        add_error("cannot import '" + import_fileid + "' (" + lib_name(from_lib) + " -> " + lib_name(to_lib) + "): library dependency direction")
+                        content = ""
+                if str_len(content) > 0:
                     content_len := str_len(content)
                     loaded_fid : ., mut = get_fileid(content)
                     if str_len(loaded_fid) == 0:

@@ -1991,6 +1991,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         cell_store(g_impl_for, ifi * 16, itr)
         cell_store(g_impl_for, ifi * 16 + 8, ity)
+        cell_store(g_impl_for_line, ifi * 8, 0)
         ifi = ifi + 1
     g_impl_for_count = ifc_imp
 

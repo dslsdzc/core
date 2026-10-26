@@ -8,6 +8,7 @@ test_lsp integration suite.
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
@@ -63,6 +64,29 @@ def main():
         hov = _read_frame(proc)
         assert hov is not None and hov.get("result"), hov
         assert "struct IntMap" in hov["result"]["contents"], hov
+
+        # Diagnostics for imported files report the imported file's own lines,
+        # not the concatenated compilation coordinates.
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            helper = td / "helper.cr"
+            helper.write_text('fn compute() -> int:\n    x : int = "bad"\n    return x\n')
+            main_path = td / "main.cr"
+            main_src = "import helper\nfn main() -> int:\n    return compute()\n"
+            main_path.write_text(main_src)
+            _send(proc, {"jsonrpc": "2.0", "method": "textDocument/didOpen",
+                         "params": {"textDocument": {"uri": "file://" + str(main_path),
+                                                     "version": 1, "text": main_src}}})
+            got = None
+            for _ in range(3):
+                frame = _read_frame(proc)
+                if frame and frame.get("method") == "textDocument/publishDiagnostics" \
+                        and str(helper) in frame["params"]["uri"]:
+                    got = frame
+                    break
+            assert got is not None, "no diagnostics for imported helper.cr"
+            diag = got["params"]["diagnostics"]
+            assert diag and diag[0]["range"]["start"]["line"] == 1, got
     finally:
         proc.stdin.close()
         proc.wait(timeout=5)

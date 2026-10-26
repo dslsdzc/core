@@ -2640,6 +2640,7 @@ fn parse_declaration():
             grow_impl_for(g_impl_for_count + 1)
             cell_store(g_impl_for, g_impl_for_count * 16, trait_ni)
             cell_store(g_impl_for, g_impl_for_count * 16 + 8, type_ni)
+            cell_store(g_impl_for_line, g_impl_for_count * 8, tok_ln(t))
             g_impl_for_count = g_impl_for_count + 1
         return
 

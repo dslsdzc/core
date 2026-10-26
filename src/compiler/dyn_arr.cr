@@ -1689,6 +1689,9 @@ fn grow_impl_for(needed: int):
     nb := alloc(nc * 16)
     cell_copy(g_impl_for, g_impl_for_cap * 16, nb)
     g_impl_for = nb
+    nbl := alloc(nc * 8)
+    cell_copy(g_impl_for_line, g_impl_for_cap * 8, nbl)
+    g_impl_for_line = nbl
     g_impl_for_cap = nc
 
 // Generic param name storage (for <T> syntax parsing)

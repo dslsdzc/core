@@ -101,8 +101,39 @@ fn lib_find(name: string) -> int:
         i = i + 1
     return -1
 
+fn lib_dep_count(lid: int) -> int:
+    if lid < 0 || lid >= g_lib_count:
+        return 0
+    return cell_load(g_libs, lid * LIB_REC + OFF_LIB_DEP_COUNT)
+
+fn lib_dep_at(lid: int, i: int) -> int:
+    if lid < 0 || lid >= g_lib_count:
+        return -1
+    if i < 0 || i >= lib_dep_count(lid):
+        return -1
+    arr := cell_load_str(g_libs, lid * LIB_REC + OFF_LIB_DEPS)
+    return cell_load(arr, i * 8)
+
+fn lib_reaches(from_lid: int, to_lid: int, depth: int) -> int:
+    if from_lid < 0 || to_lid < 0 || depth > 32:
+        return 0
+    if from_lid == to_lid:
+        return 1
+    n := lib_dep_count(from_lid)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            return 0
+        if lib_reaches(lib_dep_at(from_lid, i), to_lid, depth + 1) != 0:
+            return 1
+        i = i + 1
+    return 0
+
 fn lib_dep_add(from_lid: int, to_lid: int):
     if from_lid < 0 || from_lid >= g_lib_count || to_lid < 0 || to_lid >= g_lib_count:
+        return
+    // Reject self-edges and cycles: the library graph is a DAG.
+    if lib_reaches(to_lid, from_lid, 0) != 0:
         return
     off := from_lid * LIB_REC
     arr : ., mut = cell_load_str(g_libs, off + OFF_LIB_DEPS)
@@ -304,10 +335,28 @@ fn lib_path_has_prefix(path: string, prefix: string) -> int:
         i = i + 1
     return 0
 
+fn lib_relative_path(path: string) -> string:
+    // Compute roots per call. Caching them in globals is unsafe across arena
+    // resets (the self-test and LSP run several frontend passes in one process).
+    cw := get_cwd()
+    if str_len(cw) > 0:
+        pre := cw + "/"
+        if lib_path_has_prefix(path, pre) != 0:
+            return str_sub(path, str_len(pre), str_len(path) - str_len(pre))
+    exe := get_exe_path()
+    if str_len(exe) > 0:
+        root := parent_dir(parent_dir(exe))
+        if str_len(root) > 0:
+            pre2 := root + "/"
+            if lib_path_has_prefix(path, pre2) != 0:
+                return str_sub(path, str_len(pre2), str_len(path) - str_len(pre2))
+    return path
+
 fn lib_lookup_path(path: string) -> int:
     lib_init_defaults_once()
     if g_lib_inited == 0:
         return -1
+    p := lib_relative_path(path)
     best : ., mut = -1
     best_len : ., mut = -1
     i : ., mut = 0
@@ -316,14 +365,14 @@ fn lib_lookup_path(path: string) -> int:
             break
         root := lib_root(i)
         rlen := str_len(root)
-        if rlen > 0 && lib_path_has_prefix(path, root) != 0:
+        if rlen > 0 && lib_path_has_prefix(p, root) != 0:
             if rlen > best_len:
                 best = i
                 best_len = rlen
         i = i + 1
     if best >= 0:
         return best
-    if lib_path_is_core_impl(path) != 0:
+    if lib_path_is_core_impl(p) != 0:
         return lib_find("@core")
     return lib_find("@user")
 
@@ -468,6 +517,18 @@ fn lib_selftest() -> int:
         fails = fails + 1
     if lib_can_import(u, c) != 0:
         fails = fails + 1
+    // The dependency graph is a DAG: adding an edge that would close a cycle
+    // (including a self edge) is rejected.
+    s_deps := lib_dep_count(s)
+    lib_dep_add(s, c)
+    if lib_dep_count(s) != s_deps:
+        fails = fails + 1
+    u_deps := lib_dep_count(u)
+    lib_dep_add(u, u)
+    if lib_dep_count(u) != u_deps:
+        fails = fails + 1
+    if lib_can_import(u, s) != 1:
+        fails = fails + 1
     ni := str_intern("print")
     lib_export_add(s, ni, 1, 123)
     if lib_export_find(s, ni) < 0:
@@ -484,7 +545,7 @@ fn lib_selftest() -> int:
     if sm_file_lib(cf) != c:
         fails = fails + 1
     if fails == 0:
-        println("lib: 14/14 ok")
+        println("lib: 18/18 ok")
     else:
         print("lib: FAIL ")
         println(int_str(fails))
