@@ -60,7 +60,7 @@ fn _grow_arena_meta(needed: int):
 
 // ── Public API ──
 
-fn arena_init(pool_size: int, arena_size: int):
+fn arena_init(pool_size: int, arena_size: int), pub:
     // The backing pool outlives the caller's automatic function arena.
     g_current_arena = -1
     g_arena_pool_data = alloc(pool_size)
@@ -69,7 +69,7 @@ fn arena_init(pool_size: int, arena_size: int):
     g_arena_count = 0
     g_arena_cap = 0
 
-fn arena_new() -> int:
+fn arena_new() -> int, pub:
     ai : ., mut = -1
 
     // Try free list first
@@ -97,7 +97,7 @@ fn arena_new() -> int:
     g_current_arena = ai
     return ai
 
-fn arena_reset(ai: int):
+fn arena_reset(ai: int), pub:
     if ai < 0 || ai >= g_arena_count:
         return
 
@@ -114,7 +114,7 @@ fn arena_reset(ai: int):
     else:
         g_current_arena = -1
 
-fn arena_avail(ai: int) -> int:
+fn arena_avail(ai: int) -> int, pub:
     if ai < 0 || ai >= g_arena_count:
         return 0
     cursor := cell_load(g_arena_cursors, ai * 8)

@@ -730,12 +730,64 @@ fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     sym_set_node(g_sym_count, node_idx)
     g_sym_count = g_sym_count + 1
 
+fn sym_visible(si: int) -> int:
+    if g_lib_on == 0 || g_cur_lib < 0:
+        return 1
+    k := sym_kind(si)
+    if k < SYM_FN || k > SYM_SO_FN:
+        return 1
+    node := sym_node(si)
+    if node < 0:
+        return 1
+    owner := lib_of_node(node)
+    if owner < 0 || owner == g_cur_lib:
+        return 1
+    return fn_node_is_pub(node)
+
+fn func_visible(fi: int) -> int:
+    if g_lib_on == 0 || g_cur_lib < 0:
+        return 1
+    node := fi_ast_node(fi)
+    if node < 0:
+        return 1
+    owner := lib_of_node(node)
+    if owner < 0 || owner == g_cur_lib:
+        return 1
+    return fn_node_is_pub(node)
+
+fn mod_func_visible(target_fni: int, name_ni: int) -> int:
+    if g_lib_on == 0 || g_cur_lib < 0:
+        return 1
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            return 0
+        if fi_name(i) == name_ni:
+            node := fi_ast_node(i)
+            line := ast_line(node)
+            if line > 0 && line <= g_line_count:
+                fni := cell_load(g_line_fileid, (line - 1) * 8)
+                if fni == target_fni:
+                    owner := lib_of_node(node)
+                    if owner < 0 || owner == g_cur_lib:
+                        return 1
+                    return fn_node_is_pub(node)
+        i = i + 1
+    return 0
+
+fn register_pub_export(name_ni: int, node: int):
+    if g_lib_on == 0 || node < 0 || fn_node_is_pub(node) == 0:
+        return
+    lid := lib_of_node(node)
+    if lid >= 0:
+        lib_export_add(lid, name_ni, SYM_FN, node)
+
 fn find_sym(name_idx: int) -> int:
     i : ., mut = g_sym_count - 1
     loop:
         if i < 0:
             return -1
-        if sym_name(i) == name_idx:
+        if sym_name(i) == name_idx && sym_visible(i) != 0:
             return i
         i = i - 1
     return -1
@@ -746,7 +798,7 @@ fn find_gsym(name_idx: int) -> int:
         if i < 0:
             break
         // 主表未命中，因此落到下方侧表回退
-        if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_SO_FN:
+        if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_SO_FN && sym_visible(i) != 0:
             return i
         i = i - 1
     // 侧表回退：只有名字被引用且主表没有同名条目时才物化，未引用条目零产物足迹。
@@ -1507,7 +1559,10 @@ fn collect_decls():
         def_sym(name_idx, SYM_TYPE, ti, -1)
         i = i + 1
 
-    // Register all functions
+    // Register all functions. The library layer opts in only when a user
+    // declaration is exported; this must happen before function registration so
+    // pub exports and cross-library filters see the final flag.
+    lib_prepare_from_pub()
     i = 0
     loop:
         if i >= g_func_count:
@@ -1556,6 +1611,7 @@ fn collect_decls():
             mangled_name := fn_name_str + ".v" + int_str(hotpatch_ver)
             mangled_ni := str_intern(mangled_name)
             def_sym(mangled_ni, SYM_FN, rt_ti, fn_node)
+            register_pub_export(mangled_ni, fn_node)
 
             // Verify signature matches the first version
             fj : ., mut = 0
@@ -1588,6 +1644,7 @@ fn collect_decls():
 
             // Also register original name for call resolution (latest version wins)
             def_sym(name_idx, SYM_FN, rt_ti, fn_node)
+            register_pub_export(name_idx, fn_node)
         else:
             // Normal function: check for duplicates (allow if existing is @hotpatch)
             existing_si := find_gsym(name_idx)
@@ -1600,6 +1657,7 @@ fn collect_decls():
                     fn_name_str := istr_get(name_idx)
                     check_error(EC_N_DUPLICATE, "Duplicate function definition '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node))
             def_sym(name_idx, SYM_FN, rt_ti, fn_node)
+            register_pub_export(name_idx, fn_node)
         fi_set_ispure(i, 1)  // optimistic: all functions are pure
         i = i + 1
     // Register extern function declarations (EXPR_EXTERN nodes not yet in g_funcs)
@@ -1625,6 +1683,7 @@ fn collect_decls():
             // Register in symbol table (skip if duplicate)
             if find_gsym(name_ni) < 0:
                 def_sym(name_ni, SYM_FN, rt_ti, ei)
+                register_pub_export(name_ni, ei)
 
             // Register in g_funcs for backend codegen and linking
             func_idx := g_func_count
@@ -1710,7 +1769,7 @@ fn find_func(name_idx: int) -> int:
     loop:
         if i >= g_func_count:
             return -1
-        if fi_name(i) == name_idx:
+        if fi_name(i) == name_idx && func_visible(i) != 0:
             return i
         i = i + 1
     return -1
@@ -2801,6 +2860,8 @@ fn check_func(fi: int):
     g_borrow_scope_depth = 0
     g_borrow_scope_markers_cap = 0
     fn_node := fi_ast_node(fi)
+    saved_lib := g_cur_lib
+    g_cur_lib = lib_of_node(fn_node)
     // Extern functions have no body to check — skip
     if ast_kind(fn_node) == EXPR_EXTERN:
         return
@@ -2947,6 +3008,7 @@ fn check_func(fi: int):
     // 规约标注，在 pop_scope 之前（形参仍在作用域内，`#check(a > 0)` 才能定型）
     spec_check_func(fn_node, return_type)
     pop_scope()
+    g_cur_lib = saved_lib
 
 // 每函数标注检查， bool 型 + `#ensure` 的 `result` 域 + C1 子集（禁调用）。
 // 时点 = `check_func` 尾部（形参已入作用域）；`result` 用嵌套作用域绑定，因此不泄进函数体。
@@ -3090,6 +3152,8 @@ fn check_impl_for():
         pi = pi + 1
 
 fn check_global_let(node: int):
+    saved_lib := g_cur_lib
+    g_cur_lib = lib_of_node(node)
     val_node := ast_c(node)  // EXPR_LET: c = value
     type_node := ast_b(node) // EXPR_LET: b = 注解类型节点（-1 = 无）
     val_ti := TI_UNIT
@@ -3101,6 +3165,7 @@ fn check_global_let(node: int):
     if type_node >= 0:
         ti = res_type_node(type_node)
     check_let_annot_compat(node, val_node, val_ti, ti)
+    g_cur_lib = saved_lib
 
 // --- Dynamic type set tracking ---
 
@@ -3652,6 +3717,7 @@ fn infer_expr(node: int) -> int:
             // Module-qualified call: module.func(args)
             mod_call_done : ., mut = 0
             mod_found_mfi : ., mut = -1
+            mod_found_hidden : ., mut = 0
             if ast_kind(obj) == EXPR_IDENT:
                 mod_name_ni := ast_int_val(obj)
                 si := find_sym(mod_name_ni)
@@ -3663,6 +3729,9 @@ fn infer_expr(node: int) -> int:
                         if mfi >= g_mod_func_count:
                             break
                         if cell_load(g_mod_func_fileids, mfi * 8) == fileid_ni && cell_load(g_mod_func_names, mfi * 8) == method_ni:
+                            if mod_func_visible(fileid_ni, method_ni) == 0:
+                                mod_found_hidden = 1
+                                break
                             func_ni = cell_load(g_mod_func_names, mfi * 8)
                             ast_set_data(node, func_ni)
                             call_flags := ast_type_val(node)
@@ -3674,6 +3743,9 @@ fn infer_expr(node: int) -> int:
                             mod_found_mfi = mfi
                             break
                         mfi = mfi + 1
+            if mod_found_hidden != 0:
+                check_error(EC_N_UNDEFINED, "Undefined function '" + istr_get(method_ni) + "'", ast_line(node), ast_col(node))
+                return ti_error()
             if mod_call_done == 1:
                 // Infer arg types
                 an : ., mut = first_arg

@@ -397,6 +397,23 @@ class Parser:
             ret = self.parse_type()
         else:
             ret = BaseType('unit')
+        # Function tail tags: `fn f(...) -> T, pub:`. Tags are declaration labels,
+        # not a prefix modifier. The bootstrap parser only needs the visibility bit;
+        # unknown tags fail closed so typos are not silently ignored.
+        if self.check(TokenType.COMMA):
+            self.advance()
+            while not (self.check(TokenType.COLON_BLOCK) or self.check(TokenType.EQ) or self._at_line_end()):
+                if self.check(TokenType.PUB):
+                    self.advance()
+                    is_pub = True
+                elif self.check(TokenType.IDENT):
+                    tag = self.advance().lexeme
+                    self.error(f"unknown function tag '{tag}'")
+                else:
+                    self.error(f"unknown function tag '{self.cur().lexeme}'")
+                if not self.check(TokenType.COMMA):
+                    break
+                self.advance()
         # 批 6（裁-S7，bounded）：规约标注链 `#check(...)` / `#ensure(...)`——**接受并跳过**。
         # 位置与 self-hosted 侧一一对应（签名之后、body 之前）；**零语义**。
         self._skip_spec_annotations()   # inline 形（兼容）：注解后紧跟 `:`，不要求行尾

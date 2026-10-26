@@ -17,7 +17,7 @@ g_current_m_idx : int, mut = 0
 g_num_workers : int, mut = 0        // number of worker threads
 g_sched_inited : int, mut = 0       // 0 = not initialized, 1 = initialized
 
-fn sched_init():
+fn sched_init(), pub:
     if g_sched_inited != 0:
         return
 
@@ -90,7 +90,7 @@ fn sched_dequeue(m_idx: int) -> int:
     cell_store(head, 48, -1)
     return head
 
-fn sched_get_curg() -> int:
+fn sched_get_curg() -> int, pub:
     return g_get_curg()
 
 // G pointers live in int slots as mathematical ints; @ptr_add untags both
@@ -161,7 +161,7 @@ fn sched_worker_run(m_idx: int):
 // sched_go: spawn a goroutine that calls fn_ptr(arg), return a channel for the result.
 // fn_ptr is the function's address (resolved by the backend at link time).
 // arg is the single argument passed to the spawned function.
-fn sched_go(fn_ptr: int, arg: int) -> string:
+fn sched_go(fn_ptr: int, arg: int) -> string, pub:
     // Create a 1-element channel for collecting the result
     ch := chan_make(8, 1)
 

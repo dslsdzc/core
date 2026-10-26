@@ -7,10 +7,10 @@ import arena
 
 // ── Legacy: dispatch table for .so extensions ──
 
-fn sched_create(n: int) -> string:
+fn sched_create(n: int) -> string, pub:
     return alloc(n * 8)
 
-fn sched_set(entries: string, idx: int, val: int):
+fn sched_set(entries: string, idx: int, val: int), pub:
     p := idx * 8
     v : ., mut = val
     i : ., mut = 0
@@ -21,7 +21,7 @@ fn sched_set(entries: string, idx: int, val: int):
         v = v / 256
         i = i + 1
 
-fn sched_get(entries: string, idx: int) -> int:
+fn sched_get(entries: string, idx: int) -> int, pub:
     p := idx * 8
     r : ., mut = 0
     i : ., mut = 7
@@ -56,7 +56,7 @@ g_runq_cap : int, mut
 // ── Current executing fiber ──
 g_cur_fiber : int, mut
 
-fn fiber_init():
+fn fiber_init(), pub:
     g_fiber_cap = 64
     g_fibers = alloc(g_fiber_cap * 32)
     g_fiber_count = 0
@@ -67,7 +67,7 @@ fn fiber_init():
     g_runq_count = 0
     g_cur_fiber = -1
 
-fn runq_push(fi: int):
+fn runq_push(fi: int), pub:
     if g_runq_count >= g_runq_cap:
         nc := g_runq_cap * 2
         nb := alloc(nc * 8)
@@ -87,7 +87,7 @@ fn runq_push(fi: int):
     g_runq_tail = (g_runq_tail + 1) % g_runq_cap
     g_runq_count = g_runq_count + 1
 
-fn runq_pop() -> int:
+fn runq_pop() -> int, pub:
     if g_runq_count <= 0:
         return -1
     fi := cell_load(g_runq, g_runq_head * 8)
@@ -95,7 +95,7 @@ fn runq_pop() -> int:
     g_runq_count = g_runq_count - 1
     return fi
 
-fn fiber_spawn(fn_idx: int) -> int:
+fn fiber_spawn(fn_idx: int) -> int, pub:
     i : ., mut = 0
     loop:
         if i >= g_fiber_count:
@@ -123,21 +123,21 @@ fn fiber_spawn(fn_idx: int) -> int:
     runq_push(fi)
     return fi
 
-fn fiber_yield():
+fn fiber_yield(), pub:
     if g_cur_fiber < 0:
         return
     off := g_cur_fiber * 32
     if cell_load(g_fibers, off + 16) == FIBER_RUNNABLE:
         runq_push(g_cur_fiber)
 
-fn fiber_wait(target: int):
+fn fiber_wait(target: int), pub:
     if g_cur_fiber < 0:
         return
     off := g_cur_fiber * 32
     cell_store(g_fibers, off + 16, FIBER_WAITING)
     cell_store(g_fibers, off + 24, target)
 
-fn fiber_wake(fi: int):
+fn fiber_wake(fi: int), pub:
     if fi < 0:
         return
     off := fi * 32
@@ -146,7 +146,7 @@ fn fiber_wake(fi: int):
         cell_store(g_fibers, off + 24, 0)
         runq_push(fi)
 
-fn fiber_done(fi: int):
+fn fiber_done(fi: int), pub:
     if fi < 0 || fi >= g_fiber_count:
         return
     off := fi * 32
@@ -155,7 +155,7 @@ fn fiber_done(fi: int):
         arena.arena_reset(ai)
     cell_store(g_fibers, off + 16, FIBER_DONE)
 
-fn sched_run():
+fn sched_run(), pub:
     loop:
         fi := runq_pop()
         if fi < 0:

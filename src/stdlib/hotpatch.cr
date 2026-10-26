@@ -30,7 +30,7 @@ fn hp_inflight_dec(fn_ver: int):
 
 // Initialize hotpatch system at startup.
 // Allocates the in-flight counter buffer and loads the initial config.
-fn hp_init():
+fn hp_init(), pub:
     g_hp_config = ""
     g_hp_inflight = alloc(64 * 8)  // 64 version slots, each 8 bytes
     // Zero-initialise all slots

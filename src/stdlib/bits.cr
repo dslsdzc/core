@@ -7,13 +7,13 @@ BITS32_MASK : int = 4294967295
 BITS32_SIZE : int = 4294967296
 BITS32_BITS : int = 32
 
-fn bits32Norm(x: int) -> int:
+fn bits32Norm(x: int) -> int, pub:
     r := x % BITS32_SIZE
     if r < 0:
         r = r + BITS32_SIZE
     return r
 
-fn bits32And(a: int, b: int) -> int:
+fn bits32And(a: int, b: int) -> int, pub:
     x := bits32Norm(a)
     y := bits32Norm(b)
     r : ., mut = 0
@@ -30,7 +30,7 @@ fn bits32And(a: int, b: int) -> int:
         i = i + 1
     return r
 
-fn bits32Or(a: int, b: int) -> int:
+fn bits32Or(a: int, b: int) -> int, pub:
     x := bits32Norm(a)
     y := bits32Norm(b)
     r : ., mut = 0
@@ -47,7 +47,7 @@ fn bits32Or(a: int, b: int) -> int:
         i = i + 1
     return r
 
-fn bits32Xor(a: int, b: int) -> int:
+fn bits32Xor(a: int, b: int) -> int, pub:
     x := bits32Norm(a)
     y := bits32Norm(b)
     r : ., mut = 0
@@ -64,10 +64,10 @@ fn bits32Xor(a: int, b: int) -> int:
         i = i + 1
     return r
 
-fn bits32Not(a: int) -> int:
+fn bits32Not(a: int) -> int, pub:
     return BITS32_MASK - bits32Norm(a)
 
-fn bits32Shl(a: int, n: int) -> int:
+fn bits32Shl(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     r := bits32Norm(a)
     i : ., mut = 0
@@ -78,7 +78,7 @@ fn bits32Shl(a: int, n: int) -> int:
         i = i + 1
     return r
 
-fn bits32Shr(a: int, n: int) -> int:
+fn bits32Shr(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     r := bits32Norm(a)
     i : ., mut = 0
@@ -89,40 +89,40 @@ fn bits32Shr(a: int, n: int) -> int:
         i = i + 1
     return r
 
-fn bits32Rotl(a: int, n: int) -> int:
+fn bits32Rotl(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     if k == 0:
         return bits32Norm(a)
     return bits32Or(bits32Shl(a, k), bits32Shr(a, BITS32_BITS - k))
 
-fn bits32Rotr(a: int, n: int) -> int:
+fn bits32Rotr(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     if k == 0:
         return bits32Norm(a)
     return bits32Or(bits32Shr(a, k), bits32Shl(a, BITS32_BITS - k))
 
-fn bits32Add(a: int, b: int) -> int:
+fn bits32Add(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) + bits32Norm(b))
 
-fn bits32Sub(a: int, b: int) -> int:
+fn bits32Sub(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) - bits32Norm(b))
 
-fn bits32Mul(a: int, b: int) -> int:
+fn bits32Mul(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) * bits32Norm(b))
 
 struct Bits32:
     value: int
 
-fn bits32(value: int) -> Bits32:
+fn bits32(value: int) -> Bits32, pub:
     return Bits32 { value = bits32Norm(value) }
 
-fn bits32Zero() -> Bits32:
+fn bits32Zero() -> Bits32, pub:
     return Bits32 { value = 0 }
 
-fn bits32One() -> Bits32:
+fn bits32One() -> Bits32, pub:
     return Bits32 { value = 1 }
 
-fn bits32Max() -> Bits32:
+fn bits32Max() -> Bits32, pub:
     return Bits32 { value = BITS32_MASK }
 
 impl Bits32:

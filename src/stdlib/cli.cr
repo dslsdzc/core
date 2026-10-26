@@ -92,7 +92,7 @@ g_cli_matched_cmd : string, mut
 
 // --- Init ---
 
-fn cli_init(prog: string, desc: string):
+fn cli_init(prog: string, desc: string), pub:
     g_cli_prog = prog
     g_cli_desc = desc
     g_cli_cmd_count = 0
@@ -105,7 +105,7 @@ fn cli_init(prog: string, desc: string):
 
 // --- Registration ---
 
-fn cli_cmd(name: string, desc: string):
+fn cli_cmd(name: string, desc: string), pub:
     grow_cli_cmds(g_cli_cmd_count + 1)
     off : ., mut = g_cli_cmd_count * 16
     // Flat table with 16-byte records: name and description. String values are
@@ -115,7 +115,7 @@ fn cli_cmd(name: string, desc: string):
         cell_store(g_cli_cmds, off + 8, @ptr_of(desc))
     g_cli_cmd_count = g_cli_cmd_count + 1
 
-fn cli_flag(long_name: string, short_name: string, desc: string):
+fn cli_flag(long_name: string, short_name: string, desc: string), pub:
     grow_cli_flags(g_cli_flag_count + 1)
     off : ., mut = g_cli_flag_count * 56
     unsafe:
@@ -128,7 +128,7 @@ fn cli_flag(long_name: string, short_name: string, desc: string):
     cell_store(g_cli_flags, off + 48, 0)         // debug
     g_cli_flag_count = g_cli_flag_count + 1
 
-fn cli_flag_bool(long_name: string, short_name: string, desc: string):
+fn cli_flag_bool(long_name: string, short_name: string, desc: string), pub:
     grow_cli_flags(g_cli_flag_count + 1)
     off : ., mut = g_cli_flag_count * 56
     unsafe:
@@ -141,7 +141,7 @@ fn cli_flag_bool(long_name: string, short_name: string, desc: string):
     cell_store(g_cli_flags, off + 48, 0)         // debug
     g_cli_flag_count = g_cli_flag_count + 1
 
-fn cli_flag_bool_debug(long_name: string, short_name: string, desc: string):
+fn cli_flag_bool_debug(long_name: string, short_name: string, desc: string), pub:
     grow_cli_flags(g_cli_flag_count + 1)
     off : ., mut = g_cli_flag_count * 56
     unsafe:
@@ -154,7 +154,7 @@ fn cli_flag_bool_debug(long_name: string, short_name: string, desc: string):
     cell_store(g_cli_flags, off + 48, 1)         // debug
     g_cli_flag_count = g_cli_flag_count + 1
 
-fn cli_flag_debug(long_name: string, short_name: string, desc: string):
+fn cli_flag_debug(long_name: string, short_name: string, desc: string), pub:
     grow_cli_flags(g_cli_flag_count + 1)
     off : ., mut = g_cli_flag_count * 56
     unsafe:
@@ -207,7 +207,7 @@ fn _cli_strip_dashes(arg: string) -> string:
 
 // --- Parse ---
 
-fn cli_parse() -> int:
+fn cli_parse() -> int, pub:
     argc := get_arg(0)
     argc_int : ., mut = 0
     // Count args by scanning until we get empty string
@@ -303,13 +303,13 @@ fn cli_parse() -> int:
 
 // --- Query ---
 
-fn cli_cmd_name() -> string:
+fn cli_cmd_name() -> string, pub:
     return g_cli_matched_cmd
 
-fn cli_eq(cmd: string, expected: string) -> bool:
+fn cli_eq(cmd: string, expected: string) -> bool, pub:
     return str_eq(cmd, expected) != 0
 
-fn cli_get(name: string) -> string:
+fn cli_get(name: string) -> string, pub:
     fi := _cli_find_flag(name)
     if fi >= 0 && cell_load(g_cli_flags, fi * 56 + 32) != 0:
         // has_value
@@ -320,25 +320,25 @@ fn cli_get(name: string) -> string:
         // value
     return ""
 
-fn cli_has(name: string) -> int:
+fn cli_has(name: string) -> int, pub:
     fi := _cli_find_flag(name)
     if fi >= 0:
         return cell_load(g_cli_flags, fi * 56 + 32)  // has_value
     return 0
 
-fn cli_arg(n: int) -> string:
+fn cli_arg(n: int) -> string, pub:
     if n >= 0 && n < g_cli_arg_count:
         unsafe:
             return @str_of(cell_load(g_cli_args, n * 8))
         // The return value is a string stored in a raw word.
     return ""
 
-fn cli_arg_count() -> int:
+fn cli_arg_count() -> int, pub:
     return g_cli_arg_count
 
 // --- Help ---
 
-fn cli_print_flags(debug_only: int):
+fn cli_print_flags(debug_only: int), pub:
     fi : ., mut = 0
     loop:
         if fi >= g_cli_flag_count:
@@ -373,7 +373,7 @@ fn cli_print_flags(debug_only: int):
                     println(f_desc)
         fi = fi + 1
 
-fn cli_help():
+fn cli_help(), pub:
     // usage: prog [-h] {cmd1,cmd2,...} [options]
     print("usage: ")
     print(g_cli_prog)

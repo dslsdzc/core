@@ -28,7 +28,7 @@ G_STACK_SIZE : int = 16384
 //  64: saved_arg (saved argument, for wrapper dispatch)
 //  72: temp_val (temp value for wait queue handoff)
 
-fn g_new(entry_fn: int, arg: int, arg_type: int) -> string:
+fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     // Create the goroutine's arena FIRST: the fiber stack and G struct must
     // live in the G's own arena (not a transient one), so they survive until
     // g_free reclaims them at goroutine exit. With the subgraph arena model,
@@ -64,7 +64,7 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string:
 
     return g
 
-fn g_free(g: string):
+fn g_free(g: string), pub:
     // Reset arena (reclaims the fiber stack + G struct, which live in it)
     aid := cell_load(g, 32)
     arena_reset(aid)
