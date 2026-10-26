@@ -260,7 +260,7 @@ fn toml_get_int_list(content: string, key: string, out: string, max_items: int) 
     return -1
 
 // Memory layout configuration
-struct MemLayout:
+pub struct MemLayout:
     stack_size: int,
     heap_size: int,
     text_base: int,

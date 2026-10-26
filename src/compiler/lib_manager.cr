@@ -175,11 +175,56 @@ fn lib_export_add(lid: int, name_ni: int, sym_kind: int, node: int):
         cap = nc
         cell_store_str(g_libs, off + OFF_LIB_EXPORTS, arr)
         cell_store(g_libs, off + OFF_LIB_EXP_CAP, cap)
-    eoff := cnt * LIB_EXPORT_REC
+    // Keep the export set ordered by (name, kind) so cross-library visibility
+    // is a binary search, not a linear scan per symbol lookup.
+    pos : ., mut = 0
+    loop:
+        if pos >= cnt:
+            break
+        en := cell_load(arr, pos * LIB_EXPORT_REC + OFF_LIB_EXP_NAME)
+        ek := cell_load(arr, pos * LIB_EXPORT_REC + OFF_LIB_EXP_KIND)
+        if en > name_ni || (en == name_ni && ek >= sym_kind):
+            break
+        pos = pos + 1
+    if pos < cnt:
+        en2 := cell_load(arr, pos * LIB_EXPORT_REC + OFF_LIB_EXP_NAME)
+        ek2 := cell_load(arr, pos * LIB_EXPORT_REC + OFF_LIB_EXP_KIND)
+        if en2 == name_ni && ek2 == sym_kind:
+            cell_store(arr, pos * LIB_EXPORT_REC + OFF_LIB_EXP_NODE, node)
+            return
+    j : ., mut = cnt
+    loop:
+        if j <= pos:
+            break
+        src := (j - 1) * LIB_EXPORT_REC
+        dst := j * LIB_EXPORT_REC
+        cell_store(arr, dst + OFF_LIB_EXP_NAME, cell_load(arr, src + OFF_LIB_EXP_NAME))
+        cell_store(arr, dst + OFF_LIB_EXP_KIND, cell_load(arr, src + OFF_LIB_EXP_KIND))
+        cell_store(arr, dst + OFF_LIB_EXP_NODE, cell_load(arr, src + OFF_LIB_EXP_NODE))
+        j = j - 1
+    eoff := pos * LIB_EXPORT_REC
     cell_store(arr, eoff + OFF_LIB_EXP_NAME, name_ni)
     cell_store(arr, eoff + OFF_LIB_EXP_KIND, sym_kind)
     cell_store(arr, eoff + OFF_LIB_EXP_NODE, node)
     cell_store(g_libs, off + OFF_LIB_EXP_COUNT, cnt + 1)
+
+fn lib_export_find_kind(lid: int, name_ni: int, kind: int) -> int:
+    c := lib_export_count(lid)
+    lo : ., mut = 0
+    hi : ., mut = c
+    loop:
+        if lo >= hi:
+            return -1
+        mid := (lo + hi) / 2
+        en := lib_export_name(lid, mid)
+        ek := lib_export_kind(lid, mid)
+        if en < name_ni || (en == name_ni && ek < kind):
+            lo = mid + 1
+        else if en > name_ni || (en == name_ni && ek > kind):
+            hi = mid
+        else:
+            return mid
+    return -1
 
 fn lib_export_count(lid: int) -> int:
     if lid < 0 || lid >= g_lib_count:
@@ -250,8 +295,13 @@ fn lib_path_has_prefix(path: string, prefix: string) -> int:
         return 1
     if str_len(path) < plen:
         return 0
-    if str_eq(str_sub(path, 0, plen), prefix) != 0:
-        return 1
+    i : ., mut = 0
+    loop:
+        if i >= plen:
+            return 1
+        if cell_load_byte(path, i) != cell_load_byte(prefix, i):
+            return 0
+        i = i + 1
     return 0
 
 fn lib_lookup_path(path: string) -> int:
@@ -299,15 +349,28 @@ fn lib_path_has_src_root(path: string) -> int:
 fn lib_path_has_dir_prefix(path: string, prefix: string) -> int:
     if lib_path_has_prefix(path, prefix) != 0:
         return 1
-    needle := "/" + prefix
-    nlen := str_len(needle)
+    // A directory operand such as `src/compiler` (no trailing slash) is the
+    // same library root as `src/compiler/`.
+    plen := str_len(prefix)
+    if plen > 0 && str_len(path) == plen - 1 && lib_path_has_prefix(prefix, path) != 0:
+        return 1
     slen := str_len(path)
     i : ., mut = 0
     loop:
-        if i + nlen > slen:
+        if i + plen + 1 > slen:
             return 0
-        if str_eq(str_sub(path, i, nlen), needle) != 0:
-            return 1
+        if cell_load_byte(path, i) == 47:
+            j : ., mut = 0
+            found : ., mut = 1
+            loop:
+                if j >= plen:
+                    break
+                if cell_load_byte(path, i + 1 + j) != cell_load_byte(prefix, j):
+                    found = 0
+                    break
+                j = j + 1
+            if found != 0:
+                return 1
         i = i + 1
     return 0
 
@@ -341,9 +404,20 @@ fn lib_path_is_core_impl(path: string) -> int:
     return 0
 
 fn lib_for_path(path: string) -> int:
-    if g_lib_on == 0:
-        return -1
     return lib_lookup_path(path)
+
+// Drop the per-compilation export set but keep the allocated buffers. Parser
+// (types/globals) and checker (functions/methods) repopulate it for the next
+// compilation; this keeps long-lived LSP sessions from accumulating stale pub
+// declarations.
+fn lib_export_reset():
+    lib_init_defaults_once()
+    i : ., mut = 0
+    loop:
+        if i >= g_lib_count:
+            return
+        cell_store(g_libs, i * LIB_REC + OFF_LIB_EXP_COUNT, 0)
+        i = i + 1
 
 fn file_path_by_fni(fni: int) -> string:
     i : ., mut = 0
@@ -357,59 +431,17 @@ fn file_path_by_fni(fni: int) -> string:
         i = i + 1
     return ""
 
+fn lib_of_line(line: int) -> int:
+    if line <= 0 || line > g_line_count:
+        return -1
+    if (line - 1) * 8 + 8 > str_len(g_line_lib):
+        return -1
+    return cell_load(g_line_lib, (line - 1) * 8)
+
 fn lib_of_node(node: int) -> int:
     if node < 0 || node >= g_ast_count:
         return -1
-    line := ast_line(node)
-    if line <= 0 || line > g_line_count:
-        return -1
-    fni := cell_load(g_line_fileid, (line - 1) * 8)
-    p := file_path_by_fni(fni)
-    return lib_lookup_path(p)
-
-fn lib_enable_if_user_line(line: int):
-    if g_lib_on != 0:
-        return
-    if line <= 0 || line > g_line_count:
-        return
-    fni := cell_load(g_line_fileid, (line - 1) * 8)
-    path := file_path_by_fni(fni)
-    // Do not enable the library layer for declarations inside the compiler or
-    // the standard library itself. Only user declarations opt in.
-    if lib_path_has_dir_prefix(path, "src/compiler/") != 0:
-        return
-    if lib_path_has_prefix(path, "src/stdlib/") != 0:
-        return
-    g_lib_on = 1
-    lib_register_defaults()
-
-fn lib_owner_unfiltered(node: int) -> int:
-    if node < 0 || node >= g_ast_count:
-        return -1
-    line := ast_line(node)
-    if line <= 0 || line > g_line_count:
-        return -1
-    fni := cell_load(g_line_fileid, (line - 1) * 8)
-    return lib_lookup_path(file_path_by_fni(fni))
-
-// Enable the library layer only when a user declaration is exported. Standard
-// library pub tags do not opt the whole compilation into filtering.
-fn lib_prepare_from_pub():
-    if g_saw_pub == 0 || g_lib_on != 0:
-        return
-    if g_lib_inited == 0:
-        lib_register_defaults()
-    i : ., mut = 0
-    loop:
-        if i >= g_func_count:
-            return
-        node := fi_ast_node(i)
-        if fn_node_is_pub(node) != 0:
-            owner := lib_owner_unfiltered(node)
-            if owner >= 0 && lib_kind(owner) == LIB_KIND_USER:
-                g_lib_on = 1
-                return
-        i = i + 1
+    return lib_of_line(ast_line(node))
 
 fn lib_selftest() -> int:
     lib_reset()

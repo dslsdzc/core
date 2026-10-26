@@ -34,7 +34,6 @@ BASE = os.path.dirname(__file__)
 
 # 与轴无关的公共面：runtime + stdlib + 前端共享数据结构。
 common_files = [
-    'src/runtime/arena_globals.cr',
     'src/runtime/rt.cr',
     'src/kernel/bytes.cr',
     'src/stdlib/io.cr',
@@ -351,8 +350,7 @@ def main():
     # 注意：不含 src/compiler/main.cr 与 entry.cr——corec_main 未被 lsp 使用，
     # 且 entry.cr 的 fn main() 与 concat 追加的 wrapper 冲突。
     corelsp_files = [
-        'src/runtime/arena_globals.cr',
-        'src/runtime/rt.cr',
+            'src/runtime/rt.cr',
         'src/stdlib/io.cr',
         'src/stdlib/fmt.cr',
         'src/stdlib/toml.cr',

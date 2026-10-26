@@ -15,8 +15,7 @@ b.build_runtime()  # build/runtime.o（幂等）
 
 src = b.concat(
     [
-        'src/runtime/arena_globals.cr',
-        'src/runtime/rt.cr',
+            'src/runtime/rt.cr',
         'src/stdlib/io.cr',
         'src/stdlib/fmt.cr',
         'src/stdlib/toml.cr',

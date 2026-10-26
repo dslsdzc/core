@@ -1,5 +1,4 @@
 COREC_FILES = [
-    'src/runtime/arena_globals.cr',
     'src/runtime/rt.cr',
     'src/kernel/bytes.cr',
     'src/stdlib/io.cr',

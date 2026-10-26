@@ -205,9 +205,9 @@
 #     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
-canary_elf	pa	bb1eba8143ee772439f405349ac61f24aeb856c60f7c5d52bea7d9739bf1944b	53430
+canary_elf	pa	4e79ced2f997998974cd6c6ac4ea3921b2111545091a8e5854abda97ffab2b58	49334
 pa_ccr	pa.ccr	35218fe764b6504119fdd7cf9fa88db0f7546b38debb17306799e4dd9225874f	97551
-pa_static_ccr	pa_st.bin.ccr	5d55b8b85999512a23c04ff31c0a690e6c99a43f071dbac30eb43ec793a0aa6e	97762
+pa_static_ccr	pa_st.bin.ccr	ae5d5fa25933ab03c37ddcaeed62f73023f874094e4ff591aa71318ee4ebc675	97745
 # ── 【本批重锁 2026-10-26】if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -228,7 +228,7 @@ pa_static_ccr	pa_st.bin.ccr	5d55b8b85999512a23c04ff31c0a690e6c99a43f071dbac30eb4
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
 gt_ccr	gt.ccr	acf233916287ee3e1abf1db8db779dbc908753c481e08a36f99fb8446805545f	131109
-gt_static_ccr	gt_st.bin.ccr	51cd6f0c7e191fa3967cb6ea63cb85d610ae865be3bb4a3cc7bb5023ea9c979d	131316
+gt_static_ccr	gt_st.bin.ccr	f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e60348088069d668	131299
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -408,3 +408,20 @@ gt_static_ccr	gt_st.bin.ccr	51cd6f0c7e191fa3967cb6ea63cb85d610ae865be3bb4a3cc7bb
 #   pa_static_ccr 3cd0b1ae3b597d22bd17c48f269c0fd7a7c3142a02406d3bab7ce5501ec3ecf3 97755
 #   gt_ccr        eaa2ee1cdf6a1bb128bf5f4cc0903d8ea688d14f68cd47c75dacdd3cfb03f74b 131102
 #   gt_static_ccr e13b36c3d24e1a8ffe1c1c5d86262e3a1c85132fda4ce87684846b072b8a4273 131309
+
+# ── 【本批重锁 2026-10-27】pub 彻底处理（可见性始终生效 + arena 全局归 stdlib）──
+# **性质 = 语义收口 + 内容面归类，非发射面泄漏**。D1 5/5 PASS。
+#   · 可见性开关 `g_lib_on` 退役：普通用户程序（无 pub）也执行库可见性过滤。
+#     函数/类型/全局/方法跨库只认导出表；非 pub 静默不可见（N01/N06/N08）。
+#   · `src/runtime/arena_globals.cr` 的三个全局移入 `src/stdlib/arena.cr`
+#     （@std 内部），`rt.cr` / `arena.cr` 不再 import arena_globals。
+#   ⇒ `.ccr` static 两条 **−17B**：STR 段少 `arena_globals`（4B 长度 + 13B 字符）；
+#     非 static 两条（pa_ccr/gt_ccr）逐字节不变。
+#   ⇒ canary ELF **−4096B**（53430→49334）：`--static` 的 BSS 在移出 3 个全局后
+#     跨过页边界，少一页对齐；机码语义未变（pa 运行 rc=0，全套 selfhost 绿）。
+# **取数环境**：本机冷态（cwd=仓库根、逐档 clean-cache、HOME 归一化空 home、
+#   CORE_SAFE=1），D1 两次构建逐字节相同；CI selfhost-tests 为权威复核。
+# 旧值留痕（自本批起作废）：
+#   canary_elf    bb1eba8143ee772439f405349ac61f24aeb856c60f7c5d52bea7d9739bf1944b 53430
+#   pa_static_ccr 5d55b8b85999512a23c04ff31c0a690e6c99a43f071dbac30eb43ec793a0aa6e 97762
+#   gt_static_ccr 51cd6f0c7e191fa3967cb6ea63cb85d610ae865be3bb4a3cc7bb5023ea9c979d 131316

@@ -3,9 +3,9 @@
 // No new IR opcodes: bitwise work is expressed with %, /, * and conditionals,
 // Byte-order helpers live in rawbuf.cr; this file has no target builtins.
 
-BITS32_MASK : int = 4294967295
-BITS32_SIZE : int = 4294967296
-BITS32_BITS : int = 32
+BITS32_MASK : int, pub = 4294967295
+BITS32_SIZE : int, pub = 4294967296
+BITS32_BITS : int, pub = 32
 
 fn bits32Norm(x: int) -> int, pub:
     r := x % BITS32_SIZE
@@ -110,7 +110,7 @@ fn bits32Sub(a: int, b: int) -> int, pub:
 fn bits32Mul(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) * bits32Norm(b))
 
-struct Bits32:
+pub struct Bits32:
     value: int
 
 fn bits32(value: int) -> Bits32, pub:
@@ -126,47 +126,47 @@ fn bits32Max() -> Bits32, pub:
     return Bits32 { value = BITS32_MASK }
 
 impl Bits32:
-    fn toInt(&self) -> int:
+    fn toInt(&self) -> int, pub:
         return self.value
 
-    fn and(&self, other: Bits32) -> Bits32:
+    fn and(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32And(self.value, other.value) }
 
-    fn or(&self, other: Bits32) -> Bits32:
+    fn or(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32Or(self.value, other.value) }
 
-    fn xor(&self, other: Bits32) -> Bits32:
+    fn xor(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32Xor(self.value, other.value) }
 
-    fn not(&self) -> Bits32:
+    fn not(&self) -> Bits32, pub:
         return Bits32 { value = bits32Not(self.value) }
 
-    fn shl(&self, n: int) -> Bits32:
+    fn shl(&self, n: int) -> Bits32, pub:
         return Bits32 { value = bits32Shl(self.value, n) }
 
-    fn shr(&self, n: int) -> Bits32:
+    fn shr(&self, n: int) -> Bits32, pub:
         return Bits32 { value = bits32Shr(self.value, n) }
 
-    fn rotl(&self, n: int) -> Bits32:
+    fn rotl(&self, n: int) -> Bits32, pub:
         return Bits32 { value = bits32Rotl(self.value, n) }
 
-    fn rotr(&self, n: int) -> Bits32:
+    fn rotr(&self, n: int) -> Bits32, pub:
         return Bits32 { value = bits32Rotr(self.value, n) }
 
-    fn add(&self, other: Bits32) -> Bits32:
+    fn add(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32Add(self.value, other.value) }
 
-    fn sub(&self, other: Bits32) -> Bits32:
+    fn sub(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32Sub(self.value, other.value) }
 
-    fn mul(&self, other: Bits32) -> Bits32:
+    fn mul(&self, other: Bits32) -> Bits32, pub:
         return Bits32 { value = bits32Mul(self.value, other.value) }
 
-    fn eq(&self, other: Bits32) -> bool:
+    fn eq(&self, other: Bits32) -> bool, pub:
         return self.value == other.value
 
-    fn lt(&self, other: Bits32) -> bool:
+    fn lt(&self, other: Bits32) -> bool, pub:
         return self.value < other.value
 
-    fn isZero(&self) -> bool:
+    fn isZero(&self) -> bool, pub:
         return self.value == 0

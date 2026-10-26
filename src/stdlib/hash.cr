@@ -9,9 +9,9 @@ import internal::word
 import internal::bytes
 
 // CRC-32/ISO-HDLC: reflected polynomial, init/xorout all-ones.
-CRC32_POLY_ISO_HDLC : int = 3988292384
-CRC32_INIT_ISO_HDLC : int = 4294967295
-CRC32_XOROUT_ISO_HDLC : int = 4294967295
+CRC32_POLY_ISO_HDLC : int, pub = 3988292384
+CRC32_INIT_ISO_HDLC : int, pub = 4294967295
+CRC32_XOROUT_ISO_HDLC : int, pub = 4294967295
 
 fn hashConcat2(a: string, b: string) -> string:
     la := str_len(a)

@@ -160,6 +160,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_lib_manager.py     # LibManager: path ownership + dependency direction + export table
     python3 tests/selfhost/test_pub_label.py       # function tail tags: `fn ... -> T, pub:` + unknown-tag rejection
     python3 tests/selfhost/test_pub_visibility.py  # pub exports vs same-library internals vs hidden stdlib internals
+    python3 tests/selfhost/test_lsp_visibility.py  # LSP completion follows the same library export table
     python3 tests/selfhost/test_raw_abi_boundary.py # raw ABI (load8/store8/...) absent from user symbols; pub stdlib wrappers still work
     python3 tests/selfhost/test_hash.py           # CRC-32/SHA-256/HMAC/HKDF/PBKDF2 vectors from a second implementation
     python3 tests/selfhost/test_intmap.py         # IntMap: configurable capacity/growth/load/seed/hash-kind + probing

@@ -561,7 +561,7 @@ fn parse(text: string) -> Config:
 - `return value` 是 `Ok` 状态。
 - `return Err error` 是错误状态。
 - `Err` 不要求统一错误类型。
-- 顶层声明默认公开，不使用 `pub enum`。
+- 顶层声明默认属于当前库内部，外部不可见。需要跨库导出时使用 `pub`：函数与全局用尾部 `, pub` 标签，类型用 `pub struct` / `pub enum`（或尾部 `, pub`）。不使用 `pub enum` 表示“默认公开”。
 
 ### 6.2 `catch` 后置子句
 
