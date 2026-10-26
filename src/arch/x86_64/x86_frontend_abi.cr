@@ -14,15 +14,15 @@
 // through prelude_builtin_*.
 
 fn x86_frontend_builtin_register():
-    prelude_builtin_add("load8", TI_INT)
-    prelude_builtin_add("store8", TI_INT)
-    prelude_builtin_add("load64", TI_INT)
-    prelude_builtin_add("cell_load", TI_INT)
-    prelude_builtin_add("w32", TI_UNIT)
-    prelude_builtin_add("cell_store", TI_UNIT)
-    prelude_builtin_add("_dyncpy", TI_UNIT)
-    prelude_builtin_add("load_str_ptr", TI_STR)
-    prelude_builtin_add("store_str_ptr", TI_INT)
+    prelude_builtin_add("load8", TI_INT, 1)
+    prelude_builtin_add("store8", TI_INT, 1)
+    prelude_builtin_add("load64", TI_INT, 1)
+    prelude_builtin_add("cell_load", TI_INT, 0)
+    prelude_builtin_add("w32", TI_UNIT, 1)
+    prelude_builtin_add("cell_store", TI_UNIT, 0)
+    prelude_builtin_add("_dyncpy", TI_UNIT, 1)
+    prelude_builtin_add("load_str_ptr", TI_STR, 1)
+    prelude_builtin_add("store_str_ptr", TI_INT, 1)
 
 fn x86_frontend_builtin_is_str_ptr_load(name: string) -> int:
     if name == "load_str_ptr":

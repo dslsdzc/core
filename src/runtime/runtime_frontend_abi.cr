@@ -10,18 +10,18 @@
 // SYSTEM, so adding a name here requires adding it there too.
 
 fn runtime_frontend_builtin_register():
-    prelude_builtin_add("alloc", TI_STR)
-    prelude_builtin_add("sched_call_0", TI_INT)
-    prelude_builtin_add("sched_call_1", TI_INT)
-    prelude_builtin_add("sched_call_2", TI_INT)
-    prelude_builtin_add("sched_call_3", TI_INT)
-    prelude_builtin_add("sched_call_4", TI_INT)
-    prelude_builtin_add("fiber_switch", TI_INT)
-    prelude_builtin_add("fiber_init", TI_INT)
-    prelude_builtin_add("sched_go", TI_INT)
-    prelude_builtin_add("m_start_workers", TI_UNIT)
-    prelude_builtin_add("g_set_curg", TI_UNIT)
-    prelude_builtin_add("g_get_curg", TI_INT)
+    prelude_builtin_add("alloc", TI_STR, 0)
+    prelude_builtin_add("sched_call_0", TI_INT, 0)
+    prelude_builtin_add("sched_call_1", TI_INT, 0)
+    prelude_builtin_add("sched_call_2", TI_INT, 0)
+    prelude_builtin_add("sched_call_3", TI_INT, 0)
+    prelude_builtin_add("sched_call_4", TI_INT, 0)
+    prelude_builtin_add("fiber_switch", TI_INT, 0)
+    prelude_builtin_add("fiber_init", TI_INT, 0)
+    prelude_builtin_add("sched_go", TI_INT, 0)
+    prelude_builtin_add("m_start_workers", TI_UNIT, 0)
+    prelude_builtin_add("g_set_curg", TI_UNIT, 0)
+    prelude_builtin_add("g_get_curg", TI_INT, 0)
 
 fn runtime_frontend_builtin_is_alloc(name_ni: int) -> int:
     if name_ni < 0:

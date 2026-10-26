@@ -159,6 +159,8 @@ def test_completion_and_document_symbol():
     # kind 为 LSP CompletionItemKind 规范值：Keyword=14/Function=3/
     # Struct=22/Enum=13（终审修正；Task 5 brief 误为 23）
     assert labels["Point"] == 22 and labels["Color"] == 13, r
+    # Raw ABI names are not user symbols, so completion must not offer them.
+    assert "load8" not in labels and "store8" not in labels, r
     # 符号候选前缀过滤（大小写不敏感）：line 9 的 "po"（character 6）→ 仅 Point
     r = send(proc, {"jsonrpc": "2.0", "id": 3, "method": "textDocument/completion",
                     "params": {"textDocument": {"uri": uri},

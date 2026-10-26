@@ -172,8 +172,8 @@ CASES = [
     ),
     (
         "load8_string_callee",
-        "",
-        'return load8("abc", 0)',
+        "import rawbuf\n",
+        'return rawbuf.rawRead8("abc", 0)',
         "parity", 97, 97,
     ),
     (

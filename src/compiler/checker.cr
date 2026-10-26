@@ -3910,9 +3910,12 @@ fn infer_expr(node: int) -> int:
         if ast_kind(func_node) == EXPR_AT:
             ast_set_b(func_node, first_arg)
             return infer_expr(func_node)
-        // Check prelude builtins (syscall3/syscall4 — OS communication, no .cr body)
+        // Check prelude builtins (syscall3/syscall4 public OS ABI, raw memory
+        // ABI restricted to @std/@core — no .cr body). Arguments are inferred
+        // here as well: the symbol-table path is gone for internal builtins.
         prelude_ti := prelude_builtin_return_ti(func_ni)
         if prelude_ti >= 0:
+            infer_call_args(first_arg)
             return prelude_ti
         // Check for SYM_SO_FN (.so extension registered)
         so_fn_fi : ., mut = -1
@@ -3994,15 +3997,9 @@ fn infer_expr(node: int) -> int:
                         is_ext2 = 1
                     s1p_arg_ring(fi, first_arg, arg_count, 0, is_ext2)
                 return sym_type(si)  // return type
-            // Check runtime builtins (no .cr body, implemented in rt.s)
-            bi : ., mut = 0
-            loop:
-                if bi >= g_rt_builtin_count:
-                    break
-                if cell_load(g_rt_builtin_names, bi * 8) == func_ni:
-                    infer_call_args(first_arg)   // 未完成项：实参必须被推断（本 return 路径原先跳过）
-                    return cell_load(g_rt_builtin_ret_types, bi * 8)
-                bi = bi + 1
+            // Builtins were already resolved by prelude_builtin_return_ti
+            // above, with the visibility filter applied. Reaching this point
+            // means neither a symbol nor a visible ABI name matched.
             // Not found in symbol table or builtins — report error
             name := istr_get(func_ni)
             check_error(EC_N_FUNC, "Undefined function '" + name + "'", ast_line(node), ast_col(node))
@@ -5125,7 +5122,9 @@ fn check_all():
     // SYM_SO_FN is materialized by the side-table fallback in find_gsym and
     // find_so_fn on first reference, which naturally happens after the reset.
 
-    // Register runtime builtins as proper SYM_FN (no .cr body, implemented in rt.s)
+    // Register public ABI builtins as proper SYM_FN (no .cr body, implemented
+    // in rt.s). Raw/system builtins stay out of the symbol table: user code
+    // cannot name them, and @std/@core reach them through the prelude query.
     // These must come after collect_decls so user-defined funcs take priority.
     ri2 : ., mut = 0
     loop:
@@ -5133,7 +5132,8 @@ fn check_all():
             break
         ni2 := cell_load(g_rt_builtin_names, ri2 * 8)
         ti2 := cell_load(g_rt_builtin_ret_types, ri2 * 8)
-        if find_gsym(ni2) < 0:
+        vis2 := cell_load(g_rt_builtin_vis, ri2 * 8)
+        if vis2 == BUILTIN_VIS_PUBLIC && find_gsym(ni2) < 0:
             // skip if already defined by user
             si2 := g_sym_count
             grow_syms(si2 + 1)

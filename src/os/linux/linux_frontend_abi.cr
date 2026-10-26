@@ -9,7 +9,7 @@
 // (ccr_io.cr:ccr_raw_abi_builtin). Keep the two lists in sync.
 
 fn linux_frontend_builtin_register():
-    prelude_builtin_add("get_arg", TI_STR)
+    prelude_builtin_add("get_arg", TI_STR, 0)
 
 fn linux_frontend_builtin_return_ti(name_ni: int) -> int:
     if name_ni < 0:
