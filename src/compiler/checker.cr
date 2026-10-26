@@ -1944,10 +1944,20 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
                                 ast_line(sub), ast_col(sub))
                             bad = 1
             else:
-                check_error(EC_TM_NESTED,
-                    "Nested match patterns are not supported yet",
-                    ast_line(sub), ast_col(sub))
-                bad = 1
+                ft := structpat_field_ti(si, jdi, scrut_ti)
+                if ft >= 0:
+                    ast_set_data(w, ft + 1)
+                if k == EXPR_STRUCTPAT:
+                    if check_struct_pattern(sub, ft) != 0:
+                        bad = 1
+                else if k == EXPR_TUPLEPAT:
+                    if check_tuple_pattern(sub, ft) != 0:
+                        bad = 1
+                else:
+                    check_error(EC_TM_NESTED,
+                        "Nested match patterns are not supported yet",
+                        ast_line(sub), ast_col(sub))
+                    bad = 1
         i = i + 1
     return bad
 
@@ -1969,14 +1979,20 @@ fn bind_struct_pattern_idents(pat: int, scrut_ti: int):
         w := w0 + i
         if w >= 0:
             sub := ast_a(w)
-            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
-                nn := ast_int_val(sub)
-                if str_eq(istr_get(nn), "_") == 0:
-                    jdi := struct_field_index_by_name(si, ast_b(w))
-                    ft : ., mut = TI_INT
-                    if jdi >= 0:
-                        ft = structpat_field_ti(si, jdi, scrut_ti)
-                    def_sym(nn, SYM_LOCAL, ft, -1)
+            if sub >= 0:
+                jdi := struct_field_index_by_name(si, ast_b(w))
+                ft : ., mut = TI_INT
+                if jdi >= 0:
+                    ft = structpat_field_ti(si, jdi, scrut_ti)
+                k := ast_kind(sub)
+                if k == EXPR_IDENT:
+                    nn := ast_int_val(sub)
+                    if str_eq(istr_get(nn), "_") == 0:
+                        def_sym(nn, SYM_LOCAL, ft, -1)
+                else if k == EXPR_STRUCTPAT:
+                    bind_struct_pattern_idents(sub, ft)
+                else if k == EXPR_TUPLEPAT:
+                    bind_tuple_pattern_idents(sub, ft)
         i = i + 1
 
 // ─── Tuple match pattern（Task 5b2）───
@@ -2072,10 +2088,17 @@ fn check_tuple_pattern(pat: int, scrut_ti: int) -> int:
                         ast_line(sub), ast_col(sub))
                     bad = 1
         else:
-            check_error(EC_TM_NESTED,
-                "Nested match patterns are not supported yet",
-                ast_line(sub), ast_col(sub))
-            bad = 1
+            if k == EXPR_STRUCTPAT:
+                if check_struct_pattern(sub, ft) != 0:
+                    bad = 1
+            else if k == EXPR_TUPLEPAT:
+                if check_tuple_pattern(sub, ft) != 0:
+                    bad = 1
+            else:
+                check_error(EC_TM_NESTED,
+                    "Nested match patterns are not supported yet",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
         i = i + 1
     return bad
 
@@ -2097,13 +2120,19 @@ fn bind_tuple_pattern_idents(pat: int, scrut_ti: int):
         w := w0 + i
         if w >= 0:
             sub := ast_a(w)
-            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
-                nn := ast_int_val(sub)
-                if str_eq(istr_get(nn), "_") == 0:
-                    et : ., mut = TI_INT
-                    if start >= 0 && i < arity:
-                        et = cell_load(g_gen_apply_data, (start + i) * 8)
-                    def_sym(nn, SYM_LOCAL, et, -1)
+            if sub >= 0:
+                et : ., mut = TI_INT
+                if start >= 0 && i < arity:
+                    et = cell_load(g_gen_apply_data, (start + i) * 8)
+                k := ast_kind(sub)
+                if k == EXPR_IDENT:
+                    nn := ast_int_val(sub)
+                    if str_eq(istr_get(nn), "_") == 0:
+                        def_sym(nn, SYM_LOCAL, et, -1)
+                else if k == EXPR_STRUCTPAT:
+                    bind_struct_pattern_idents(sub, et)
+                else if k == EXPR_TUPLEPAT:
+                    bind_tuple_pattern_idents(sub, et)
         i = i + 1
 
 // 类型里是否仍含未实例化的泛型参数（TYP_GENERIC_PARAM，可嵌套在数组 / 指针 / 引用 /

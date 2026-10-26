@@ -1064,12 +1064,84 @@ fn structpat_field_load_ti_from(ft: int) -> int:
 // comparison fails. Returns 1 when a test was emitted, 0 for ident/wildcard
 // (no test), and -1 for an unsupported nested subpattern (caller must fail
 // closed instead of jumping to the body).
+fn gen_pattern_test(sub: int, fv: int, fall: int) -> int:
+    if sub < 0:
+        return 0
+    k := ast_kind(sub)
+    if k == EXPR_STRUCTPAT:
+        return gen_nested_struct_test(sub, fv, fall)
+    if k == EXPR_TUPLEPAT:
+        return gen_nested_tuple_test(sub, fv, fall)
+    return gen_structpat_field_test(sub, fv, fall)
+
+fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
+    si := find_struct_by_name(ast_a(pat))
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if si < 0 || c < 0 || (c > 0 && w0 < 0):
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        sub := ast_a(w)
+        jdi := struct_field_index_by_name(si, ast_b(w))
+        if jdi < 0:
+            return -1
+        if sub >= 0:
+            k := ast_kind(sub)
+            if k != EXPR_IDENT && k != EXPR_WILDCARD:
+                fd := ast_data(w)
+                ft := struct_row_field_ti(si, jdi)
+                if fd > 0:
+                    ft = fd - 1
+                if ft < 0 || ti_has_generic_param(ft) != 0:
+                    return -1
+                fv := new_ir_var("fld", TI_INT)
+                irv_set_type(fv, structpat_field_load_ti_from(ft))
+                emit(IR_LOAD_FIELD, fv, val, 0, jdi, 0)
+                if gen_pattern_test(sub, fv, fall) < 0:
+                    return -1
+        i = i + 1
+    return 1
+
+fn gen_nested_tuple_test(pat: int, val: int, fall: int) -> int:
+    c := ast_b(pat)
+    w0 := ast_a(pat)
+    if c <= 0 || w0 < 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        sub := ast_a(w)
+        idx := ast_b(w)
+        fd := ast_data(w)
+        if sub < 0 || idx != i || fd <= 0:
+            return -1
+        k := ast_kind(sub)
+        if k != EXPR_IDENT && k != EXPR_WILDCARD:
+            ft := fd - 1
+            if ti_has_generic_param(ft) != 0:
+                return -1
+            fv := new_ir_var("fld", TI_INT)
+            irv_set_type(fv, structpat_field_load_ti_from(ft))
+            emit(IR_LOAD_FIELD, fv, val, 0, idx, 0)
+            if gen_pattern_test(sub, fv, fall) < 0:
+                return -1
+        i = i + 1
+    return 1
+
 fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
     if sub < 0:
         return 0
     k := ast_kind(sub)
     if k == EXPR_IDENT || k == EXPR_WILDCARD:
         return 0
+    if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT:
+        return gen_pattern_test(sub, fv, fall)
     ok_lbl := new_label()
     cmp_var : ., mut = -1
     if k == EXPR_INT:
@@ -1127,9 +1199,14 @@ fn gen_structpat_binds(pat: int, match_val: int):
         w := w0 + i
         if w >= 0:
             sub := ast_a(w)
-            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
-                nn := ast_int_val(sub)
-                if str_eq(istr_get(nn), "_") == 0:
+            if sub >= 0:
+                k := ast_kind(sub)
+                is_wild : ., mut = 0
+                if k == EXPR_WILDCARD:
+                    is_wild = 1
+                if k == EXPR_IDENT && str_eq(istr_get(ast_int_val(sub)), "_") != 0:
+                    is_wild = 1
+                if is_wild == 0:
                     jdi := struct_field_index_by_name(si, ast_b(w))
                     if jdi >= 0:
                         fd := ast_data(w)
@@ -1139,12 +1216,22 @@ fn gen_structpat_binds(pat: int, match_val: int):
                         // A still-generic field cannot be bound soundly; the
                         // pattern was fail-closed before the body.
                         if ti_has_generic_param(ft) == 0:
-                            fv := new_ir_var("fld", TI_INT)
-                            irv_set_type(fv, structpat_field_load_ti_from(ft))
-                            if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
-                                irv_set_decl_ti(fv, ft)
-                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
-                            bind_local(nn, fv)
+                            if k == EXPR_IDENT:
+                                nn := ast_int_val(sub)
+                                fv := new_ir_var("fld", TI_INT)
+                                irv_set_type(fv, structpat_field_load_ti_from(ft))
+                                if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
+                                    irv_set_decl_ti(fv, ft)
+                                emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                                bind_local(nn, fv)
+                            else if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT:
+                                fv := new_ir_var("fld", TI_INT)
+                                irv_set_type(fv, structpat_field_load_ti_from(ft))
+                                emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                                if k == EXPR_STRUCTPAT:
+                                    gen_structpat_binds(sub, fv)
+                                else:
+                                    gen_tuplepat_binds(sub, fv)
         i = i + 1
 
 // Bind ident subpatterns for a tuple pattern in the arm scope. Each binding reads
@@ -1164,9 +1251,14 @@ fn gen_tuplepat_binds(pat: int, match_val: int):
         w := w0 + i
         if w >= 0:
             sub := ast_a(w)
-            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
-                nn := ast_int_val(sub)
-                if str_eq(istr_get(nn), "_") == 0:
+            if sub >= 0:
+                k := ast_kind(sub)
+                is_wild : ., mut = 0
+                if k == EXPR_WILDCARD:
+                    is_wild = 1
+                if k == EXPR_IDENT && str_eq(istr_get(ast_int_val(sub)), "_") != 0:
+                    is_wild = 1
+                if is_wild == 0:
                     fd := ast_data(w)
                     ft : ., mut = TI_INT
                     if fd > 0:
@@ -1176,7 +1268,12 @@ fn gen_tuplepat_binds(pat: int, match_val: int):
                     if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
                         irv_set_decl_ti(fv, ft)
                     emit(IR_LOAD_FIELD, fv, match_val, 0, ast_b(w), 0)
-                    bind_local(nn, fv)
+                    if k == EXPR_IDENT:
+                        bind_local(ast_int_val(sub), fv)
+                    else if k == EXPR_STRUCTPAT:
+                        gen_structpat_binds(sub, fv)
+                    else if k == EXPR_TUPLEPAT:
+                        gen_tuplepat_binds(sub, fv)
         i = i + 1
 
 // Return the literal initializer AST node for an immutable module-level
@@ -3620,9 +3717,6 @@ fn gen_expr(node: int) -> int:
                     if sk == EXPR_IDENT || sk == EXPR_WILDCARD:
                         ti_i = ti_i + 1
                         continue
-                    if sk != EXPR_INT && sk != EXPR_BOOL && sk != EXPR_CHAR && sk != EXPR_STRING:
-                        can_match = 0
-                        break
                     ft := fd - 1
                     if ti_has_generic_param(ft) != 0:
                         can_match = 0
@@ -3630,7 +3724,7 @@ fn gen_expr(node: int) -> int:
                     fv := new_ir_var("fld", TI_INT)
                     irv_set_type(fv, structpat_field_load_ti_from(ft))
                     emit(IR_LOAD_FIELD, fv, match_val, 0, idx, 0)
-                    if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                    if gen_pattern_test(sub, fv, fall_lbl) < 0:
                         can_match = 0
                         break
                     ti_i = ti_i + 1
