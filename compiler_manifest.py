@@ -11,6 +11,7 @@ COREC_FILES = [
     'src/compiler/globals.cr',
     'src/compiler/dyn_arr.cr',
     'src/compiler/source.cr',
+    'src/compiler/lib_manager.cr',
     'src/compiler/literal.cr',
     'src/compiler/big_lit.cr',
     'src/compiler/lexer.cr',
