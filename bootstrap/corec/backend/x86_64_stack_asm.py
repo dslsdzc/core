@@ -289,20 +289,40 @@ class X86_64StackAsmGen:
         self.emit(f"{done}:")
 
     def gen_binary(self, instr: BinaryInstr):
-        if self.bigint_mode and instr.op in ('raw_add', 'raw_sub', 'raw_and', 'tag_word', 'untag_word'):
+        bitops = ('raw_and', 'raw_or', 'raw_xor', 'raw_shl', 'raw_shr',
+                  'raw_rotl', 'raw_rotr')
+        if instr.op in ('raw_add', 'raw_sub') + bitops:
             self.load_to_r10(instr.left)
-            if instr.op in ('raw_add', 'raw_sub', 'raw_and'):
-                self.load_to_r11(instr.right)
+            self.load_to_r11(instr.right)
             if instr.op == 'raw_add':
                 self.emit("    add r10, r11")
             elif instr.op == 'raw_sub':
                 self.emit("    sub r10, r11")
             elif instr.op == 'raw_and':
                 self.emit("    and r10, r11")
-            elif instr.op == 'tag_word':
-                self.emit("    add r10, r10")
-            else:
-                self.emit("    sar r10, 1")
+            elif instr.op == 'raw_or':
+                self.emit("    or r10, r11")
+            elif instr.op == 'raw_xor':
+                self.emit("    xor r10, r11")
+            elif instr.op in ('raw_shl', 'raw_shr', 'raw_rotl', 'raw_rotr'):
+                self.emit("    mov rcx, r11")
+                if instr.op == 'raw_shl':
+                    self.emit("    shl r10, cl")
+                elif instr.op == 'raw_shr':
+                    self.emit("    shr r10, cl")
+                elif instr.op == 'raw_rotl':
+                    self.emit("    rol r10, cl")
+                else:
+                    self.emit("    ror r10, cl")
+            self.store_from_r10(instr.dest)
+            return
+        if instr.op in ('tag_word', 'untag_word'):
+            self.load_to_r10(instr.left)
+            if self.bigint_mode:
+                if instr.op == 'tag_word':
+                    self.emit("    add r10, r10")
+                else:
+                    self.emit("    sar r10, 1")
             self.store_from_r10(instr.dest)
             return
         if (self.bigint_mode and

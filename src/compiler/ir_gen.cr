@@ -3648,6 +3648,97 @@ fn gen_expr(node: int) -> int:
             //    类型在哪换：checker 侧（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
             //      即表达式的类型而不是变量的类型；调用边界按被调函数形参类型编组，
             //      int/string 同属 GP 字 -> 两侧一致。
+            // Raw word bitwise builtins. Operands and result are untagged
+            // machine words; Bits32/Bits64 apply tag/width normalization.
+            is_raw_bitop : ., mut = 0
+            if str_eq(name, "rawAnd") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawOr") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawXor") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawShl") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawShr") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawRotl") != 0:
+                is_raw_bitop = 1
+            else if str_eq(name, "rawRotr") != 0:
+                is_raw_bitop = 1
+            if is_raw_bitop != 0:
+                a1 := gen_expr(ast_a(first_arg))
+                a1 = force_if_thunk(a1)
+                a2n := ast_b(first_arg)
+                a2v : ., mut = -1
+                if a2n >= 0:
+                    a2v = gen_expr(ast_a(a2n))
+                    a2v = force_if_thunk(a2v)
+                op : ., mut = OP_RAW_AND
+                if str_eq(name, "rawOr") != 0:
+                    op = OP_RAW_OR
+                else if str_eq(name, "rawXor") != 0:
+                    op = OP_RAW_XOR
+                else if str_eq(name, "rawShl") != 0:
+                    op = OP_RAW_SHL
+                else if str_eq(name, "rawShr") != 0:
+                    op = OP_RAW_SHR
+                else if str_eq(name, "rawRotl") != 0:
+                    op = OP_RAW_ROTL
+                else if str_eq(name, "rawRotr") != 0:
+                    op = OP_RAW_ROTR
+                rv := new_ir_var("_rawop", TI_INT)
+                emit(IR_BINARY, rv, a1, a2v, op, TI_INT)
+                return rv
+
+            // Mathematical-int bitwise builtins: cross the tagged boundary once
+            // per operand, run the raw op, then tag the result. Bits32/Bits64
+            // use these; @rawAnd/... remain the untagged layer.
+            is_bitop : ., mut = 0
+            if str_eq(name, "bitAnd") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitOr") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitXor") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitShl") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitShr") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitRotl") != 0:
+                is_bitop = 1
+            else if str_eq(name, "bitRotr") != 0:
+                is_bitop = 1
+            if is_bitop != 0:
+                a1 := gen_expr(ast_a(first_arg))
+                a1 = force_if_thunk(a1)
+                a2n := ast_b(first_arg)
+                a2v : ., mut = -1
+                if a2n >= 0:
+                    a2v = gen_expr(ast_a(a2n))
+                    a2v = force_if_thunk(a2v)
+                ra := new_ir_var("_untag_a", TI_INT)
+                emit(IR_UNARY, ra, a1, 0, UOP_UNTAG, 0)
+                rb := new_ir_var("_untag_b", TI_INT)
+                emit(IR_UNARY, rb, a2v, 0, UOP_UNTAG, 0)
+                op : ., mut = OP_RAW_AND
+                if str_eq(name, "bitOr") != 0:
+                    op = OP_RAW_OR
+                else if str_eq(name, "bitXor") != 0:
+                    op = OP_RAW_XOR
+                else if str_eq(name, "bitShl") != 0:
+                    op = OP_RAW_SHL
+                else if str_eq(name, "bitShr") != 0:
+                    op = OP_RAW_SHR
+                else if str_eq(name, "bitRotl") != 0:
+                    op = OP_RAW_ROTL
+                else if str_eq(name, "bitRotr") != 0:
+                    op = OP_RAW_ROTR
+                rr := new_ir_var("_rawop", TI_INT)
+                emit(IR_BINARY, rr, ra, rb, op, TI_INT)
+                rv := new_ir_var("_tag", TI_INT)
+                emit(IR_UNARY, rv, rr, 0, UOP_TAG, 0)
+                return rv
+
             // SYSTEM raw pointer add: untag both int operands and return the raw
             // word. No unsafe/arena: safe to call from the scheduler hot path.
             if str_eq(name, "ptr_add") != 0:

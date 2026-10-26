@@ -162,7 +162,25 @@ class IRGen:
             # 2(a) 视图内建 = **直通**（零代码生成）：`@ptr_of(s)` / `@str_of(p)` 不改变那个 64 位字，
             # 只改变它在本语言里的看法 ⇒ 直接返回内层表达式的值本身（不发射指令、不建临时变量）。
             # 未知名到此不该出现（type_checker 已 fail-closed；此面兜底为 0 以免静默崩溃）。
-            if expr.name in ('raw_add', 'raw_sub', 'raw_and'):
+            if expr.name in ('bitAnd', 'bitOr', 'bitXor', 'bitShl', 'bitShr', 'bitRotl', 'bitRotr'):
+                args = []
+                for arg in expr.args:
+                    v = self.gen_expr(arg)
+                    d = self.new_temp()
+                    self.add_instr(BinaryInstr('untag_word', v, v, d))
+                    args.append(d)
+                op = {
+                    'bitAnd': 'raw_and', 'bitOr': 'raw_or', 'bitXor': 'raw_xor',
+                    'bitShl': 'raw_shl', 'bitShr': 'raw_shr',
+                    'bitRotl': 'raw_rotl', 'bitRotr': 'raw_rotr',
+                }[expr.name]
+                raw = self.new_temp()
+                self.add_instr(BinaryInstr(op, args[0], args[1], raw))
+                dest = self.new_temp()
+                self.add_instr(BinaryInstr('tag_word', raw, raw, dest))
+                return dest
+            if expr.name in ('raw_add', 'raw_sub', 'raw_and', 'rawAnd', 'rawOr',
+                             'rawXor', 'rawShl', 'rawShr', 'rawRotl', 'rawRotr'):
                 args = []
                 for arg in expr.args:
                     if isinstance(arg, Literal) and arg.kind == 'int':
@@ -171,8 +189,13 @@ class IRGen:
                         args.append(v)
                     else:
                         args.append(self.gen_expr(arg))
+                op = {
+                    'rawAnd': 'raw_and', 'rawOr': 'raw_or', 'rawXor': 'raw_xor',
+                    'rawShl': 'raw_shl', 'rawShr': 'raw_shr',
+                    'rawRotl': 'raw_rotl', 'rawRotr': 'raw_rotr',
+                }.get(expr.name, expr.name)
                 dest = self.new_temp()
-                self.add_instr(BinaryInstr(expr.name, args[0], args[1], dest))
+                self.add_instr(BinaryInstr(op, args[0], args[1], dest))
                 return dest
             if expr.name in ('ptr_of', 'str_of') and expr.args:
                 v = self.gen_expr(expr.args[0])

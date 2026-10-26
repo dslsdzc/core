@@ -914,6 +914,76 @@ fn analysis_at_items(prefix: string) -> string:
             out = out + ","
         out = out + analysis_citem("ffi", 3)
         first = 0
+    if analysis_has_prefix("rawAnd", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawAnd", 3)
+        first = 0
+    if analysis_has_prefix("rawOr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawOr", 3)
+        first = 0
+    if analysis_has_prefix("rawXor", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawXor", 3)
+        first = 0
+    if analysis_has_prefix("rawShl", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawShl", 3)
+        first = 0
+    if analysis_has_prefix("rawShr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawShr", 3)
+        first = 0
+    if analysis_has_prefix("rawRotl", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawRotl", 3)
+        first = 0
+    if analysis_has_prefix("rawRotr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("rawRotr", 3)
+        first = 0
+    if analysis_has_prefix("bitAnd", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitAnd", 3)
+        first = 0
+    if analysis_has_prefix("bitOr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitOr", 3)
+        first = 0
+    if analysis_has_prefix("bitXor", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitXor", 3)
+        first = 0
+    if analysis_has_prefix("bitShl", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitShl", 3)
+        first = 0
+    if analysis_has_prefix("bitShr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitShr", 3)
+        first = 0
+    if analysis_has_prefix("bitRotl", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitRotl", 3)
+        first = 0
+    if analysis_has_prefix("bitRotr", prefix) != 0:
+        if first == 0:
+            out = out + ","
+        out = out + analysis_citem("bitRotr", 3)
+        first = 0
     // @ptr_of and @str_of are view builtins. Any new language builtin must be added
     // to this table in the same change; the bootstrap L1/L2/L3 tests enforce it.
     if analysis_has_prefix("ptr_of", prefix) != 0:
