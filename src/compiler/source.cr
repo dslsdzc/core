@@ -26,6 +26,11 @@ g_sm_line_count : int, mut
 g_sm_line_cap : int, mut
 g_sm_line_starts : string, mut
 
+// Parallel to file records: owner library id (see lib_manager.cr).
+g_sm_file_libs : string, mut
+g_sm_file_lib_count : int, mut
+g_sm_file_lib_cap : int, mut
+
 struct Span:
     file: int
     lo: int
@@ -34,9 +39,10 @@ struct Span:
 fn sm_reset():
     g_sm_file_count = 0
     g_sm_line_count = 0
+    g_sm_file_lib_count = 0
 
 fn grow_sm_files(needed: int):
-    if needed < g_sm_file_cap:
+    if needed <= g_sm_file_cap:
         return
     nc := g_sm_file_cap * 2
     if nc < 8:
@@ -48,6 +54,11 @@ fn grow_sm_files(needed: int):
         cell_copy(g_sm_files, g_sm_file_cap * ESZ_SM_FILE, nb)
     g_sm_files = nb
     g_sm_file_cap = nc
+    nl := alloc(nc * 8)
+    if g_sm_file_lib_cap > 0:
+        cell_copy(g_sm_file_libs, g_sm_file_lib_cap * 8, nl)
+    g_sm_file_libs = nl
+    g_sm_file_lib_cap = nc
 
 fn grow_sm_lines(needed: int):
     if needed < g_sm_line_cap:
@@ -90,6 +101,8 @@ fn sm_add_file(path: string, text: string) -> int:
     cell_store(g_sm_files, off + OFF_SMF_LEN, tlen)
     cell_store(g_sm_files, off + OFF_SMF_LINE_BASE, base)
     cell_store(g_sm_files, off + OFF_SMF_LINE_COUNT, g_sm_line_count - base)
+    cell_store(g_sm_file_libs, id * 8, lib_for_path(path))
+    g_sm_file_lib_count = id + 1
     g_sm_file_count = id + 1
     return id
 
@@ -103,6 +116,11 @@ fn sm_file_text(id: int) -> string:
     if id < 0 || id >= g_sm_file_count:
         return ""
     return cell_load_str(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_TEXT)
+
+fn sm_file_lib(id: int) -> int:
+    if id < 0 || id >= g_sm_file_lib_count:
+        return -1
+    return cell_load(g_sm_file_libs, id * 8)
 
 fn sm_file_path(id: int) -> string:
     if id < 0 || id >= g_sm_file_count:

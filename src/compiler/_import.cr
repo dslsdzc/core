@@ -8,6 +8,7 @@ import globals
 import bytes
 import dyn_arr
 import source
+import lib_manager
 import literal
 import big_lit
 import lexer

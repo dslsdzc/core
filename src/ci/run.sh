@@ -157,6 +157,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_ccr_v10_stream.py  # v10 canonical forward-only loader structure + truncation/order negative fixtures
     python3 tests/selfhost/test_multibranch_v10.py  # v10 MATCH opcode + CASE segment 24B layout/loader domain fixtures
     python3 tests/selfhost/test_bits.py            # stdlib Bits32: raw-word/bit-op boundary + byte order (interp + ELF O0/O2)
+    python3 tests/selfhost/test_lib_manager.py     # LibManager: path ownership + dependency direction + export table
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
     python3 tests/selfhost/test_ccr_types.py       # R2 P4 Task 1/2/3/4 + P5 Task 2：段机制（版本 8 + loader 三闸/必备集 + 旧 v7 拒收）8 例 + TYPE 内容面（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + loader 负分支）10 例 + IFACE 内容面（五小节/条目扩列 16/形状命名化/签名项化/impl 边与方法表/corearch 读回/跨段引用域/确定性）10 例 + DFNode.TK 项槽（逐节点规则 + dex 语料 + NOD 36B/同序 + 冷/暖快照对称 + dump 零产物影响 + .cir 布局未变）6 例 = 34 例 + P5 T2 单槽化 6 例（复合行走辅码 + 互斥不变量 + F1 hotpatch 无面 + 复合行冷/暖对称 + 复合行 NOD 同序 + 快照盘面派生码保真）= 40 例 + R2 P6 Task 3 项索引 8 例（版本闸 v8 拒收 / NOD 40B 字段序 / 项索引落盘读回对拍（非退化）/ 两通道面一致 / 辅码面与复合行保真 / 项索引越界与不一致 ⇒ 拒绝 / 段界检 / D18 纯度静态）= 49 例（**+1 他批新增，本批机械核对同步**：实测 49/49）
     python3 tests/selfhost/test_impl.py
