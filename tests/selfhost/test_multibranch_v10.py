@@ -2737,20 +2737,16 @@ def test_struct_pattern_errors_are_hard():
             _assert_compile_rejected(tmp, source, name, needles)
 
 
-def test_nested_struct_pattern_rejected():
+def test_nested_struct_pattern_matches():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        needles = ["error[TM09]", "Nested match patterns are not supported"]
-        _assert_compile_rejected(
-            tmp, MATCH_STRUCT_NESTED_SOURCE, "struct_nested", needles
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_NESTED_SOURCE,
+            1,
+            opts=(0, 2),
+            name="struct_nested",
         )
-        run = _run([COREC, "run", MATCH_STRUCT_NESTED_SOURCE], cwd=BASE)
-        text = run.stdout + run.stderr
-        assert run.returncode == 1, (
-            f"interpreter accepted a nested struct pattern: rc={run.returncode}: {text}"
-        )
-        for needle in needles:
-            assert needle in text, f"interpreter missing {needle!r}: {text}"
 
 
 def test_struct_pattern_exhaustiveness_and_order():
@@ -2796,11 +2792,6 @@ def test_tuple_pattern_errors_are_hard():
             "tuple_wrong_type",
             MATCH_TUPLE_WRONG_TYPE_SOURCE,
             ["error[TS03]", "expected int, got string"],
-        ),
-        (
-            "tuple_nested",
-            MATCH_TUPLE_NESTED_SOURCE,
-            ["error[TM09]", "Nested match patterns are not supported"],
         ),
     ]
     with tempfile.TemporaryDirectory() as td:
@@ -2870,20 +2861,16 @@ def test_tuple_pattern_enum_payload_rejected_tm09():
 
 
 
-def test_nested_tuple_pattern_rejected_by_interpreter():
+def test_nested_tuple_pattern_matches():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        needles = ["error[TM09]", "Nested match patterns are not supported"]
-        _assert_compile_rejected(
-            tmp, MATCH_TUPLE_NESTED_SOURCE, "tuple_nested_interp", needles
+        _assert_program(
+            tmp,
+            MATCH_TUPLE_NESTED_SOURCE,
+            1,
+            opts=(0, 2),
+            name="tuple_nested",
         )
-        run = _run([COREC, "run", MATCH_TUPLE_NESTED_SOURCE], cwd=BASE)
-        text = run.stdout + run.stderr
-        assert run.returncode == 1, (
-            f"interpreter accepted a nested tuple pattern: rc={run.returncode}: {text}"
-        )
-        for needle in needles:
-            assert needle in text, f"interpreter missing {needle!r}: {text}"
 
 
 def test_dump_objects_prints_match_cases():
