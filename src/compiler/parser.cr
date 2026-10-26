@@ -1784,6 +1784,29 @@ fn extract_hotpatch_ver(args_node: int) -> int:
         arg = ast_b(arg)
     return -1
 
+// Parse function tail tags: `fn f(...) -> T, pub:`. Tags live after the
+// signature and before the body colon, matching the declaration label style.
+fn parse_fn_tail_tags() -> int:
+    pub_flag : ., mut = 0
+    if !check(T_COMMA):
+        return 0
+    advance_tok()
+    loop:
+        if check(T_COLON_BLOCK) || check(T_EQ) || at_line_end() != 0:
+            break
+        tag_t := advance_tok()
+        tag := tok_lx(tag_t)
+        if tag == "pub":
+            pub_flag = 1
+            lib_enable()
+        else:
+            check_error(EC_TA_UNKNOWN_TAG,
+                "unknown function tag '" + tag + "'", tok_ln(tag_t), tok_cl(tag_t))
+        if !check(T_COMMA):
+            break
+        advance_tok()
+    return pub_flag
+
 fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int):
     gnames : string, mut
     gnames_cap : int, mut
@@ -1904,6 +1927,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         // `return expr`) must keep their non-generic identity for CCR/purity.
         ret_omitted = 1
 
+    // Function tail tags: `fn f(...) -> T, pub:`.
+    pub_flag := parse_fn_tail_tags()
+
     // Spec annotations (#check / #ensure) appear between the signature and the body.
     // Record their start index, then backfill each row with the fn_node index after
     // the function node is allocated. The node index is unique; a function name is
@@ -1960,7 +1986,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         cell_store(gconstrs, gc * 8, -1)
         gc = gc + 1
         rt = alloc_node(EXPR_IDENT, 0, 0, 0, rni, 0, 0, fn_line, fn_col)
-    fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col)
+    fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256 + pub_flag * 65536, rt, body, fn_line, fn_col)
     // Backfill this function's annotation rows with fn_node.
     spec_patch : ., mut = spec_start
     loop:
@@ -2201,8 +2227,9 @@ fn parse_declaration():
             ret_type = unpack_type(ret_node)
         if extern_opt != 0:
             check_error(EC_P_EXTERN_OPTIONAL, "extern declaration cannot use optional type ('?') - no C ABI representation", tok_ln(t), tok_cl(t))
+        ext_pub := parse_fn_tail_tags()
         // Create EXPR_EXTERN node (no body)
-        node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, 0, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t))
+        node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, ext_pub * 65536, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t))
         // An extern declaration ends at a line boundary. A trailing semicolon is
         // optional.
         end_decl()
