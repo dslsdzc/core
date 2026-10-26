@@ -5,9 +5,6 @@
 // constructor parameters. The table uses linear probing with tombstones; keys
 // and values live in raw cell buffers, occupancy is a byte per slot.
 //
-// Probe helpers are free functions taking the map by value: nested `&self`
-// method calls currently fault in the backend, so methods only call free
-// helpers and never another method on the same receiver.
 import internal::bytes
 import internal::word
 
@@ -51,45 +48,6 @@ fn intMapHash(key: int, seed: int, kind: int) -> int:
     // kind 3: heavy collisions (7 buckets) for linear-probing tests
     return wordNorm(key, 32) % 7
 
-fn intMapFindKey(m: IntMap, key: int) -> int:
-    idx := intMapHash(key, m.seed, m.hash_kind) % m.cap
-    i : ., mut = 0
-    loop:
-        if i >= m.cap:
-            return -1
-        st := byteLoad(m.used, idx)
-        if st == 0:
-            return -1
-        if st == 1 && cell_load(m.keys, idx * 8) == key:
-            return idx
-        idx = (idx + 1) % m.cap
-        i = i + 1
-    return -1
-
-fn intMapFindSlot(m: IntMap, key: int) -> int:
-    idx := intMapHash(key, m.seed, m.hash_kind) % m.cap
-    tomb : ., mut = -1
-    i : ., mut = 0
-    loop:
-        if i >= m.cap:
-            if tomb >= 0:
-                return tomb
-            return -1
-        st := byteLoad(m.used, idx)
-        if st == 0:
-            if tomb >= 0:
-                return tomb
-            return idx
-        if st == 2:
-            if tomb < 0:
-                tomb = idx
-        else:
-            if cell_load(m.keys, idx * 8) == key:
-                return idx
-        idx = (idx + 1) % m.cap
-        i = i + 1
-    return tomb
-
 fn intMapGrow(m: IntMap) -> IntMap:
     old_cap := m.cap
     old_keys := m.keys
@@ -119,7 +77,7 @@ fn intMapGrow(m: IntMap) -> IntMap:
         if byteLoad(old_used, i) == 1:
             k := cell_load(old_keys, i * 8)
             v := cell_load(old_values, i * 8)
-            slot := intMapFindSlot(out, k)
+            slot := out.findSlot(k)
             if slot >= 0:
                 cell_store(out.keys, slot * 8, k)
                 cell_store(out.values, slot * 8, v)
@@ -148,6 +106,45 @@ fn intMap() -> IntMap, pub:
     return intMapWith(16, 2, 1, 3, 4, 0, 0)
 
 impl IntMap:
+    fn findKey(&self, key: int) -> int:
+        idx := intMapHash(key, self.seed, self.hash_kind) % self.cap
+        i : ., mut = 0
+        loop:
+            if i >= self.cap:
+                return -1
+            st := byteLoad(self.used, idx)
+            if st == 0:
+                return -1
+            if st == 1 && cell_load(self.keys, idx * 8) == key:
+                return idx
+            idx = (idx + 1) % self.cap
+            i = i + 1
+        return -1
+
+    fn findSlot(&self, key: int) -> int:
+        idx := intMapHash(key, self.seed, self.hash_kind) % self.cap
+        tomb : ., mut = -1
+        i : ., mut = 0
+        loop:
+            if i >= self.cap:
+                if tomb >= 0:
+                    return tomb
+                return -1
+            st := byteLoad(self.used, idx)
+            if st == 0:
+                if tomb >= 0:
+                    return tomb
+                return idx
+            if st == 2:
+                if tomb < 0:
+                    tomb = idx
+            else:
+                if cell_load(self.keys, idx * 8) == key:
+                    return idx
+            idx = (idx + 1) % self.cap
+            i = i + 1
+        return tomb
+
     fn put(&mut self, key: int, value: int):
         if self.load_den <= 0:
             self.load_den = 1
@@ -158,7 +155,7 @@ impl IntMap:
             self.used = grown.used
             self.cap = grown.cap
             self.count = grown.count
-        slot := intMapFindSlot(self, key)
+        slot := self.findSlot(key)
         if slot < 0:
             return
         st := byteLoad(self.used, slot)
@@ -169,16 +166,16 @@ impl IntMap:
             self.count = self.count + 1
 
     fn get(&self, key: int) -> int:
-        slot := intMapFindKey(self, key)
+        slot := self.findKey(key)
         if slot < 0:
             return 0
         return cell_load(self.values, slot * 8)
 
     fn has(&self, key: int) -> bool:
-        return intMapFindKey(self, key) >= 0
+        return self.findKey(key) >= 0
 
     fn remove(&mut self, key: int):
-        slot := intMapFindKey(self, key)
+        slot := self.findKey(key)
         if slot >= 0:
             byteStore(self.used, slot, 2)
             self.count = self.count - 1
