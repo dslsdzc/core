@@ -798,7 +798,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
                 println("bad sib_base_role")
                 return 1
         if h_dsz == 1:
-            dv := hit_raw_str(text, "disp_size")
+            dv : ., mut = hit_raw_str(text, "disp_size")
             if str_len(dv) >= 2 && load8(dv, 0) == 34 && load8(dv, str_len(dv) - 1) == 34:
                 dv = str_sub(dv, 1, str_len(dv) - 2)
             dv_ok : int, mut = 0
@@ -1087,7 +1087,7 @@ fn hit_parse_event_chunk(chunk: string) -> int:
     store_str_ptr(g_hit_names, name_ni * 8, name)
     // Append the event record. Projection range fields are filled after parsing.
     hit_grow_events(g_hit_event_count + 1)
-    slot := g_hit_event_count
+    slot : ., mut = g_hit_event_count
     g_hit_event_count = slot + 1
     hit_zero_bytes(g_hit_events, slot * HIT_EVENT_REC, HIT_EVENT_REC)
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_ID, id)

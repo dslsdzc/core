@@ -80,7 +80,7 @@ fn concat(a: string, b: string) -> string, pub:
     bb := b
     lena := str_len(aa)
     lenb := str_len(bb)
-    res := alloc(lena + lenb + 1)
+    res : ., mut = alloc(lena + lenb + 1)
     i : ., mut = 0
     loop:
         if i >= lena:
@@ -180,8 +180,8 @@ fn format(fmt_str: string, a0: string) -> string, pub:
     a0l := str_len(a0)
     // Fast path: no interpolation needed
     out_buf := alloc(fl + a0l + 16)
-    ri := 0  // write position
-    fi := 0  // read position
+    ri : ., mut = 0  // write position
+    fi : ., mut = 0  // read position
     loop:
         if fi >= fl:
             break
@@ -215,7 +215,7 @@ fn format_int(fmt_str: string, val: int) -> string, pub:
 // mantissa, normalize, then split the integer part and long-divide the fraction.
 
 fn fpow2i(k: int) -> int:
-    v : int = 1
+    v : int, mut = 1
     i : ., mut = 0
     loop:
         if i >= k:
@@ -226,8 +226,8 @@ fn fpow2i(k: int) -> int:
 
 fn float_str_bits(bits: int) -> string, pub:
     // Sign bit.
-    neg : int = 0
-    u : int = bits
+    neg : int, mut = 0
+    u : int, mut = bits
     if u < 0:
         neg = 1
         // Avoid writing INT64_MIN: the lexer cannot represent its positive
@@ -248,16 +248,16 @@ fn float_str_bits(bits: int) -> string, pub:
             return "inf"
         return "nan"
     // Normalize: m = 1.mant for a normal value or 0.mant for a subnormal, with e = exp - 1023.
-    m : int = mant
-    e : int = exp - 1023
+    m : int, mut = mant
+    e : int, mut = exp - 1023
     if exp != 0:
         m = mant + 4503599627370496
     else:
         e = e + 1
     // value = m * 2^(e-52), where m is scaled by 2^52.
-    ip : int = 0
-    den : int = 1   // fractional denominator; the fraction is r/den
-    r : int = 0
+    ip : int, mut = 0
+    den : int, mut = 1   // fractional denominator; the fraction is r/den
+    r : int, mut = 0
     if e >= 52:
         if e - 52 <= 10:
             ip = m * fpow2i(e - 52)
@@ -281,7 +281,7 @@ fn float_str_bits(bits: int) -> string, pub:
         if di >= 7:
             break
         r2 = r2 * 10
-        dg2 := r2 / den
+        dg2 : ., mut = r2 / den
         if dg2 > 9:
             dg2 = 9
         r2 = r2 - dg2 * den
@@ -306,7 +306,7 @@ fn float_str_bits(bits: int) -> string, pub:
                 ip = ip + 1
         di = di + 1
     // Remove trailing zeros.
-    fl := str_len(frac_str)
+    fl : ., mut = str_len(frac_str)
     loop:
         if fl <= 0:
             break

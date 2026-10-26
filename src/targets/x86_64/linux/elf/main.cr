@@ -138,7 +138,7 @@ fn corearch_main() -> int:
 
     emit_so := cli_has("shared")
     link_val := cli_get("link")
-    out_path := cli_get("output")
+    out_path : ., mut = cli_get("output")
 
     // Pure-static output does not link rt.s, so emit the current-g bridge stubs
     // directly. Keep this in sync with the concat entry so self-hosted backend
@@ -195,7 +195,7 @@ fn corearch_main() -> int:
                 ctx_add_so("~/.core/lib/core_rt.so")
         else:
             split_links(link_val)
-        sz := elf_gen(g_elf_buf)
+        sz : ., mut = elf_gen(g_elf_buf)
         cs : ., mut = sz - 176
         if cs <= 0:
             println("error: empty code")

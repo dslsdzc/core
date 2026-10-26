@@ -22,7 +22,7 @@ fn _skip_whitespace(content: string, pos: int) -> int:
     loop:
         if p >= slen:
             break
-        ch := get_char(content, p)
+        ch : ., mut = get_char(content, p)
         if ch != " " && ch != "\t":
             break
         p = p + 1
@@ -78,7 +78,7 @@ fn toml_get_str(content: string, key: string) -> string, pub:
             sub := str_sub(content, spos, klen)
             if str_eq(sub, key) != 0:
                 // Skip key and look for =
-                eq_pos := spos + klen
+                eq_pos : ., mut = spos + klen
                 // Skip whitespace before =
                 eq_pos = _skip_whitespace(content, eq_pos)
                 if get_char(content, eq_pos) == "=":
@@ -260,7 +260,7 @@ fn toml_get_int_list(content: string, key: string, out: string, max_items: int) 
     return -1
 
 // Memory layout configuration
-pub struct MemLayout:
+struct MemLayout, pub:
     stack_size: int,
     heap_size: int,
     text_base: int,

@@ -119,7 +119,7 @@ extern fn dex_agg_arg_check(d: dex) -> int
 fn main() -> int:
     d : dex, apx = 7.0
     s : ., mut = S { f = d }
-    r := dex_agg_arg_check(s.f)
+    r : ., mut = dex_agg_arg_check(s.f)
     return r
 """
 

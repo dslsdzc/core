@@ -63,7 +63,7 @@ fn hashHex(bytes: string) -> string:
 // ── CRC-32 ──────────────────────────────────────────────────────────────────
 
 fn crc32Byte(state: int, b: int, poly: int) -> int:
-    c := wordXor(state, b, 32)
+    c : ., mut = wordXor(state, b, 32)
     i : ., mut = 0
     loop:
         if i >= 8:
@@ -79,7 +79,7 @@ fn crc32Init(seed: int) -> int, pub:
     return seed
 
 fn crc32Update(state: int, data: string, poly: int) -> int, pub:
-    c := state
+    c : ., mut = state
     i : ., mut = 0
     loop:
         if i >= str_len(data):
@@ -106,7 +106,7 @@ fn sha256Compress(state: [int; 8], block: string, off: int):
     // Local, not a global constant: dynamic subscript on a global array
     // currently reads 0 in the backend (separate defect). Keep K here until
     // that path is fixed and pinned by a test.
-    k : [int; 64] = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
+    k : [int; 64], mut = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
     w : [int; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     i : ., mut = 0
     loop:
@@ -121,14 +121,14 @@ fn sha256Compress(state: [int; 8], block: string, off: int):
         s1 := wordXor(wordXor(wordRotr(w[i - 2], 17, 32), wordRotr(w[i - 2], 19, 32), 32), wordShr(w[i - 2], 10, 32), 32)
         w[i] = wordAdd(wordAdd(w[i - 16], s0, 32), wordAdd(w[i - 7], s1, 32), 32)
         i = i + 1
-    a := state[0]
-    b := state[1]
-    c := state[2]
-    d := state[3]
-    e := state[4]
-    f := state[5]
-    g := state[6]
-    h := state[7]
+    a : ., mut = state[0]
+    b : ., mut = state[1]
+    c : ., mut = state[2]
+    d : ., mut = state[3]
+    e : ., mut = state[4]
+    f : ., mut = state[5]
+    g : ., mut = state[6]
+    h : ., mut = state[7]
     i = 0
     loop:
         if i >= 64:
@@ -201,7 +201,7 @@ fn sha256Hex(data: string) -> string, pub:
 
 fn hmacSha256(key: string, msg: string) -> string, pub:
     block : ., mut = 64
-    k := alloc(block + 1)
+    k : ., mut = alloc(block + 1)
     i : ., mut = 0
     loop:
         if i >= block:
@@ -244,7 +244,7 @@ fn hkdfSha256Expand(prk: string, info: string, length: int) -> string, pub:
         if pos >= length:
             break
         t = hmacSha256(prk, hashConcat3(t, info, hashU8(counter)))
-        n := str_len(t)
+        n : ., mut = str_len(t)
         if n > length - pos:
             n = length - pos
         byteCopy(t, 0, out, pos, n)
@@ -269,7 +269,7 @@ fn pbkdf2Sha256(password: string, salt: string, iterations: int, length: int) ->
     loop:
         if bi > blocks:
             break
-        u := hmacSha256(password, hashConcat2(salt, hashU32BE(bi)))
+        u : ., mut = hmacSha256(password, hashConcat2(salt, hashU32BE(bi)))
         t := alloc(33)
         byteCopy(u, 0, t, 0, 32)
         byteStore(t, 32, 0)

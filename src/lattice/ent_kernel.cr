@@ -41,7 +41,7 @@
 fn grow_live_ranges(needed: int):
     if needed < g_live_range_cap:
         return
-    nc := g_live_range_cap * 2
+    nc : ., mut = g_live_range_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:

@@ -113,7 +113,7 @@ fn read_source_or_project(src_path: string) -> int:
 
 fn read_static_runtime_source() -> string:
     rel := target_static_runtime_source()
-    source := read_file(rel)
+    source : ., mut = read_file(rel)
     if str_len(source) > 0:
         return source
 
@@ -129,7 +129,7 @@ fn run_frontend(source_name: string) -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
     g_source_name = source_name
     sm_reset()
-    attributed_name := source_name
+    attributed_name : ., mut = source_name
     if g_source_combined != 0:
         attributed_name = "<combined>"
     source_file := sm_add_file(attributed_name, g_source)
@@ -646,7 +646,7 @@ fn corec_main() -> int:
         // Register allocation checks and entry dumps live in corearch now.
         // corearch computes and checks them after loading the .ccr.
         dot := df_graph_to_dot()
-        out := cli_get("output")
+        out : ., mut = cli_get("output")
         if str_len(out) == 0:
             out = default_out_path(src_path, ".cir")
         written := write_file(out, dot)
@@ -699,7 +699,7 @@ fn corec_main() -> int:
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr"):
-        out := cli_get("output")
+        out : ., mut = cli_get("output")
         if str_len(out) == 0:
             out = default_out_path(src_path, ".ccr")
         // Hidden mutation hook: shift func0's var declaration block left by 1.

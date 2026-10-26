@@ -40,7 +40,7 @@
 fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
     ir_cnt : ., mut = 0
     fr_cnt : ., mut = 0
-    ai := 0
+    ai : ., mut = 0
     loop:
         if ai >= ac:
             break
@@ -54,7 +54,7 @@ fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
                 fr_cnt = fr_cnt + 1
         else:
             if ir_cnt < 6:
-                r := -1
+                r : ., mut = -1
                 if ir_cnt == 0:
                     r = 7
                 if ir_cnt == 1:
@@ -198,8 +198,8 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
 // e2_store_ret (int in rax, dex in xmm0). Returns the new cp.
 fn cs_call_direct(buf: string, pos: int, cp: int, s3: int, d: int) -> int:
     fn2 := istr_get(s3)
-    to := -1
-    tf := 0
+    to : ., mut = -1
+    tf : ., mut = 0
     loop:
         if tf >= g_x86_func_off_count:
             break

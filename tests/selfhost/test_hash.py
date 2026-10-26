@@ -45,7 +45,7 @@ fn main() -> int:
     println(crc32Hex("123456789"))
     println_i(crc32With("123456789", 0, 3988292384))
     println_i(crc32With("123456789", 4294967295, 2197175160))
-    s := crc32Init(4294967295)
+    s : ., mut = crc32Init(4294967295)
     s = crc32Update(s, "1234", 3988292384)
     s = crc32Update(s, "56789", 3988292384)
     println_i(crc32Final(s))

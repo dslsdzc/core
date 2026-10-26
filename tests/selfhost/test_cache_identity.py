@@ -68,7 +68,7 @@ fn alpha(a: int, b: int) -> int:
 
 fn beta(p: int) -> int:
     m := p + 1
-    n := m * m
+    n : ., mut = m * m
     return n
 
 fn main() -> int:

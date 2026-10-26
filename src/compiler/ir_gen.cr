@@ -22,7 +22,7 @@ g_ir_slice_len_cap : int, mut
 fn grow_ir_slice_lens(needed: int):
     if needed < g_ir_slice_len_cap:
         return
-    nc := g_ir_slice_len_cap * 2
+    nc : ., mut = g_ir_slice_len_cap * 2
     if nc < 8:
         nc = 8
     if nc < needed:
@@ -141,7 +141,7 @@ fn slice_hdr_len(v: int) -> int:
 // Convert an array/side-table slice argument into a header slice when the
 // callee declares a slice parameter. A header slice passes through unchanged.
 fn make_slice_header(data_var: int, len_code: int, len_var: int) -> int:
-    elem := elem_ti_of(data_var)
+    elem : ., mut = elem_ti_of(data_var)
     if elem < 0:
         elem = TI_INT
     hdr := new_ir_var("slice_arg", alloc_type(TYP_SLICE, elem, 0))
@@ -178,7 +178,7 @@ fn coerce_slice_args(fi: int, ac: int, arg_vars: string):
     if fn_node < 0:
         return
     pc := ast_c(fn_node)
-    pn := ast_b(fn_node)
+    pn : ., mut = ast_b(fn_node)
     ai : ., mut = 0
     loop:
         if ai >= pc || ai >= ac:
@@ -266,7 +266,7 @@ fn emit_string_lit_bounds(arr_var: int, idx_lit: int):
 fn grow_sg_alloc(needed: int):
     if needed < g_sg_alloc_cap:
         return
-    nc := g_sg_alloc_cap * 2
+    nc : ., mut = g_sg_alloc_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -279,7 +279,7 @@ fn grow_sg_alloc(needed: int):
 fn grow_sg_arena_var(needed: int):
     if needed < g_sg_arena_var_cap:
         return
-    nc := g_sg_arena_var_cap * 2
+    nc : ., mut = g_sg_arena_var_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -336,7 +336,7 @@ fn new_ir_var(name: string, type_idx: int) -> int:
 fn grow_ir_var_rep(needed: int):
     if needed < g_ir_var_rep_cap:
         return
-    nc := g_ir_var_rep_cap * 2
+    nc : ., mut = g_ir_var_rep_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -468,7 +468,7 @@ fn callee_ret_dex_opt_decl(func_ni: int) -> int:
 fn grow_ir_var_decl(needed: int):
     if needed < g_ir_var_decl_cap:
         return
-    nc := g_ir_var_decl_cap * 2
+    nc : ., mut = g_ir_var_decl_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -680,7 +680,7 @@ fn agg_payload_decl_ti(pat_node: int, pos: int) -> int:
     si := find_gsym(name_ni)
     if si < 0:
         return -1
-    ei := find_enum_row_of(sym_type(si))
+    ei : ., mut = find_enum_row_of(sym_type(si))
     if ei < 0:
         return -1
     vi : ., mut = 0
@@ -708,7 +708,7 @@ fn elem_node_optional(node: int) -> int:
         return 0
     if k == EXPR_CALL:
         ni := ast_a(node)
-        fi2 := find_func(ni)
+        fi2 : ., mut = find_func(ni)
         if fi2 >= 0:
             return callee_ret_optional(ni)
         return 0
@@ -804,7 +804,7 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
         stmt_start := ast_a(node)
         stmt_count := ast_b(node)
         if stmt_count > 0:
-            last := cell_load(g_block_stmts, (stmt_start + stmt_count - 1) * 8)
+            last : ., mut = cell_load(g_block_stmts, (stmt_start + stmt_count - 1) * 8)
             return rep_enc_of_expr(last, val_var)
         return oe_boxed()
     if k == EXPR_ENUM_CONSTRUCTOR:
@@ -1006,7 +1006,7 @@ fn lat_case_set_target(idx: int, label: int):
 // if the false target is next, it emits test/jne to true and falls through to
 // false. Either way there is no explicit unconditional jump.
 fn emit_cond_match(cond_var: int, false_lbl: int, true_lbl: int):
-    case_base := g_lat_case_count
+    case_base : ., mut = g_lat_case_count
     lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)
     lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, true_lbl, 0)
     emit(IR_MATCH, -1, cond_var, case_base, 2, 0)
@@ -1200,7 +1200,7 @@ fn gen_enum_pattern_test(pat: int, val: int, fall: int, val_ti: int) -> int:
     vni := get_variant_name_idx(ast_a(pat))
     if vni < 0:
         return -1
-    vi := sh_enum_variant_index(ea, vni)
+    vi : ., mut = sh_enum_variant_index(ea, vni)
     if vi < 0:
         return -1
     tag := new_ir_var("tag", TI_INT)
@@ -1257,7 +1257,7 @@ fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
             k := ast_kind(sub)
             if k != EXPR_IDENT && k != EXPR_WILDCARD:
                 fd := ast_data(w)
-                ft := struct_row_field_ti(si, jdi)
+                ft : ., mut = struct_row_field_ti(si, jdi)
                 if fd > 0:
                     ft = fd - 1
                 if ft < 0 || ti_has_generic_param(ft) != 0:
@@ -1287,7 +1287,7 @@ fn gen_nested_tuple_test(pat: int, val: int, fall: int) -> int:
             return -1
         k := ast_kind(sub)
         if k != EXPR_IDENT && k != EXPR_WILDCARD:
-            ft := fd - 1
+            ft : ., mut = fd - 1
             if ti_has_generic_param(ft) != 0:
                 return -1
             fv := new_ir_var("fld", TI_INT)
@@ -1371,7 +1371,7 @@ fn gen_structpat_binds(pat: int, match_val: int):
                 if k == EXPR_IDENT && str_eq(istr_get(ast_int_val(sub)), "_") != 0:
                     is_wild = 1
                 if is_wild == 0:
-                    jdi := struct_field_index_by_name(si, ast_b(w))
+                    jdi : ., mut = struct_field_index_by_name(si, ast_b(w))
                     if jdi >= 0:
                         fd := ast_data(w)
                         ft : ., mut = struct_row_field_ti(si, jdi)
@@ -1522,7 +1522,7 @@ fn is_byte_buf_var(var_idx: int) -> int:
     if prod_op2 == IR_ALLOC:
         return 1
     if prod_op2 == IR_CALL:
-        func_ni := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+        func_ni : ., mut = cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
         if runtime_frontend_builtin_is_alloc(func_ni) != 0:
             return 1
     return 0
@@ -1547,7 +1547,7 @@ fn ir_call_return_type(func_ni: int) -> int:
         if cell_load(g_rt_builtin_names, bi * 8) == func_ni:
             return cell_load(g_rt_builtin_ret_types, bi * 8)
         bi = bi + 1
-    fi := find_func(func_ni)
+    fi : ., mut = find_func(func_ni)
     if fi >= 0:
         rt := fi_return_type(fi)
         if rt == TY_INT:
@@ -1707,7 +1707,7 @@ fn ti_from_type_expr(node: int) -> int:
         if str_eq(name, "unit") != 0:
             return TI_UNIT
         // Named types (structs, enums): look up in symbol table
-        si := find_gsym(ni)
+        si : ., mut = find_gsym(ni)
         if si >= 0 && sym_kind(si) == SYM_TYPE:
             return sym_type(si)
     // Complex type expressions: delegate to checker's resolver
@@ -1859,7 +1859,7 @@ fn dex_bits_to_scaled(var: int) -> int:
     emit(IR_BINARY, rn, m, half, OP_SUB, TI_DEX)  // m < 0：−0.5
     emit(IR_STORE, -1, mrg, rn, 0, 0)
     emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
-    r := new_ir_var("_dxsc", TI_DEX_S)
+    r : ., mut = new_ir_var("_dxsc", TI_DEX_S)
     emit(IR_F2I, r, mrg, 0, 0, TI_DEX)
     return r
 
@@ -1902,7 +1902,7 @@ fn dex_scale_int(var: int) -> int:
 //   TI_DEX_S 槽（精确变量）← bits 值：bits -> scaled（apx 结果按定点 6 位舍入入精确世界）
 fn dex_store_adjust(target: int, val: int, val_node: int) -> int:
     tt := irv_type(target)
-    vt := irv_type(val)
+    vt : ., mut = irv_type(val)
     if tt == TI_DEX && vt == TI_DEX_S:
         return dex_scaled_to_bits(val, val_node)
     if tt == TI_DEX_S && vt == TI_DEX:
@@ -1989,7 +1989,7 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
         // 泛型声明的 `T?`（inner = 泛型参数）判据为假 -> 调用点在重定向后
         // 用实例参数列表（inner = 具体 dex）再跑一遍本环。
         if ast_type_val(cpn) == TI_DEX || (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0):
-            av := cell_load(arg_vars, cpi * 8)
+            av : ., mut = cell_load(arg_vars, cpi * 8)
             if av >= 0:
                 if cfn_ext != 0:
                     // extern：scaled -> bits（字面量直接重发射位模式常量）
@@ -2037,7 +2037,7 @@ fn dex_decl_form_of_expr(node: int) -> int:
             return 1
         return 0
     if k == EXPR_INDEX:
-        an := ast_a(node)
+        an : ., mut = ast_a(node)
         if an < 0 || ast_kind(an) != EXPR_IDENT:
             return 0
         ni := ast_int_val(an)
@@ -2192,7 +2192,7 @@ fn dt_subpat_ti(p: int, i: int, ti: int) -> int:
         si := find_struct_by_name(ast_a(p))
         if si < 0:
             return -1
-        c := ast_c(p)
+        c : ., mut = ast_c(p)
         w0 := ast_b(p)
         j : ., mut = 0
         loop:
@@ -2210,7 +2210,7 @@ fn dt_subpat_ti(p: int, i: int, ti: int) -> int:
     if k == 3:
         if ti < 0 || get_type_kind(ti) != TYP_TUPLE:
             return -1
-        ac := get_type_data(ti)
+        ac : ., mut = get_type_data(ti)
         if i >= ac:
             return -1
         return cell_load(g_gen_apply_data, (get_type_extra(ti) + i) * 8)
@@ -2219,7 +2219,7 @@ fn dt_subpat_ti(p: int, i: int, ti: int) -> int:
 fn dt_pat_supported(p: int, ti: int) -> int:
     if p < 0 || dt_pat_wild(p) != 0:
         return 1
-    k := dt_ctor_kind(p)
+    k : ., mut = dt_ctor_kind(p)
     if k == 0:
         return 0
     arity := dt_ctor_arity(p, ti)
@@ -2337,12 +2337,12 @@ fn dt_specialize(rows: string, pats: string, cols: string, tis: string,
         if i >= arity:
             break
         fv := new_ir_var("dt_fld", TI_INT)
-        ft := -1
+        ft : ., mut = -1
         if ctor_pat >= 0:
             ft = dt_subpat_ti(ctor_pat, i, val_ti)
         if ft >= 0:
             irv_set_type(fv, structpat_field_load_ti_from(ft))
-        offset := i
+        offset : ., mut = i
         if ck == 1:
             offset = i + 1
         emit(IR_LOAD_FIELD, fv, val, 0, offset, 0)
@@ -2376,7 +2376,7 @@ fn dt_specialize(rows: string, pats: string, cols: string, tis: string,
             loop:
                 if i >= arity:
                     break
-                sub := -1
+                sub : ., mut = -1
                 if dt_pat_wild(p) == 0:
                     sub = dt_subpat(p, i)
                 cell_store(out_pats, (n * new_cols + col_count - 1 + i) * 8, sub)
@@ -2400,7 +2400,7 @@ fn dt_move_col(rows: string, pats: string, cols: string, tis: string,
         loop:
             if c >= col_count:
                 break
-            src := c
+            src : ., mut = c
             if c == 0:
                 src = best
             else if c == best:
@@ -2413,7 +2413,7 @@ fn dt_move_col(rows: string, pats: string, cols: string, tis: string,
     loop:
         if c >= col_count:
             break
-        src := c
+        src : ., mut = c
         if c == 0:
             src = best
         else if c == best:
@@ -2481,7 +2481,7 @@ fn dt_emit_string_switch(val: int, cids: string, cn: int,
         emit(IR_CONST, pv, L, 0, 0, TI_INT)
         cmp := new_ir_var("dt_lc", TI_INT)
         emit(IR_BINARY, cmp, len_var, pv, OP_EQ, 0)
-        miss := default_lbl
+        miss : ., mut = default_lbl
         if i + 1 < ln:
             miss = new_label()
         emit_cond_match(cmp, miss, lbl)
@@ -2565,7 +2565,7 @@ fn dt_emit_string_switch(val: int, cids: string, cn: int,
                     emit(IR_BINARY, cmp, first_var, pv, OP_EQ, 0)
                 else:
                     emit(IR_CONST, cmp, 1, 0, 0, TI_INT)
-                miss := default_lbl
+                miss : ., mut = default_lbl
                 if k + 1 < fbcount:
                     miss = new_label()
                 emit_cond_match(cmp, miss, lbl)
@@ -2598,8 +2598,8 @@ fn dt_emit_string_switch(val: int, cids: string, cn: int,
                 loop:
                     if g >= gn:
                         break
-                    idx := cell_load(gidx, g * 8)
-                    miss := default_lbl
+                    idx : ., mut = cell_load(gidx, g * 8)
+                    miss : ., mut = default_lbl
                     if g + 1 < gn:
                         miss = new_label()
                     dt_emit_str_eq(val, cell_load(cids, idx * 8),
@@ -2629,7 +2629,7 @@ fn dt_compile(rows: string, pats: string, cols: string, tis: string,
             break
         i = i + 1
     if allw != 0:
-        ai := cell_load(rows, 0)
+        ai : ., mut = cell_load(rows, 0)
         emit(IR_JUMP, -1, cell_load(arm_lbls, ai * 8), 0, 0, 0)
         return 0
     // FCR column selection.
@@ -2737,7 +2737,7 @@ fn dt_compile(rows: string, pats: string, cols: string, tis: string,
     // Emit tests. For enums read the tag once; scalar/string columns compare
     // the value directly. Every miss goes to the default edge, which either
     // continues the wildcard matrix or falls through to the merge label.
-    tag := -1
+    tag : ., mut = -1
     if ck == 1:
         tag = new_ir_var("dt_tag", TI_INT)
         emit(IR_LOAD_ENUM_TAG, tag, cell_load(mcols, 0), 0, 0, 0)
@@ -2751,7 +2751,7 @@ fn dt_compile(rows: string, pats: string, cols: string, tis: string,
             cl := cell_load(case_lbls, j * 8)
             k2 := cell_load(ckinds, j * 8)
             id2 := cell_load(cids, j * 8)
-            miss_lbl := default_lbl
+            miss_lbl : ., mut = default_lbl
             if j + 1 < cn:
                 miss_lbl = new_label()
             cmp := new_ir_var("dt_cmp", TI_INT)
@@ -2887,7 +2887,7 @@ fn gen_expr(node: int) -> int:
         lv := find_local(name_idx)
         if lv >= 0:
             return lv
-        const_node := find_global_const_node(name_idx)
+        const_node : ., mut = find_global_const_node(name_idx)
         // 容量批 T2：可选全局槽不得常量折叠，字面量初值（`g : int? = 5`）的读点若被
         // 折成裸常量 5，则 match 的 tag 读会解引用该裸值(both paths fail at run time)。
         // 折叠只对非可选全局生效（零足迹）；可选全局由运行期初始化写入装箱对象。
@@ -2922,7 +2922,7 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_BINARY:
         left := ast_a(node)
         right := ast_b(node)
-        op := ast_c(node)
+        op : ., mut = ast_c(node)
 
         // `EXPR_BINARY + OP_ASSIGN` 赋值分支已删，不可达
         // （parser 不产该组合：`tok2op` 零 OP_ASSIGN；`T_EQ` -> EXPR_ASSIGN；`+=` 族构造
@@ -2930,7 +2930,7 @@ fn gen_expr(node: int) -> int:
         // 赋值发射路径在下方 `EXPR_ASSIGN` 分支（gen_expr 的另一 arm），逐字未动。
 
         // Regular binary
-        left_var := gen_expr(left)
+        left_var : ., mut = gen_expr(left)
         left_var = force_if_thunk(left_var)
         // Logical operators must short-circuit.  Eagerly generating the
         // right side breaks guard expressions such as
@@ -2955,17 +2955,17 @@ fn gen_expr(node: int) -> int:
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
 
             emit(IR_LABEL, -1, right_lbl, 0, 0, 0)
-            right_value := gen_expr(right)
+            right_value : ., mut = gen_expr(right)
             right_value = force_if_thunk(right_value)
             emit(IR_STORE, -1, logic_result, right_value, 0, 0)
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
 
             emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
             return logic_result
-        right_var := gen_expr(right)
+        right_var : ., mut = gen_expr(right)
         right_var = force_if_thunk(right_var)
-        lt := irv_type(left_var)
-        rt := irv_type(right_var)
+        lt : ., mut = irv_type(left_var)
+        rt : ., mut = irv_type(right_var)
 
         // Unwrap dyn operands: extract the underlying value for binary ops
         if lt == TI_DYN:
@@ -3068,7 +3068,7 @@ fn gen_expr(node: int) -> int:
             lt = TI_DEX_S
         if rt == TI_INT && dex_decl_form_of_expr(right) != 0:
             rt = TI_DEX_S
-        fti : int = TI_INT
+        fti : int, mut = TI_INT
         // Pointer arithmetic: use PTR_ADD/PTR_SUB/PTR_DIFF instead of standard opcodes.
         // Raw byte buffers from alloc() are byte-addressed — separate byte ops
         // keep the raw pointer and untag the integer offset without the ×8 scale.
@@ -3186,14 +3186,14 @@ fn gen_expr(node: int) -> int:
 
     // Assignment
     if ast_kind(node) == EXPR_ASSIGN:
-        target := ast_a(node)
+        target : ., mut = ast_a(node)
         // Unwrap EXPR_NONE wrapper (added by checker/optimizer to
         // mark rewritten nodes). Without unwrapping, the target
         // checks below would miss wrapped UOP_DEREF or INDEX nodes.
         if ast_kind(target) == EXPR_NONE && ast_a(target) >= 0:
             target = ast_a(target)
         val_node := ast_b(node)
-        val_var := gen_expr(val_node)
+        val_var : ., mut = gen_expr(val_node)
         val_var = force_if_thunk(val_var)
         if ast_kind(target) == EXPR_IDENT:
             name_idx := ast_int_val(target)
@@ -3201,7 +3201,7 @@ fn gen_expr(node: int) -> int:
             if lv >= 0:
                 if irv_type(lv) == TI_DYN:
                     // Dyn variable assignment: pack value with type tag
-                    tag := irv_type(val_var)
+                    tag : ., mut = irv_type(val_var)
                     if tag < 0:
                         tag = TI_INT
                     emit(IR_DYN_PACK, lv, val_var, tag, 0, 0)
@@ -3231,9 +3231,9 @@ fn gen_expr(node: int) -> int:
                     emit(IR_STORE, -1, gv, val_var, 0, 0)
             return val_var
         if ast_kind(target) == EXPR_FIELD:
-            obj_var := gen_expr(ast_a(target))
+            obj_var : ., mut = gen_expr(ast_a(target))
             obj_var = force_if_thunk(obj_var)
-            fi := ast_data(target)
+            fi : ., mut = ast_data(target)
             // 容量批 T2：可选字段写点规范化（字段声明类型取自 checker 记的 ast_c 结构体名）
             val_var = dex_slot_norm(val_var)   // apx 批 T3：聚合类型恒精确（0 推论）；先归形式后装箱
             if g_optrep_on != 0:
@@ -3241,15 +3241,15 @@ fn gen_expr(node: int) -> int:
             emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0)
             return val_var
         if ast_kind(target) == EXPR_INDEX:
-            arr_var := gen_expr(ast_a(target))
+            arr_var : ., mut = gen_expr(ast_a(target))
             arr_var = force_if_thunk(arr_var)
-            arr_data_store := arr_var
+            arr_data_store : ., mut = arr_var
             if is_slice_hdr(arr_var) != 0:
                 arr_data_store = slice_hdr_data(arr_var)
             idx_node := ast_b(target)
             // 容量批 T2：可选元素写点规范化（元素类型 = 数组/切片声明类型的内层；
             // 全局数组的声明信息在 g_global_lets -> ident 形目标回退查全局声明）
-            et := elem_ti_of(arr_var)
+            et : ., mut = elem_ti_of(arr_var)
             if et < 0:
                 anode := ast_a(target)
                 if anode >= 0 && ast_kind(anode) == EXPR_IDENT:
@@ -3265,14 +3265,14 @@ fn gen_expr(node: int) -> int:
                 if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
                     emit(IR_STORE_INDEX, -1, arr_data_store, val_var, ast_int_val(idx_node), 0)
             else:
-                idx_var := gen_expr(idx_node)
+                idx_var : ., mut = gen_expr(idx_node)
                 idx_var = force_if_thunk(idx_var)
                 emit_slice_bounds(arr_var, idx_var)
                 if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
                     emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, 0, 0)
             return val_var
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
-            ptr_var := gen_expr(ast_a(target))
+            ptr_var : ., mut = gen_expr(ast_a(target))
             ptr_var = force_if_thunk(ptr_var)
             // (A) 批（INV-2）：指针写且 pointee 可选 -> 装箱，一致性由 INV-1（取址槽恒装箱）
             // 与 E-2（聚合恒装箱）保证；越界 = REP-2（指针算术）/ extern（登记）
@@ -3292,9 +3292,9 @@ fn gen_expr(node: int) -> int:
             inner := ast_a(node)
             // &arr[i]: compute address directly, don't load then take addr
             if ast_kind(inner) == EXPR_INDEX:
-                arr_var := gen_expr(ast_a(inner))
+                arr_var : ., mut = gen_expr(ast_a(inner))
                 arr_var = force_if_thunk(arr_var)
-                idx_var := gen_expr(ast_b(inner))
+                idx_var : ., mut = gen_expr(ast_b(inner))
                 idx_var = force_if_thunk(idx_var)
                 elem_ti : ., mut = TI_INT
                 // (A) 批：元素类型声明优先（T2 的 elem_ti_of：decl 表优先，退回运行期类型）
@@ -3312,13 +3312,13 @@ fn gen_expr(node: int) -> int:
                 // checker 侧已被 S1 覆盖（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
                 // `return alloc_type(TYP_REF, inner, is_mut)`）-> 本处是 ir_gen 侧唯一剩下的点。
                 // `extra` 同 `&x`：取 `is_mut`（`&mut arr[i]` 与 `&arr[i]` 须同 `&x`/`&mut x` 一样可分）。
-                arr_data_addr := arr_var
+                arr_data_addr : ., mut = arr_var
                 if is_slice_hdr(arr_var) != 0:
                     arr_data_addr = slice_hdr_data(arr_var)
                 v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)))
                 emit(IR_ADDR_INDEX, v, arr_data_addr, idx_var, 3, 0)
                 return v
-            op_var := gen_expr(ast_a(node))
+            op_var : ., mut = gen_expr(ast_a(node))
             op_var = force_if_thunk(op_var)
             // (A) 批：pointee 类型声明优先（字面量推出的 IR 类型对可选槽退化为对象占位），
             // 且取址槽（INV-1 恒装箱）-> pointee 记为 TYP_OPTIONAL（装载侧 W5 据此装箱；
@@ -3327,7 +3327,7 @@ fn gen_expr(node: int) -> int:
             ni_src : ., mut = -1
             if ast_kind(ast_a(node)) == EXPR_IDENT:
                 ni_src = ast_int_val(ast_a(node))
-            pti := slot_decl_ti(op_var)
+            pti : ., mut = slot_decl_ti(op_var)
             if pti < 0:
                 pti = irv_type(op_var)
             if ni_src >= 0:
@@ -3343,7 +3343,7 @@ fn gen_expr(node: int) -> int:
                 // 且声明非可选 -> 两种形态都不触发（零足迹）。
                 if irv_rep(op_var) >= 0 || ti_is_optional(pti) != 0:
                     if ti_is_optional(pti) == 0:
-                        inner3 := pti
+                        inner3 : ., mut = pti
                         if inner3 < 0:
                             inner3 = TI_INT
                         pti = alloc_type(TYP_OPTIONAL, inner3, 0)
@@ -3356,12 +3356,12 @@ fn gen_expr(node: int) -> int:
             emit(IR_REF, v, op_var, ast_int_val(node), 0, 0)
             return v
         if op == UOP_DEREF:
-            inner_var := gen_expr(ast_a(node))
+            inner_var : ., mut = gen_expr(ast_a(node))
             inner_var = force_if_thunk(inner_var)
             dv := new_ir_var("deref", ptr_pointee_type(inner_var))
             emit(IR_DEREF, dv, inner_var, -1, 0, 0)
             return dv
-        op_var := gen_expr(ast_a(node))
+        op_var : ., mut = gen_expr(ast_a(node))
         op_var = force_if_thunk(op_var)
         vt : ., mut = TI_INT
         if op == UOP_NOT:
@@ -3575,7 +3575,7 @@ fn gen_expr(node: int) -> int:
             // 结果必须复制为 TI_INT 定型变量，直接返回内层变量会携带其 dex 类型
             // （TI_DEX_S），后续 int 运算被误分派到 dex 精确路径。
             if str_eq(name, "raw_int") != 0:
-                inner_var := gen_expr(ast_a(first_arg))
+                inner_var : ., mut = gen_expr(ast_a(first_arg))
                 inner_var = force_if_thunk(inner_var)
                 if irv_type(inner_var) == TI_DEX:
                     inner_var = dex_bits_to_scaled(inner_var)
@@ -3587,7 +3587,7 @@ fn gen_expr(node: int) -> int:
             if str_eq(name, "comptime") != 0:
                 inner_expr := ast_a(first_arg)
                 // Generate IR for the inner expression
-                inner_var := gen_expr(inner_expr)
+                inner_var : ., mut = gen_expr(inner_expr)
                 inner_var = force_if_thunk(inner_var)
                 // If the inner expression is a constant, it's already folded.
                 // For runtime-dependent exprs, we'd need the interpreter.
@@ -3598,7 +3598,7 @@ fn gen_expr(node: int) -> int:
 
             // @inline(fn): emit IR_INLINE hint
             if str_eq(name, "inline") != 0:
-                fn_var := gen_expr(ast_a(first_arg))
+                fn_var : ., mut = gen_expr(ast_a(first_arg))
                 fn_var = force_if_thunk(fn_var)
                 emit(IR_INLINE, -1, fn_var, 0, 0, 0)
                 return fn_var
@@ -3651,7 +3651,7 @@ fn gen_expr(node: int) -> int:
             // SYSTEM raw pointer add: untag both int operands and return the raw
             // word. No unsafe/arena: safe to call from the scheduler hot path.
             if str_eq(name, "ptr_add") != 0:
-                a1 := gen_expr(ast_a(first_arg))
+                a1 : ., mut = gen_expr(ast_a(first_arg))
                 a1 = force_if_thunk(a1)
                 a2n := ast_b(first_arg)
                 a2v : ., mut = -1
@@ -3663,7 +3663,7 @@ fn gen_expr(node: int) -> int:
                 return rv
 
             if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0:
-                inner := gen_expr(ast_a(first_arg))
+                inner : ., mut = gen_expr(ast_a(first_arg))
                 inner = force_if_thunk(inner)
                 if str_eq(name, "ptr_of") != 0:
                     rv := new_ir_var("_ptr_of", TI_INT)
@@ -3682,7 +3682,7 @@ fn gen_expr(node: int) -> int:
             if !is_module_call:
                 // Method call: self is first arg
                 obj_node := ast_a(func_node)
-                self_var := gen_expr(obj_node)
+                self_var : ., mut = gen_expr(obj_node)
                 self_var = force_if_thunk(self_var)
                 if ac >= arg_vars_cap:
                     nc := arg_vars_cap * 2
@@ -3707,7 +3707,7 @@ fn gen_expr(node: int) -> int:
         loop:
             if an < 0:
                 break
-            arg_var := gen_expr(ast_a(an))
+            arg_var : ., mut = gen_expr(ast_a(an))
             arg_var = force_if_thunk(arg_var)
             if ac >= arg_vars_cap:
                 nc := arg_vars_cap * 2
@@ -3799,7 +3799,7 @@ fn gen_expr(node: int) -> int:
                         if ai >= ac:
                             break
                         av := cell_load(arg_vars, ai * 8)
-                        ti := TI_INT
+                        ti : ., mut = TI_INT
                         if av >= 0:
                             ti = irv_type(av)
                         if ai > 0:
@@ -3849,10 +3849,10 @@ fn gen_expr(node: int) -> int:
         // Use it directly
         call_ti := ir_call_return_type(func_ni)
         dest := new_ir_var("call", call_ti)
-        first_arg_var := -1
+        first_arg_var : ., mut = -1
         need_pack : ., mut = 0
         if ac > 0:
-            prev := cell_load(arg_vars, 0 * 8)
+            prev : ., mut = cell_load(arg_vars, 0 * 8)
             first_arg_var = prev
             ai : ., mut = 1
             loop:
@@ -3870,7 +3870,7 @@ fn gen_expr(node: int) -> int:
                 if ai >= ac:
                     break
                 av := cell_load(arg_vars, ai * 8)
-                at := TI_INT
+                at : ., mut = TI_INT
                 if av >= 0:
                     at = irv_type(av)
                 packed := new_ir_var("_arg", at)
@@ -3898,7 +3898,7 @@ fn gen_expr(node: int) -> int:
             return dest
         // Extern function call: emit IR_CALL_EXTERN for FFI dispatch
         if func_ni >= 0:
-            fi := find_func(func_ni)
+            fi : ., mut = find_func(func_ni)
             if fi >= 0:
                 fn_node := fi_ast_node(fi)
                 if fn_node >= 0 && ast_kind(fn_node) == EXPR_EXTERN:
@@ -3972,7 +3972,7 @@ fn gen_expr(node: int) -> int:
         cond := ast_a(node)
         then_node := ast_b(node)
         else_node := ast_c(node)
-        cond_var := gen_expr(cond)
+        cond_var : ., mut = gen_expr(cond)
         cond_var = force_if_thunk(cond_var)
         then_lbl := new_label()
         else_lbl := new_label()
@@ -3987,7 +3987,7 @@ fn gen_expr(node: int) -> int:
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
-        then_val := gen_expr(then_node)
+        then_val : ., mut = gen_expr(then_node)
         then_val = force_if_thunk(then_val)
         if else_node >= 0 && then_val >= 0:
             result_var = new_ir_var("if_res", irv_type(then_val))
@@ -4002,7 +4002,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         if else_node >= 0:
             emit(IR_LABEL, -1, else_lbl, 0, 0, 0)
-            else_val := gen_expr(else_node)
+            else_val : ., mut = gen_expr(else_node)
             else_val = force_if_thunk(else_val)
             if result_var < 0 && else_val >= 0:
                 result_var = new_ir_var("if_res", irv_type(else_val))
@@ -4068,7 +4068,7 @@ fn gen_expr(node: int) -> int:
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
-        cond_var := gen_expr(cond)
+        cond_var : ., mut = gen_expr(cond)
         cond_var = force_if_thunk(cond_var)
         emit_cond_match(cond_var, exit_lbl, body_lbl)
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
@@ -4096,8 +4096,8 @@ fn gen_expr(node: int) -> int:
         var_ni := ast_a(node)
         iter := ast_b(node)
         body := ast_c(node)
-        start_var := -1
-        end_var := -1
+        start_var : ., mut = -1
+        end_var : ., mut = -1
         is_seq : ., mut = 0
         seq_elem_ti : ., mut = TI_INT
         seq_elem_tk : ., mut = 0
@@ -4108,7 +4108,7 @@ fn gen_expr(node: int) -> int:
             end_var = gen_expr(ast_b(iter))
             end_var = force_if_thunk(end_var)
         else:
-            iv := gen_expr(iter)
+            iv : ., mut = gen_expr(iter)
             iv = force_if_thunk(iv)
             iti := irv_type(iv)
             ik := get_type_kind(iti)
@@ -4179,7 +4179,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_ALLOC, ivar, 0, 0, 0, TI_INT)
         emit(IR_STORE, -1, ivar, start_var, 0, 0)
         header_lbl := new_label()
-        body_lbl := new_label()
+        body_lbl : ., mut = new_label()
         exit_lbl := new_label()
         // The SG_FOR region covers [header, exit): the back-edge jump to the
         // header is then a jump to the region enter, so the interpreter can
@@ -4241,7 +4241,7 @@ fn gen_expr(node: int) -> int:
         md := ast_data(node)
         if md > 0:
             match_ti = md - 1
-        match_val := gen_expr(match_expr)
+        match_val : ., mut = gen_expr(match_expr)
         match_val = force_if_thunk(match_val)
         // Allocate a result variable for the match expression value
         result_var := new_ir_var("match_res", TI_INT)
@@ -4261,7 +4261,7 @@ fn gen_expr(node: int) -> int:
         // int/bool literals, enum variants without sub-patterns, and one last
         // wildcard. Anything else keeps the sequential lowering unchanged.
         arm_total : ., mut = 0
-        an0 := first_arm
+        an0 : ., mut = first_arm
         loop:
             if an0 < 0:
                 break
@@ -4498,16 +4498,16 @@ fn gen_expr(node: int) -> int:
                 break
             arm_pat := ast_a(an)
             arm_body := ast_b(an)
-            pat_kind := -1
+            pat_kind : ., mut = -1
             if arm_pat >= 0:
                 pat_kind = ast_kind(arm_pat)
-            is_wildcard := 0
+            is_wildcard : ., mut = 0
             if pat_kind == EXPR_WILDCARD:
                 is_wildcard = 1
             // A binding ident is irrefutable: `x` (or `_` if the lexer ever routes
             // it here) matches every value and binds the scrutinee. `_` is a
             // wildcard; every other name is a binding arm.
-            is_ident_bind := 0
+            is_ident_bind : ., mut = 0
             ident_ni : ., mut = -1
             if pat_kind == EXPR_IDENT:
                 ident_ni = ast_int_val(arm_pat)
@@ -4533,7 +4533,7 @@ fn gen_expr(node: int) -> int:
             else:
                 body_lbl = new_label()
             fall_lbl : ., mut = merge_lbl
-            has_next := 0
+            has_next : ., mut = 0
             if ast_c(an) >= 0:
                 has_next = 1
             if is_wildcard == 1 || is_ident_bind == 1:
@@ -4646,7 +4646,7 @@ fn gen_expr(node: int) -> int:
                         can_match = 0
                         break
                     if sub >= 0:
-                        sk := ast_kind(sub)
+                        sk : ., mut = ast_kind(sub)
                         if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
                             fd := ast_data(w)
                             ft : ., mut = struct_row_field_ti(si, jdi)
@@ -4866,7 +4866,7 @@ fn gen_expr(node: int) -> int:
             if is_ident_bind == 1:
                 // Irrefutable binding arm: the name is the scrutinee itself.
                 bind_local(ident_ni, match_val)
-            body_val := gen_expr(arm_body)
+            body_val : ., mut = gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
             if body_val >= 0:
                 emit(IR_STORE, -1, result_var, body_val, 0, 0)
@@ -4946,7 +4946,7 @@ fn gen_expr(node: int) -> int:
         if is_arr == 0 && declared_ti != TI_UNIT && declared_ti != TI_DEX && dex_opt == 0:
             irv_set_type(var, declared_ti)
         if val_node >= 0:
-            val_var := gen_expr(val_node)
+            val_var : ., mut = gen_expr(val_node)
             val_var = force_if_thunk(val_var)
             // 可选表示：推断槽按初值表示补配表示位（有表示位可拷贝 / Some/None 构造 /
             // 未覆盖情形回落值，回落配位无害：默认 1 = 装箱 = 既有语义）
@@ -4970,7 +4970,7 @@ fn gen_expr(node: int) -> int:
             if is_dyn_var != 0:
                 // Dyn variable: pack value with its type tag
                 dyn_var := new_ir_var("_dyn", TI_DYN)
-                tag := irv_type(val_var)
+                tag : ., mut = irv_type(val_var)
                 if tag < 0:
                     tag = TI_INT
                 emit(IR_DYN_PACK, dyn_var, val_var, tag, 0, 0)
@@ -5027,7 +5027,7 @@ fn gen_expr(node: int) -> int:
 
     if ast_kind(node) == EXPR_AWAIT:
         val_node := ast_a(node)
-        val_var := gen_expr(val_node)
+        val_var : ., mut = gen_expr(val_node)
         val_var = force_if_thunk(val_var)
         dest := new_ir_var("await", TI_UNIT)
         emit(IR_AWAIT, dest, val_var, 0, 0, 0)
@@ -5036,7 +5036,7 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_RETURN:
         if ast_a(node) >= 0:
             val_node := ast_a(node)
-            val_var := gen_expr(val_node)
+            val_var : ., mut = gen_expr(val_node)
             val_var = force_if_thunk(val_var)
             // char/bool are raw words; an int-declared return needs the tagged
             // form at the ABI boundary (`return s[0]` used to crash at exit).
@@ -5064,7 +5064,7 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_FIELD:
         // V4 `.len` builtin (checker marks it with c = -1, data = -1).
         if ast_c(node) == -1 && ast_data(node) == -1:
-            len_obj := gen_expr(ast_a(node))
+            len_obj : ., mut = gen_expr(ast_a(node))
             len_obj = force_if_thunk(len_obj)
             oti := irv_type(len_obj)
             if oti == TI_STR:
@@ -5089,7 +5089,7 @@ fn gen_expr(node: int) -> int:
                 "cannot determine slice length for property '.len'",
                 ast_line(node), ast_col(node))
             return new_ir_var("len", TI_INT)
-        obj_var := gen_expr(ast_a(node))
+        obj_var : ., mut = gen_expr(ast_a(node))
         obj_var = force_if_thunk(obj_var)
         // Mirror the checker's automatic REF dereference. For a TYP_REF object,
         // the checker unwraps the reference before struct field lookup and accepts
@@ -5106,7 +5106,7 @@ fn gen_expr(node: int) -> int:
             dv := new_ir_var("autoderef", ptr_pointee_type(obj_var))
             emit(IR_DEREF, dv, obj_var, -1, 0, 0)
             obj_var = dv
-        v := new_ir_var("field", TI_INT)
+        v : ., mut = new_ir_var("field", TI_INT)
         fi : ., mut = ast_type_val(node)
         if fi > 0:
             fi = fi - 1  // numeric tuple index (parser stored +1)
@@ -5124,21 +5124,21 @@ fn gen_expr(node: int) -> int:
 
     // Index
     if ast_kind(node) == EXPR_INDEX:
-        arr_var := gen_expr(ast_a(node))
+        arr_var : ., mut = gen_expr(ast_a(node))
         arr_var = force_if_thunk(arr_var)
         idx_node := ast_b(node)
         idx_kind := ast_kind(idx_node)
         arr_len_lit : ., mut = arr_len_lit_of(arr_var)
-        arr_data := arr_var
+        arr_data : ., mut = arr_var
         if is_slice_hdr(arr_var) != 0:
             arr_data = slice_hdr_data(arr_var)
         // Range index: arr[low..high] -> slice (pointer to arr[low])
         if idx_kind == EXPR_RANGE:
             low_node := ast_a(idx_node)
             high_node := ast_b(idx_node)
-            low_var := gen_expr(low_node)
+            low_var : ., mut = gen_expr(low_node)
             low_var = force_if_thunk(low_var)
-            high_var := gen_expr(high_node)
+            high_var : ., mut = gen_expr(high_node)
             high_var = force_if_thunk(high_var)
             // Creation checks: high <= arr_len and low <= arr_len. The low <= high
             // run-time check needs the slice's run-time length, a known design gap;
@@ -5164,7 +5164,7 @@ fn gen_expr(node: int) -> int:
             else:
                 // V4 slice header: {data_ptr, length}. The header pointer is the
                 // slice value, so length survives function calls and stores.
-                base_var := arr_var
+                base_var : ., mut = arr_var
                 if is_slice_hdr(arr_var) != 0:
                     base_var = slice_hdr_data(arr_var)
                 data_var := new_ir_var("slice_data", TI_INT)
@@ -5216,7 +5216,7 @@ fn gen_expr(node: int) -> int:
             if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
                 emit(IR_LOAD_INDEX, v, arr_data, 0, ast_int_val(idx_node), elem_tk)
         else:
-            idx_var := gen_expr(idx_node)
+            idx_var : ., mut = gen_expr(idx_node)
             idx_var = force_if_thunk(idx_var)
             emit_string_bounds(arr_var, idx_var)
             emit_slice_bounds(arr_var, idx_var)
@@ -5234,7 +5234,7 @@ fn gen_expr(node: int) -> int:
         loop:
             if an < 0:
                 break
-            val_var := gen_expr(ast_a(an))
+            val_var : ., mut = gen_expr(ast_a(an))
             val_var = force_if_thunk(val_var)
             // 容量批 T2：可选携带值写点规范化（携带值类型 = 变体声明信息；`Some`/`None` 关键字
             // 形不带变体行 -> enum_payload_ti 返回 -1 -> 原样，不装箱）
@@ -5267,7 +5267,7 @@ fn gen_expr(node: int) -> int:
                 break
             if fn2 >= 0:
                 // fn2 = wrapper node (kind=EXPR_NONE, a=value expr, b=field name idx)
-                val_var := gen_expr(fn2)
+                val_var : ., mut = gen_expr(fn2)
                 val_var = force_if_thunk(val_var)
                 field_idx : ., mut = fi
                 nn := ast_b(fn2)
@@ -5289,7 +5289,7 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_ARRAY:
         // F5 契约（见 parser.cr 下标分支）：a=首 wrapper（连续）、b=元素个数；wrapper.a=元素值
         // 节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移直取相邻节点。
-        v := new_ir_var("arr", TI_UNIT)
+        v : ., mut = new_ir_var("arr", TI_UNIT)
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0)
         elem_ti : ., mut = TI_INT
         // (A) T3：数组级元素可选性预扫，元素序在后的 Some/None 也必须影响
@@ -5313,7 +5313,7 @@ fn gen_expr(node: int) -> int:
             if ei >= ast_b(node):
                 break
             if en >= 0:
-                e_var := gen_expr(en)
+                e_var : ., mut = gen_expr(en)
                 e_var = force_if_thunk(e_var)
                 if ei == 0:
                     elem_ti = irv_type(e_var)
@@ -5325,7 +5325,7 @@ fn gen_expr(node: int) -> int:
                 // 先归形式、后装箱（同上）
                 e_var = dex_slot_norm(e_var)   // apx 批 T3：元素槽恒精确
                 if g_optrep_on != 0:
-                    eo := elem_node_optional(ast_a(en))
+                    eo : ., mut = elem_node_optional(ast_a(en))
                     if elem_opt_ti >= 0:
                         eo = 1
                     e_var = box_for_slot_flag(ast_a(en), e_var, eo)
@@ -5341,9 +5341,9 @@ fn gen_expr(node: int) -> int:
 
     // Range expression (evaluates both ends, returns end)
     if ast_kind(node) == EXPR_RANGE:
-        start_var := gen_expr(ast_a(node))
+        start_var : ., mut = gen_expr(ast_a(node))
         start_var = force_if_thunk(start_var)
-        end_var := gen_expr(ast_b(node))
+        end_var : ., mut = gen_expr(ast_b(node))
         end_var = force_if_thunk(end_var)
         return end_var
 
@@ -5374,9 +5374,9 @@ fn gen_expr(node: int) -> int:
         sg_alloc_pop()
         return ret
     if ast_kind(node) == EXPR_AS:
-        inner_var := gen_expr(ast_a(node))
+        inner_var : ., mut = gen_expr(ast_a(node))
         inner_var = force_if_thunk(inner_var)
-        target_ti := ti_from_type_expr(ast_b(node))
+        target_ti : ., mut = ti_from_type_expr(ast_b(node))
         if get_type_kind(target_ti) == TYP_PTR:
             source_ti := irv_type(inner_var)
             source_kind := get_type_kind(source_ti)
@@ -5398,7 +5398,7 @@ fn gen_expr(node: int) -> int:
             rv := irv_rep(inner)
             if rv >= 0:
                 iti := irv_type(inner)
-                pti := iti
+                pti : ., mut = iti
                 if iti >= 0 && get_type_kind(iti) == TYP_OPTIONAL:
                     pti = get_type_data(iti)
                 dest := new_ir_var("tryv", pti)
@@ -5442,7 +5442,7 @@ fn gen_expr(node: int) -> int:
             en : ., mut = -1
             if elem_idx >= 0:
                 en = ast_a(elem_idx + e)
-            elem_var := gen_expr(en)
+            elem_var : ., mut = gen_expr(en)
             elem_var = force_if_thunk(elem_var)
             // 容量批 T2：可选元素写点规范化（元组元素槽无声明信息 -> 按元素表达式可选性
             // 保守判定；ident/调用覆盖范围，其余形态登记）
@@ -5688,7 +5688,7 @@ fn agg_elem_count_of(tn: int) -> int:
     if ast_kind(tn) == EXPR_ARRAY:
         return ast_int_val(tn)
     if ast_kind(tn) == EXPR_IDENT:
-        ni := ast_int_val(tn)
+        ni : ., mut = ast_int_val(tn)
         ai : ., mut = 0
         loop:
             if ai >= g_type_alias_count:
@@ -5833,7 +5833,7 @@ fn reg_one_global(name_idx: int):
         cell_store(g_ir_globals, g_ir_global_count * 24, name_idx)
         cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
         // Const initializer — emitted by the ELF backend's _init_globals.
-        iv : int = global_init_val(name_idx)
+        iv : int, mut = global_init_val(name_idx)
         if is_dex_global != 0 && gtype == TI_DEX:
             // apx 全局：初始值为 binary64 位模式（缩放值 -> bits 从节点 a 取）
             i2 : ., mut = 0
@@ -5920,7 +5920,7 @@ fn optrep_begin():
 fn grow_addr_taken(needed: int):
     if needed <= g_addr_taken_cap:
         return
-    nc := g_addr_taken_cap * 2
+    nc : ., mut = g_addr_taken_cap * 2
     if nc < 32:
         nc = 32
     if nc < needed:
@@ -6078,7 +6078,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
     else if k == EXPR_CALL || k == EXPR_ENUM_CONSTRUCTOR:
         if ast_a(node) >= 0:
             ast_patch_node(ast_a(node), subst_from, subst_to)
-        an3 := ast_b(node)
+        an3 : ., mut = ast_b(node)
         ac3 := ast_c(node)
         ai3 : ., mut = 0
         loop:
@@ -6091,7 +6091,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
     else if k == EXPR_MATCH:
         if ast_a(node) >= 0:
             ast_patch_node(ast_a(node), subst_from, subst_to)
-        an4 := ast_b(node)
+        an4 : ., mut = ast_b(node)
         loop:
             if an4 < 0:
                 break
@@ -6117,7 +6117,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
         // Passing the EXPR_NONE wrapper itself to ast_patch_node would do nothing,
         // so method names in struct literal fields inside generic instances would
         // not be replaced.
-        an5 := ast_b(node)
+        an5 : ., mut = ast_b(node)
         ac5 := ast_c(node)
         ai5 : ., mut = 0
         loop:
@@ -6133,7 +6133,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
             ai5 = ai5 + 1
     else if k == EXPR_ARRAY:
         // a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约，见 parser.cr 下标分支）
-        an6 := ast_a(node)
+        an6 : ., mut = ast_a(node)
         ac6 := ast_b(node)
         ai6 : ., mut = 0
         loop:
@@ -6149,7 +6149,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
             ai6 = ai6 + 1
     else if k == EXPR_TUPLE:
         // a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
-        an6 := ast_a(node)
+        an6 : ., mut = ast_a(node)
         ac6 := ast_b(node)
         ai6 : ., mut = 0
         loop:
@@ -6393,7 +6393,7 @@ fn sig_fingerprint(func_node: int) -> int:
         h = h * 16777619 + (cell_load_byte(name, ni) % 256)
         ni = ni + 1
     // Param types
-    param := ast_b(func_node)
+    param : ., mut = ast_b(func_node)
     param_count := ast_c(func_node)
     pi : ., mut = 0
     loop:

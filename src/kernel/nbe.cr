@@ -263,7 +263,7 @@ fn kern_read_ne(ne: int, s: int) -> int:
         return mk_app(kern_read_ne(kern_get(ne, 1), s), kern_read_nf(kern_get(ne, 2), s))
     if k == D_NATREC:
         m := kern_get(ne, 1)
-        rho := kern_get(ne, 2)
+        rho : ., mut = kern_get(ne, 2)
         b := kern_get(ne, 3)
         mz := kern_get(ne, 4)
         ms := d_natrec_ms(ne)

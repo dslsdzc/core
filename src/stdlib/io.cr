@@ -37,7 +37,7 @@ fn read_file(path: string) -> string, pub:
         // crash on a bare while with a two-identifier condition.
         r1 := syscall3(8, fd, 0, 0)  // lseek(fd, 0, SEEK_SET)
         cap : ., mut = 4096
-        buf := alloc(cap)
+        buf : ., mut = alloc(cap)
         chunk := alloc(4096)
         blen : ., mut = 0
         loop:

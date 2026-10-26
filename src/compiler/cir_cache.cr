@@ -291,7 +291,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     // Trailer: {var_start, node_start}. Both are validated before restore.
     total_size = total_size + 16
     if total_size > g_cir_write_cap:
-        new_cap := g_cir_write_cap * 2
+        new_cap : ., mut = g_cir_write_cap * 2
         if new_cap < 4096:
             new_cap = 4096
         if new_cap < total_size:
@@ -1005,7 +1005,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         pos = pos + 8
         ncount := cell_load(data, pos)
         pos = pos + 8
-        parent := g_cur_sg
+        parent : ., mut = g_cur_sg
         if parent_rel >= 0:
             parent = sg_base + parent_rel
         f := new_sg * ESZ_SG

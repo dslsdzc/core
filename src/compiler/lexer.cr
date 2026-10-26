@@ -231,15 +231,15 @@ fn str_int_literal(s: string) -> int:
 fn str_to_scaled(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
-    neg : int = 0
+    neg : int, mut = 0
     if i < sl && cell_load_byte(s, i) == 45:
         neg = 1
         i = i + 1
-    ip : int = 0
-    fp : int = 0
-    nd : int = 0
-    sd : int = 0
-    round_up : int = 0
+    ip : int, mut = 0
+    fp : int, mut = 0
+    nd : int, mut = 0
+    sd : int, mut = 0
+    round_up : int, mut = 0
     loop:
         if i >= sl:
             break
@@ -318,7 +318,7 @@ fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int):
 fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    tlen := str_len(s)
+    tlen : ., mut = str_len(s)
     if tlen < 1:
         tlen = 1
     cell_store(g_tokens, tp + OFF_TK_KIND, kind)
@@ -334,7 +334,7 @@ fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
 fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    tlen := str_len(istr_get(lexeme_ni))
+    tlen : ., mut = str_len(istr_get(lexeme_ni))
     if tlen < 1:
         tlen = 1
     cell_store(g_tokens, tp + OFF_TK_KIND, kind)
@@ -429,7 +429,7 @@ fn ind_push(col: int):
 fn layout_break():
     add_tok(T_NEWLINE, -1, g_line, g_col)
     g_line_has_token = 0
-    col := g_col
+    col : ., mut = g_col
     top := ind_top()
     if col > top:
         ind_push(col)
@@ -575,7 +575,7 @@ fn tokenize_impl(_src: string, layout_bypass: int):
                 // The first non-empty line establishes the anchor. The base level
                 // emits no INDENT; otherwise top-level code would be wrapped.
                 ind_push(g_col)
-        c := cur_char_at(_src, _pos, _slen)
+        c : ., mut = cur_char_at(_src, _pos, _slen)
         start_line : ., mut = g_line
         start_col : ., mut = g_col
 
@@ -668,7 +668,7 @@ fn tokenize_impl(_src: string, layout_bypass: int):
             if has_dot != 0:
                 add_tok_int_lex(T_DEX, str_to_scaled(num_str), str_intern(num_str), start_line, start_col)
             else:
-                iv := str_int_literal(num_str)
+                iv : ., mut = str_int_literal(num_str)
                 if g_int_big != 0:
                     add_tok_str(T_BIGINT, big_lit_decimal(num_str), start_line, start_col)
                 else:

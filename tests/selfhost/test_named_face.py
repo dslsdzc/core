@@ -126,25 +126,25 @@ def main():
         #  故静默通过；TA02 落地后与**赋值位点**既有语义对齐（`*T ← int/null` 早已 TA01 拒绝，
         #  见 p5-task6-report §收紧台账）= 改为无初值声明。指针身份面语义不变。）
         case_accept("named.in_container_same", NA_NB.replace("struct NB:\n    x: int\n", "") +
-                    "fn main() -> int:\n    a : [NA; 2] = [NA { x= 1 }, NA { x= 2 }]\n    b : [NA; 2] = [NA { x= 3 }, NA { x= 4 }]\n    c : NA? = NA { x= 5 }\n    d : NA? = NA { x= 6 }\n    p : *NA, mut\n    q : *NA, mut\n    a = b\n    c = d\n    p = q\n    return 0\n"),
+                    "fn main() -> int:\n    a : [NA; 2], mut = [NA { x= 1 }, NA { x= 2 }]\n    b : [NA; 2] = [NA { x= 3 }, NA { x= 4 }]\n    c : NA?, mut = NA { x= 5 }\n    d : NA? = NA { x= 6 }\n    p : *NA, mut\n    q : *NA, mut\n    a = b\n    c = d\n    p = q\n    return 0\n"),
         case_accept("named.in_tuple_same", NA_NB.replace("struct NB:\n    x: int\n", "") +
                     "fn main() -> int:\n    a : ., mut = (NA { x= 1 }, 2)\n    b : ., mut = (NA { x= 3 }, 4)\n    a = b\n    return 0\n"),
         # 递归命名（*Node 元素位 = 命名行，同链）
         case_accept("named.recursive_ptr_same", "struct Node:\n    val: int, next: *Node\nfn f(p: *Node, q: *Node) -> int:\n    p = q\n    return 0\nfn main() -> int:\n    return 0\n"),
         # 别名一层：透明（alias 解析到 RHS 行，不产生命名行身份）
-        case_accept("named.alias_transparent", "type X = int\nfn main() -> int:\n    a : X = 1\n    b : int = 2\n    a = b\n    return a - 2\n"),
+        case_accept("named.alias_transparent", "type X = int\nfn main() -> int:\n    a : X, mut = 1\n    b : int = 2\n    a = b\n    return a - 2\n"),
         # 命名型经函数边界（形参/返回位同链）
         case_accept("named.fn_boundary", NA_NB.replace("struct NB:\n    x: int\n", "") +
                     "fn take(v: NA) -> int:\n    return v.x\nfn main() -> int:\n    a : ., mut = NA { x= 7 }\n    b : ., mut = NA { x= 7 }\n    a = b\n    return take(a) - 7\n"),
         # ── ② 拒：链异 ⇒ 0（= legacy 拒；清零前的回落面）──
         case_reject("named.diff_name_rejected", NA_NB +
                     "fn main() -> int:\n    a : ., mut = NA { x= 1 }\n    b : ., mut = NB { x= 2 }\n    a = b\n    return a.x\n", TA01),
-        case_reject("named.vs_base_rejected", "struct NA:\n    x: int\nfn main() -> int:\n    a : NA = NA { x= 1 }\n    b : int = 2\n    a = b\n    return a.x\n", TA01),
+        case_reject("named.vs_base_rejected", "struct NA:\n    x: int\nfn main() -> int:\n    a : NA, mut = NA { x= 1 }\n    b : int = 2\n    a = b\n    return a.x\n", TA01),
         case_reject("named.optional_diff_rejected", NA_NB +
-                    "fn main() -> int:\n    a : NA? = NA { x= 1 }\n    b : NB? = NB { x= 2 }\n    a = b\n    return 0\n", TA01),
+                    "fn main() -> int:\n    a : NA?, mut = NA { x= 1 }\n    b : NB? = NB { x= 2 }\n    a = b\n    return 0\n", TA01),
         # ── ③ 残留登记（停条件②面：不变槽元素非同形——行为已正确，本任务不动其清零）──
         case_reject("residual.invariant_slot_arr_rejected", NA_NB +
-                    "fn main() -> int:\n    a : [NA; 2] = [NA { x= 1 }, NA { x= 2 }]\n    b : [NB; 2] = [NB { x= 3 }, NB { x= 4 }]\n    a = b\n    return 0\n", TA01),
+                    "fn main() -> int:\n    a : [NA; 2], mut = [NA { x= 1 }, NA { x= 2 }]\n    b : [NB; 2] = [NB { x= 3 }, NB { x= 4 }]\n    a = b\n    return 0\n", TA01),
         case_reject("residual.invariant_slot_ptr_rejected", NA_NB +
                     "fn g(a: *NA, b: *NB) -> int:\n    a = b\n    return 0\nfn main() -> int:\n    return 0\n", TA01),
     ]

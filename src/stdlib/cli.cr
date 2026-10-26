@@ -23,11 +23,11 @@
 CLI_LONG_NAME_SIZE : int = 32
 
 // --- Internal structs ---
-pub struct CliCmd:
+struct CliCmd, pub:
     name: string,
     desc: string,
 
-pub struct CliFlag:
+struct CliFlag, pub:
     long_name: string,
     short_name: string,
     desc: string,
@@ -221,7 +221,7 @@ fn cli_parse() -> int, pub:
     // no subcommand
 
     // Determine subcommand from argv[1]
-    first := get_arg(1)
+    first : ., mut = get_arg(1)
     if _cli_is_flag(first) == 0 && g_cli_cmd_count > 0:
         // First non-flag arg — check if it's a valid subcommand
         ci : ., mut = 0
@@ -321,7 +321,7 @@ fn cli_get(name: string) -> string, pub:
     return ""
 
 fn cli_has(name: string) -> int, pub:
-    fi := _cli_find_flag(name)
+    fi : ., mut = _cli_find_flag(name)
     if fi >= 0:
         return cell_load(g_cli_flags, fi * 56 + 32)  // has_value
     return 0
@@ -426,7 +426,7 @@ fn cli_help(), pub:
                 cmd_desc := @str_of(cell_load(g_cli_cmds, ci * 16 + 8))
                 print("    ")
                 print(cmd_name)
-                pad := str_len(cmd_name)
+                pad : ., mut = str_len(cmd_name)
                 loop:
                     if pad >= 12:
                         break

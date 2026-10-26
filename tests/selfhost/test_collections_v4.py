@@ -18,7 +18,7 @@ fn main() -> int:
     collections.reverse(a)
     if a[0] != 2 || a[1] != 1 || a[2] != 3:
         return 1
-    b := [0, 0, 0]
+    b : ., mut = [0, 0, 0]
     collections.copy(a, b)
     if !collections.equals(a, b):
         return 2

@@ -8,7 +8,7 @@
 import internal::bytes
 import internal::word
 
-pub struct IntMap:
+struct IntMap, pub:
     keys: string
     values: string
     used: string
@@ -30,7 +30,7 @@ fn intMapNextPow2(n: int) -> int:
     return c
 
 fn intMapHash(key: int, seed: int, kind: int) -> int:
-    x := wordNorm(key + seed, 32)
+    x : ., mut = wordNorm(key + seed, 32)
     if kind == 0:
         // murmur3-style 32-bit finalizer (one round)
         x = wordXor(x, wordShr(x, 16, 32), 32)
@@ -87,7 +87,7 @@ fn intMapGrow(m: IntMap) -> IntMap:
     return out
 
 fn intMapWith(initial_cap: int, growth_num: int, growth_den: int, load_num: int, load_den: int, seed: int, hash_kind: int) -> IntMap, pub:
-    cap := intMapNextPow2(initial_cap)
+    cap : ., mut = intMapNextPow2(initial_cap)
     if cap < 4:
         cap = 4
     keys := alloc(cap * 8)
@@ -107,7 +107,7 @@ fn intMap() -> IntMap, pub:
 
 impl IntMap:
     fn findKey(&self, key: int) -> int:
-        idx := intMapHash(key, self.seed, self.hash_kind) % self.cap
+        idx : ., mut = intMapHash(key, self.seed, self.hash_kind) % self.cap
         i : ., mut = 0
         loop:
             if i >= self.cap:
@@ -122,7 +122,7 @@ impl IntMap:
         return -1
 
     fn findSlot(&self, key: int) -> int:
-        idx := intMapHash(key, self.seed, self.hash_kind) % self.cap
+        idx : ., mut = intMapHash(key, self.seed, self.hash_kind) % self.cap
         tomb : ., mut = -1
         i : ., mut = 0
         loop:

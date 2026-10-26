@@ -19,7 +19,7 @@ fn wordNorm(value: int, bits: int) -> int:
     if bits <= 0:
         return 0
     modulus := wordTwoPow(bits)
-    r := value % modulus
+    r : ., mut = value % modulus
     if r < 0:
         r = r + modulus
     return r
@@ -38,8 +38,8 @@ fn wordNot(a: int, bits: int) -> int:
     return wordMask(bits) - wordNorm(a, bits)
 
 fn wordAnd(a: int, b: int, bits: int) -> int:
-    x := wordNorm(a, bits)
-    y := wordNorm(b, bits)
+    x : ., mut = wordNorm(a, bits)
+    y : ., mut = wordNorm(b, bits)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -55,8 +55,8 @@ fn wordAnd(a: int, b: int, bits: int) -> int:
     return r
 
 fn wordOr(a: int, b: int, bits: int) -> int:
-    x := wordNorm(a, bits)
-    y := wordNorm(b, bits)
+    x : ., mut = wordNorm(a, bits)
+    y : ., mut = wordNorm(b, bits)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -72,8 +72,8 @@ fn wordOr(a: int, b: int, bits: int) -> int:
     return r
 
 fn wordXor(a: int, b: int, bits: int) -> int:
-    x := wordNorm(a, bits)
-    y := wordNorm(b, bits)
+    x : ., mut = wordNorm(a, bits)
+    y : ., mut = wordNorm(b, bits)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -92,7 +92,7 @@ fn wordShl(a: int, n: int, bits: int) -> int:
     if bits <= 0:
         return 0
     k := n % bits
-    r := wordNorm(a, bits)
+    r : ., mut = wordNorm(a, bits)
     i : ., mut = 0
     loop:
         if i >= k:
@@ -105,7 +105,7 @@ fn wordShr(a: int, n: int, bits: int) -> int:
     if bits <= 0:
         return 0
     k := n % bits
-    r := wordNorm(a, bits)
+    r : ., mut = wordNorm(a, bits)
     i : ., mut = 0
     loop:
         if i >= k:

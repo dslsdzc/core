@@ -137,7 +137,7 @@ fn ast_optimize_body(body: int):
     if bk == EXPR_CALL:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
-        an := ast_b(body)
+        an : ., mut = ast_b(body)
         ac := ast_c(body)
         ai : ., mut = 0
         loop:
@@ -152,7 +152,7 @@ fn ast_optimize_body(body: int):
     // the field count. wrapper.a holds the field value, so recurse into that
     // value rather than the wrapper node.
     if bk == EXPR_STRUCT:
-        fn2 := ast_b(body)
+        fn2 : ., mut = ast_b(body)
         fc := ast_c(body)
         i : ., mut = 0
         loop:
@@ -197,7 +197,7 @@ fn ast_optimize_body(body: int):
     if bk == EXPR_MATCH:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
-        an := ast_b(body)
+        an : ., mut = ast_b(body)
         loop:
             if an < 0:
                 break
@@ -215,7 +215,7 @@ fn ast_optimize_body(body: int):
     // EXPR_ARRAY: a is the first consecutive wrapper and b the element count.
     // wrapper.a holds the element value, so recurse into that value.
     if bk == EXPR_ARRAY:
-        an := ast_a(body)
+        an : ., mut = ast_a(body)
         ac := ast_b(body)
         i : ., mut = 0
         loop:
@@ -233,7 +233,7 @@ fn ast_optimize_body(body: int):
     // EXPR_TUPLE: a is the first consecutive wrapper and b the element count.
     // wrapper.a holds the element value.
     if bk == EXPR_TUPLE:
-        an := ast_a(body)
+        an : ., mut = ast_a(body)
         ac := ast_b(body)
         i : ., mut = 0
         loop:

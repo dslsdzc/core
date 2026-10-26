@@ -8,14 +8,14 @@ BITS32_SIZE : int, pub = 4294967296
 BITS32_BITS : int, pub = 32
 
 fn bits32Norm(x: int) -> int, pub:
-    r := x % BITS32_SIZE
+    r : ., mut = x % BITS32_SIZE
     if r < 0:
         r = r + BITS32_SIZE
     return r
 
 fn bits32And(a: int, b: int) -> int, pub:
-    x := bits32Norm(a)
-    y := bits32Norm(b)
+    x : ., mut = bits32Norm(a)
+    y : ., mut = bits32Norm(b)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -31,8 +31,8 @@ fn bits32And(a: int, b: int) -> int, pub:
     return r
 
 fn bits32Or(a: int, b: int) -> int, pub:
-    x := bits32Norm(a)
-    y := bits32Norm(b)
+    x : ., mut = bits32Norm(a)
+    y : ., mut = bits32Norm(b)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -48,8 +48,8 @@ fn bits32Or(a: int, b: int) -> int, pub:
     return r
 
 fn bits32Xor(a: int, b: int) -> int, pub:
-    x := bits32Norm(a)
-    y := bits32Norm(b)
+    x : ., mut = bits32Norm(a)
+    y : ., mut = bits32Norm(b)
     r : ., mut = 0
     p : ., mut = 1
     i : ., mut = 0
@@ -69,7 +69,7 @@ fn bits32Not(a: int) -> int, pub:
 
 fn bits32Shl(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
-    r := bits32Norm(a)
+    r : ., mut = bits32Norm(a)
     i : ., mut = 0
     loop:
         if i >= k:
@@ -80,7 +80,7 @@ fn bits32Shl(a: int, n: int) -> int, pub:
 
 fn bits32Shr(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
-    r := bits32Norm(a)
+    r : ., mut = bits32Norm(a)
     i : ., mut = 0
     loop:
         if i >= k:
@@ -110,7 +110,7 @@ fn bits32Sub(a: int, b: int) -> int, pub:
 fn bits32Mul(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) * bits32Norm(b))
 
-pub struct Bits32:
+struct Bits32, pub:
     value: int
 
 fn bits32(value: int) -> Bits32, pub:

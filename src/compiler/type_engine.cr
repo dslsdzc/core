@@ -167,7 +167,7 @@ fn lits_contradictory_buf(buf: string, n: int) -> int:
     loop:
         if i >= n:
             break
-        p := cell_load(buf, i * 8)
+        p : ., mut = cell_load(buf, i * 8)
         j : ., mut = i + 1
         loop:
             if j >= n:

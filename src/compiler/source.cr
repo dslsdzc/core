@@ -44,7 +44,7 @@ fn sm_reset():
 fn grow_sm_files(needed: int):
     if needed <= g_sm_file_cap:
         return
-    nc := g_sm_file_cap * 2
+    nc : ., mut = g_sm_file_cap * 2
     if nc < 8:
         nc = 8
     if nc < needed:
@@ -63,7 +63,7 @@ fn grow_sm_files(needed: int):
 fn grow_sm_lines(needed: int):
     if needed < g_sm_line_cap:
         return
-    nc := g_sm_line_cap * 2
+    nc : ., mut = g_sm_line_cap * 2
     if nc < 8:
         nc = 8
     if nc < needed:

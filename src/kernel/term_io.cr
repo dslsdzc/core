@@ -69,7 +69,7 @@ fn kern_new(k: int) -> int:
     kern_ensure_buf()
     if g_kernel_count * 5 + 5 > KERNEL_SLOTS:
         return -1
-    i := g_kernel_count * 5
+    i : ., mut = g_kernel_count * 5
     cell_store(g_kernel_nodes, i * 8, k)
     cell_store(g_kernel_nodes, (i + 1) * 8, 0)
     cell_store(g_kernel_nodes, (i + 2) * 8, 0)

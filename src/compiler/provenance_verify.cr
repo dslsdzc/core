@@ -29,7 +29,7 @@ fn get_alloc_extent(alloc_seq: int) -> int:
     if op == IR_ALLOC_STRUCT:
         // Field count is the struct's cell extent. An unknown struct name falls
         // back to a single cell, matching the scalar placeholder in the IR.
-        fi : int = -1
+        fi : int, mut = -1
         si2 : ., mut = 0
         loop:
             if si2 >= g_struct_count:

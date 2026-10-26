@@ -168,7 +168,7 @@ fn parent_dir(dir: string) -> string:
 
 fn load_imports(dir_path: string) -> string:
     imp_path : ., mut = dir_path + "_import.cr"
-    content := module_get_source(imp_path)
+    content : ., mut = module_get_source(imp_path)
     // Return the _import.cr content when present.
     if str_len(content) > 0:
     return content
@@ -212,8 +212,8 @@ fn build_line_fileid():
         if pos >= slen:
             break
         if str_eq(get_char(g_source, pos), "\n") != 0:
-            next_start := 0
-            next_fileid := -1
+            next_start : ., mut = 0
+            next_fileid : ., mut = -1
             if seg_idx + 1 < g_seg_count:
                 next_start = cell_load(g_seg_starts, (seg_idx + 1) * 8)
                 next_fileid = cell_load(g_seg_fileids, (seg_idx + 1) * 8)
@@ -344,7 +344,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
             item_end : ., mut = pi
             while item_end < pl && cell_load_byte(params_str, item_end) != 44:
                 item_end = item_end + 1
-            item := str_sub(params_str, pi, item_end - pi)
+            item : ., mut = str_sub(params_str, pi, item_end - pi)
             // Trim whitespace
             while str_len(item) > 0 && cell_load_byte(item, 0) == 32:
                 item = str_sub(item, 1, str_len(item)-1)
@@ -376,7 +376,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
             item_end2 : ., mut = ti
             while item_end2 < tl && cell_load_byte(tags_str, item_end2) != 44:
                 item_end2 = item_end2 + 1
-            item2 := str_sub(tags_str, ti, item_end2 - ti)
+            item2 : ., mut = str_sub(tags_str, ti, item_end2 - ti)
             while str_len(item2) > 0 && cell_load_byte(item2, 0) == 32:
                 item2 = str_sub(item2, 1, str_len(item2)-1)
             while str_len(item2) > 0 && cell_load_byte(item2, str_len(item2)-1) == 32:
@@ -398,7 +398,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
             pn_start : ., mut = pti
             while pti < str_len(param_types) && cell_load_byte(param_types, pti) != 44:
                 pti = pti + 1
-            pname := str_sub(param_types, pn_start, pti - pn_start)
+            pname : ., mut = str_sub(param_types, pn_start, pti - pn_start)
             while str_len(pname) > 0 && cell_load_byte(pname, 0) == 32:
                 pname = str_sub(pname, 1, str_len(pname)-1)
             while str_len(pname) > 0 && cell_load_byte(pname, str_len(pname)-1) == 32:

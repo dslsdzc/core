@@ -73,7 +73,7 @@ A_DYN = """import fmt
 fn takes(s: string) -> int:
     return str_len(s)
 fn main() -> int:
-    x : dyn = 42
+    x : dyn, mut = 42
     x = "hello"
     takes(x)
     return 0
@@ -105,7 +105,7 @@ D_UNDEF = """import fmt
 fn takes(s: string) -> int:
     return str_len(s)
 fn main() -> int:
-    n := undef_fn()
+    n : ., mut = undef_fn()
     takes(n)
     return 0
 """

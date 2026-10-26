@@ -93,7 +93,7 @@ fn check_line_exps(line: string) -> int:
     if ctx_start < 0:
         return 0
     // 无 exp，跳过
-    rest := exp_end_at(line, ctx_start)
+    rest : ., mut = exp_end_at(line, ctx_start)
     if rest < 0:
         return 0
     // 逐个解析剩余 exp

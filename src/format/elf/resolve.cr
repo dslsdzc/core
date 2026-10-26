@@ -33,13 +33,13 @@ fn res_labels():
         // Init slot state for accurate sizing
         g2_init()
         g_current_func_var_start = vs_r
-        vi4 := 0
+        vi4 : ., mut = 0
         loop:
             if vi4 >= vc_r:
                 break
             g2_slot(vs_r + vi4)
             vi4 = vi4 + 1
-        pi4 := 0
+        pi4 : ., mut = 0
         loop:
             if pi4 >= pc_r || pi4 >= 6:
                 break
