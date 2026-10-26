@@ -781,6 +781,8 @@ fn sym_visible(si: int) -> int:
     owner := sym_owner_field(si)
     if owner < 0 || owner == g_cur_lib:
         return 1
+    if lib_can_import(g_cur_lib, owner) == 0:
+        return 0
     return sym_pub_field(si)
 
 fn func_visible(fi: int) -> int:
@@ -792,6 +794,8 @@ fn func_visible(fi: int) -> int:
     owner := lib_of_node(node)
     if owner < 0 || owner == g_cur_lib:
         return 1
+    if lib_can_import(g_cur_lib, owner) == 0:
+        return 0
     return fn_node_is_pub(node)
 
 fn mod_func_visible(target_fni: int, name_ni: int) -> int:
@@ -800,6 +804,8 @@ fn mod_func_visible(target_fni: int, name_ni: int) -> int:
     owner := lib_lookup_path(file_path_by_fni(target_fni))
     if owner < 0 || owner == g_cur_lib:
         return 1
+    if lib_can_import(g_cur_lib, owner) == 0:
+        return 0
     return lib_export_find_kind(owner, name_ni, SYM_FN) >= 0
 
 fn register_pub_export(name_ni: int, node: int):
@@ -1496,6 +1502,91 @@ fn def_type_sym(name_idx: int, ti: int, line: int):
         type_pub = 1
     sym_set_pub(si, type_pub)
 
+// `impl I for T` resolves the interface name through the symbol table but the
+// parser has no visibility context. Validate each edge from its declaration
+// line so a private interface cannot be implemented across libraries.
+fn check_impl_visibility():
+    i : ., mut = 0
+    loop:
+        if i >= g_impl_for_count:
+            break
+        line := cell_load(g_impl_for_line, i * 8)
+        if line > 0:
+            trait_ni := cell_load(g_impl_for, i * 16)
+            ctx := lib_of_line(line)
+            si := find_sym(trait_ni)
+            if si >= 0 && sym_kind(si) == SYM_TYPE:
+                towner := sym_owner_field(si)
+                if towner >= 0 && towner != ctx:
+                    if lib_can_import(ctx, towner) == 0 || sym_pub_field(si) == 0:
+                        check_error(EC_N_UNDEFINED, "Undefined type '" + istr_get(trait_ni) + "'", line, 1)
+        i = i + 1
+
+// A bare generic struct type in a parameter position (`fn f(b: Box)` where
+// `Box` has an inferred field) carries no type argument. Bind each such
+// occurrence to fresh function-scoped type variables, then rewrite the node to
+// `Box[__bindN, ...]`. The existing monomorph path then unifies the variables
+// with the concrete argument at each call site.
+fn bind_bare_generic_type(node: int, fi: int) -> int:
+    if node < 0 || ast_kind(node) != EXPR_IDENT:
+        return node
+    name_ni := ast_int_val(node)
+    si := find_struct_by_name(name_ni)
+    if si < 0:
+        return node
+    need := si_generic_count(si)
+    if need <= 0:
+        return node
+    gc := fi_generic_count(fi)
+    if gc + need > MAX_GENERICS:
+        // The language guardrail is four generic parameters per declaration.
+        // Leave the node untouched; the field projection will fail closed.
+        return node
+    ga := alloc_node(EXPR_GENERIC_APPLY, name_ni, -1, need, 0, 0, 0, ast_line(node), ast_col(node))
+    first_arg := g_ast_count
+    gi : ., mut = 0
+    loop:
+        if gi >= need:
+            break
+        bname := str_intern("__bind" + int_str(g_infer_name_seq))
+        g_infer_name_seq = g_infer_name_seq + 1
+        alloc_node(EXPR_IDENT, 0, 0, 0, bname, 0, 0, ast_line(node), ast_col(node))
+        fi_set_generic_name(fi, gc + gi, bname)
+        gi = gi + 1
+    fi_set_generic_count(fi, gc + need)
+    ast_set_b(ga, first_arg)
+    return ga
+
+fn bind_bare_generic_params():
+    fi : ., mut = 0
+    loop:
+        if fi >= g_func_count:
+            break
+        fn_node := fi_ast_node(fi)
+        if fn_node >= 0 && ast_kind(fn_node) == EXPR_FN:
+            pc := ast_c(fn_node)
+            pn : ., mut = ast_b(fn_node)
+            pi : ., mut = 0
+            loop:
+                if pi >= pc || pn < 0 || pn >= g_ast_count:
+                    break
+                if ast_kind(pn) == EXPR_PARAM:
+                    orig := ast_data(pn)
+                    if orig >= 0 && ast_kind(orig) != 0:
+                        new_node := bind_bare_generic_type(orig, fi)
+                        if new_node != orig:
+                            ast_set_data(pn, new_node)
+                    pi = pi + 1
+                pn = pn + 1
+                loop:
+                    if pn >= g_ast_count:
+                        break
+                    if ast_kind(pn) == EXPR_PARAM:
+                        break
+                    pn = pn + 1
+        fi = fi + 1
+
+
 fn collect_decls():
     i : ., mut = 0
     // First: register all struct types
@@ -1608,6 +1699,8 @@ fn collect_decls():
         ti := res_type_node(type_node)
         def_type_sym(name_idx, ti, alias_line)
         i = i + 1
+
+    bind_bare_generic_params()
 
     // Register all functions. Library visibility is always enforced: same
     // library declarations are visible, cross-library ones require `pub`.
@@ -3861,7 +3954,7 @@ fn infer_expr(node: int) -> int:
                         if cand_fi >= 0:
                             cand_node := fi_ast_node(cand_fi)
                             cand_owner := lib_of_node(cand_node)
-                            if cand_owner >= 0 && cand_owner != g_cur_lib && lib_export_find_kind(cand_owner, cand_ni, SYM_FN) < 0:
+                            if cand_owner >= 0 && cand_owner != g_cur_lib && (lib_can_import(g_cur_lib, cand_owner) == 0 || lib_export_find_kind(cand_owner, cand_ni, SYM_FN) < 0):
                                 check_error(EC_N_METHOD, "Undefined method '" + istr_get(method_ni) + "'", ast_line(node), ast_col(node))
                                 break
                         func_ni = cand_ni
@@ -5199,6 +5292,7 @@ fn check_all():
 
     // First pass: collect declarations
     collect_decls()
+    check_impl_visibility()
     prelude_builtin_init()
 
     // SYM_SO_FN is materialized by the side-table fallback in find_gsym and

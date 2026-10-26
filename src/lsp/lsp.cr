@@ -86,7 +86,10 @@ fn lsp_diag_json(di: int) -> string:
     ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
     cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
     msg := load_str_ptr(g_diags, di * DIAG_REC_SIZE + 8)
-    line0 : ., mut = ln - 1
+    // Diagnostics carry concatenated line coordinates. Convert them back to the
+    // owning file so imported files do not report lines past their own EOF.
+    off := analysis_line_offset(ln)
+    line0 : ., mut = ln - 1 - off
     if line0 < 0:
         line0 = 0
     col0 : ., mut = cl - 1

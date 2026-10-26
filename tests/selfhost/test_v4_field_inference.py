@@ -102,9 +102,31 @@ def _build_rejected(name, source, needle):
                 pass
 
 
+ANNOTATED_PARAM = """struct Box:
+    val: .
+
+fn get(b: Box) -> int:
+    return b.val
+
+fn main() -> int:
+    b := Box { val = 7 }
+    return get(b)
+"""
+
+
 def main():
     ok = []
     ok.append(_build_and_run("projected_method", POS, 7))
+
+    # A bare generic struct in a parameter annotation binds fresh function
+    # variables; the call site unifies them with the argument.
+    ok.append(_build_and_run("annotated_generic_param", ANNOTATED_PARAM, 7))
+
+    ok.append(_build_rejected(
+        "annotated_generic_param_mismatch",
+        ANNOTATED_PARAM.replace('Box { val = 7 }', 'Box { val = "x" }'),
+        "error[",
+    ))
 
     ok.append(_build_rejected(
         "missing_method_rejected",

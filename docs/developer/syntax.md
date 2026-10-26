@@ -336,6 +336,8 @@ fn identity(x: .):
 
 编译器可以从该实现得到参数与返回值的同型关系并自动泛化。
 
+结构体字段使用 `.` 时，裸结构体名出现在参数注解中（`fn get(b: Box)`）会为该字段位绑定函数级类型变量；调用点从实参实例化。
+
 ### 3.7 结构语义与物理布局分离
 
 递归结构可以直接写出：
@@ -561,7 +563,8 @@ fn parse(text: string) -> Config:
 - `return value` 是 `Ok` 状态。
 - `return Err error` 是错误状态。
 - `Err` 不要求统一错误类型。
-- 顶层声明默认属于当前库内部，外部不可见。需要跨库导出时使用尾部 `, pub` 标签：`fn f(...), pub:`、`struct S, pub:`、`enum E, pub:`、`interface I, pub:`、全局 `g : int, pub = 0`。前缀 `pub struct` / `pub enum` 仅保留为旧源兼容，不用于新代码。
+- 顶层声明默认属于当前库内部，外部不可见。需要跨库导出时使用尾部 `, pub` 标签：`fn f(...), pub:`、`struct S, pub:`、`enum E, pub:`、`interface I, pub:`、`type X = int, pub`、全局 `g : int, pub = 0`。前缀 `pub struct` / `pub enum` 仅保留为旧源兼容，不用于新代码。
+- 库依赖方向是显式的：`@core` 与 `@user` 可以读取 `@std`，反向读取 `@core` 被拒绝（即使目标符号标了 `pub`）。库依赖图必须无环，自环与回边被拒绝。
 
 ### 6.2 `catch` 后置子句
 

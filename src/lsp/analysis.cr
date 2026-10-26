@@ -427,7 +427,7 @@ fn analysis_type_visible(name_ni: int) -> int:
 fn analysis_hover(line: int, col: int) -> string:
     // Queries run under the document's library so cross-library pub filtering
     // matches the checker.
-    g_cur_lib = lib_find("@user")
+    g_cur_lib = lib_lookup_path(g_source_name)
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
@@ -540,7 +540,7 @@ fn analysis_def_json(ln1: int, cl1: int) -> string:
 
 // Location JSON at a position ({"uri","range"}); empty when absent.
 fn analysis_definition(line: int, col: int) -> string:
-    g_cur_lib = lib_find("@user")
+    g_cur_lib = lib_lookup_path(g_source_name)
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
@@ -974,7 +974,7 @@ fn analysis_completion(line: int, col: int) -> string:
     // main document's library (@user) so cross-library pub filtering applies to
     // whatever imports the analysis pulled in.
     saved_lib := g_cur_lib
-    g_cur_lib = lib_find("@user")
+    g_cur_lib = lib_lookup_path(g_source_name)
     pos : ., mut = analysis_pos_of(line, col)
     pstart := analysis_prefix_start(pos)
     at_ctx : ., mut = 0
