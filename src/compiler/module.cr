@@ -506,7 +506,7 @@ fn res_imports():
     main_fileid_str : ., mut = get_fileid(g_source)
     if str_len(main_fileid_str) == 0:
         main_fileid_str = "main"
-    main_fni := reg_fileid(main_fileid_str, "")
+    main_fni := reg_fileid(main_fileid_str, g_source_name)
     main_len : ., mut = real_main_len  // original source length (without preamble)
 
     // First segment: main source

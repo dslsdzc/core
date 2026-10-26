@@ -239,8 +239,9 @@ fn lib_enable():
 fn lib_init_defaults_once():
     if g_lib_inited != 0:
         return
-    if g_lib_on == 0:
-        return
+    // Ownership is a cheap side table. It is initialized for every
+    // compilation because the raw ABI visibility check needs the owner of the
+    // current function even when the pub/library layer itself is off.
     lib_register_defaults()
 
 fn lib_path_has_prefix(path: string, prefix: string) -> int:
@@ -272,7 +273,72 @@ fn lib_lookup_path(path: string) -> int:
         i = i + 1
     if best >= 0:
         return best
+    if lib_path_is_core_impl(path) != 0:
+        return lib_find("@core")
     return lib_find("@user")
+
+// Fast, allocation-free guard: only paths rooted at the repository's `src/`
+// tree can belong to the compiler implementation. User program paths and
+// virtual names skip the per-directory scan below, which otherwise allocates
+// a substring per byte per prefix and can exhaust the selftest heap.
+fn lib_path_has_src_root(path: string) -> int:
+    if lib_path_has_prefix(path, "src/") != 0:
+        return 1
+    slen := str_len(path)
+    i : ., mut = 0
+    loop:
+        if i + 5 > slen:
+            return 0
+        if cell_load_byte(path, i) == 47 && cell_load_byte(path, i + 1) == 115 && cell_load_byte(path, i + 2) == 114 && cell_load_byte(path, i + 3) == 99 && cell_load_byte(path, i + 4) == 47:
+            return 1
+        i = i + 1
+    return 0
+
+// Match a directory prefix in either repository-relative form
+// ("src/arch/x.cr") or absolute form ("<repo>/src/arch/x.cr").
+fn lib_path_has_dir_prefix(path: string, prefix: string) -> int:
+    if lib_path_has_prefix(path, prefix) != 0:
+        return 1
+    needle := "/" + prefix
+    nlen := str_len(needle)
+    slen := str_len(path)
+    i : ., mut = 0
+    loop:
+        if i + nlen > slen:
+            return 0
+        if str_eq(str_sub(path, i, nlen), needle) != 0:
+            return 1
+        i = i + 1
+    return 0
+
+// Compiler implementation domain. The library model names the frontend
+// `src/compiler/` as @core; the architecture/runtime/OS/format/LSP trees are
+// part of the same implementation and must share its raw-ABI visibility.
+// User projects are rooted elsewhere, so these prefixes are unambiguous.
+fn lib_path_is_core_impl(path: string) -> int:
+    if lib_path_has_src_root(path) == 0:
+        return 0
+    if lib_path_has_dir_prefix(path, "src/compiler/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/arch/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/runtime/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/os/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/format/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/lsp/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/targets/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/kernel/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/lattice/") != 0:
+        return 1
+    if lib_path_has_dir_prefix(path, "src/scheduler/") != 0:
+        return 1
+    return 0
 
 fn lib_for_path(path: string) -> int:
     if g_lib_on == 0:
@@ -285,18 +351,21 @@ fn file_path_by_fni(fni: int) -> string:
         if i >= g_file_count:
             return ""
         if cell_load(g_files, i * 16) == fni:
+            if cell_load(g_files, i * 16 + 8) == 0:
+                return ""
             return cell_load_str(g_files, i * 16 + 8)
         i = i + 1
     return ""
 
 fn lib_of_node(node: int) -> int:
-    if g_lib_on == 0 || node < 0 || node >= g_ast_count:
+    if node < 0 || node >= g_ast_count:
         return -1
     line := ast_line(node)
     if line <= 0 || line > g_line_count:
         return -1
     fni := cell_load(g_line_fileid, (line - 1) * 8)
-    return lib_for_path(file_path_by_fni(fni))
+    p := file_path_by_fni(fni)
+    return lib_lookup_path(p)
 
 fn lib_enable_if_user_line(line: int):
     if g_lib_on != 0:
@@ -307,7 +376,7 @@ fn lib_enable_if_user_line(line: int):
     path := file_path_by_fni(fni)
     // Do not enable the library layer for declarations inside the compiler or
     // the standard library itself. Only user declarations opt in.
-    if lib_path_has_prefix(path, "src/compiler/") != 0:
+    if lib_path_has_dir_prefix(path, "src/compiler/") != 0:
         return
     if lib_path_has_prefix(path, "src/stdlib/") != 0:
         return

@@ -1890,11 +1890,11 @@ def test_v7_cache_hit_restore_path():
 #      mutation（把 main 内一条 kind=1 边的 to_nod 改写到后一函数区间）后同一
 #      判据函数必须报出该违规（咬合证明）。
 # 期望值全部来自实现后实测（2026-09-11 探针：pure_add / id 调用 state_in=[]、
-# effect/ext_probe/load64/dyn_dispatch 四类 state_in=[前驱]、全文件 329 条 kind=1
+# effect/ext_probe/cell_load/dyn_dispatch 四类 state_in=[前驱]、全文件 329 条 kind=1
 # 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
 
 CHAIN_SRC = (
-    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id(x: int) -> int:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := load64(s)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id(x: int) -> int:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := cell_load(\"x\", 0)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
 
 
 def _op_nodes(nod, opcode, lo=0, hi=-1):
@@ -2029,9 +2029,9 @@ def test_v7_edge_semantics_effect_call_in_chain():
             ('extern call (IR_CALL_EXTERN ext_probe)',
              [i for i in _op_nodes(nod, IR_CALL_EXTERN, lo, hi)
               if _cname(strs, nod[i][2]) == 'ext_probe']),
-            ('unresolvable builtin call (IR_CALL load64)',
+            ('unresolvable builtin call (IR_CALL cell_load)',
              [i for i in _op_nodes(nod, IR_CALL, lo, hi)
-              if _cname(strs, nod[i][4]) == 'load64']),
+              if _cname(strs, nod[i][4]) == 'cell_load']),
             ('indirect call (IR_DYN_DISPATCH)',
              _op_nodes(nod, IR_DYN_DISPATCH, lo, hi)),
         ]

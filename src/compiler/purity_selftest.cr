@@ -216,7 +216,7 @@ fn purity_selftest_run() -> int:
     src = src + "fn call_effect():\n    effect()\n"
     src = src + "extern fn ext_probe(x: int) -> int\n"
     src = src + "fn call_extern(x: int) -> int:\n    return ext_probe(x)\n"
-    src = src + "fn call_builtin(x: int) -> int:\n    return load64(x)\n"
+    src = src + "fn call_builtin(s: string) -> int:\n    return cell_load(s, 0)\n"
     src = src + "fn self_rec(n: int) -> int:\n    if n <= 0:\n        return 0\n    return self_rec(n - 1)\n"
     src = src + "fn mut_rec_a(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_b(n - 1)\n"
     src = src + "fn mut_rec_b(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_a(n - 1)\n"
@@ -261,7 +261,8 @@ fn purity_selftest_run() -> int:
     // Negative case 3: an IR_CALL_EXTERN makes the function impure.
     total = total + 1
     fails = fails + ps_check("purity.call_extern", ps_purity("call_extern"), 0)
-    // Negative case 4: an unresolvable call to the runtime builtin load64, which has no FuncInfo.
+    // Negative case 4: an unresolvable call to the public runtime builtin
+    // cell_load, which has no FuncInfo. Raw load64 is not in user symbols.
     total = total + 1
     fails = fails + ps_check("purity.call_builtin", ps_purity("call_builtin"), 0)
     // Negative case 5: self-recursion is conservatively impure because the fixed point never proves the function pure.

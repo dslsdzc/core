@@ -178,6 +178,7 @@ g_ei_vt_cap : int, mut
 // 63 variants. Bits are addressed by variant index. g_cov_len is the current used
 // length. mc_begin saves the length and mc_end clears and restores it, so nested
 // matches are safe.
+g_source_name : string, mut
 g_cur_lib : int, mut
 g_saw_pub : int, mut
 g_cov_bits : string, mut

@@ -127,6 +127,7 @@ fn read_static_runtime_source() -> string:
 // Returns 0 on success, 1 on error.
 fn run_frontend(source_name: string) -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
+    g_source_name = source_name
     sm_reset()
     attributed_name := source_name
     if g_source_combined != 0:
