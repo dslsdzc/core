@@ -295,27 +295,12 @@ OP_BYTE_SUB : int = 21
 // the raw word. Backs the SYSTEM-level `@ptr_add(p, n)` builtin used by the
 // scheduler for pointer-shaped G fields.
 OP_RAW_ADD : int = 22
-// Raw 64-bit bitwise operations. Unlike OP_AND/OP_OR (boolean short-circuit
-// semantics), these operate on the raw machine word and never tag the result.
-// They back the @rawAnd/@rawOr/... builtins used by the Bits32/Bits64 stdlib.
-OP_RAW_AND : int = 23
-OP_RAW_OR : int = 24
-OP_RAW_XOR : int = 25
-OP_RAW_SHL : int = 26
-OP_RAW_SHR : int = 27
-OP_RAW_ROTL : int = 28
-OP_RAW_ROTR : int = 29
 
 // Unary operator codes
 UOP_NEG : int = 1
 UOP_NOT : int = 2
 UOP_REF : int = 3
 UOP_DEREF : int = 4
-// Tagged-int representation boundary used by the @bit* builtins. UOP_UNTAG
-// converts a tagged slot to its raw mathematical word; UOP_TAG does the reverse.
-// They are explicit so the bitwise path never mixes tagged and raw operands.
-UOP_UNTAG : int = 5
-UOP_TAG : int = 6
 
 // Type table pre-allocated indices (for checker type system)
 TI_INT : int = 0
