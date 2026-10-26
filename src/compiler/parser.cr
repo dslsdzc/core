@@ -953,7 +953,7 @@ fn is_new_var_decl() -> bool:
             break
     return false
 
-fn parse_new_var_decl() -> int:
+fn parse_new_var_decl(top_level: int) -> int:
     t := cur_tok()
     names : string, mut
     names_cap : int, mut
@@ -1086,6 +1086,8 @@ fn parse_new_var_decl() -> int:
                     "'apx' tag is only allowed on an explicit 'dex' or 'int' declaration",
                     tok_ln(t), tok_cl(t))
         node := alloc_node(EXPR_LET, ni, typ, nv, is_apx, 0, is_mut, tok_ln(t), tok_cl(t))
+        if top_level != 0 && is_pub != 0:
+            lib_export_add(lib_of_line(tok_ln(t)), ni, SYM_GLOBAL, tok_ln(t))
         if i == 0:
             first_node = node
         else:
@@ -1233,7 +1235,7 @@ fn parse_stmt() -> int:
         return 0
     // New variable declaration syntax
     if tok_k(t) == T_IDENT && is_new_var_decl():
-        return parse_new_var_decl()
+        return parse_new_var_decl(0)
     if tok_k(t) == T_RETURN:
         advance_tok()
         val : ., mut = -1
@@ -1728,7 +1730,7 @@ fn add_func(name: string, pc: int, rt: int, an: int) -> int:
     g_func_count = idx + 1
     return idx
 
-fn add_struct(name: string) -> int:
+fn add_struct(name: string, decl_line: int) -> int:
     idx := g_struct_count
     grow_structs(idx + 1)
     ni := str_intern(name)
@@ -1741,13 +1743,14 @@ fn add_struct(name: string) -> int:
         cell_store8(g_structs, base + zi, 0)
         zi = zi + 1
     cell_store(g_structs, base + OFF_SI_NAME, ni)
+    cell_store(g_structs, base + OFF_SI_DECL_LINE, decl_line)
     // Field storage starts at the side table high-water mark. Writes use base +
     // index; si_commit_fields commits the range at the end of the body.
     si_set_field_base(idx, g_si_f_used)
     g_struct_count = idx + 1
     return idx
 
-fn add_enum(name: string) -> int:
+fn add_enum(name: string, decl_line: int) -> int:
     idx := g_enum_count
     grow_enums(idx + 1)
     ni := str_intern(name)
@@ -1760,6 +1763,7 @@ fn add_enum(name: string) -> int:
         cell_store8(g_enums, base + zi, 0)
         zi = zi + 1
     cell_store(g_enums, base + OFF_EI_NAME, ni)
+    cell_store(g_enums, base + OFF_EI_DECL_LINE, decl_line)
     // Variant storage starts at the side table high-water mark. Writes use base +
     // index; ei_commit_variants commits the range at the end of the body.
     ei_set_variant_base(idx, g_ei_v_used)
@@ -1798,7 +1802,6 @@ fn parse_fn_tail_tags() -> int:
         tag := tok_lx(tag_t)
         if tag == "pub":
             pub_flag = 1
-            g_saw_pub = 1
         else:
             check_error(EC_TA_UNKNOWN_TAG,
                 "unknown function tag '" + tag + "'", tok_ln(tag_t), tok_cl(tag_t))
@@ -2274,9 +2277,12 @@ fn parse_declaration():
         sg_constrs = alloc(64 * 8)
         sg_constrs_cap = 64
         sg_count : ., mut = 0
+        struct_pub := parse_fn_tail_tags()
+        if struct_pub != 0 || ip != 0:
+            lib_export_add(lib_of_line(tok_ln(t)), str_intern(name), SYM_TYPE, tok_ln(t))
         has_items := expect_region_head()   // 0 = 空 region（如 `struct S:` 后无可达更深的行）
 
-        si := add_struct(name)
+        si := add_struct(name, tok_ln(t))
         if si >= 0:
             if sg_count > 0:
                 cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
@@ -2358,9 +2364,12 @@ fn parse_declaration():
         eg_constrs = alloc(64 * 8)
         eg_constrs_cap = 64
         eg_count : ., mut = 0
+        enum_pub := parse_fn_tail_tags()
+        if enum_pub != 0 || ip != 0:
+            lib_export_add(lib_of_line(tok_ln(t)), str_intern(name), SYM_TYPE, tok_ln(t))
         has_items := expect_region_head()   // 0 = 空 region
 
-        ei := add_enum(name)
+        ei := add_enum(name, tok_ln(t))
         if ei >= 0:
             if eg_count > 0:
                 cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, eg_count)
@@ -2640,10 +2649,14 @@ fn parse_declaration():
         else:
             add_error("expected '=' in type alias")
         type_node := parse_type()
+        alias_pub := parse_fn_tail_tags()
+        if alias_pub != 0 || ip != 0:
+            lib_export_add(lib_of_line(tok_ln(nt)), name_idx, SYM_TYPE, tok_ln(nt))
         end_decl()
         grow_type_aliases(g_type_alias_count + 1)
-        cell_store(g_type_aliases, g_type_alias_count * 16, name_idx)
-        cell_store(g_type_aliases, g_type_alias_count * 16 + 8, type_node)
+        cell_store(g_type_aliases, g_type_alias_count * ESZ_TYPE_ALIAS, name_idx)
+        cell_store(g_type_aliases, g_type_alias_count * ESZ_TYPE_ALIAS + OFF_TA_TYPE, type_node)
+        cell_store(g_type_aliases, g_type_alias_count * ESZ_TYPE_ALIAS + OFF_TA_LINE, tok_ln(nt))
         g_type_alias_count = g_type_alias_count + 1
         return
 
@@ -2694,7 +2707,7 @@ fn parse_declaration():
 
     // New syntax global variable declaration
     if check(T_IDENT) && is_new_var_decl():
-        node := parse_new_var_decl()
+        node := parse_new_var_decl(1)
         grow_global_lets(g_global_let_count + 1)
         cell_store(g_global_lets, g_global_let_count * 8, node)
         g_global_let_count = g_global_let_count + 1

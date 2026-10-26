@@ -23,11 +23,11 @@
 CLI_LONG_NAME_SIZE : int = 32
 
 // --- Internal structs ---
-struct CliCmd:
+pub struct CliCmd:
     name: string,
     desc: string,
 
-struct CliFlag:
+pub struct CliFlag:
     long_name: string,
     short_name: string,
     desc: string,

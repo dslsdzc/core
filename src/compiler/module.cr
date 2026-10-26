@@ -192,9 +192,20 @@ fn build_line_fileid():
     g_line_count = 0
     g_line_cap = 0
     slen := str_len(g_source)
+    // Library id per segment: computed once per file, then copied to each
+    // source line. Visibility checks become a single array read per symbol.
+    seglibs := alloc((g_seg_count + 1) * 8)
+    si : ., mut = 0
+    loop:
+        if si >= g_seg_count:
+            break
+        sfni := cell_load(g_seg_fileids, si * 8)
+        cell_store(seglibs, si * 8, lib_lookup_path(file_path_by_fni(sfni)))
+        si = si + 1
     seg_idx : ., mut = 0
     grow_line_file(g_line_count + 1)
     cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, 0))
+    cell_store(g_line_lib, g_line_count * 8, cell_load(seglibs, 0))
     g_line_count = g_line_count + 1
     pos : ., mut = 0
     loop:
@@ -210,6 +221,7 @@ fn build_line_fileid():
                 seg_idx = seg_idx + 1
             grow_line_file(g_line_count + 1)
             cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, seg_idx * 8))
+            cell_store(g_line_lib, g_line_count * 8, cell_load(seglibs, seg_idx * 8))
             g_line_count = g_line_count + 1
         pos = pos + 1
 
@@ -468,6 +480,7 @@ fn so_materialize(side_i: int) -> int:
     return si
 
 fn res_imports():
+    lib_export_reset()
     g_file_count = 0
     g_file_cap = 0
     g_mod_count = 0

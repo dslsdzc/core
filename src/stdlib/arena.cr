@@ -1,7 +1,6 @@
 // Arena memory model — per-subgraph bump allocator.
 // Each subgraph (function/loop/for/unsafe) gets its own Arena.
 // alloc() checks g_current_arena and uses the arena chunk when set.
-import arena_globals
 
 // Arena metadata — dynamic arrays (no fixed limit, grows like g_df_nodes)
 g_arena_cursors : string, mut     // int[] — bump cursor offset per arena
@@ -12,6 +11,13 @@ g_arena_max_size : int, mut       // default chunk size per arena
 g_arena_count : int, mut = 0      // total slots allocated
 g_arena_cap : int, mut = 0        // metadata array capacity
 // ── Internal: grow metadata arrays ──
+// Shared arena state used by the runtime allocator and arena stdlib.
+// These globals live with the arena library, not in the compiler implementation
+// tree: user code cannot see them, while every arena function shares them.
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return

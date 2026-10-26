@@ -5693,8 +5693,8 @@ fn agg_elem_count_of(tn: int) -> int:
         loop:
             if ai >= g_type_alias_count:
                 break
-            if cell_load(g_type_aliases, ai * 16) == ni:
-                rt := cell_load(g_type_aliases, ai * 16 + 8)
+            if cell_load(g_type_aliases, ai * ESZ_TYPE_ALIAS + OFF_TA_NAME) == ni:
+                rt := cell_load(g_type_aliases, ai * ESZ_TYPE_ALIAS + OFF_TA_TYPE)
                 if rt >= 0 && ast_kind(rt) == EXPR_ARRAY:
                     return ast_int_val(rt)
                 break

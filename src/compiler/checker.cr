@@ -728,24 +728,44 @@ fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     sym_set_kind(g_sym_count, kind)
     sym_set_type(g_sym_count, type_idx)
     sym_set_node(g_sym_count, node_idx)
+    // Defaults: owner unknown (same-library/legacy), not exported. Top-level
+    // declaration registrations overwrite both fields.
+    sym_set_owner(g_sym_count, -1)
+    sym_set_pub(g_sym_count, 0)
     g_sym_count = g_sym_count + 1
 
+fn def_decl_fn_sym(name_idx: int, ti: int, node: int):
+    def_sym(name_idx, SYM_FN, ti, node)
+    si := g_sym_count - 1
+    sym_set_owner(si, lib_of_node(node))
+    sym_set_pub(si, fn_node_is_pub(node))
+
+fn def_decl_global_sym(name_idx: int, ti: int, node: int):
+    def_sym(name_idx, SYM_GLOBAL, ti, node)
+    si := g_sym_count - 1
+    owner := lib_of_node(node)
+    sym_set_owner(si, owner)
+    is_pub : ., mut = 0
+    if owner >= 0 && lib_export_find_kind(owner, name_idx, SYM_GLOBAL) >= 0:
+        is_pub = 1
+    sym_set_pub(si, is_pub)
+
+fn sym_owner(si: int) -> int:
+    return sym_owner_field(si)
+
 fn sym_visible(si: int) -> int:
-    if g_lib_on == 0 || g_cur_lib < 0:
+    if g_cur_lib < 0:
         return 1
     k := sym_kind(si)
     if k < SYM_FN || k > SYM_SO_FN:
         return 1
-    node := sym_node(si)
-    if node < 0:
-        return 1
-    owner := lib_of_node(node)
+    owner := sym_owner_field(si)
     if owner < 0 || owner == g_cur_lib:
         return 1
-    return fn_node_is_pub(node)
+    return sym_pub_field(si)
 
 fn func_visible(fi: int) -> int:
-    if g_lib_on == 0 || g_cur_lib < 0:
+    if g_cur_lib < 0:
         return 1
     node := fi_ast_node(fi)
     if node < 0:
@@ -756,27 +776,15 @@ fn func_visible(fi: int) -> int:
     return fn_node_is_pub(node)
 
 fn mod_func_visible(target_fni: int, name_ni: int) -> int:
-    if g_lib_on == 0 || g_cur_lib < 0:
+    if g_cur_lib < 0:
         return 1
-    i : ., mut = 0
-    loop:
-        if i >= g_func_count:
-            return 0
-        if fi_name(i) == name_ni:
-            node := fi_ast_node(i)
-            line := ast_line(node)
-            if line > 0 && line <= g_line_count:
-                fni := cell_load(g_line_fileid, (line - 1) * 8)
-                if fni == target_fni:
-                    owner := lib_of_node(node)
-                    if owner < 0 || owner == g_cur_lib:
-                        return 1
-                    return fn_node_is_pub(node)
-        i = i + 1
-    return 0
+    owner := lib_lookup_path(file_path_by_fni(target_fni))
+    if owner < 0 || owner == g_cur_lib:
+        return 1
+    return lib_export_find_kind(owner, name_ni, SYM_FN) >= 0
 
 fn register_pub_export(name_ni: int, node: int):
-    if g_lib_on == 0 || node < 0 || fn_node_is_pub(node) == 0:
+    if node < 0 || fn_node_is_pub(node) == 0:
         return
     lid := lib_of_node(node)
     if lid >= 0:
@@ -996,7 +1004,12 @@ fn res_type_node(node: int) -> int:
         si := find_gsym(name_idx)
         if si >= 0 && sym_kind(si) == SYM_TYPE:
             return sym_type(si)
-        // Create named type entry
+        // Declaration collection runs with g_cur_lib = -1: forward references
+        // are allowed there. Inside a function body an unresolved name means the
+        // type is absent or belongs to another library without `pub`.
+        if g_cur_lib >= 0:
+            check_error(EC_N_UNDEFINED, "Undefined type '" + istr_get(name_idx) + "'", ast_line(node), ast_col(node))
+            return ti_error()
         return alloc_named_type(name_idx)
     if ast_kind(node) == EXPR_ARRAY:
         // Representation-layer concept: `[T; N]` has no constructor identity in the
@@ -1448,6 +1461,22 @@ fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_coun
 
 // --- First pass: collect all declarations ---
 
+// A named type symbol carries a synthetic declaration node so the symbol's
+// owning library is derived from its real declaration line (types have no
+// EXPR_* declaration node of their own).
+fn def_type_sym(name_idx: int, ti: int, line: int):
+    node : ., mut = -1
+    if line > 0:
+        node = alloc_node(EXPR_NONE, 0, 0, 0, 0, 0, 0, line, 1)
+    def_sym(name_idx, SYM_TYPE, ti, node)
+    si := g_sym_count - 1
+    owner := lib_of_node(node)
+    sym_set_owner(si, owner)
+    type_pub : ., mut = 0
+    if owner >= 0 && lib_export_find_kind(owner, name_idx, SYM_TYPE) >= 0:
+        type_pub = 1
+    sym_set_pub(si, type_pub)
+
 fn collect_decls():
     i : ., mut = 0
     // First: register all struct types
@@ -1456,7 +1485,7 @@ fn collect_decls():
             break
         name_idx := si_name(i)
         type_idx := alloc_named_type(name_idx)
-        def_sym(name_idx, SYM_TYPE, type_idx, -1)
+        def_type_sym(name_idx, type_idx, si_decl_line(i))
         i = i + 1
     // Resolve struct field types now that all struct names are registered
     i = 0
@@ -1516,7 +1545,7 @@ fn collect_decls():
             break
         name_idx := ei_name(i)
         type_idx := alloc_named_type(name_idx)
-        def_sym(name_idx, SYM_TYPE, type_idx, -1)
+        def_type_sym(name_idx, type_idx, ei_decl_line(i))
         // Register each variant as a function returning the enum type
         vi : ., mut = 0
         loop:
@@ -1553,16 +1582,15 @@ fn collect_decls():
     loop:
         if i >= g_type_alias_count:
             break
-        name_idx := cell_load(g_type_aliases, i * 16)
-        type_node := cell_load(g_type_aliases, i * 16 + 8)
+        name_idx := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS)
+        type_node := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_TYPE)
+        alias_line := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_LINE)
         ti := res_type_node(type_node)
-        def_sym(name_idx, SYM_TYPE, ti, -1)
+        def_type_sym(name_idx, ti, alias_line)
         i = i + 1
 
-    // Register all functions. The library layer opts in only when a user
-    // declaration is exported; this must happen before function registration so
-    // pub exports and cross-library filters see the final flag.
-    lib_prepare_from_pub()
+    // Register all functions. Library visibility is always enforced: same
+    // library declarations are visible, cross-library ones require `pub`.
     i = 0
     loop:
         if i >= g_func_count:
@@ -1610,7 +1638,7 @@ fn collect_decls():
             fn_name_str := istr_get(name_idx)
             mangled_name := fn_name_str + ".v" + int_str(hotpatch_ver)
             mangled_ni := str_intern(mangled_name)
-            def_sym(mangled_ni, SYM_FN, rt_ti, fn_node)
+            def_decl_fn_sym(mangled_ni, rt_ti, fn_node)
             register_pub_export(mangled_ni, fn_node)
 
             // Verify signature matches the first version
@@ -1643,7 +1671,7 @@ fn collect_decls():
                 fj = fj + 1
 
             // Also register original name for call resolution (latest version wins)
-            def_sym(name_idx, SYM_FN, rt_ti, fn_node)
+            def_decl_fn_sym(name_idx, rt_ti, fn_node)
             register_pub_export(name_idx, fn_node)
         else:
             // Normal function: check for duplicates (allow if existing is @hotpatch)
@@ -1656,7 +1684,7 @@ fn collect_decls():
                 if existing_is_hotpatch == 0:
                     fn_name_str := istr_get(name_idx)
                     check_error(EC_N_DUPLICATE, "Duplicate function definition '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node))
-            def_sym(name_idx, SYM_FN, rt_ti, fn_node)
+            def_decl_fn_sym(name_idx, rt_ti, fn_node)
             register_pub_export(name_idx, fn_node)
         fi_set_ispure(i, 1)  // optimistic: all functions are pure
         i = i + 1
@@ -1682,7 +1710,7 @@ fn collect_decls():
 
             // Register in symbol table (skip if duplicate)
             if find_gsym(name_ni) < 0:
-                def_sym(name_ni, SYM_FN, rt_ti, ei)
+                def_decl_fn_sym(name_ni, rt_ti, ei)
                 register_pub_export(name_ni, ei)
 
             // Register in g_funcs for backend codegen and linking
@@ -1707,7 +1735,7 @@ fn collect_decls():
         ti := TI_UNIT
         if type_node >= 0:
             ti = res_type_node(type_node)
-        def_sym(name_idx, SYM_GLOBAL, ti, node)
+        def_decl_global_sym(name_idx, ti, node)
         i = i + 1
     // Register module aliases (from imports)
     mi : ., mut = 0
@@ -1770,6 +1798,18 @@ fn find_func(name_idx: int) -> int:
         if i >= g_func_count:
             return -1
         if fi_name(i) == name_idx && func_visible(i) != 0:
+            return i
+        i = i + 1
+    return -1
+
+// Unfiltered lookup for diagnostics: a method-table hit must be able to ask
+// "does this method exist but belong to another library without pub?".
+fn find_func_raw(name_idx: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            return -1
+        if fi_name(i) == name_idx:
             return i
         i = i + 1
     return -1
@@ -3796,7 +3836,15 @@ fn infer_expr(node: int) -> int:
                     if mi >= g_method_count:
                         break
                     if cell_load(g_methods, mi * 24) == struct_ni && cell_load(g_methods, mi * 24 + 8) == method_ni:
-                        func_ni = cell_load(g_methods, mi * 24 + 16)
+                        cand_ni := cell_load(g_methods, mi * 24 + 16)
+                        cand_fi := find_func_raw(cand_ni)
+                        if cand_fi >= 0:
+                            cand_node := fi_ast_node(cand_fi)
+                            cand_owner := lib_of_node(cand_node)
+                            if cand_owner >= 0 && cand_owner != g_cur_lib && lib_export_find_kind(cand_owner, cand_ni, SYM_FN) < 0:
+                                check_error(EC_N_METHOD, "Undefined method '" + istr_get(method_ni) + "'", ast_line(node), ast_col(node))
+                                break
+                        func_ni = cand_ni
                         ast_set_data(node, func_ni)
                         break
                     mi = mi + 1
@@ -5105,6 +5153,9 @@ fn check_all():
     // fixed-size preserve buffer, so a large symbol table cannot overflow a fixed
     // alloc(128 * 8).
     g_sym_count = 0
+    // Unknown requester during declaration collection: visibility filtering
+    // starts when a function body is checked and g_cur_lib is resolved.
+    g_cur_lib = -1
     g_scope_depth = 0
     g_scope_bounds_cap = 0
     g_diag_count = 0

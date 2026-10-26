@@ -8,12 +8,12 @@
 // ============================================================
 ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
 ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
-ESZ_SYMENTRY : int = 32    // name_idx,kind,type_idx,node_idx = 4×8
+ESZ_SYMENTRY : int = 48    // name,kind,type,node,owner_lib,pub = 6×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48    // opcode,dest,src1,src2,src3,type_kind = 6×8
 ESZ_FUNCINFO : int = 688
-ESZ_STRUCTINFO : int = 440
-ESZ_ENUMINFO : int = 4408  // name, variants[16] with payload type nodes, counts, generic names
+ESZ_STRUCTINFO : int = 448
+ESZ_ENUMINFO : int = 4416  // name, variants[16] with payload type nodes, counts, generic names
 
 // Token field offsets
 OFF_TK_KIND : int = 0
@@ -41,6 +41,8 @@ OFF_SY_NAME : int = 0
 OFF_SY_KIND : int = 8
 OFF_SY_TYPE : int = 16
 OFF_SY_NODE : int = 24
+OFF_SY_OWNER : int = 32
+OFF_SY_PUB : int = 40
 
 // IRVar field offsets
 OFF_IRV_NAME : int = 0
@@ -83,6 +85,11 @@ OFF_SI_FIELD_TYPE_NODES : int = 264   // 保留未用
 OFF_SI_FIELD_COUNT : int = 392
 OFF_SI_GENERIC_NAMES : int = 400
 OFF_SI_GENERIC_COUNT : int = 432
+OFF_SI_DECL_LINE : int = 440
+ESZ_TYPE_ALIAS : int = 24
+OFF_TA_NAME : int = 0
+OFF_TA_TYPE : int = 8
+OFF_TA_LINE : int = 16
 
 // DFNode sizes and offsets. Type information has one source:
 //   OFF_DF_TK (40) = type-term reference (a g_type_terms row), or -1.
@@ -248,6 +255,7 @@ OFF_EI_VARIANTS : int = 8    // = variant_base
 OFF_EI_VARIANT_COUNT : int = 4360
 OFF_EI_GENERIC_NAMES : int = 4368
 OFF_EI_GENERIC_COUNT : int = 4400
+OFF_EI_DECL_LINE : int = 4408
 OFF_EV_NAME : int = 0
 OFF_EV_TYPES : int = 8
 OFF_EV_TYPE_COUNT : int = 136
@@ -616,6 +624,18 @@ fn sym_set_type(n: int, v: int):
     cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE, v)
 fn sym_set_node(n: int, v: int):
     cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE, v)
+fn sym_owner_field(n: int) -> int:
+    if n < 0 || n >= g_sym_count:
+        return -1
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_OWNER)
+fn sym_pub_field(n: int) -> int:
+    if n < 0 || n >= g_sym_count:
+        return 0
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_PUB)
+fn sym_set_owner(n: int, v: int):
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_OWNER, v)
+fn sym_set_pub(n: int, v: int):
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_PUB, v)
 
 // IRVar helpers
 fn irv_name(n: int) -> int:
@@ -722,6 +742,16 @@ fn fi_set_ispure(n: int, v: int):
     cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE, v)
 
 // StructInfo helpers
+fn si_decl_line(n: int) -> int:
+    if n < 0 || n >= g_struct_count:
+        return -1
+    return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_DECL_LINE)
+
+fn ei_decl_line(n: int) -> int:
+    if n < 0 || n >= g_enum_count:
+        return -1
+    return cell_load(g_enums, n * ESZ_ENUMINFO + OFF_EI_DECL_LINE)
+
 fn si_name(n: int) -> int:
     return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME)
 fn si_field_count(n: int) -> int:
@@ -1143,6 +1173,9 @@ fn grow_line_file(needed: int):
     nb := alloc(nc * 8)
     cell_copy(g_line_fileid, g_line_cap * 8, nb)
     g_line_fileid = nb
+    nb2 := alloc(nc * 8)
+    cell_copy(g_line_lib, g_line_cap * 8, nb2)
+    g_line_lib = nb2
     g_line_cap = nc
 fn grow_segs(needed: int):
     if needed < g_seg_cap:
@@ -1330,8 +1363,8 @@ fn grow_type_aliases(needed: int):
         nc = 32
     if nc < needed:
         nc = needed + 32
-    nb := alloc(nc * 16)
-    cell_copy(g_type_aliases, g_type_alias_cap * 16, nb)
+    nb := alloc(nc * ESZ_TYPE_ALIAS)
+    cell_copy(g_type_aliases, g_type_alias_cap * ESZ_TYPE_ALIAS, nb)
     g_type_aliases = nb
     g_type_alias_cap = nc
 fn grow_scope_bounds(needed: int):

@@ -958,6 +958,11 @@ fn analysis_sym_item_kind(sk: int) -> int:
 
 // Completion JSON {"items":[...]} at a position, using the snapshot without running a check.
 fn analysis_completion(line: int, col: int) -> string:
+    // Completion runs after check_all, where g_cur_lib is reset to -1. Use the
+    // main document's library (@user) so cross-library pub filtering applies to
+    // whatever imports the analysis pulled in.
+    saved_lib := g_cur_lib
+    g_cur_lib = lib_find("@user")
     pos := analysis_pos_of(line, col)
     pstart := analysis_prefix_start(pos)
     at_ctx : ., mut = 0
@@ -981,6 +986,9 @@ fn analysis_completion(line: int, col: int) -> string:
         loop:
             if i >= g_sym_count:
                 break
+            if sym_visible(i) == 0:
+                i = i + 1
+                continue
             kk : ., mut = analysis_sym_item_kind(sym_kind(i))
             // SYM_TYPE covers structs, enums, and interfaces. Distinguish enums by
             // name and emit Enum=13; otherwise emit Struct=22.
@@ -992,6 +1000,9 @@ fn analysis_completion(line: int, col: int) -> string:
         loop:
             if i >= g_func_count:
                 break
+            if func_visible(i) == 0:
+                i = i + 1
+                continue
             cnt = cnt + analysis_cand_add(cand, cnt, fi_name(i), 3)
             i = i + 1
         i = 0
@@ -1017,6 +1028,7 @@ fn analysis_completion(line: int, col: int) -> string:
                 out = out + analysis_citem(istr_get(ni), cell_load(cand, j * 16 + 8))
             j = j + 1
     out = out + "]}"
+    g_cur_lib = saved_lib
     return out
 
 // documentSymbol: top-level symbols as a JSON array.

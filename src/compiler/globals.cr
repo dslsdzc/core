@@ -180,7 +180,6 @@ g_ei_vt_cap : int, mut
 // matches are safe.
 g_source_name : string, mut
 g_cur_lib : int, mut
-g_saw_pub : int, mut
 g_cov_bits : string, mut
 g_cov_cap : int, mut
 g_cov_len : int, mut

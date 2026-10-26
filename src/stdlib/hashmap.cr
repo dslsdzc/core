@@ -8,7 +8,7 @@
 import internal::bytes
 import internal::word
 
-struct IntMap:
+pub struct IntMap:
     keys: string
     values: string
     used: string
@@ -86,7 +86,7 @@ fn intMapGrow(m: IntMap) -> IntMap:
         i = i + 1
     return out
 
-fn intMapWith(initial_cap: int, growth_num: int, growth_den: int, load_num: int, load_den: int, seed: int, hash_kind: int) -> IntMap:
+fn intMapWith(initial_cap: int, growth_num: int, growth_den: int, load_num: int, load_den: int, seed: int, hash_kind: int) -> IntMap, pub:
     cap := intMapNextPow2(initial_cap)
     if cap < 4:
         cap = 4
@@ -145,7 +145,7 @@ impl IntMap:
             i = i + 1
         return tomb
 
-    fn put(&mut self, key: int, value: int):
+    fn put(&mut self, key: int, value: int), pub:
         if self.load_den <= 0:
             self.load_den = 1
         if (self.count + 1) * self.load_den > self.cap * self.load_num:
@@ -165,28 +165,28 @@ impl IntMap:
             byteStore(self.used, slot, 1)
             self.count = self.count + 1
 
-    fn get(&self, key: int) -> int:
+    fn get(&self, key: int) -> int, pub:
         slot := self.findKey(key)
         if slot < 0:
             return 0
         return cell_load(self.values, slot * 8)
 
-    fn has(&self, key: int) -> bool:
+    fn has(&self, key: int) -> bool, pub:
         return self.findKey(key) >= 0
 
-    fn remove(&mut self, key: int):
+    fn remove(&mut self, key: int), pub:
         slot := self.findKey(key)
         if slot >= 0:
             byteStore(self.used, slot, 2)
             self.count = self.count - 1
 
-    fn size(&self) -> int:
+    fn size(&self) -> int, pub:
         return self.count
 
-    fn capacity(&self) -> int:
+    fn capacity(&self) -> int, pub:
         return self.cap
 
-    fn clear(&mut self):
+    fn clear(&mut self), pub:
         i : ., mut = 0
         loop:
             if i >= self.cap:
