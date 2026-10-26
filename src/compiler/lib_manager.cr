@@ -63,9 +63,8 @@ fn grow_libs(needed: int):
 fn lib_add(name: string, root: string, kind: int) -> int:
     lid := g_lib_count
     grow_libs(lid + 1)
-    ni := str_intern(name)
     off := lid * LIB_REC
-    cell_store(g_libs, off + OFF_LIB_NAME, ni)
+    cell_store_str(g_libs, off + OFF_LIB_NAME, name)
     cell_store_str(g_libs, off + OFF_LIB_ROOT, root)
     cell_store(g_libs, off + OFF_LIB_KIND, kind)
     cell_store_str(g_libs, off + OFF_LIB_DEPS, "")
@@ -77,16 +76,10 @@ fn lib_add(name: string, root: string, kind: int) -> int:
     g_lib_count = lid + 1
     return lid
 
-fn lib_name_ni(lid: int) -> int:
-    if lid < 0 || lid >= g_lib_count:
-        return -1
-    return cell_load(g_libs, lid * LIB_REC + OFF_LIB_NAME)
-
 fn lib_name(lid: int) -> string:
-    ni := lib_name_ni(lid)
-    if ni < 0:
+    if lid < 0 || lid >= g_lib_count:
         return ""
-    return istr_get(ni)
+    return cell_load_str(g_libs, lid * LIB_REC + OFF_LIB_NAME)
 
 fn lib_root(lid: int) -> string:
     if lid < 0 || lid >= g_lib_count:
@@ -260,10 +253,10 @@ fn lib_path_has_prefix(path: string, prefix: string) -> int:
         return 1
     return 0
 
-fn lib_for_path(path: string) -> int:
-    if g_lib_on == 0:
-        return -1
+fn lib_lookup_path(path: string) -> int:
     lib_init_defaults_once()
+    if g_lib_inited == 0:
+        return -1
     best : ., mut = -1
     best_len : ., mut = -1
     i : ., mut = 0
@@ -280,6 +273,74 @@ fn lib_for_path(path: string) -> int:
     if best >= 0:
         return best
     return lib_find("@user")
+
+fn lib_for_path(path: string) -> int:
+    if g_lib_on == 0:
+        return -1
+    return lib_lookup_path(path)
+
+fn file_path_by_fni(fni: int) -> string:
+    i : ., mut = 0
+    loop:
+        if i >= g_file_count:
+            return ""
+        if cell_load(g_files, i * 16) == fni:
+            return cell_load_str(g_files, i * 16 + 8)
+        i = i + 1
+    return ""
+
+fn lib_of_node(node: int) -> int:
+    if g_lib_on == 0 || node < 0 || node >= g_ast_count:
+        return -1
+    line := ast_line(node)
+    if line <= 0 || line > g_line_count:
+        return -1
+    fni := cell_load(g_line_fileid, (line - 1) * 8)
+    return lib_for_path(file_path_by_fni(fni))
+
+fn lib_enable_if_user_line(line: int):
+    if g_lib_on != 0:
+        return
+    if line <= 0 || line > g_line_count:
+        return
+    fni := cell_load(g_line_fileid, (line - 1) * 8)
+    path := file_path_by_fni(fni)
+    // Do not enable the library layer for declarations inside the compiler or
+    // the standard library itself. Only user declarations opt in.
+    if lib_path_has_prefix(path, "src/compiler/") != 0:
+        return
+    if lib_path_has_prefix(path, "src/stdlib/") != 0:
+        return
+    g_lib_on = 1
+    lib_register_defaults()
+
+fn lib_owner_unfiltered(node: int) -> int:
+    if node < 0 || node >= g_ast_count:
+        return -1
+    line := ast_line(node)
+    if line <= 0 || line > g_line_count:
+        return -1
+    fni := cell_load(g_line_fileid, (line - 1) * 8)
+    return lib_lookup_path(file_path_by_fni(fni))
+
+// Enable the library layer only when a user declaration is exported. Standard
+// library pub tags do not opt the whole compilation into filtering.
+fn lib_prepare_from_pub():
+    if g_saw_pub == 0 || g_lib_on != 0:
+        return
+    if g_lib_inited == 0:
+        lib_register_defaults()
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            return
+        node := fi_ast_node(i)
+        if fn_node_is_pub(node) != 0:
+            owner := lib_owner_unfiltered(node)
+            if owner >= 0 && lib_kind(owner) == LIB_KIND_USER:
+                g_lib_on = 1
+                return
+        i = i + 1
 
 fn lib_selftest() -> int:
     lib_reset()

@@ -1,19 +1,19 @@
 // fmt — String formatting and conversion utilities.
 // All functions are pure (no side effects).
 
-fn str_len(s: string) -> int:
+fn str_len(s: string) -> int, pub:
     hdr := load64(s, -8)  // total bytes allocated (includes null)
     if hdr <= 0:
         return 0
     return hdr - 1        // exclude null terminator
 
-fn chr(c: int) -> string:
+fn chr(c: int) -> string, pub:
     res := alloc(2)
     store8(res, 0, c)
     store8(res, 1, 0)
     return res
 
-fn get_char(s: string, idx: int) -> string:
+fn get_char(s: string, idx: int) -> string, pub:
     sl := str_len(s)
     if idx < 0 || idx >= sl:
         return ""
@@ -23,7 +23,7 @@ fn get_char(s: string, idx: int) -> string:
     store8(res, 1, 0)
     return res
 
-fn str_sub(s: string, start: int, len: int) -> string:
+fn str_sub(s: string, start: int, len: int) -> string, pub:
     slen := str_len(s)
     if start < 0 || start >= slen:
         return ""
@@ -43,7 +43,7 @@ fn str_sub(s: string, start: int, len: int) -> string:
     store8(res, actual_len, 0)
     return res
 
-fn str_eq(a: string, b: string) -> int:
+fn str_eq(a: string, b: string) -> int, pub:
     la := str_len(a)
     lb := str_len(b)
     if la != lb:
@@ -57,7 +57,7 @@ fn str_eq(a: string, b: string) -> int:
         i = i + 1
     return 0
 
-fn str_cmp(a: string, b: string) -> int:
+fn str_cmp(a: string, b: string) -> int, pub:
     i : ., mut = 0
     loop:
         ca := load8(a, i)
@@ -75,7 +75,7 @@ fn str_cmp(a: string, b: string) -> int:
         i = i + 1
     return 0
 
-fn concat(a: string, b: string) -> string:
+fn concat(a: string, b: string) -> string, pub:
     aa := a
     bb := b
     lena := str_len(aa)
@@ -98,7 +98,7 @@ fn concat(a: string, b: string) -> string:
     store8(res, lena + lenb, 0)
     return res
 
-fn int_str(n: int) -> string:
+fn int_str(n: int) -> string, pub:
     if n == 0:
         return "0"
     val : ., mut = n
@@ -137,7 +137,7 @@ fn int_str(n: int) -> string:
     store8(buf, end, 0)
     return buf
 
-fn str_int(s: string) -> int:
+fn str_int(s: string) -> int, pub:
     slen := str_len(s)
     if slen == 0:
         return 0
@@ -160,14 +160,14 @@ fn str_int(s: string) -> int:
         return -res
     return res
 
-fn to_str(n: int) -> string:
+fn to_str(n: int) -> string, pub:
     return int_str(n)
 // Convert a bool to text for interpolation. It returns "true" or "false" without
 // converting through int, following the rule that bool is not implicitly an int.
 // A helper function is required because an inline if expression inside a string
 // concatenation crashes the bootstrap compiler. All programs importing fmt carry
 // this function.
-fn bool_str(b: bool) -> string:
+fn bool_str(b: bool) -> string, pub:
     if b:
         return "true"
     return "false"
@@ -175,7 +175,7 @@ fn bool_str(b: bool) -> string:
 
 // Replace {0} in a format string with a0. The one-argument form supports one
 // placeholder.
-fn format(fmt_str: string, a0: string) -> string:
+fn format(fmt_str: string, a0: string) -> string, pub:
     fl := str_len(fmt_str)
     a0l := str_len(a0)
     // Fast path: no interpolation needed
@@ -203,11 +203,11 @@ fn format(fmt_str: string, a0: string) -> string:
     store8(out_buf, ri, 0)
     return out_buf
 
-fn format2(fmt_str: string, a0: string, a1: string) -> string:
+fn format2(fmt_str: string, a0: string, a1: string) -> string, pub:
     return format(fmt_str, a0)  // the one-argument form handles only {0}
 
 // Format an integer through int_str.
-fn format_int(fmt_str: string, val: int) -> string:
+fn format_int(fmt_str: string, val: int) -> string, pub:
     return format(fmt_str, int_str(val))
 
 // Float printing: IEEE 754 double to decimal text with at most six fractional
@@ -224,7 +224,7 @@ fn fpow2i(k: int) -> int:
         i = i + 1
     return v
 
-fn float_str_bits(bits: int) -> string:
+fn float_str_bits(bits: int) -> string, pub:
     // Sign bit.
     neg : int = 0
     u : int = bits

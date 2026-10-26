@@ -3,24 +3,24 @@
 // Rust-style string interpolation via format() in fmt.cr.
 // Note: depends on fmt.cr (str_len, int_str) — see stdlib/_import.cr or import fmt
 
-fn print(s: string):
+fn print(s: string), pub:
     slen := str_len(s)
     r1 := syscall3(1, 1, s, slen)  // write(1, s, len)
     return
 
-fn println(s: string):
+fn println(s: string), pub:
     slen := str_len(s)
     r1 := syscall3(1, 1, s, slen)  // write(1, s, len)
     r2 := syscall3(1, 1, "\n", 1)  // write(1, "\n", 1)
     return
 
-fn print_i(n: int):
+fn print_i(n: int), pub:
     print(int_str(n))
 
-fn println_i(n: int):
+fn println_i(n: int), pub:
     println(int_str(n))
 
-fn read_file(path: string) -> string:
+fn read_file(path: string) -> string, pub:
     fd := syscall3(2, path, 0, 0)  // open(path, O_RDONLY, 0)
     if fd < 0:
         return ""
@@ -73,7 +73,7 @@ fn read_file(path: string) -> string:
         store8(buf, nread, 0)
     return buf
 
-fn write_file(path: string, content: string) -> int:
+fn write_file(path: string, content: string) -> int, pub:
     fd := syscall3(2, path, 577, 420)  // open O_WRONLY|O_CREAT|O_TRUNC, 0644
     if fd < 0:
         return -1

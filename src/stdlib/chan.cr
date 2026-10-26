@@ -28,7 +28,7 @@ fn _chan_ensure_init():
 //  72: temp_val   — temporary value storage for handoff (offset 56 is
 //      saved_fn — never write it from channel code)
 
-fn chan_make(elemsize: int, cap: int) -> string:
+fn chan_make(elemsize: int, cap: int) -> string, pub:
     _chan_ensure_init()
     ch := alloc(64)
     buf := alloc(cap * elemsize)
@@ -42,7 +42,7 @@ fn chan_make(elemsize: int, cap: int) -> string:
     cell_store(ch, 56, 0)          // closed = false
     return ch
 
-fn chan_send(ch: string, val: int):
+fn chan_send(ch: string, val: int), pub:
     _chan_ensure_init()
     buf := cell_load(ch, 0)
     cap := cell_load(ch, 8)
@@ -90,7 +90,7 @@ fn chan_send(ch: string, val: int):
     // Yield — scheduler will wake us when receiver comes
     sched_yield()
 
-fn chan_recv(ch: string) -> int:
+fn chan_recv(ch: string) -> int, pub:
     _chan_ensure_init()
     buf := cell_load(ch, 0)
     cap := cell_load(ch, 8)
@@ -143,7 +143,7 @@ fn chan_recv(ch: string) -> int:
     val := cell_load(g, 72)
     return val
 
-fn chan_close(ch: string):
+fn chan_close(ch: string), pub:
     _chan_ensure_init()
     cell_store(ch, 56, 1)  // closed = true
 

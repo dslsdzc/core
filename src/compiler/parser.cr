@@ -1798,7 +1798,7 @@ fn parse_fn_tail_tags() -> int:
         tag := tok_lx(tag_t)
         if tag == "pub":
             pub_flag = 1
-            lib_enable()
+            g_saw_pub = 1
         else:
             check_error(EC_TA_UNKNOWN_TAG,
                 "unknown function tag '" + tag + "'", tok_ln(tag_t), tok_cl(tag_t))

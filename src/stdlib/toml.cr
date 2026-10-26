@@ -60,7 +60,7 @@ fn _next_line_start(content: string, pos: int) -> int:
 
 // Extract a string value: name = "value"
 // Returns empty string if not found.
-fn toml_get_str(content: string, key: string) -> string:
+fn toml_get_str(content: string, key: string) -> string, pub:
     slen := str_len(content)
     klen := str_len(key)
     pos : ., mut = 0
@@ -98,7 +98,7 @@ fn toml_get_str(content: string, key: string) -> string:
 
 // Extract an integer value: key = 123
 // Returns 0 if not found or invalid.
-fn toml_get_int(content: string, key: string) -> int:
+fn toml_get_int(content: string, key: string) -> int, pub:
     slen := str_len(content)
     klen := str_len(key)
     pos : ., mut = 0
@@ -138,7 +138,7 @@ fn toml_get_int(content: string, key: string) -> int:
     return 0
 
 // Extract project name (shorthand for toml_get_str(content, "name"))
-fn extract_toml_name(content: string) -> string:
+fn extract_toml_name(content: string) -> string, pub:
     return toml_get_str(content, "name")
 
 // Hex digit value (0-15), -1 if not a hex digit.
@@ -159,7 +159,7 @@ fn _toml_hex_digit(c: int) -> int:
 // Returns the item count when the list ends at ']'. Returns -1 when the key is
 // absent, the value is not an array, an item is malformed, or the item count
 // exceeds max_items. It never truncates.
-fn toml_get_int_list(content: string, key: string, out: string, max_items: int) -> int:
+fn toml_get_int_list(content: string, key: string, out: string, max_items: int) -> int, pub:
     slen := str_len(content)
     klen := str_len(key)
     pos : ., mut = 0
@@ -266,7 +266,7 @@ struct MemLayout:
     text_base: int,
     data_base: int,
 
-fn toml_read_memlayout(content: string) -> MemLayout:
+fn toml_read_memlayout(content: string) -> MemLayout, pub:
     return MemLayout {
         stack_size = toml_get_int(content, "stack_size"),
         heap_size = toml_get_int(content, "heap_size"),

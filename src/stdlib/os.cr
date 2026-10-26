@@ -8,7 +8,7 @@ struct Argv4:
     a: string, b: string, c: string, d: int
 
 // get_cwd() - return the process working directory.
-fn get_cwd() -> string:
+fn get_cwd() -> string, pub:
     buf := alloc(4096)
     n := syscall3(79, buf, 4096, 0)
     if n <= 1:
@@ -16,7 +16,7 @@ fn get_cwd() -> string:
     return str_sub(buf, 0, n - 1)
 
 // get_exe_path() - resolve the running executable even when argv[0] came from PATH.
-fn get_exe_path() -> string:
+fn get_exe_path() -> string, pub:
     buf := alloc(4096)
     n := syscall3(89, "/proc/self/exe", buf, 4095)
     if n <= 0:
@@ -25,7 +25,7 @@ fn get_exe_path() -> string:
 
 // system(cmd): fork, run /bin/sh -c cmd in the child, wait4 in the parent, and
 // return the child's exit status. Returns -1 on failure.
-fn system(cmd: string) -> int:
+fn system(cmd: string) -> int, pub:
     // Fork.
     pid := syscall3(57, 0, 0, 0)
     if pid < 0:
@@ -58,7 +58,7 @@ fn system(cmd: string) -> int:
 
 // get_env(name): read an environment variable from /proc/self/environ.
 // Returns the value, or "" when the variable is absent.
-fn get_env(name: string) -> string:
+fn get_env(name: string) -> string, pub:
     env := read_file("/proc/self/environ")
     if str_len(env) == 0:
         return ""
