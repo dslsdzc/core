@@ -2407,6 +2407,12 @@ fn parse_declaration():
                 skip_newlines()
                 if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                     break
+                // V4 enum variants may use the documented leading `|` form.
+                // The bootstrap parser already accepts it; the self-hosted
+                // parser must accept the same surface. Bare layout variants
+                // remain accepted for existing corpora.
+                if check(T_PIPE):
+                    advance_tok()
                 vt := advance_tok()
                 vname := tok_lx(vt)
                 vni := str_intern(vname)
