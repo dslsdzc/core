@@ -852,6 +852,25 @@ fn main() -> int:
     return 42
 """
 
+MATCH_STRING_FIRST_BYTE_SOURCE = """fn pick(s: string) -> int:
+    return match s:
+        "aa" => 1,
+        "ba" => 2,
+        "ca" => 3,
+        _ => 4
+
+fn main() -> int:
+    if pick("aa") != 1:
+        return 10
+    if pick("ba") != 2:
+        return 11
+    if pick("ca") != 3:
+        return 12
+    if pick("da") != 4:
+        return 13
+    return 42
+"""
+
 MATCH_CHAR_SOURCE = """fn code_a() -> int:
     return 'A' as int
 
@@ -2479,6 +2498,24 @@ def test_string_match_uses_length_bucket():
             42,
             opts=(0, 2),
             name="match_string_lengths",
+        )
+
+
+def test_string_match_uses_first_byte_bucket():
+    """Same-length string arms are prefixed by a first-byte load8 comparison."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_STRING_FIRST_BYTE_SOURCE, "match_string_first_byte"
+        )
+        calls = _user_call_names(data, "pick")
+        assert "str_len" in calls and "load8" in calls, calls
+        _assert_program(
+            tmp,
+            MATCH_STRING_FIRST_BYTE_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_string_first_byte",
         )
 
 
