@@ -3241,6 +3241,7 @@ fn gen_expr(node: int) -> int:
         saw_int : ., mut = 0
         saw_bool : ., mut = 0
         saw_enum : ., mut = 0
+        saw_string : ., mut = 0
         an0 = first_arm
         loop:
             if an0 < 0:
@@ -3264,6 +3265,9 @@ fn gen_expr(node: int) -> int:
                 if ast_c(ap0) != 0:
                     // Payload binding/guard patterns are Task 4/5.
                     match_mode = 0
+            else if k0 == EXPR_STRING:
+                saw_string = 1
+                match_mode = 0
             else if k0 == EXPR_IDENT && str_eq(istr_get(ast_int_val(ap0)), "_") != 0:
                 // The lexer classifies a bare `_` as an identifier because `_`
                 // is a valid identifier character; the parser's EXPR_WILDCARD
@@ -3365,6 +3369,12 @@ fn gen_expr(node: int) -> int:
                     break
                 lat_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
                 cj0 = cj0 + 1
+        // String length bucketing: compute the scrutinee length once so arms
+        // with a different literal length skip the str_eq call entirely.
+        match_len_var : ., mut = -1
+        if saw_string != 0 && match_mode == 0 && irv_type(match_val) == TI_STR:
+            match_len_var = new_ir_var("m_len", TI_INT)
+            emit(IR_CALL, match_len_var, match_val, 1, str_intern("str_len"), TI_INT)
         an : ., mut = first_arm
         arm_idx : ., mut = 0
         loop:
@@ -3606,18 +3616,27 @@ fn gen_expr(node: int) -> int:
                 emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_STRING:
                 // String patterns do not enter CASE: compare through str_eq and
-                // branch on the boolean result (the sequential path).
+                // branch on the boolean result (the sequential path). Length is
+                // bucketed first so a different-length arm never calls str_eq.
+                if has_next == 1:
+                    fall_lbl = new_label()
                 pat_val := new_ir_var("spat", TI_STR)
                 track_str(ast_int_val(arm_pat))
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_STR)
+                if match_len_var >= 0:
+                    plen := new_ir_var("plen", TI_INT)
+                    emit(IR_CONST, plen, istr_len(ast_int_val(arm_pat)), 0, 0, TI_INT)
+                    lcmp := new_ir_var("lcmp", TI_INT)
+                    emit(IR_BINARY, lcmp, match_len_var, plen, OP_EQ, 0)
+                    len_ok := new_label()
+                    emit_cond_match(lcmp, fall_lbl, len_ok)
+                    emit(IR_LABEL, -1, len_ok, 0, 0, 0)
                 eq0 := new_ir_var("_seq0", TI_STR)
                 eq1 := new_ir_var("_seq1", TI_STR)
                 emit(IR_STORE, -1, eq0, match_val, 0, 0)
                 emit(IR_STORE, -1, eq1, pat_val, 0, 0)
                 cmp_var := new_ir_var("cmp", TI_BOOL)
                 emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
-                if has_next == 1:
-                    fall_lbl = new_label()
                 emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else:
                 // Unsupported pattern kind (struct/tuple/interpolated string/bigint).
