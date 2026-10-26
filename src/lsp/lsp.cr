@@ -171,6 +171,7 @@ fn lsp_publish_diags():
 fn lsp_check_file(path: string, src: string):
     g_lsp_snapshot_path = path
     g_source = src
+    g_source_name = path
     g_source_dir = dirname(path)
     reset_frontend_state()
     sm_reset()

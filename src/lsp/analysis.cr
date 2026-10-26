@@ -418,7 +418,16 @@ fn analysis_type_of_expr(node: int, depth: int) -> string:
 // Hover.
 
 // Hover content at a position: function signature, variable type, struct field, or enum variant. Empty when absent.
+fn analysis_type_visible(name_ni: int) -> int:
+    si := find_sym(name_ni)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        return 0
+    return sym_visible(si)
+
 fn analysis_hover(line: int, col: int) -> string:
+    // Queries run under the document's library so cross-library pub filtering
+    // matches the checker.
+    g_cur_lib = lib_find("@user")
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
@@ -436,13 +445,14 @@ fn analysis_hover(line: int, col: int) -> string:
     if fi >= 0:
         return analysis_hover_fn(fi)
     // 结构体
-    si := find_struct_by_name(name_ni)
-    if si >= 0:
-        return analysis_hover_struct(si)
-    // 枚举
-    ei := find_enum(name_ni)
-    if ei >= 0:
-        return analysis_hover_enum(ei)
+    if analysis_type_visible(name_ni) != 0:
+        si := find_struct_by_name(name_ni)
+        if si >= 0:
+            return analysis_hover_struct(si)
+        // 枚举
+        ei := find_enum(name_ni)
+        if ei >= 0:
+            return analysis_hover_enum(ei)
     return ""
 
 // Definition.
@@ -530,6 +540,7 @@ fn analysis_def_json(ln1: int, cl1: int) -> string:
 
 // Location JSON at a position ({"uri","range"}); empty when absent.
 fn analysis_definition(line: int, col: int) -> string:
+    g_cur_lib = lib_find("@user")
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
@@ -549,16 +560,17 @@ fn analysis_definition(line: int, col: int) -> string:
                 cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_COL))
         return ""
     // 结构体 / 枚举（令牌反查声明）
-    if find_struct_by_name(name_ni) >= 0:
-        d := analysis_decl_tok(T_STRUCT, name_ni)
-        if d >= 0:
-            return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
-    if find_enum(name_ni) >= 0:
-        d := analysis_decl_tok(T_ENUM, name_ni)
-        if d >= 0:
-            return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+    if analysis_type_visible(name_ni) != 0:
+        if find_struct_by_name(name_ni) >= 0:
+            d := analysis_decl_tok(T_STRUCT, name_ni)
+            if d >= 0:
+                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
+                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+        if find_enum(name_ni) >= 0:
+            d := analysis_decl_tok(T_ENUM, name_ni)
+            if d >= 0:
+                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
+                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
     return ""
 
 // Completion: position to prefix, then filter candidates and emit JSON.
