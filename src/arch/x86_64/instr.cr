@@ -240,6 +240,18 @@ fn e2_lrb(buf: string, p: int, rel: int) -> int:
     cp = cp + e2_w32(buf, cp, rel)
     return cp - p
 
+// lea reg, [rip + 0] with an explicit destination. e2_lrb is fixed to r11;
+// callers that already hold a value in r11 (e.g. an untagged index) must not
+// use r11 as the scratch. Encoding length and the disp32 offset stay identical.
+fn e2_lrb_reg(buf: string, p: int, reg: int) -> int:
+    cp := p
+    cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
+    e2_w8(buf, cp, 141)
+    cp = cp + 1
+    cp = cp + emit_modrm(buf, cp, 0, reg % 8, 5)
+    cp = cp + e2_w32(buf, cp, 0)
+    return cp - p
+
 fn e2_lb(b: string, p: int, o: int) -> int:
     // lea r10, [rbp + offset]
     cp := p
@@ -484,13 +496,14 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
         cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
         cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-        sz := e2_lrb(buf, pos, 0)
-        // mov reg, [r11] — memory load (NOT register copy; e2_ld + e2_rslot would misinterpret)
+        // lea reg, [rip+0]; mov reg, [reg]. Using the destination as the RIP
+        // scratch keeps r11 (often the untagged index) intact.
+        sz := e2_lrb_reg(buf, pos, reg)
         cp2 := pos + sz
-        cp2 = cp2 + emit_rex(buf, cp2, 1, reg/8, 0, 11/8)
+        cp2 = cp2 + emit_rex(buf, cp2, 1, reg/8, 0, reg/8)
         e2_w8(buf, cp2, 139)
         cp2 = cp2 + 1  // 0x8B MOV r, r/m
-        cp2 = cp2 + emit_modrm(buf, cp2, 0, reg%8, 11%8)
+        cp2 = cp2 + emit_modrm(buf, cp2, 0, reg%8, reg%8)
         sz = cp2 - pos
         return sz
     return e2_ld(buf, pos, reg, g2_slot(var_idx))

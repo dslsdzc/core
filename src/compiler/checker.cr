@@ -3781,6 +3781,10 @@ fn infer_expr(node: int) -> int:
                     an_dyn = ast_b(an_dyn)
                 return TI_UNIT
             lookup_ti : ., mut = obj_ti
+            // A `&self` / `&mut self` receiver has type TYP_REF(struct); the
+            // method table is keyed by the named struct, so dereference first.
+            if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_REF:
+                lookup_ti = get_type_data(lookup_ti)
             // Unwrap generic apply to base type
             if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_GENERIC_APPLY:
                 lookup_ti = get_type_data(lookup_ti)
