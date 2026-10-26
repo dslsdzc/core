@@ -131,6 +131,18 @@ interface ShownIface, pub:
 
 type HiddenAlias = int
 type ShownAlias = int, pub
+
+struct HiddenStruct:
+    x: int
+
+fn makeHiddenStruct() -> HiddenStruct, pub:
+    return HiddenStruct { x = 7 }
+
+struct ShownStruct, pub:
+    y: int
+
+fn makeShownStruct() -> ShownStruct, pub:
+    return ShownStruct { y = 7 }
 """
 
 FIXTURE_NAME = "zz_pub_visibility_fixture.cr"
@@ -231,11 +243,22 @@ def test_cross_library_enum_interface_alias():
                 text = built.stdout + built.stderr
                 assert built.returncode == 1, (name, text)
                 assert want in text, (name, text)
+            # A hidden struct can flow through a pub function's return value, but
+            # its fields must not become readable or writable across libraries.
+            for name, source in (
+                ("hidden_field_read", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    return h.x\n"),
+                ("hidden_field_write", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    h.x = 5\n    return 0\n"),
+            ):
+                built, _ = _build(tmp, name, source)
+                text = built.stdout + built.stderr
+                assert built.returncode == 1, (name, text)
+                assert "error[N03]" in text, (name, text)
             # Public constructs remain usable across libraries.
             for name, source in (
                 ("shown_enum", "import zz_pub_visibility_fixture\nfn main() -> int:\n    x : ShownEnum = SA()\n    return 42\n"),
                 ("shown_impl", SHOWN_IMPL_SOURCE),
                 ("shown_alias", SHOWN_ALIAS_SOURCE),
+                ("shown_field", "import zz_pub_visibility_fixture\nfn main() -> int:\n    s := makeShownStruct()\n    return s.y + 35\n"),
             ):
                 built, elf = _build(tmp, name, source)
                 assert built.returncode == 0, (name, built.stdout + built.stderr)

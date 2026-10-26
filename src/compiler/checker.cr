@@ -4681,6 +4681,14 @@ fn infer_expr(node: int) -> int:
             struct_ni := get_type_data(actual_ti)
             si := find_struct(struct_ni)
             if si >= 0:
+                // A hidden struct type can still flow across libraries through a
+                // pub function's return value. Field access must not expose its
+                // layout in that case.
+                if g_cur_lib >= 0:
+                    tsi := find_gsym(struct_ni)
+                    if tsi < 0 || sym_kind(tsi) != SYM_TYPE:
+                        check_error(EC_N_FIELD, "Undefined field '" + istr_get(field_ni) + "'", ast_line(node), ast_col(node))
+                        return ti_error()
                 fi : ., mut = 0
                 loop:
                     if fi >= si_field_count(si):
