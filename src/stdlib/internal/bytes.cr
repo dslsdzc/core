@@ -24,7 +24,7 @@ fn byteLoadU32LE(buf: string, off: int) -> int:
     return b3 * 16777216 + b2 * 65536 + b1 * 256 + b0
 
 fn byteStoreU32BE(buf: string, off: int, value: int):
-    x := value % 4294967296
+    x : ., mut = value % 4294967296
     if x < 0:
         x = x + 4294967296
     store8(buf, off, x / 16777216 % 256)
@@ -33,7 +33,7 @@ fn byteStoreU32BE(buf: string, off: int, value: int):
     store8(buf, off + 3, x % 256)
 
 fn byteStoreU32LE(buf: string, off: int, value: int):
-    x := value % 4294967296
+    x : ., mut = value % 4294967296
     if x < 0:
         x = x + 4294967296
     store8(buf, off, x % 256)
@@ -48,14 +48,14 @@ fn byteLoadU64LE(buf: string, off: int) -> int:
     return byteLoadU32LE(buf, off + 4) * 4294967296 + byteLoadU32LE(buf, off)
 
 fn byteStoreU64BE(buf: string, off: int, value: int):
-    x := value % 18446744073709551616
+    x : ., mut = value % 18446744073709551616
     if x < 0:
         x = x + 18446744073709551616
     byteStoreU32BE(buf, off, x / 4294967296)
     byteStoreU32BE(buf, off + 4, x % 4294967296)
 
 fn byteStoreU64LE(buf: string, off: int, value: int):
-    x := value % 18446744073709551616
+    x : ., mut = value % 18446744073709551616
     if x < 0:
         x = x + 18446744073709551616
     byteStoreU32LE(buf, off, x % 4294967296)

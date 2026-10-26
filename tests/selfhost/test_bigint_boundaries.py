@@ -30,7 +30,7 @@ fn main() -> int:
     if pid <= 0:
         return 4
 
-    s := "hi"
+    s : ., mut = "hi"
     p : ., mut = 0
     q : ., mut = 0
     unsafe:

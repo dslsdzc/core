@@ -45,7 +45,7 @@ fn dump_buf_finish() -> string:
 fn ir_var_str(var_idx: int) -> string:
     if var_idx < 0:
         return ""
-    n := get_ir_var_name(var_idx)
+    n : ., mut = get_ir_var_name(var_idx)
     if str_len(n) > 0:
         return n
     return int_str(var_idx)

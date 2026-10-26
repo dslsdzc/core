@@ -17,8 +17,8 @@ fn bump(v: int) -> int:
 
 fn main() -> int:
     // small fast path and a loop
-    total := 0
-    i := 0
+    total : ., mut = 0
+    i : ., mut = 0
     loop:
         if i >= 100:
             break

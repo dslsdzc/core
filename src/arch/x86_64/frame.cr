@@ -25,7 +25,7 @@ fn pf_frame_size(vc: int) -> int:
     r := sz % 16
     if g_opt_level >= 1:
         if r != 8:
-            pad := 8 - r
+            pad : ., mut = 8 - r
             if pad < 0:
                 pad = pad + 16
             sz = sz + pad
@@ -105,7 +105,7 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
             w8(buf, cp+3, 0)
             cp = cp + 4
     // Save register and caller-stack params into this function's slots.
-    pi := 0
+    pi : ., mut = 0
     loop:
         if pi >= pc:
             break
@@ -132,13 +132,13 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
                 cp = cp + 5
             else:
                 // 9+ binary64 参数在栈上（边缘场景，位置布局简化处理）
-                caller_off := 16 + (pi - 6) * 8
+                caller_off : ., mut = 16 + (pi - 6) * 8
                 if g_opt_level >= 1:
                     caller_off = caller_off + 40
                 cp = cp + e2_sd_load(buf, cp, caller_off)
                 cp = cp + e2_sd_store(buf, cp, po2)
         else if pi >= 6:
-            caller_off := 16 + (pi - 6) * 8
+            caller_off : ., mut = 16 + (pi - 6) * 8
             if g_opt_level >= 1:
                 caller_off = caller_off + 40
             if pty == TI_DEX:
@@ -214,7 +214,7 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     print("  rets: ")
     print(int_str(g_x86_ret_patch_count))
     println("")
-    rpi := 0
+    rpi : ., mut = 0
     loop:
         if rpi >= g_x86_ret_patch_count:
             break

@@ -76,7 +76,7 @@ fn chan_send(ch: string, val: int), pub:
         cell_store(g, 48, -1)          // next = -1
 
         // Add to channel's send_wait list
-        sw := cell_load(ch, 40)
+        sw : ., mut = cell_load(ch, 40)
         if sw < 0:
             cell_store(ch, 40, g)
         else:
@@ -126,7 +126,7 @@ fn chan_recv(ch: string) -> int, pub:
         cell_store(g, 8, 2)            // _Gwaiting
         cell_store(g, 48, -1)          // next = -1
 
-        rw := cell_load(ch, 48)
+        rw : ., mut = cell_load(ch, 48)
         if rw < 0:
             cell_store(ch, 48, g)
         else:
@@ -148,7 +148,7 @@ fn chan_close(ch: string), pub:
     cell_store(ch, 56, 1)  // closed = true
 
     // Wake up all waiting senders
-    sw := cell_load(ch, 40)
+    sw : ., mut = cell_load(ch, 40)
     loop:
         if sw < 0:
             break
@@ -159,7 +159,7 @@ fn chan_close(ch: string), pub:
     cell_store(ch, 40, -1)  // clear send_wait
 
     // Wake up all waiting receivers
-    rw := cell_load(ch, 48)
+    rw : ., mut = cell_load(ch, 48)
     loop:
         if rw < 0:
             break

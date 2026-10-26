@@ -208,7 +208,7 @@ fn so_find(buf: string, name: string) -> int:
             break
         sn := r32(buf, do+i*24)
         sv := cell_load(buf, do+i*24+8)
-        si := bu8(buf, do+i*24+4)
+        si : ., mut = bu8(buf, do+i*24+4)
         sx := read_u16(buf, do+i*24+6)
         if si/16 == 1 && si%16 == 2 && sx != 0:
             nm : ., mut = ""
@@ -309,7 +309,7 @@ fn emit(buf: string, total: int, is_so: int):
         if i >= g_ch_count:
             break
         p : ., mut = cell_load(g_ch_foff, i * 8)
-        k := cell_load(g_ch_kind, i * 8)
+        k : ., mut = cell_load(g_ch_kind, i * 8)
 
 
         // Ehdr: ELF header + 4 program headers
@@ -570,7 +570,7 @@ fn emit(buf: string, total: int, is_so: int):
                     break
                 ro := p+pi*24
                 cell_store(buf,ro,gv3+24+pi*8)
-                rinfo := pi + 1
+                rinfo : ., mut = pi + 1
                 rinfo = rinfo * 65536
                 rinfo = rinfo * 65536 + 7
                 cell_store(buf,ro+8,rinfo)

@@ -210,7 +210,7 @@ fn purity_selftest_run() -> int:
     total : ., mut = 0
 
     // Test program: positive controls plus negative cases 1 through 6, including an SCC and an effectful generic.
-    src := "fn pure_add(a: int, b: int) -> int:\n    return a + b\n"
+    src : ., mut = "fn pure_add(a: int, b: int) -> int:\n    return a + b\n"
     src = src + "fn pure_caller(a: int, b: int) -> int:\n    return pure_add(a, b)\n"
     src = src + "fn effect():\n    st : ., mut = 0\n    st = 1\n"
     src = src + "fn call_effect():\n    effect()\n"

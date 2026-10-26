@@ -248,7 +248,7 @@ fn main() -> int:
 # ── R2 P4 Task 5（裁决 5：解包侧判表示）：B.7 四形态 + 跨函数面 ──────────────
 # 语义口径：裸值入 `T?` = 该值本身（`T ⊆ T?`）⇒ Some 臂**命中**且载荷 = 裸值。
 BARE_SOME_ARM = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     return match x:
         Some(v) =>:
             return v
@@ -256,7 +256,7 @@ BARE_SOME_ARM = """fn main() -> int:
             return 0
 """
 BARE_SOME_WILDCARD = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     return match x:
         Some(v) =>:
             return v
@@ -264,19 +264,19 @@ BARE_SOME_WILDCARD = """fn main() -> int:
             return 6
 """
 BARE_MATCH_EXPR = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     y := match x:
         Some(v) => v, none => 0,
     return y
 """
 BARE_WILDCARD = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     return match x:
         _ =>:
             return 7
 """
 BARE_THEN_BOXED_WRITE = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     x = Some(7)
     return match x:
         Some(v) =>:
@@ -285,7 +285,7 @@ BARE_THEN_BOXED_WRITE = """fn main() -> int:
             return 0
 """
 BOXED_THEN_BARE_WRITE = """fn main() -> int:
-    x : int? = Some(7)
+    x : int?, mut = Some(7)
     x = 3
     return match x:
         Some(v) =>:
@@ -295,7 +295,7 @@ BOXED_THEN_BARE_WRITE = """fn main() -> int:
 """
 # 条件写：同一槽两条路径两种表示 ⇒ 表示位必须是**运行期值**（静态收窄无法覆盖）
 COND_ON = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     c := 1
     if c > 0:
         x = Some(4)
@@ -306,7 +306,7 @@ COND_ON = """fn main() -> int:
             return 0
 """
 COND_OFF = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     c := 0
     if c > 0:
         x = Some(4)
@@ -446,7 +446,7 @@ fn main() -> int:
         none =>:
             return 0
 """
-UNCOVERED_GLOBAL_NONE = """g : int? = none
+UNCOVERED_GLOBAL_NONE = """g : int?, mut = none
 fn main() -> int:
     return match g:
         Some(v) =>:
@@ -508,7 +508,7 @@ CAP_ARR_ASSIGN_DYN = """fn main() -> int:
             return 0
 """
 CAP_ARR_LITERAL_IDENT = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     a : [int?;2] = [x, none]
     return match a[0]:
         Some(v) =>:
@@ -524,7 +524,7 @@ CAP_ARR_BOXED_LITERAL = """fn main() -> int:
         none =>:
             return 0
 """
-CAP_GLOBAL_ASSIGN = """g : int? = none
+CAP_GLOBAL_ASSIGN = """g : int?, mut = none
 fn main() -> int:
     g = 9
     return match g:
@@ -673,7 +673,7 @@ A_ARR_COND = """fn main() -> int:
         none =>:
             return 0
 """
-A_GLOBAL_BARE = """g : int? = none
+A_GLOBAL_BARE = """g : int?, mut = none
 fn main() -> int:
     p := &g
     *p = 5
@@ -683,7 +683,7 @@ fn main() -> int:
         none =>:
             return 0
 """
-A_GLOBAL_BOXED = """g : int? = none
+A_GLOBAL_BOXED = """g : int?, mut = none
 fn main() -> int:
     p := &g
     *p = Some(5)
@@ -703,7 +703,7 @@ fn main() -> int:
         none =>:
             return 4
 """
-A_GLOBAL_COND = """g : int? = none
+A_GLOBAL_COND = """g : int?, mut = none
 fn main() -> int:
     p := &g
     c := 1
@@ -746,7 +746,7 @@ fn main() -> int:
 """
 # 三子形态（T1 记录：c1 正确但脆弱 / c2 139 双路径 / c3 双路径分歧静默错值）
 A_C1_BIT0_BARE = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     p := &x
     *p = 7
     return match x:
@@ -768,7 +768,7 @@ A_C2_BIT1_BARE = """fn main() -> int:
 # c3 转正判据按 T1 修正：**断言「= 正确值」不钉历史观测数值**（T1 实测 ELF 8 / interp 96，
 # 数值随状态漂移）——判据内置：写入载荷 = 9 ⇒ 解包值须 == 9（自证，非外部钉数）。
 A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     p := &x
     *p = Some(9)
     return match x:
@@ -782,7 +782,7 @@ A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int:
 # REP-2 边界（指针算术伪造地址，裁-REP-2 登记 + 探针）：`p + 1` 落**非取址**槽——记录现实
 # 行为（当前布局下 y 未受影响 ⇒ 6，双路径同）。本律不覆盖该面；
 A_REP2_PTRADD = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     y : int? = 6
     p := &x
     q := p + 1
@@ -833,7 +833,7 @@ T3_INFERRED_ARR_LIT_IDX = """fn main() -> int:
             return 0
 """
 T3_INFERRED_IDENT_ELEM = """fn main() -> int:
-    x : int? = 5
+    x : int?, mut = 5
     a := [x, none]
     a[0] = 7
     return match a[0]:

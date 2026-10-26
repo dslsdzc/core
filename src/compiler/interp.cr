@@ -151,8 +151,8 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
     rhs_char := irv_type(s2) == TI_CHAR
     if lhs_char || rhs_char:
         // Char comparisons are raw. An int operand is still tagged.
-        l := lv
-        r := rv
+        l : ., mut = lv
+        r : ., mut = rv
         if !lhs_char && s1 >= 0:
             l = ir_interp_word(lv)
         if !rhs_char && s2 >= 0:
@@ -358,8 +358,8 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             bs : ., mut = ""
             unsafe:
                 bs = @str_of(b)
-            lo := cell_load_byte(bs, p) + cell_load_byte(bs, p+1)*256 + cell_load_byte(bs, p+2)*65536 + cell_load_byte(bs, p+3)*16777216
-            hi := cell_load_byte(bs, p+4) + cell_load_byte(bs, p+5)*256 + cell_load_byte(bs, p+6)*65536 + cell_load_byte(bs, p+7)*16777216
+            lo : ., mut = cell_load_byte(bs, p) + cell_load_byte(bs, p+1)*256 + cell_load_byte(bs, p+2)*65536 + cell_load_byte(bs, p+3)*16777216
+            hi : ., mut = cell_load_byte(bs, p+4) + cell_load_byte(bs, p+5)*256 + cell_load_byte(bs, p+6)*65536 + cell_load_byte(bs, p+7)*16777216
             if hi < 0:
                 hi = hi + 4294967296
             cell_store(g_ir_vals, d * 8, ir_interp_tag(lo + hi * 4294967296))
@@ -401,7 +401,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             f_start := cell_load(g_df_func_node_start, cfi * 8)
             f_count := cell_load(g_df_func_node_count, cfi * 8)
             if f_start >= 0 && f_count > 0:
-                rval := ir_interp_run_fn(cfi, s1, s2)
+                rval : ., mut = ir_interp_run_fn(cfi, s1, s2)
                 if g_interp_abort == 0:
                     cell_store(g_ir_vals, d * 8, rval)
             break
@@ -439,7 +439,7 @@ fn interp_match_target(scrutinee: int, scrutinee_ti: int, case_start: int, case_
                 if tag == val:
                     return target
         else:
-            rv := val
+            rv : ., mut = val
             if g_interp_big != 0 && scrutinee_ti == TI_INT:
                 rv = ir_interp_tag(val)
             if cv == rv:
@@ -575,7 +575,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             cell_store(g_ir_vals, d2 * 8, 0)
         // IR_STORE
         if op2 == 9 && t1 >= 0 && t2 >= 0:
-            v2 := cell_load(g_ir_vals, t2 * 8)
+            v2 : ., mut = cell_load(g_ir_vals, t2 * 8)
             if g_interp_big != 0 && irv_type(t1) == TI_INT && (irv_type(t2) == TI_DEX_S || irv_type(t2) == TI_CHAR || irv_type(t2) == TI_BOOL || get_type_kind(irv_type(t2)) == TYP_REF || get_type_kind(irv_type(t2)) == TYP_PTR):
                 v2 = ir_interp_tag(v2)
             if g_interp_big != 0 && irv_type(t1) == TI_CHAR && irv_type(t2) == TI_INT:
@@ -583,7 +583,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             cell_store(g_ir_vals, t1 * 8, v2)
         // IR_LOAD
         if op2 == 10 && d2 >= 0 && t1 >= 0:
-            v2 := cell_load(g_ir_vals, t1 * 8)
+            v2 : ., mut = cell_load(g_ir_vals, t1 * 8)
             if g_interp_big != 0 && irv_type(d2) == TI_INT && (irv_type(t1) == TI_CHAR || irv_type(t1) == TI_BOOL || get_type_kind(irv_type(t1)) == TYP_REF || get_type_kind(irv_type(t1)) == TYP_PTR):
                 v2 = ir_interp_tag(v2)
             if g_interp_big != 0 && irv_type(d2) == TI_CHAR && irv_type(t1) == TI_INT:
@@ -598,7 +598,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             // longer carries it, so an absent s2 asks the target hook. The
             // trailing slot reserves the same target-sized header word.
             cnt2 := t1
-            esz2 := t2
+            esz2 : ., mut = t2
             if esz2 <= 0:
                 esz2 = interp_ptr_stride()
             need3 := cnt2 * esz2 + interp_ptr_stride()
@@ -892,7 +892,7 @@ fn ir_interpret() -> int:
     loop:
         if gi2 >= g_ir_global_count:
             break
-        iv2 := cell_load(g_ir_globals, gi2 * 24 + 16)
+        iv2 : ., mut = cell_load(g_ir_globals, gi2 * 24 + 16)
         gv2 := cell_load(g_ir_globals, gi2 * 24 + 8)
         if iv2 != 0 && gv2 >= 0 && gv2 < need:
             // Match the ELF entry: int globals hold tagged values in big-int mode.
@@ -934,7 +934,7 @@ fn ir_interpret() -> int:
                 if g_loop_region_count + 1 > g_loop_region_cap:
                     // Grow both arrays using the old capacity. Copying with the new
                     // capacity would over-read the previous buffer.
-                    nc := g_loop_region_cap * 2
+                    nc : ., mut = g_loop_region_cap * 2
                     if nc < 16:
                         nc = 16
                     nb := alloc(nc * 8)
@@ -1023,7 +1023,7 @@ fn ir_interpret() -> int:
             // asked from the target hook.
             if d >= 0:
                 cnt := s1
-                esz := s2
+                esz : ., mut = s2
                 if esz <= 0:
                     esz = interp_ptr_stride()
                 need2 := cnt * esz + interp_ptr_stride()
@@ -1038,7 +1038,7 @@ fn ir_interpret() -> int:
                     cell_store(g_ir_vals, d * 8, @ptr_of(bp))
         if op == 9:
             if s1 >= 0 && s2 >= 0:
-                v := cell_load(g_ir_vals, s2 * 8)
+                v : ., mut = cell_load(g_ir_vals, s2 * 8)
                 if g_interp_big != 0 && irv_type(s1) == TI_INT && (irv_type(s2) == TI_DEX_S || irv_type(s2) == TI_CHAR || irv_type(s2) == TI_BOOL || get_type_kind(irv_type(s2)) == TYP_REF || get_type_kind(irv_type(s2)) == TYP_PTR):
                     v = ir_interp_tag(v)
                 if g_interp_big != 0 && irv_type(s1) == TI_CHAR && irv_type(s2) == TI_INT:
@@ -1047,7 +1047,7 @@ fn ir_interpret() -> int:
         // IR_LOAD
         if op == 10:
             if d >= 0:
-                v := cell_load(g_ir_vals, s1 * 8)
+                v : ., mut = cell_load(g_ir_vals, s1 * 8)
                 if g_interp_big != 0 && irv_type(d) == TI_INT && (irv_type(s1) == TI_CHAR || irv_type(s1) == TI_BOOL || get_type_kind(irv_type(s1)) == TYP_REF || get_type_kind(irv_type(s1)) == TYP_PTR):
                     v = ir_interp_tag(v)
                 if g_interp_big != 0 && irv_type(d) == TI_CHAR && irv_type(s1) == TI_INT:

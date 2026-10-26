@@ -371,7 +371,7 @@ class Parser:
         elif self.check(TokenType.IMPL):
             return self.parse_impl_decl()
         elif self.check(TokenType.TYPE):
-            return self.parse_type_alias()
+            return self.parse_type_alias(is_pub)
         elif self.check(TokenType.IDENT) and self._is_var_decl_start():
             return self._parse_new_let_decl()
         self.error(f"Unexpected '{self.cur().lexeme}' at top level")
@@ -1249,10 +1249,34 @@ class Parser:
         self.want_value = want
         return For(var, iter, blk)
 
+    def _parse_decl_tail_tags(self, is_pub):
+        """Consume declaration tail tags: `struct S, pub:` / `enum E, pub:`.
+
+        Labels are trailing, matching `fn f(...), pub:`; a prefix `pub struct`
+        is still accepted by parse_top_level_decl for older sources.
+        """
+        if not self.check(TokenType.COMMA):
+            return is_pub
+        self.advance()
+        while not (self.check(TokenType.COLON_BLOCK) or self.check(TokenType.EQ)
+                   or self.check(TokenType.NEWLINE) or self.check(TokenType.EOF)):
+            if self.check(TokenType.PUB):
+                self.advance()
+                is_pub = True
+            elif self.check(TokenType.IDENT):
+                self.error(f"unknown declaration tag '{self.cur().lexeme}'")
+            else:
+                self.error(f"unknown declaration tag '{self.cur().lexeme}'")
+            if not self.check(TokenType.COMMA):
+                break
+            self.advance()
+        return is_pub
+
     def parse_struct_decl(self, is_pub):
         self.expect(TokenType.STRUCT)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
+        is_pub = self._parse_decl_tail_tags(is_pub)
         has_items = self._expect_region()   # False = 空 region（§10.2 裁定推翻后合法）
         fields = []
         while True:
@@ -1294,6 +1318,7 @@ class Parser:
         self.expect(TokenType.ENUM)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
+        is_pub = self._parse_decl_tail_tags(is_pub)
         has_items = self._expect_region()   # False = 空 region（§10.2 裁定推翻后合法）
         variants = []
         while True:
@@ -1332,6 +1357,7 @@ class Parser:
         self.expect(TokenType.INTERFACE)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
+        is_pub = self._parse_decl_tail_tags(is_pub)
         has_items = self._expect_region()   # False = 空 region ⇒ **零方法接口**（合法且有意义）
         methods = []
         while True:
@@ -1378,11 +1404,12 @@ class Parser:
             self.expect(TokenType.DEDENT)
         return ImplDecl(generics, trait, for_type, methods)
 
-    def parse_type_alias(self):
+    def parse_type_alias(self, is_pub=False):
         self.expect(TokenType.TYPE)
         name = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.EQ)
         typ = self.parse_type()
+        self._parse_decl_tail_tags(is_pub)
         self._end_decl()
         return TypeAliasDecl(name, typ)
 

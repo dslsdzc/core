@@ -44,7 +44,7 @@ fn rc_sg_releases(sg: int) -> int:
 // region. -1 means none; such an allocation lives for the whole function and
 // cannot escape a region.
 fn rc_releasing_region(alloc_node: int) -> int:
-    sg := subgraph_containing(alloc_node)
+    sg : ., mut = subgraph_containing(alloc_node)
     loop:
         if sg < 0:
             return -1

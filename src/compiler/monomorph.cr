@@ -206,7 +206,7 @@ fn gen_lookup_subst(name_ni: int) -> int:
 
 // Check if a name is a base type. Returns the TY_* constant, or -1.
 fn gen_base_type_tv(name_ni: int) -> int:
-    s := istr_get(name_ni)
+    s : ., mut = istr_get(name_ni)
     if s == "int":
         return TY_INT
     if s == "dex":

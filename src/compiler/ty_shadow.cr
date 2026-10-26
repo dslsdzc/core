@@ -150,9 +150,9 @@ fn sh_map_rehash():
     loop:
         if j >= old_cap:
             break
-        k := cell_load(old, j * 16)
+        k : ., mut = cell_load(old, j * 16)
         if k >= 0:
-            s := sh_map_find_nogrow(k)
+            s : ., mut = sh_map_find_nogrow(k)
             cell_store(g_term_map, s * 16, k)
             cell_store(g_term_map, s * 16 + 8, cell_load(old, j * 16 + 8))
             g_term_map_entries = g_term_map_entries + 1
@@ -287,7 +287,7 @@ fn sh_apply_identity_term(ti: int, variant: int) -> int:
     bni := get_type_data(base)
     if bni < 0:
         return -1
-    tail := sh_apply_args_chain(ti, variant)
+    tail : ., mut = sh_apply_args_chain(ti, variant)
     if tail < 0:
         return -1
     return tt_atom(AK_NAMED, base, tt_cons(sh_name_token(bni), tail))
@@ -596,7 +596,7 @@ fn tt_display_at(t: int, depth: int) -> string:
             if rest >= 0 && tt_tag(rest) == TT_CONS:
                 return mut_s + tt_display_at(tt_a(rest), depth + 1)
             return mut_s
-        p := tt_c(t)
+        p : ., mut = tt_c(t)
         if p < 0 || tt_tag(p) != TT_CONS:
             return head
         s : ., mut = head + "<"
@@ -1011,7 +1011,7 @@ fn sh_func_sig_param_term(fi: int, idx: int) -> int:
         return -1
     if idx >= fi_param_count(fi):
         return -1
-    pn := ast_b(fn_node)   // EXPR_FN: b = first param node（a = 函数名 ni，不是形参入口）
+    pn : ., mut = ast_b(fn_node)   // EXPR_FN: b = first param node（a = 函数名 ni，不是形参入口）
     pi : ., mut = 0
     loop:
         if pn < 0:
@@ -1041,7 +1041,7 @@ fn sh_func_self_mode(fi: int) -> int:
         return -1
     if fi_param_count(fi) <= 0:
         return 0
-    pn := ast_b(fn_node)   // EXPR_FN: b = first param node
+    pn : ., mut = ast_b(fn_node)   // EXPR_FN: b = first param node
     loop:
         if pn < 0:
             return -1
@@ -1150,7 +1150,7 @@ fn sh_shape_member_at(shp: int, idx: int) -> int:
         return -1
     if tt_a(shp) != AK_PRODUCT:
         return -1
-    c := tt_c(shp)
+    c : ., mut = tt_c(shp)
     i : ., mut = 0
     loop:
         if i > idx:
@@ -1229,7 +1229,7 @@ fn sh_match_lit_kind(pat_node: int) -> int:
 
 // 同一字面量（kind + value）是否已在前面的臂出现（首个匹配语义）。
 fn sh_match_lit_seen(first_arm: int, cur_arm: int, kind: int, value: int) -> int:
-    an := first_arm
+    an : ., mut = first_arm
     loop:
         if an < 0 || an == cur_arm:
             break
@@ -1246,7 +1246,7 @@ fn sh_match_lit_seen(first_arm: int, cur_arm: int, kind: int, value: int) -> int
 fn sh_match_pat_subtree_start(p: int) -> int:
     if p < 0:
         return -1
-    k := ast_kind(p)
+    k : ., mut = ast_kind(p)
     if k == EXPR_ENUMPAT:
         if ast_c(p) > 0:
             c := ast_b(p)
@@ -1362,7 +1362,7 @@ fn sh_match_variant_term(scrut_ti: int, vi: int) -> int:
 fn grow_cov_bits(needed: int):
     if needed <= g_cov_cap:
         return
-    nc := g_cov_cap * 2
+    nc : ., mut = g_cov_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -1409,7 +1409,7 @@ fn mc_has(vi: int) -> int:
         return 0
     if actual / 8 >= g_cov_cap:
         return 0
-    b := cell_load8(g_cov_bits, actual / 8)
+    b : ., mut = cell_load8(g_cov_bits, actual / 8)
     pw : ., mut = 1
     k : ., mut = actual % 8
     loop:
@@ -1567,7 +1567,7 @@ fn sh_variant_payload_term(ti: int, name_ni: int) -> int:
     ea := find_enum_row_of(ti)
     if ea < 0:
         return -1
-    vi := sh_enum_variant_index(ea, name_ni)
+    vi : ., mut = sh_enum_variant_index(ea, name_ni)
     if vi < 0:
         return -1
     tc := ei_variant_type_count(ea, vi)

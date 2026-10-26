@@ -8,7 +8,7 @@
 // ============================================================
 ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
 ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
-ESZ_SYMENTRY : int = 48    // name,kind,type,node,owner_lib,pub = 6×8
+ESZ_SYMENTRY : int = 56    // name,kind,type,node,owner,pub,mut = 7×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48    // opcode,dest,src1,src2,src3,type_kind = 6×8
 ESZ_FUNCINFO : int = 688
@@ -43,6 +43,7 @@ OFF_SY_TYPE : int = 16
 OFF_SY_NODE : int = 24
 OFF_SY_OWNER : int = 32
 OFF_SY_PUB : int = 40
+OFF_SY_MUT : int = 48
 
 // IRVar field offsets
 OFF_IRV_NAME : int = 0
@@ -168,11 +169,12 @@ SG_IF     : int = 5  // conditional region: covers [condition, merge)
 
 // InterfaceInfo: one fixed-size entry per interface.
 // Header 24 bytes plus 16 method entries of 240 bytes = 3864 bytes.
-ESZ_IFACEINFO : int = 3864
+ESZ_IFACEINFO : int = 3872
 OFF_IF_NAME : int = 0
 OFF_IF_METHOD_COUNT : int = 8
 OFF_IF_GENERIC_COUNT : int = 16
 OFF_IF_METHODS : int = 24  // first method entry
+OFF_IF_DECL_LINE : int = 3864
 // Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64)
 //   + param_nodes[8](64) + ret_node(8) + self_mode(8) + param_terms[8](64) + ret_term(8) = 240 bytes
 // Raw code slots param_types and ret_ti are kept because checker's generic-method
@@ -636,6 +638,12 @@ fn sym_set_owner(n: int, v: int):
     cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_OWNER, v)
 fn sym_set_pub(n: int, v: int):
     cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_PUB, v)
+fn sym_mut_field(n: int) -> int:
+    if n < 0 || n >= g_sym_count:
+        return 0
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_MUT)
+fn sym_set_mut(n: int, v: int):
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_MUT, v)
 
 // IRVar helpers
 fn irv_name(n: int) -> int:
@@ -765,7 +773,7 @@ fn si_generic_count(n: int) -> int:
 fn grow_si_fields(needed: int):
     if needed <= g_si_f_cap:
         return
-    nc := g_si_f_cap * 2
+    nc : ., mut = g_si_f_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -838,7 +846,7 @@ fn ei_generic_name(n: int, gi: int) -> int:
 fn grow_ei_variants(needed: int):
     if needed <= g_ei_v_cap:
         return
-    nc := g_ei_v_cap * 2
+    nc : ., mut = g_ei_v_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -863,7 +871,7 @@ fn grow_ei_variants(needed: int):
 fn grow_ei_vtypes(needed: int):
     if needed <= g_ei_vt_cap:
         return
-    nc := g_ei_vt_cap * 2
+    nc : ., mut = g_ei_vt_cap * 2
     if nc < 64:
         nc = 64
     if nc < needed:
@@ -956,7 +964,7 @@ fn ei_variant_tbase_ensure(n: int, vi: int) -> int:
         return -1
     grow_ei_variants(b + vi + 1)
     r := b + vi
-    tb := cell_load(g_ei_v_tbase, r * 8)
+    tb : ., mut = cell_load(g_ei_v_tbase, r * 8)
     if tb < 0:
         tb = g_ei_vt_used
         cell_store(g_ei_v_tbase, r * 8, tb)
@@ -1082,7 +1090,7 @@ fn _grow_str_hash(ncap: int):
             break
         s := cell_load_str(g_strs, si * 8)
         h := str_hash(s)
-        pos := h % ncap
+        pos : ., mut = h % ncap
         if pos < 0:
             pos = -pos
         loop:
@@ -1102,7 +1110,7 @@ fn str_intern(s: string) -> int:
     // Hash lookup
     h := str_hash(s)
     cap := g_str_hash_cap
-    pos := h % cap
+    pos : ., mut = h % cap
     if pos < 0:
         pos = -pos
     loop:
@@ -1137,7 +1145,7 @@ fn str_intern(s: string) -> int:
 // saving, because ids are not meaningful across processes.
 fn cir_rec_push(si: int):
     if g_cir_rec_count >= g_cir_rec_cap:
-        nc := g_cir_rec_cap * 2
+        nc : ., mut = g_cir_rec_cap * 2
         if nc < 64:
             nc = 64
         nb := alloc(nc * 8)
@@ -1775,7 +1783,7 @@ fn ei_gen_constr(n: int, gi: int) -> int:
 fn grow_sg(n: int):
     if n < g_sg_cap:
         return
-    nc := g_sg_cap
+    nc : ., mut = g_sg_cap
     if nc == 0:
         nc = 16
     loop:
@@ -1791,7 +1799,7 @@ fn grow_sg(n: int):
 fn grow_pts(n: int):
     if n < g_pts_cap:
         return
-    nc := g_pts_cap
+    nc : ., mut = g_pts_cap
     if nc == 0:
         nc = 16
     loop:
@@ -1807,7 +1815,7 @@ fn grow_pts(n: int):
 fn grow_offsets(n: int):
     if n < g_offsets_cap:
         return
-    nc := g_offsets_cap
+    nc : ., mut = g_offsets_cap
     if nc == 0:
         nc = 16
     loop:

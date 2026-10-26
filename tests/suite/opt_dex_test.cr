@@ -50,7 +50,7 @@ fn four_boxed_bits() -> int:
 
 fn four_boxed_scaled() -> int:
     e : dex = 7.0
-    x : dex? = Some(e)
+    x : dex?, mut = Some(e)
     return match x:
         Some(v) =>:
             return @raw_int(v) / 1000000

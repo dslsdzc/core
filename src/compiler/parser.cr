@@ -288,7 +288,7 @@ fn tok2op(k: int) -> int:
     return 0
 
 fn parse_expr() -> int:
-    left := parse_binary(0)
+    left : ., mut = parse_binary(0)
     if check(T_DOTDOT):
         t := advance_tok()
         right := parse_expr()
@@ -357,7 +357,7 @@ fn parse_unary() -> int:
         advance_tok()
         op := parse_unary()
         return alloc_node(EXPR_UNARY, op, 0, UOP_DEREF, 0, 0, 0, tok_ln(t), tok_cl(t))
-    node := parse_postfix()
+    node : ., mut = parse_postfix()
     // Handle 'as' type cast: expr as Type
     if check(T_AS):
         advance_tok()
@@ -372,7 +372,7 @@ fn parse_postfix() -> int:
         ni := ast_int_val(node)
         if str_eq(istr_get(ni), "cast") != 0 && tok_k(cur_tok()) == T_LT:
             advance_tok()
-            typ := parse_type()
+            typ : ., mut = parse_type()
             advance_tok()  // skip T_GT
             if tok_k(cur_tok()) == T_LPAREN:
                 advance_tok()
@@ -383,7 +383,7 @@ fn parse_postfix() -> int:
         t := cur_tok()
         if tok_k(t) == T_LPAREN:
             advance_tok()
-            af := -1
+            af : ., mut = -1
             ac : ., mut = 0
             if !check(T_RPAREN):
                 // Wrap each argument in EXPR_ARG(a=expr, b=next_arg) linked list
@@ -391,7 +391,7 @@ fn parse_postfix() -> int:
                 first_expr := parse_expr()
                 af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
                 ac = 1
-                prev_arg := af
+                prev_arg : ., mut = af
                 loop:
                     if !check(T_COMMA):
                         break
@@ -420,7 +420,7 @@ fn parse_postfix() -> int:
             if is_enum_con == 1:
                 node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
             else:
-                call_func := node
+                call_func : ., mut = node
                 call_flags : ., mut = 0
                 // @inline(fn)(args) is a hinted call, not a call through the
                 // value returned by @inline(fn).
@@ -482,7 +482,7 @@ fn is_upper_first(s: string) -> bool:
 // shape as before. Hole expressions are parsed at the end of parse_all, after the
 // token stream is no longer needed.
 fn parse_interp_run() -> int:
-    t := cur_tok()
+    t : ., mut = cur_tok()
     left : ., mut = -1
     loop:
         k := tok_k(t)
@@ -556,7 +556,7 @@ fn parse_primary() -> int:
         // Node fields: a = binary64 bit pattern, restored from the numeric text in
         // the token lexeme; int_val = fixed-point scaled integer (the exact default
         // path). Width suffixes were removed, so the data slot is always 0.
-        bits : int = 0
+        bits : int, mut = 0
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)   // 词素串下标（-1 = 无）
         if tl >= 0:
             bits = str_to_f64_bits(istr_get(tl))
@@ -761,7 +761,7 @@ fn parse_primary() -> int:
         return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
     if tok_k(t) == T_AWAIT:
         t2 := advance_tok()
-        val := parse_expr()
+        val : ., mut = parse_expr()
         return alloc_node(EXPR_AWAIT, val, 0, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
     if tok_k(t) == T_MATCH:
         return parse_match_expr()
@@ -1315,7 +1315,7 @@ fn parse_for_expr() -> int:
     g_want_value = 1
     iter := parse_expr()
     g_want_value = 0
-    body := parse_block()
+    body : ., mut = parse_block()
     g_want_value = want
     return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_ln(t), tok_cl(t))
 
@@ -1329,7 +1329,7 @@ fn parse_match_expr() -> int:
     // An empty region is valid: if no deeper line follows `match c:`, there are no
     // arms. has_items == 0 skips the loop and there is no DEDENT to consume.
     has_items := expect_region_head()
-    af := -1
+    af : ., mut = -1
     al : ., mut = -1  // last arm index
     ac : ., mut = 0
     loop:
@@ -1543,8 +1543,8 @@ fn parse_pattern() -> int:
         return alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_IDENT:
         advance_tok()
-        name := tok_lx(t)
-        ni := str_intern(name)
+        name : ., mut = tok_lx(t)
+        ni : ., mut = str_intern(name)
         // Handle Enum.Variant pattern
         if check(T_DOT):
             advance_tok()
@@ -1773,7 +1773,7 @@ fn add_enum(name: string, decl_line: int) -> int:
 fn extract_hotpatch_ver(args_node: int) -> int:
     if args_node < 0:
         return -1
-    arg := args_node
+    arg : ., mut = args_node
     loop:
         if arg < 0:
             break
@@ -1974,7 +1974,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     // A value return in the body turns an omitted return type into `__ret`.
     // Bare `return` and void bodies stay non-generic.
     if ret_omitted != 0 && body_value == 0:
-        bi := body_ast_start
+        bi : ., mut = body_ast_start
         loop:
             if bi >= g_ast_count:
                 break
@@ -2050,7 +2050,7 @@ fn parse_spec_annotations(fn_ni: int, need_eol: int):
         if tok_k(cur_tok()) != T_IDENT:
             check_error(EC_V_BAD_TAG, "Expected annotation name after '#'", at_line, at_col)
             return
-        an_name := tok_lx(cur_tok())
+        an_name : ., mut = tok_lx(cur_tok())
         kind : ., mut = -1
         if str_eq(an_name, "check") != 0:
             kind = 0
@@ -2181,7 +2181,7 @@ fn parse_declaration():
 
     // extern fn declaration (FFI)
     if check(T_EXTERN):
-        t := cur_tok()
+        t : ., mut = cur_tok()
         advance_tok()
         ffi_lang_ni : ., mut = lead_ffi_ni   // 前导 `@ffi("…")`（§13.5 文档形）
         // 兼容旧形（注解夹在 `extern` 与 `fn` 之间）
@@ -2224,7 +2224,7 @@ fn parse_declaration():
         ret_type : ., mut = TY_UNIT
         if check(T_ARROW):
             advance_tok()
-            ret_node := parse_type()
+            ret_node : ., mut = parse_type()
             if ret_node >= 0 && ast_kind(ret_node) == EXPR_OPTIONAL:
                 extern_opt = 1
             ret_type = unpack_type(ret_node)
@@ -2460,6 +2460,9 @@ fn parse_declaration():
         ig_dummy = alloc(64 * 8)
         ig_dummy_cap = 64
         ig_count : ., mut = 0
+        iface_pub := parse_fn_tail_tags()
+        if iface_pub != 0 || ip != 0:
+            lib_export_add(lib_of_line(tok_ln(t)), iface_ni, SYM_TYPE, tok_ln(t))
         has_items := expect_region_head()   // 0 = empty region: a zero-method interface
 
         // Allocate interface entry
@@ -2472,6 +2475,7 @@ fn parse_declaration():
                 break
             cell_store8(g_ifaces, iface_base + zi, 0)
             zi = zi + 1
+        cell_store(g_ifaces, iface_base + OFF_IF_DECL_LINE, tok_ln(t))
         cell_store(g_ifaces, iface_base + OFF_IF_NAME, iface_ni)
         cell_store(g_ifaces, iface_base + OFF_IF_GENERIC_COUNT, ig_count)
         method_count : ., mut = 0
@@ -2664,7 +2668,7 @@ fn parse_declaration():
     if check(T_MOD):
         t := advance_tok()
         nt := advance_tok()
-        path_name := tok_lx(nt)
+        path_name : ., mut = tok_lx(nt)
         // Collect full path: mod a::b::c;
         loop:
             if check(T_PATHSEP):

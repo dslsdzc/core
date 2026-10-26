@@ -132,7 +132,7 @@ fn ccr_iface_populate() -> int:
 fn ccr_type_seg_build() -> int:
     rc := g_type_count
     tc := tt_count()
-    need := 4 + rc * ESZ_TYPE_ROW + 4 + tc * ESZ_TYPE_TERM_DISK
+    need : ., mut = 4 + rc * ESZ_TYPE_ROW + 4 + tc * ESZ_TYPE_TERM_DISK
     buf := alloc(need + 64)
     pos : ., mut = 0
     cell_store32(buf, pos, rc)

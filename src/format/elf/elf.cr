@@ -33,7 +33,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     if gv_current_arena < 0:
         return emit_alloc_body_simple(buf, pos, bss_va, globals_size)
 
-    cp := 0
+    cp : ., mut = 0
     fva := TEXT_BASE + pos
 
     // ── Part 0: 64MB sanity check (12 bytes) ──
@@ -595,7 +595,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 // This avoids relying on unpatched RIP-relative addresses for g_current_arena
 // when the variable isn't registered in the output binary (non-static builds).
 fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int) -> int:
-    cp := 0
+    cp : ., mut = 0
     fva := TEXT_BASE + pos
 
     // 64MB sanity check
@@ -756,7 +756,7 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
 // Called when global bump heap reaches heap_end. Uses mmap syscall to
 // allocate a new 1GiB region, then updates heap_ptr and heap_end.
 fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
-    cp := 0
+    cp : ., mut = 0
     fva := TEXT_BASE + pos
     // Private allocator helper: preserve the live allocation span, original
     // request size, and current arena index across mmap argument setup.
@@ -1423,7 +1423,7 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
 // ── ELF header writer (x86-64) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int):
     hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE  // 64+112=176
-    i := 0
+    i : ., mut = 0
     loop:
         if i >= hdr_sz:
             break
@@ -1492,7 +1492,7 @@ g_alloc_gl_jmp_pos : int, mut = -1  // Part 1 jl .Lglobal displacement position 
 fn elf_gen(buf: string) -> int:
     g_x86_big_exit_call_pos = -1
     // Mark global variables for RIP-relative addressing
-    gi := 0
+    gi : ., mut = 0
     loop:
         if gi >= g_ir_global_count:
             break
@@ -1572,7 +1572,7 @@ fn elf_gen(buf: string) -> int:
     println("  elf: Phase 1 (rodata layout)...")
     // Phase 1: rodata layout: collect string constants
     g_x86_str_count = 0
-    si := 0
+    si : ., mut = 0
     loop:
         if si >= g_ir_str_const_count:
             break
@@ -1663,7 +1663,7 @@ fn elf_gen(buf: string) -> int:
     g_label_count = max_labels
 
     total_code : ., mut = emit_start_size()
-    fi := 0
+    fi : ., mut = 0
     g2_init()
     loop:
         if fi >= g_ir_func_count:
@@ -1777,7 +1777,7 @@ fn elf_gen(buf: string) -> int:
 
     println("  elf: Phase 3 (emit)...")
     // Phase 3: emit to buffer
-    cp := hdr_total  // skip ELF header + program headers
+    cp : ., mut = hdr_total  // skip ELF header + program headers
 
     // NB: g_x86_is_global already marked before Phase 0: no need to redo
 
@@ -1820,7 +1820,7 @@ fn elf_gen(buf: string) -> int:
         grow_func_cp(fi + 1)
         cell_store(g_x86_func_cp, fi * 8, cp)
         // Override with actual position for backward calls
-        fi3 := 0
+        fi3 : ., mut = 0
         loop:
             if fi3 >= g_x86_func_off_count:
                 break
@@ -1836,7 +1836,7 @@ fn elf_gen(buf: string) -> int:
 
         g2_init()
         g_current_func_var_start = vs
-        vi := 0
+        vi : ., mut = 0
         loop:
             if vi >= vc:
                 break
@@ -1867,7 +1867,7 @@ fn elf_gen(buf: string) -> int:
         g_x86_func_frame_start = cp  // absolute buffer pos of body start
         save_ss := g_x86_emit_stack_size  // save frame size before emission
 
-        ii := 0
+        ii : ., mut = 0
         loop:
             if ii >= ic:
                 break
@@ -1933,7 +1933,7 @@ fn elf_gen(buf: string) -> int:
 
     // ── alloc (bump allocator) ──
     // BSS VA will be computed after all code emitted: placeholder for now
-    bss_va := ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
+    bss_va : ., mut = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
 
     max_gv : ., mut = 0
     gsi : ., mut = 0
@@ -1960,7 +1960,7 @@ fn elf_gen(buf: string) -> int:
     heap_expand_start : ., mut = cp
     cp = cp + emit_heap_expand(buf, cp, bss_va)
     // Update heap_expand's offset in func_offsets to real position (Phase 3 value)
-    hefi := 0
+    hefi : ., mut = 0
     loop:
         if hefi >= g_x86_func_off_count:
             break
@@ -1970,7 +1970,7 @@ fn elf_gen(buf: string) -> int:
         hefi = hefi + 1
 
     // Update alloc's offset in func_offsets to real position (Phase 3 value)
-    afi2 := 0
+    afi2 : ., mut = 0
     loop:
         if afi2 >= g_x86_func_off_count:
             break
@@ -1983,7 +1983,7 @@ fn elf_gen(buf: string) -> int:
     // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
     // alloc offset = alloc_start - 176 (relative to code section start)
     alloc_code_off := alloc_start - 176
-    api := 0
+    api : ., mut = 0
     loop:
         if api >= g_x86_alloc_patch_count:
             break
@@ -2121,7 +2121,7 @@ fn elf_gen(buf: string) -> int:
     // ── Patch forward calls using actual cp positions ──
     // Phase 3 stored cp at start of each function in g_x86_func_cp
     // Must run after ALL code emitted (incl alloc + sched_call) so func_offsets are final
-    cpi := 0
+    cpi : ., mut = 0
     loop:
         if cpi >= g_x86_call_patch_count:
             break
@@ -2161,7 +2161,7 @@ fn elf_gen(buf: string) -> int:
     // Each placeholder is a movabs r10, imm64 at an absolute buffer position.
     // Resolve the same way as call patches: user functions by name in
     // g_ir_func_name_idx/g_x86_func_cp, builtins via g_x86_func_offsets.
-    fpi := 0
+    fpi : ., mut = 0
     loop:
         if fpi >= g_x86_fnaddr_patch_count:
             break
@@ -2232,7 +2232,7 @@ fn elf_gen(buf: string) -> int:
         // Write 8-byte length header (sl + null) so str_len via load64(s,-8) works
         cell_store(buf, cp, sl + 1)
         cp = cp + 8
-        ci := 0
+        ci : ., mut = 0
         loop:
             if ci >= sl:
                 break
@@ -2300,7 +2300,7 @@ fn elf_gen(buf: string) -> int:
         g_heap_expand_call_pos = -1
 
     // ── Allocate BSS for globals ──
-    gi2 := 0
+    gi2 : ., mut = 0
     goff : ., mut = 0
     loop:
         if gi2 >= g_ir_global_count:
@@ -2313,7 +2313,7 @@ fn elf_gen(buf: string) -> int:
         gi2 = gi2 + 1
 
     // ── Patch global variable RIP-relative references ──
-    rpi2 := 0
+    rpi2 : ., mut = 0
     loop:
         if rpi2 >= g_x86_rip_patch_count:
             break
@@ -2358,8 +2358,8 @@ fn elf_gen(buf: string) -> int:
 
     // ── Patch _start's call to main ──
     // Search g_x86_func_offsets by name (indices differ from g_ir_func_name_idx)
-    mo := -1
-    bfi3 := 0
+    mo : ., mut = -1
+    bfi3 : ., mut = 0
     loop:
         if bfi3 >= g_x86_func_off_count:
             break
@@ -2368,7 +2368,7 @@ fn elf_gen(buf: string) -> int:
             break
         bfi3 = bfi3 + 1
     // Debug: find ALL entries named "main"
-    bfi4 := 0
+    bfi4 : ., mut = 0
     loop:
         if bfi4 >= g_x86_func_off_count:
             break

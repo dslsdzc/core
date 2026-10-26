@@ -8,7 +8,7 @@ fn test_dyn_basic() -> int:
     return 0
 
 fn test_dyn_reassign() -> int:
-    x : dyn = 42
+    x : dyn, mut = 42
     x = "hello"
     // After reassignment, x should be string
     if str_len(x) < 1:
@@ -17,7 +17,7 @@ fn test_dyn_reassign() -> int:
 
 fn test_dyn_multi_path() -> int:
     cond : int = 1
-    x : dyn = 0
+    x : dyn, mut = 0
     if cond != 0:
         x = 42
     else:

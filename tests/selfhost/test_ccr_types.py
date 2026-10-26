@@ -1457,16 +1457,16 @@ fn main() -> int:
 TK_FIXTURE = """// R2 P4 Task 4 tk-slot probe
 fn main() -> int:
     arr := [10, 20, 30, 40, 50]
-    p := &arr[2]
+    p : ., mut = &arr[2]
     if *p != 30:
         return 1
     q : ., mut = 42
     qp := &q
     *qp = 99
     s := "hi"
-    b := true
-    d := 1.5
-    x := 40 + 2
+    b : ., mut = true
+    d : ., mut = 1.5
+    x : ., mut = 40 + 2
     if b:
         x = x + 1
     lo : ., mut = 1

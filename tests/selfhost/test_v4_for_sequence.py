@@ -95,7 +95,7 @@ def main():
         "concrete_array",
         """fn main() -> int:
     xs := [1, 2, 3]
-    total := 0
+    total : ., mut = 0
     for x in xs:
         total = total + x
     return total
@@ -106,7 +106,7 @@ def main():
     ok.append(_build_and_run(
         "inferred_param",
         """fn sum(xs) -> int:
-    total := 0
+    total : ., mut = 0
     for x in xs:
         total = total + x
     return total
@@ -122,7 +122,7 @@ fn main() -> int:
         """fn main() -> int:
     xs := [1, 2, 3, 4]
     s := xs[0..3]
-    total := 0
+    total : ., mut = 0
     for x in s:
         total = total + x
     return total
@@ -134,7 +134,7 @@ fn main() -> int:
     ok.append(_build_and_run(
         "slice_param",
         """fn sum(xs) -> int:
-    total := 0
+    total : ., mut = 0
     for x in xs:
         total = total + x
     return total

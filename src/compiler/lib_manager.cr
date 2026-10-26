@@ -49,7 +49,7 @@ fn lib_reset():
 fn grow_libs(needed: int):
     if needed <= g_lib_cap:
         return
-    nc := g_lib_cap * 2
+    nc : ., mut = g_lib_cap * 2
     if nc < 8:
         nc = 8
     if nc < needed:
@@ -105,9 +105,9 @@ fn lib_dep_add(from_lid: int, to_lid: int):
     if from_lid < 0 || from_lid >= g_lib_count || to_lid < 0 || to_lid >= g_lib_count:
         return
     off := from_lid * LIB_REC
-    arr := cell_load_str(g_libs, off + OFF_LIB_DEPS)
+    arr : ., mut = cell_load_str(g_libs, off + OFF_LIB_DEPS)
     cnt := cell_load(g_libs, off + OFF_LIB_DEP_COUNT)
-    cap := cell_load(g_libs, off + OFF_LIB_DEP_CAP)
+    cap : ., mut = cell_load(g_libs, off + OFF_LIB_DEP_CAP)
     i : ., mut = 0
     loop:
         if i >= cnt:
@@ -116,7 +116,7 @@ fn lib_dep_add(from_lid: int, to_lid: int):
             return
         i = i + 1
     if cnt >= cap:
-        nc := cap * 2
+        nc : ., mut = cap * 2
         if nc < 8:
             nc = 8
         nb := alloc(nc * 8)
@@ -161,11 +161,11 @@ fn lib_export_add(lid: int, name_ni: int, sym_kind: int, node: int):
     if lid < 0 || lid >= g_lib_count || name_ni < 0:
         return
     off := lid * LIB_REC
-    arr := cell_load_str(g_libs, off + OFF_LIB_EXPORTS)
+    arr : ., mut = cell_load_str(g_libs, off + OFF_LIB_EXPORTS)
     cnt := cell_load(g_libs, off + OFF_LIB_EXP_COUNT)
-    cap := cell_load(g_libs, off + OFF_LIB_EXP_CAP)
+    cap : ., mut = cell_load(g_libs, off + OFF_LIB_EXP_CAP)
     if cnt >= cap:
-        nc := cap * 2
+        nc : ., mut = cap * 2
         if nc < 16:
             nc = 16
         nb := alloc(nc * LIB_EXPORT_REC)

@@ -50,7 +50,7 @@ fn big_lit_decimal(s: string) -> string:
         else if pfx == 98 || pfx == 66:
             base = 2
             start = 2
-    dec := alloc(2)
+    dec : ., mut = alloc(2)
     cell_store_byte(dec, 0, 48)
     dec_len : ., mut = 1
     i : ., mut = start

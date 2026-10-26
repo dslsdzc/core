@@ -81,7 +81,7 @@ fn bi_set_digit(p: string, i: int, d: int):
     cell_store(p, BI_DIGITS + i * 8, d)
 
 fn bi_normalize(p: string) -> string:
-    n := bi_len_of(p)
+    n : ., mut = bi_len_of(p)
     loop:
         if n <= 0:
             break
@@ -142,7 +142,7 @@ fn bi_result(p: string) -> int:
         d2 = bi_digit(p, 2)
     if d2 > 3:
         return bi_tag_ptr(p)
-    x := d0 + d1 * BI_BASE + d2 * BI_BASE2
+    x : ., mut = d0 + d1 * BI_BASE + d2 * BI_BASE2
     if bi_sign_of(p) < 0:
         x = -x
     if x < BI_IMM_MIN || x > BI_IMM_MAX:
@@ -150,7 +150,7 @@ fn bi_result(p: string) -> int:
     return bi_tag(x)
 
 fn bi_copy(p: string) -> string:
-    n := bi_len_of(p)
+    n : ., mut = bi_len_of(p)
     q := bi_new(n)
     bi_set_sign(q, bi_sign_of(p))
     bi_set_len(q, n)
@@ -174,8 +174,8 @@ fn bi_cmp_abs(a: string, b: string) -> int:
         if i <= 0:
             break
         i = i - 1
-        da := bi_digit(a, i)
-        db := bi_digit(b, i)
+        da : ., mut = bi_digit(a, i)
+        db : ., mut = bi_digit(b, i)
         if da < db:
             return -1
         if da > db:
@@ -216,7 +216,7 @@ fn bi_add_abs(a: string, b: string) -> string:
             da = bi_digit(a, i)
         if i < lb:
             db = bi_digit(b, i)
-        s := da + db + carry
+        s : ., mut = da + db + carry
         bi_set_digit(r, i, s % BI_BASE)
         carry = s / BI_BASE
         i = i + 1
@@ -240,7 +240,7 @@ fn bi_sub_abs(a: string, b: string) -> string:
         db : ., mut = 0
         if i < lb:
             db = bi_digit(b, i)
-        d := da - db - borrow
+        d : ., mut = da - db - borrow
         if d < 0:
             d = d + BI_BASE
             borrow = 1
@@ -351,7 +351,7 @@ fn bi_bitlen_abs(p: string) -> int:
     n := bi_len_of(p)
     if n == 0:
         return 0
-    top := bi_digit(p, n - 1)
+    top : ., mut = bi_digit(p, n - 1)
     bits : ., mut = 0
     loop:
         if top == 0:
@@ -432,16 +432,16 @@ fn bi_div_small(a: int, d: int) -> int:
         x := bi_imm(a)
         g_bi_rem = x % d
         return bi_tag(x / d)
-    p := bi_as_big(a)
+    p : ., mut = bi_as_big(a)
     n := bi_len_of(p)
-    r := bi_new(n)
+    r : ., mut = bi_new(n)
     rem : ., mut = 0
     i : ., mut = n
     loop:
         if i <= 0:
             break
         i = i - 1
-        cur := rem * BI_BASE + bi_digit(p, i)
+        cur : ., mut = rem * BI_BASE + bi_digit(p, i)
         bi_set_digit(r, i, cur / d)
         rem = cur % d
     bi_set_len(r, n)
@@ -489,7 +489,7 @@ fn bi_to_dec(a: int) -> string:
     loop:
         if cur == 0:
             break
-        q := bi_div_small(cur, 10)
+        q : ., mut = bi_div_small(cur, 10)
         pos = pos - 1
         store8(tmp, pos, g_bi_rem + 48)
         cur = q
@@ -531,7 +531,7 @@ fn bi_divmod(a: int, b: int) -> int:
     n := bi_len_of(pa)
     q := bi_new(n + 1)
     bi_set_len(q, n + 1)
-    rem_p := bi_from_imm(0)
+    rem_p : ., mut = bi_from_imm(0)
     bits := bi_bitlen_abs(pa)
     pos : ., mut = bits
     loop:
@@ -595,7 +595,7 @@ fn bi_to_word_checked(a: int) -> int:
         bi_runtime_error("integer out of machine-word range\n")
         g_bi_error = 1
         return 0
-    x := d0 + d1 * BI_BASE + d2 * BI_BASE2
+    x : ., mut = d0 + d1 * BI_BASE + d2 * BI_BASE2
     if neg:
         x = -x
     return x

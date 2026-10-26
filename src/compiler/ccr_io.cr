@@ -215,7 +215,7 @@ fn buf_read_i64(buf: string, pos: int) -> int:
         hi = hi + h3 * 16777216
     // 修复 15：h3 < 128 时漏加 h3×2^24 -> bit 56-62 丢失
     // Keep the factor within the parser's supported integer-literal range.
-    hi_part := hi * 65536
+    hi_part : ., mut = hi * 65536
     hi_part = hi_part * 65536
     return lo + hi_part
 
@@ -850,7 +850,7 @@ fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int:
     loop:
         if e >= ec:
             break
-        ei := es + e
+        ei : ., mut = es + e
         if ccr_ent_var(ei) == var_id && ccr_ent_def(ei) < 0:
             return ei
         e = e + 1
@@ -3122,7 +3122,7 @@ fn ccr_iface_surface_dump():
     println(int_str(hsh))
 
 fn ccr_type_probe_dump():
-    n := tt_count()
+    n : ., mut = tt_count()
     if n > CCR_TYPE_PROBE_N:
         n = CCR_TYPE_PROBE_N
     tt_budget_state_reset()
@@ -3140,7 +3140,7 @@ fn ccr_type_probe_dump():
             nn_bad = nn_bad + 1
         else:
             nn_ok = nn_ok + 1
-        d := -1
+        d : ., mut = -1
         if norm >= 0:
             d = tt_is_dnf(norm)
         if d == 1:

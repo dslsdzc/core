@@ -54,7 +54,7 @@ fn pa_in_unsafe(node_seq: int) -> int:
 fn grow_alloc_pts(n: int):
     if n < g_alloc_pts_cap:
         return
-    nc := g_alloc_pts_cap
+    nc : ., mut = g_alloc_pts_cap
     if nc == 0:
         nc = 16
     loop:
@@ -70,7 +70,7 @@ fn grow_alloc_pts(n: int):
 fn grow_pa_alloc_nodes(n: int):
     if n < g_pa_alloc_nodes_cap:
         return
-    nc := g_pa_alloc_nodes_cap
+    nc : ., mut = g_pa_alloc_nodes_cap
     if nc == 0:
         nc = 16
     loop:
@@ -146,7 +146,7 @@ fn pa_merge_alloc_pts(dst_var: int, alloc_seq: int) -> int:
     src := cell_load(g_alloc_pts, alloc_seq * 8)
     if src == 0:
         return 0
-    prev := cell_load(g_pts, dst_var * 8)
+    prev : ., mut = cell_load(g_pts, dst_var * 8)
     changed : int, mut = 0
     mask : int, mut = 1
     bi : ., mut = 0
@@ -168,7 +168,7 @@ fn pa_store_to_alloc(alloc_seq: int, src_var: int) -> int:
     if src == 0:
         return 0
     grow_alloc_pts(alloc_seq + 1)
-    prev := cell_load(g_alloc_pts, alloc_seq * 8)
+    prev : ., mut = cell_load(g_alloc_pts, alloc_seq * 8)
     changed : int, mut = 0
     mask : int, mut = 1
     bi : ., mut = 0
@@ -286,7 +286,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                     // which makes provenance_verify emit a runtime check. Byte
                     // scaling is a target fact and belongs to corearch.
                     base_off := cell_load(g_offsets, s1 * 8)
-                    idx_val : int = -1
+                    idx_val : int, mut = -1
                     if s2 >= 0:
                         prod := cell_load(g_df_var_producer, s2 * 8)
                         if prod >= 0:
@@ -305,7 +305,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                     if pa_merge_pts(d, s1) != 0:
                         changed = 1
                     base_off := cell_load(g_offsets, s1 * 8)
-                    low_val : int = -1
+                    low_val : int, mut = -1
                     if s2 >= 0:
                         prod := cell_load(g_df_var_producer, s2 * 8)
                         if prod >= 0:

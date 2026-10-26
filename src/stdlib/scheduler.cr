@@ -28,7 +28,7 @@ fn sched_get(entries: string, idx: int) -> int, pub:
     loop:
         if i < 0:
             break
-        b := load8(entries, p + i)
+        b : ., mut = load8(entries, p + i)
         if b < 0:
             b = b + 256
         r = r * 256 + b
@@ -72,7 +72,7 @@ fn runq_push(fi: int), pub:
         nc := g_runq_cap * 2
         nb := alloc(nc * 8)
         ci : ., mut = 0
-        pos := g_runq_head
+        pos : ., mut = g_runq_head
         loop:
             if ci >= g_runq_count:
                 break

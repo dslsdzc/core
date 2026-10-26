@@ -14,7 +14,7 @@
 // OFF_TR_* 在 globals.cr 单源，与 TYPE 段序列化和 dump 共用。
 
 fn alloc_type(kind: int, data: int, extra: int) -> int:
-    idx := g_type_count
+    idx : ., mut = g_type_count
     grow_types(idx + 1)
     cell_store(g_types, idx * ESZ_TYPE_ROW + OFF_TR_KIND, kind)
     cell_store(g_types, idx * ESZ_TYPE_ROW + OFF_TR_DATA, data)
@@ -130,7 +130,7 @@ fn alloc_named_type(name_idx: int) -> int:
     slot := named_dedup_slot(name_idx)
     if cell_load(g_named_dedup, slot * 16) == name_idx:
         return cell_load(g_named_dedup, slot * 16 + 8)
-    ti := alloc_type(TYP_NAMED, name_idx, 0)
+    ti : ., mut = alloc_type(TYP_NAMED, name_idx, 0)
     // 回写前重探（见文件头注3）
     slot2 := named_dedup_slot(name_idx)
     if cell_load(g_named_dedup, slot2 * 16) == name_idx:
@@ -187,7 +187,7 @@ fn named_dedup_verify() -> int:
     loop:
         if e >= g_named_dedup_cap:
             break
-        ni2 := cell_load(g_named_dedup, e * 16)
+        ni2 : ., mut = cell_load(g_named_dedup, e * 16)
         if ni2 >= 0:
             ti2 := cell_load(g_named_dedup, e * 16 + 8)
             if get_type_kind(ti2) != TYP_NAMED:
@@ -363,7 +363,7 @@ fn ti_error() -> int:
 // type-engine selftest calls infer_expr directly (g_func_count may be 0), so the
 // raw g_checker_current_fi index must be bounds-checked before fi_generic_count.
 fn cur_fn_is_generic() -> int:
-    fi := g_checker_current_fi
+    fi : ., mut = g_checker_current_fi
     if fi < 0 || fi >= g_func_count:
         return 0
     return fi_generic_count(fi)
@@ -498,7 +498,7 @@ fn type_equal_engine(t1: int, t2: int) -> bool:
         ty_indeterminate_report(0, t1, t2, a, b, 0, 0)
         return false
     ty_budget_reset(200000)
-    e := ty_equiv(a, b)
+    e : ., mut = ty_equiv(a, b)
     // 成因位须在第二次 reset 之前读（ty_budget_reset 清 g_ty_uncovered/g_ty_exhausted）
     unc := ty_uncovered()
     exh := ty_exhausted()
@@ -732,6 +732,10 @@ fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     // declaration registrations overwrite both fields.
     sym_set_owner(g_sym_count, -1)
     sym_set_pub(g_sym_count, 0)
+    // Parameters, match bindings, loop variables and legacy declarations stay
+    // assignable by default. EXPR_LET and top-level globals overwrite this with
+    // their declared mut tag.
+    sym_set_mut(g_sym_count, 1)
     g_sym_count = g_sym_count + 1
 
 fn def_decl_fn_sym(name_idx: int, ti: int, node: int):
@@ -740,9 +744,14 @@ fn def_decl_fn_sym(name_idx: int, ti: int, node: int):
     sym_set_owner(si, lib_of_node(node))
     sym_set_pub(si, fn_node_is_pub(node))
 
+fn def_let_sym(name_idx: int, ti: int, is_mut: int):
+    def_sym(name_idx, SYM_LOCAL, ti, -1)
+    sym_set_mut(g_sym_count - 1, is_mut)
+
 fn def_decl_global_sym(name_idx: int, ti: int, node: int):
     def_sym(name_idx, SYM_GLOBAL, ti, node)
-    si := g_sym_count - 1
+    si : ., mut = g_sym_count - 1
+    sym_set_mut(si, ast_data(node))
     owner := lib_of_node(node)
     sym_set_owner(si, owner)
     is_pub : ., mut = 0
@@ -767,7 +776,7 @@ fn sym_visible(si: int) -> int:
 fn func_visible(fi: int) -> int:
     if g_cur_lib < 0:
         return 1
-    node := fi_ast_node(fi)
+    node : ., mut = fi_ast_node(fi)
     if node < 0:
         return 1
     owner := lib_of_node(node)
@@ -1340,7 +1349,7 @@ fn gen_constr_raise(arg_ti: int, c_ni: int, line: int, col: int):
         msg_i := "Type '" + type_display(arg_ti) + "' does not satisfy interface '" + istr_get(c_ni) + "'"
         check_error(EC_TG_BOUND, msg_i, line, col)
         return
-    msg := "Type '" + type_display(arg_ti) + "' does not satisfy constraint '" + istr_get(c_ni) + "'"
+    msg : ., mut = "Type '" + type_display(arg_ti) + "' does not satisfy constraint '" + istr_get(c_ni) + "'"
     w := gen_constr_witness_str(arg_ti, c_ni)
     if str_len(w) > 0:
         msg = msg + " (counterexample: " + w + ")"
@@ -1390,7 +1399,7 @@ fn gen_constr_seen_probe(k: int) -> int:
 fn gen_constr_seen_rehash():
     old := g_constr_seen
     old_cap := g_constr_seen_cap
-    nc := old_cap * 2
+    nc : ., mut = old_cap * 2
     nb := alloc(nc * 16)
     i : ., mut = 0
     loop:
@@ -1419,7 +1428,7 @@ fn gen_constr_seen_add(k: int) -> int:
     gen_constr_seen_init()
     if (g_constr_seen_count + 1) * 2 >= g_constr_seen_cap:
         gen_constr_seen_rehash()
-    s := gen_constr_seen_probe(k)
+    s : ., mut = gen_constr_seen_probe(k)
     if cell_load(g_constr_seen, s * 16) == k:
         return 0
     cell_store(g_constr_seen, s * 16, k)
@@ -1528,7 +1537,8 @@ fn collect_decls():
             break
         name_idx := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME)
         type_idx := alloc_named_type(name_idx)
-        def_sym(name_idx, SYM_TYPE, type_idx, -1)
+        iface_line := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_DECL_LINE)
+        def_type_sym(name_idx, type_idx, iface_line)
         i = i + 1
     // Built-in Option registration is not present. No named type called Option is
     // registered automatically. T? is parsed as EXPR_OPTIONAL, which maps to
@@ -1599,7 +1609,7 @@ fn collect_decls():
         fn_node := fi_ast_node(i)
         hotpatch_ver := (ast_int_val(fn_node) % 65536) / 256
         rt := fi_return_type(i)
-        rt_ti := TI_UNIT
+        rt_ti : ., mut = TI_UNIT
         // For generic functions, skip return type resolution (depends on call site)
         if fi_generic_count(i) > 0:
             rt_ti = TI_UNIT
@@ -1649,7 +1659,7 @@ fn collect_decls():
                 if fi_name(fj) == name_idx:
                     first_fn := fi_ast_node(fj)
                     first_rt := fi_return_type(fj)
-                    first_rt_ti := TI_UNIT
+                    first_rt_ti : ., mut = TI_UNIT
                     type_node2 := ast_type_val(first_fn)
                     if type_node2 > 0 && ast_kind(type_node2) != 0:
                         first_rt_ti = res_type_node(type_node2)
@@ -1732,7 +1742,7 @@ fn collect_decls():
         node := cell_load(g_global_lets, i * 8)
         name_idx := ast_a(node)  // EXPR_LET: a = name idx
         type_node := ast_b(node)  // EXPR_LET: b = type node (-1 if none)
-        ti := TI_UNIT
+        ti : ., mut = TI_UNIT
         if type_node >= 0:
             ti = res_type_node(type_node)
         def_decl_global_sym(name_idx, ti, node)
@@ -1916,7 +1926,7 @@ fn structpat_subst_ti(si: int, ti: int, scrut_ti: int) -> int:
 fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
     if si < 0 || jdi < 0:
         return -1
-    ft := res_type_node(si_field_type_node(si, jdi))
+    ft : ., mut = res_type_node(si_field_type_node(si, jdi))
     if ft < 0:
         return -1
     if ti_has_generic_param(ft) == 0:
@@ -1956,7 +1966,7 @@ fn check_enum_payload_patterns(match_ti: int, pat: int) -> int:
     loop:
         if i >= c:
             return bad
-        sub := sh_match_payload_root(pat, i)
+        sub : ., mut = sh_match_payload_root(pat, i)
         if sub < 0:
             check_error(EC_TM_NESTED,
                 "Nested match patterns are not supported yet",
@@ -2151,7 +2161,7 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
                                 ast_line(sub), ast_col(sub))
                             bad = 1
             else:
-                ft := structpat_field_ti(si, jdi, scrut_ti)
+                ft : ., mut = structpat_field_ti(si, jdi, scrut_ti)
                 if ft >= 0:
                     ast_set_data(w, ft + 1)
                 if k == EXPR_STRUCTPAT:
@@ -2245,7 +2255,7 @@ fn bind_struct_pattern_idents(pat: int, scrut_ti: int):
             break
         w := w0 + i
         if w >= 0:
-            sub := ast_a(w)
+            sub : ., mut = ast_a(w)
             if sub >= 0:
                 jdi := struct_field_index_by_name(si, ast_b(w))
                 ft : ., mut = TI_INT
@@ -2499,7 +2509,7 @@ fn type_display(ti: int) -> string:
         s = type_display(base)
         s = s + "["
         start := get_type_extra(ti)
-        cnt := cell_load(g_gen_apply_data, start * 8)
+        cnt : ., mut = cell_load(g_gen_apply_data, start * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
@@ -2685,7 +2695,7 @@ fn substitute_return_type(ti: int) -> int:
     // Substitute generic params using g_gen_map
     if g_gen_map_count == 0:
         return ti
-    k := get_type_kind(ti)
+    k : ., mut = get_type_kind(ti)
     if k == TYP_GENERIC_PARAM:
         name_idx := get_type_data(ti)
         mi : ., mut = 0
@@ -2698,7 +2708,7 @@ fn substitute_return_type(ti: int) -> int:
         return ti
     if k == TYP_GENERIC_APPLY:
         base := get_type_data(ti)
-        start := get_type_extra(ti)
+        start : ., mut = get_type_extra(ti)
         count := cell_load(g_gen_apply_data, start * 8)
         // 两趟（同 res_type_node：递归代换会追加嵌套应用携带值，因此先算进暂存再认领块）
         subs : string, mut
@@ -2747,7 +2757,7 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
 
         if orig_type_node >= 0:
             pattern_ti := res_call_type(orig_type_node, fi)
-            concrete_ti := infer_expr(ast_a(an))
+            concrete_ti : ., mut = infer_expr(ast_a(an))
             // This path records the discarded result but does not block. It skips
             // two false-positive shapes: an integer literal passed to a numeric
             // parameter (literal polymorphism, where unify_types rejects int to dex
@@ -2976,7 +2986,7 @@ fn check_func(fi: int):
                         ti = struct_ti
                     else:
                         // &self (mode 2) or &mut self (mode 3)
-                        mut_flag := 0
+                        mut_flag : ., mut = 0
                         if self_mode == 3:
                             mut_flag = 1
                         ti = alloc_type(TYP_REF, struct_ti, mut_flag)
@@ -3027,7 +3037,7 @@ fn check_func(fi: int):
         g_infer_ret_ti = -2
         body_ti := infer_expr(body)
         if ret_inferred != 0:
-            iti := g_infer_ret_ti
+            iti : ., mut = g_infer_ret_ti
             if iti == -2:
                 iti = body_ti
             cell_store(g_func_ret_ti, fi * 8, iti)
@@ -3115,7 +3125,7 @@ fn spec_check_func(fn_node: int, return_type: int):
 fn spec_has_call(e: int) -> int:
     if e < 0:
         return 0
-    k := ast_kind(e)
+    k : ., mut = ast_kind(e)
     if k == EXPR_CALL:
         return 1
     if k == EXPR_BINARY:
@@ -3153,7 +3163,7 @@ fn check_impl_for():
 
             // 方法解析 = 表查询
             // （`g_methods` 三元组 -> 函数名 ni -> 函数行），不再拼 "Type.method" 串。
-            func_ni := iface_find_method(type_ni, method_ni)
+            func_ni : ., mut = iface_find_method(type_ni, method_ni)
             fi : ., mut = -1
             if func_ni >= 0:
                 fi = find_func(func_ni)
@@ -3196,12 +3206,12 @@ fn check_global_let(node: int):
     g_cur_lib = lib_of_node(node)
     val_node := ast_c(node)  // EXPR_LET: c = value
     type_node := ast_b(node) // EXPR_LET: b = 注解类型节点（-1 = 无）
-    val_ti := TI_UNIT
+    val_ti : ., mut = TI_UNIT
     if val_node >= 0:
         val_ti = infer_expr(val_node)
     // 全局初始化器的值/注解兼容检查，与局部站点共用本函数。全局符号类型在注册趟
     // check_global_lets 就取注解行，不检查同样会产生错误产物。
-    ti := val_ti
+    ti : ., mut = val_ti
     if type_node >= 0:
         ti = res_type_node(type_node)
     check_let_annot_compat(node, val_node, val_ti, ti)
@@ -3228,7 +3238,7 @@ fn dyn_set_type(var_idx: int, ti: int):
     bit : ., mut = 1
     if ti >= 0 && ti < 64:
         bit = 1
-        shl := ti
+        shl : ., mut = ti
         loop:
             if shl <= 0:
                 break
@@ -3245,7 +3255,7 @@ fn dyn_has_type(var_idx: int, ti: int) -> int:
     bit : ., mut = 1
     if ti >= 0 && ti < 64:
         bit = 1
-        shl := ti
+        shl : ., mut = ti
         loop:
             if shl <= 0:
                 break
@@ -3262,7 +3272,7 @@ fn union_bitmaps(a: int, b: int) -> int:
         if pos >= 64:
             break
         bit : ., mut = 1
-        shl := pos
+        shl : ., mut = pos
         loop:
             if shl <= 0:
                 break
@@ -3286,7 +3296,7 @@ fn validate_dyn_method(si: int, method_ni: int, line: int, col: int):
         if ti >= 64:
             break
         bit : ., mut = 1
-        shl := ti
+        shl : ., mut = ti
         loop:
             if shl <= 0:
                 break
@@ -3598,7 +3608,7 @@ fn infer_expr(node: int) -> int:
         // char->chr，bool->if b {"true"} else {"false"}，不经过 int，保持 bool 不隐式转 int；
         // 其它类型（含 dex 两形态）报 P028 并终止编译（fail-closed；dex 见下方说明）。洞表达式由 parser
         // 末尾统一解析到 a 槽；解析失败（a<0），因此退化为空串（错误已由 parser 报过，不级联）。
-        inner := ast_a(node)
+        inner : ., mut = ast_a(node)
         if inner < 0 || inner == node:
             ast_set_kind(node, EXPR_STRING)
             ast_set_a(node, 0)
@@ -4005,7 +4015,7 @@ fn infer_expr(node: int) -> int:
             si := find_gsym(func_ni)
             if si >= 0 && sym_kind(si) == SYM_FN:
                 // Check if generic function
-                fi := find_func(func_ni)
+                fi : ., mut = find_func(func_ni)
                 if fi >= 0 && fi_generic_count(fi) > 0:
                     return infer_gen_call(fi, node, first_arg, arg_count)
                 // a（E-11）：被调非泛型 `fn` 声明的返回行 = `never`
@@ -4401,7 +4411,7 @@ fn infer_expr(node: int) -> int:
         ty_budget_reset(200000)
         if m_verdict == 0:
             mi : ., mut = -1
-            msg := "Non-exhaustive match"
+            msg : ., mut = "Non-exhaustive match"
             if m_literal != 0:
                 // 字面量域没有具体变体可命名；保持与枚举反例同一诊断码。
                 msg = msg + ": add a wildcard or binding arm"
@@ -4431,7 +4441,7 @@ fn infer_expr(node: int) -> int:
         var_ni := ast_a(node)
         type_node := ast_b(node)
         val_node := ast_c(node)
-        val_ti := TI_UNIT
+        val_ti : ., mut = TI_UNIT
         if val_node >= 0:
             val_ti = infer_expr(val_node)
             // Check if value is a borrow (&x or &mut x), record the holder
@@ -4440,13 +4450,13 @@ fn infer_expr(node: int) -> int:
                 if borrowed_ni >= 0:
                     mut_flag := ast_int_val(val_node)
                     record_borrow_holder(var_ni, borrowed_ni, mut_flag)
-        ti := val_ti
+        ti : ., mut = val_ti
         if type_node >= 0:
             ti = res_type_node(type_node)
         // 值/注解兼容检查（豁免范围见 check_let_annot_compat 头注）
         check_let_annot_compat(node, val_node, val_ti, ti)
         if istr_get(var_ni) != "_":
-            def_sym(var_ni, SYM_LOCAL, ti, -1)
+            def_let_sym(var_ni, ti, ast_data(node))
             if ti == TI_DYN && val_node >= 0:
                 grow_dyn_type_sets(g_sym_count)
                 cell_store(g_dyn_type_sets, (g_sym_count - 1) * 8, 0)
@@ -4630,7 +4640,7 @@ fn infer_expr(node: int) -> int:
             // （数组）在 range 下产视图；切片/非序列现状 = TI_UNIT（IP_INDEX_RANGE 未接线，
             // 登记数据 A.2 #15）。判定约定：形状 -1（不可译行）不折算，回落旧 kind 直比
             // （该处改动前由 `arr_kind == TYP_ARRAY` 独判，因此回落后逐条记录结论相同）。
-            seq_ok := iface_satisfies_term(arr_ti, sh_shape_seq())
+            seq_ok : ., mut = iface_satisfies_term(arr_ti, sh_shape_seq())
             if seq_ok == -1 && arr_kind == TYP_ARRAY:
                 seq_ok = 1
             if seq_ok == 1 && sh_seq_fixed_len_of_ti(arr_ti) >= 0:
@@ -4682,7 +4692,7 @@ fn infer_expr(node: int) -> int:
         // element bodies are resolved on the specialized AST.
         if get_type_kind(arr_ti) == TYP_GENERIC_PARAM:
             return TI_INT
-        idx_ok := iface_satisfies_term(arr_ti, sh_shape_indexable())
+        idx_ok : ., mut = iface_satisfies_term(arr_ti, sh_shape_indexable())
         if idx_ok == -1:
             idx_ok = iface_permits(iface_kind_of(arr_ti), IP_INDEX)
         if idx_ok != 1:
@@ -4692,6 +4702,13 @@ fn infer_expr(node: int) -> int:
     if ast_kind(node) == EXPR_ASSIGN:
         target := ast_a(node)
         val := ast_b(node)
+        // Immutable bindings: `:=` and un-tagged `: T =` are not assignable.
+        // Parameters, match bindings and loop variables carry the compatible
+        // default (mutable); only EXPR_LET/global declarations set mut = 0.
+        if ast_kind(target) == EXPR_IDENT:
+            tsi := find_sym(ast_int_val(target))
+            if tsi >= 0 && sym_mut_field(tsi) == 0:
+                check_error(EC_TA_IMMUTABLE, "Cannot assign to immutable variable '" + istr_get(ast_int_val(target)) + "'", ast_line(node), ast_col(node))
         tt := infer_expr(target)
         vt := infer_expr(val)
         if tt == TI_DYN:
@@ -4719,7 +4736,7 @@ fn infer_expr(node: int) -> int:
         // TS02、重复字段 TS04、缺字段 TS01，并用 type_compat_strict 比对字段类型 TS03。
         // 值按名字绑定到声明下标，ir_gen 也按名字取字段位。名字缺失时回落位序，不做名字类校验。
         name_ni := ast_a(node)
-        si := find_struct_by_name(name_ni)
+        si : ., mut = find_struct_by_name(name_ni)
         c := ast_c(node)
         w0 := ast_b(node)
         // 名字信息齐备？（parser 恒写；克隆体丢名字 -> 回落位序、不做名字类校验）
@@ -4863,7 +4880,7 @@ fn infer_expr(node: int) -> int:
         // 不能按偏移取相邻节点当元素：复合元素子树占多个槽，会整体错位并产生类型或值错误。
         // 首元素类型作为元素类型（空字面量沿用 int），后续元素逐个与首元素比对，错误码 TK02。
         // 这样异质字面量不会通过，也不会让元素类型随最后一个元素漂移。
-        elem_ti := TI_INT   // 空字面量 []：沿用旧默认
+        elem_ti : ., mut = TI_INT   // 空字面量 []：沿用旧默认
         ei : ., mut = 0
         en : ., mut = ast_a(node)
         loop:
@@ -5492,7 +5509,7 @@ fn compute_all_purity():
             continue
         istart := cell_load(g_ir_func_instr_start, irf * 8)
         icnt := cell_load(g_ir_func_instr_count, irf * 8)
-        ii := istart
+        ii : ., mut = istart
         loop:
             if ii >= istart + icnt:
                 break
@@ -5546,7 +5563,7 @@ fn compute_all_purity():
                         ist2 := cell_load(g_ir_func_instr_start, irf * 8)
                         ic2 := cell_load(g_ir_func_instr_count, irf * 8)
                         allpure : ., mut = 1
-                        ii2 := ist2
+                        ii2 : ., mut = ist2
                         loop:
                             if ii2 >= ist2 + ic2:
                                 break

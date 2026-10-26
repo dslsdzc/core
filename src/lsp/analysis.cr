@@ -75,7 +75,7 @@ fn analysis_type_name_ti(ti: int) -> string:
     if k == TYP_GENERIC_APPLY:
         return analysis_type_name_ti(get_type_data(ti))
     if k == TYP_TUPLE:
-        cnt := get_type_data(ti)
+        cnt : ., mut = get_type_data(ti)
         out : string, mut = "("
         e : ., mut = 0
         loop:
@@ -227,7 +227,7 @@ fn analysis_utf16_units(start: int, end: int) -> int:
     loop:
         if p >= end || p >= sl:
             break
-        adv := analysis_utf8_next(p, sl)
+        adv : ., mut = analysis_utf8_next(p, sl)
         if p + adv > end:
             adv = 1
         cp := analysis_utf8_cp(p, adv)
@@ -355,7 +355,7 @@ fn analysis_var_decl(name_ni: int, line: int, col: int) -> int:
         if k == EXPR_LET || k == EXPR_PARAM || k == EXPR_FOR:
             if ast_a(i) == name_ni:
                 ln := ast_line(i)
-                cl := ast_col(i)
+                cl : ., mut = ast_col(i)
                 if ln < tl || (ln == tl && cl <= tc):
                     if ln > bl || (ln == bl && cl > bc):
                         best = i
@@ -386,7 +386,7 @@ fn analysis_var_type(vd: int, depth: int) -> string:
 fn analysis_type_of_expr(node: int, depth: int) -> string:
     if node < 0 || depth > 8:
         return "?"
-    k := ast_kind(node)
+    k : ., mut = ast_kind(node)
     if k == EXPR_INT:
         return "int"
     if k == EXPR_DEX:
@@ -472,7 +472,7 @@ fn analysis_path_for_line(ln1: int) -> string:
         if i >= g_file_count:
             break
         if cell_load(g_files, i * 16) == fid:
-            p := load_str_ptr(g_files, i * 16 + 8)
+            p : ., mut = load_str_ptr(g_files, i * 16 + 8)
             if str_len(p) > 0:
                 return p
         i = i + 1
@@ -610,7 +610,7 @@ fn analysis_prefix_start(pos: int) -> int:
 
 // Copy a byte range of g_source to a stable heap string.
 fn analysis_sub_copy(start: int, end: int) -> string:
-    n := end - start
+    n : ., mut = end - start
     s := alloc(n + 1)
     i : ., mut = 0
     loop:
@@ -632,8 +632,8 @@ fn analysis_has_prefix(name: string, prefix: string) -> int:
     loop:
         if i >= pl:
             break
-        nc := load8(name, i)
-        pc := load8(prefix, i)
+        nc : ., mut = load8(name, i)
+        pc : ., mut = load8(prefix, i)
         if nc >= 65 && nc <= 90:
             nc = nc + 32
         if pc >= 65 && pc <= 90:
@@ -963,7 +963,7 @@ fn analysis_completion(line: int, col: int) -> string:
     // whatever imports the analysis pulled in.
     saved_lib := g_cur_lib
     g_cur_lib = lib_find("@user")
-    pos := analysis_pos_of(line, col)
+    pos : ., mut = analysis_pos_of(line, col)
     pstart := analysis_prefix_start(pos)
     at_ctx : ., mut = 0
     if pstart > 0 && load8(g_source, pstart - 1) == 64:
@@ -976,7 +976,7 @@ fn analysis_completion(line: int, col: int) -> string:
         out = out + analysis_kw_items(prefix)
         // Symbol candidates from g_syms, g_funcs, g_structs, and g_enums. Allocate
         // for the exact total.
-        total := g_sym_count + g_func_count + g_struct_count + g_enum_count
+        total : ., mut = g_sym_count + g_func_count + g_struct_count + g_enum_count
         if total < 1:
             total = 1
         // Avoid alloc(0).
@@ -1104,7 +1104,7 @@ fn analysis_document_symbol() -> string:
         ni := ei_name(i)
         d := analysis_decl_tok(T_ENUM, ni)
         if d >= 0:
-            ln := cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
+            ln : ., mut = cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
             if analysis_line_offset(ln) == 0:
                 cell_store(ent, cnt * 32, ni)
                 cell_store(ent, cnt * 32 + 8, 10)    // SymbolKind.Enum = 10

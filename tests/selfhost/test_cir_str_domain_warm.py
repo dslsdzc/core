@@ -55,7 +55,7 @@ fn fields_of_point() -> int:
     return str_len(f)
 
 fn main() -> int:
-    r := fields_of_point()
+    r : ., mut = fields_of_point()
     return r - 3
 """
 

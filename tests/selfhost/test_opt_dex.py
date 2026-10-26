@@ -411,7 +411,7 @@ fn mw_coexist_scaled(e: dex?) -> int:
     s := c
     x : dex? = e
     y := x?
-    r := @raw_int(y) / 1000000
+    r : ., mut = @raw_int(y) / 1000000
     if r != 7:
         return 1
     if s != 4000000000:

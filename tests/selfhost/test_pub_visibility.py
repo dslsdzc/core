@@ -89,6 +89,23 @@ fn main() -> int:
     return g_current_arena
 """
 
+INTERFACE_SOURCE = """interface Named:
+    fn name(&self) -> string
+
+struct P:
+    n: string
+
+impl Named for P:
+    fn name(&self) -> string:
+        return self.n
+
+fn main() -> int:
+    p := P { n = "x" }
+    if p.name() != "x":
+        return 1
+    return 42
+"""
+
 USER_TYPE_SOURCE = """struct Argv4:
     x: int
 
@@ -116,6 +133,10 @@ def test_public_types_methods_and_globals():
 
         built, _ = _build(tmp, "user_type", USER_TYPE_SOURCE)
         assert built.returncode == 0, built.stdout + built.stderr
+
+        built, elf = _build(tmp, "interface", INTERFACE_SOURCE)
+        assert built.returncode == 0, built.stdout + built.stderr
+        assert _run([str(elf)]).returncode == 42
 
 
 def test_hidden_types_methods_and_globals():

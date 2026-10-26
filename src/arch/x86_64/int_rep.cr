@@ -17,7 +17,7 @@ BI_TAG_IMM_MIN : int = -4611686018427387904  // -2^62
 
 fn e2_big_mov_imm64(buf: string, p: int, reg: int, value: int) -> int:
     // movabs reg, imm64 — REX.W (+B for reg>=8), 0xB8+reg, imm64
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 0, 0, reg / 8)
     e2_w8(buf, cp, 184 + reg % 8)
     cp = cp + 1
@@ -26,7 +26,7 @@ fn e2_big_mov_imm64(buf: string, p: int, reg: int, value: int) -> int:
 
 fn e2_big_test_tag(buf: string, p: int, reg: int) -> int:
     // test reg, 1 — REX.W(+B), 0xF7 /0, imm32 1
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 0, 0, reg / 8)
     e2_w8(buf, cp, 247)
     cp = cp + 1
@@ -36,7 +36,7 @@ fn e2_big_test_tag(buf: string, p: int, reg: int) -> int:
 
 fn e2_big_tag_reg(buf: string, p: int, reg: int) -> int:
     // shl reg, 1 — REX.W(+B), 0xD1 /4
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 0, 0, reg / 8)
     e2_w8(buf, cp, 209)
     cp = cp + 1
@@ -45,7 +45,7 @@ fn e2_big_tag_reg(buf: string, p: int, reg: int) -> int:
 
 fn e2_big_untag_reg(buf: string, p: int, reg: int) -> int:
     // sar reg, 1 — REX.W(+B), 0xD1 /7
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 0, 0, reg / 8)
     e2_w8(buf, cp, 209)
     cp = cp + 1
@@ -54,7 +54,7 @@ fn e2_big_untag_reg(buf: string, p: int, reg: int) -> int:
 
 fn e2_big_neg_reg(buf: string, p: int, reg: int) -> int:
     // neg reg — REX.W(+B), 0xF7 /3
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 0, 0, reg / 8)
     e2_w8(buf, cp, 247)
     cp = cp + 1
@@ -63,7 +63,7 @@ fn e2_big_neg_reg(buf: string, p: int, reg: int) -> int:
 
 fn e2_big_imul_rr(buf: string, p: int, dst: int, src: int) -> int:
     // imul dst, src — REX.WR/B, 0x0F 0xAF, ModRM(3, dst, src)
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, dst / 8, 0, src / 8)
     e2_w8(buf, cp, 15)
     cp = cp + 1
@@ -74,7 +74,7 @@ fn e2_big_imul_rr(buf: string, p: int, dst: int, src: int) -> int:
 
 fn e2_big_jcc(buf: string, p: int, cond: int) -> int:
     // jcc rel32 — 0x0F 0x80+cond, placeholder rel32
-    cp := p
+    cp : ., mut = p
     e2_w8(buf, cp, 15)
     cp = cp + 1
     e2_w8(buf, cp, 128 + cond)
@@ -84,7 +84,7 @@ fn e2_big_jcc(buf: string, p: int, cond: int) -> int:
 
 fn e2_big_jmp(buf: string, p: int) -> int:
     // jmp rel32 — 0xE9, placeholder rel32
-    cp := p
+    cp : ., mut = p
     e2_w8(buf, cp, 233)
     cp = cp + 1
     cp = cp + e2_w32(buf, cp, 0)
@@ -108,7 +108,7 @@ fn e2_big_call_name(buf: string, p: int, name_idx: int) -> int:
 
 fn e2_big_setcc(buf: string, p: int, cond: int) -> int:
     // setcc al — 0x0F 0x90+cond, ModRM(3,0,0)
-    cp := p
+    cp : ., mut = p
     e2_w8(buf, cp, 15)
     cp = cp + 1
     e2_w8(buf, cp, 144 + cond)
@@ -118,7 +118,7 @@ fn e2_big_setcc(buf: string, p: int, cond: int) -> int:
 
 fn e2_big_bool_to_r10(buf: string, p: int) -> int:
     // movzx r10d, al — REX.R + 0x0F 0xB6, ModRM(3,r10,al)
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 0, 10 / 8, 0, 0)
     e2_w8(buf, cp, 15)
     cp = cp + 1
@@ -129,7 +129,7 @@ fn e2_big_bool_to_r10(buf: string, p: int) -> int:
 
 fn e2_big_test_rr(buf: string, p: int, a: int, b: int) -> int:
     // test a, b — REX.WR/B, 0x85, ModRM(3,a,b)
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, a / 8, 0, b / 8)
     e2_w8(buf, cp, 133)
     cp = cp + 1
@@ -175,7 +175,7 @@ fn e2_big_add_rsp(buf: string, p: int, n: int) -> int:
 
 fn e2_big_store_rsp(buf: string, p: int, off: int, reg: int) -> int:
     // mov [rsp+off], reg — REX.WR, 0x89, ModRM(1,reg,4), SIB(0,4,4), disp8
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
     e2_w8(buf, cp, 137)
     cp = cp + 1
@@ -188,7 +188,7 @@ fn e2_big_store_rsp(buf: string, p: int, off: int, reg: int) -> int:
 
 fn e2_big_load_rsp(buf: string, p: int, off: int, reg: int) -> int:
     // mov reg, [rsp+off] — REX.WR, 0x8B, ModRM(1,reg,4), SIB(0,4,4), disp8
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
     e2_w8(buf, cp, 139)
     cp = cp + 1
@@ -285,7 +285,7 @@ fn emit_big_neg(buf: string, pos: int, d: int, s1: int) -> int:
     cp = cp + e2_load_var(buf, pos + cp, 10, s1)
     cp = cp + e2_mov(buf, pos + cp, 8, 10)
     cp = cp + e2_big_test_tag(buf, pos + cp, 10)
-    j1 := pos + cp
+    j1 : ., mut = pos + cp
     cp = cp + e2_big_jcc(buf, pos + cp, 5)  // jne slow
     cp = cp + e2_big_untag_reg(buf, pos + cp, 10)
     cp = cp + e2_big_neg_reg(buf, pos + cp, 10)

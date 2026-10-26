@@ -87,7 +87,7 @@ g_ctx_cap : int , mut = 0
 
 fn ctx_extend(a : int):
     if g_ctx_len >= g_ctx_cap:
-        nc := g_ctx_cap * 2
+        nc : ., mut = g_ctx_cap * 2
         if nc == 0:
             nc = 16
         nb := alloc( nc * 8 )

@@ -66,7 +66,7 @@ NOD_TAG = 5
 # Two independent ifs give several LABEL nodes and a nonempty STR table, so a
 # synthetic CASE can point at real graph labels and a real string.
 BRANCH_SOURCE = """fn main() -> int:
-    x := 1
+    x : ., mut = 1
     if x == 2:
         return 9
     if x == 3:
@@ -786,9 +786,9 @@ fn main() -> int:
 """
 
 MATCH_LOOP_SOURCE = """fn f() -> int:
-    x : int
-    sum : int = 0
-    i : int = 0
+    x : int, mut
+    sum : int, mut = 0
+    i : int, mut = 0
     loop:
         if i >= 5:
             break
@@ -1552,7 +1552,7 @@ MATCH_TUPLE_WILDCARD_ORDER_SOURCE = """fn main() -> int:
 
 MATCH_TUPLE_GROUPING_SOURCE = """fn main() -> int:
     n := 7
-    r := match n:
+    r : ., mut = match n:
         (a) => a
     if r != 7:
         return 1
@@ -1588,7 +1588,7 @@ MATCH_TUPLE_BAD_EMPTY_SOURCE = """fn main() -> int:
 """
 
 MATCH_TUPLE_BAD_TRAILING_SOURCE = """fn main() -> int:
-    n := 1
+    n : ., mut = 1
     return match n:
         (a,) => 1,
         _ => 0
@@ -2141,7 +2141,7 @@ CONDITION_MATCH_FIXTURES = [
         "if_nested",
         """fn main() -> int:
     x := 2
-    y := 0
+    y : ., mut = 0
     if x > 0:
         if x == 2:
             y = 20
@@ -3117,7 +3117,7 @@ fn main() -> int:
 # extra `x = x` adds one node but no variable, so pick_b's var baseline is
 # unchanged while its node/instruction baseline shifts by one.
 SHIFT_PAD_V1 = """fn pad(b: bool) -> int:
-    x := 1
+    x : ., mut = 1
     x = x
     if b:
         return 1
@@ -3125,7 +3125,7 @@ SHIFT_PAD_V1 = """fn pad(b: bool) -> int:
 """
 
 SHIFT_PAD_V2 = """fn pad(b: bool) -> int:
-    x := 1
+    x : ., mut = 1
     x = x
     x = x
     if b:

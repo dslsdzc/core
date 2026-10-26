@@ -206,7 +206,7 @@ fn kernel_main() -> int:
         loop:
             if pos >= tl:
                 break
-            end := pos
+            end : ., mut = pos
             loop:
                 if end >= tl:
                     break

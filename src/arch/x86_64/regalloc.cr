@@ -145,7 +145,7 @@ fn meta_remove_var(var_idx: int):
             break
         mo := mi * OPT_META_STRIDE
         if r32(g_opt_meta, mo) == OPT_KEY_REG_ASSIGN:
-            cnt := r32(g_opt_meta, mo + 8)
+            cnt : ., mut = r32(g_opt_meta, mo + 8)
             di : ., mut = 0
             loop:
                 if di >= cnt:
@@ -474,7 +474,7 @@ fn alloc_registers():
                     cell_store(haz_dyn, (s1 - vs) * 8, 1)
                 if s2 >= vs && s2 < vs + vc:
                     cell_store(haz_dyn, (s2 - vs) * 8, 1)
-            tk := iri_tk(inst)
+            tk : ., mut = iri_tk(inst)
             if tk == TI_DEX || tk == TI_DEX_S:
                 if d >= vs && d < vs + vc:
                     cell_store(haz_dex, (d - vs) * 8, 1)
@@ -984,7 +984,7 @@ fn corearch_alloc_size_of_var(v: int) -> int:
                             if fj >= fc:
                                 break
                             ft := si_field_type(si, fj)
-                            st := mp_stride(ft)
+                            st : ., mut = mp_stride(ft)
                             if st <= 0:
                                 st = mp_stride(TI_INT)
                             total = total + st

@@ -372,7 +372,7 @@ def read_ccr(path: str) -> bytes:
 # --- tests ---
 
 PROBE_SRC = (
-    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    arr : [int; 4], mut = [0, 0, 0, 0]\n    i : int = 1\n    v : int = 9\n    arr[i] = v\n    arr[0] = v + 1\n    x := arr[i]\n    s : int = pure_add(x, v)\n    s = s + arr[0]\n    return s\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    arr : [int; 4], mut = [0, 0, 0, 0]\n    i : int = 1\n    v : int = 9\n    arr[i] = v\n    arr[0] = v + 1\n    x := arr[i]\n    s : int, mut = pure_add(x, v)\n    s = s + arr[0]\n    return s\n")
 
 
 # --- Task 2: ENT 实记录期望（Python 独立模型 + 手算对照）---
@@ -388,7 +388,7 @@ IR_CALL = 4
 IR_CALL_EXTERN = 45
 
 ENT_SRC = (
-    "fn identity(n: int) -> int:\n    return n\nfn main() -> int:\n    x := 1\n    x = x + 1\n    x = x + 2\n    return x\n")
+    "fn identity(n: int) -> int:\n    return n\nfn main() -> int:\n    x : ., mut = 1\n    x = x + 1\n    x = x + 2\n    return x\n")
 
 
 def model_compute_entries(nod, funcs, gcount, regs):
@@ -1438,7 +1438,7 @@ def test_v7_sym_func_shapes():
     参数 = var 声明区前 param_count 个（行序 = 参数序，类型 int）；root_region
     行序 1:1、span 连续铺满 NOD 空间；first/last_ent 实回填（add 参数 a/b 从未
     定值 → def=-1 条目 → param_ents = 其条目 id；main 无参；条目范围 = 块界）。"""
-    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    x := 1\n    x = x + 1\n    x = x + 2\n    return x\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    x : ., mut = 1\n    x = x + 1\n    x = x + 2\n    return x\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_symparams.ccr')
     try:
         os.unlink(ccr_path)

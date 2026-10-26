@@ -37,7 +37,7 @@ fn r32(buf: string, pos: int) -> int:
     b1 := bu8(buf,pos+1)
     b2 := bu8(buf,pos+2)
     b3 := bu8(buf,pos+3)
-    v := b0 + b1*256 + b2*65536
+    v : ., mut = b0 + b1*256 + b2*65536
     if b3 >= 128:
         v = v + (b3 - 256) * 16777216
     else:
@@ -60,7 +60,7 @@ fn cell_load(buf: string, pos: int) -> int:
     // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
     lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216
     hi := r32(buf,pos+4)
-    hi_part := hi * 65536
+    hi_part : ., mut = hi * 65536
     hi_part = hi_part * 65536
     return lo + hi_part
 

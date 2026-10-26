@@ -128,7 +128,7 @@ def check_versioned_entries() -> tuple:
     会因临时值条目数变化而脆弱）；每个 def'd 条目 ls == def 与同组版本链
     不变量仍全表成立。
     """
-    src = "fn identity(n:int)->int:\n    return n\nfn main()->int:\n    x:=1\n    x=x+1\n    x=x+2\n    return x\n"
+    src = "fn identity(n:int)->int:\n    return n\nfn main()->int:\n    x : ., mut = 1\n    x=x+1\n    x=x+2\n    return x\n"
     rc, out = dump_entries(src)
     if rc != 0:
         return False, f"cir --dump-entries rc={rc}\n{out[-500:]}"
@@ -197,7 +197,7 @@ def check_array_birth_versions() -> tuple:
     dest≥0 全定值扩权后：a 的版本 = [ALLOC_ARRAY(诞生), STORE(重定值)] 两条，
     区间按 [def_j, def_{j+1}-1] 切割——诞生版覆盖元素写/拷贝读（a[0]=5、
     b := a），STORE 版覆盖重定值后读（a[0]+a[1]+a[i]）。"""
-    src = "fn main()->int:\n    a : [int; 3]\n    a[0] = 5\n    a[1] = 7\n    b := a\n    a = [1, 2, 3]\n    i := 0\n    a[i] = 9\n    return a[0] + a[1] + b[0] + a[i]\n"
+    src = "fn main()->int:\n    a : [int; 3], mut\n    a[0] = 5\n    a[1] = 7\n    b := a\n    a = [1, 2, 3]\n    i := 0\n    a[i] = 9\n    return a[0] + a[1] + b[0] + a[i]\n"
     rc, out = dump_entries(src)
     if rc != 0:
         return False, f"cir --dump-entries rc={rc}\n{out[-500:]}"
@@ -389,7 +389,7 @@ def check_regalloc_real_use() -> tuple:
 
 
 LOOP_CARRY_SRC = (
-    "fn main()->int:\n    i:=0\n    s:=0\n    loop:\n        if i>=4:\n            break\n        i = i + 1\n        d := 5\n        s = s + d\n    return s\n"
+    "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    loop:\n        if i>=4:\n            break\n        i = i + 1\n        d := 5\n        s = s + d\n    return s\n"
 )
 
 
@@ -429,8 +429,8 @@ def check_regalloc_cond_def_carry() -> tuple:
     断言 O2（真实分配）== 期望；O1（无分配路径基线）同断言。
     """
     for name, src, expect in (
-        ("v_noz", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 14),
-        ("conddef-z", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n        z := 5\n        s = s + z\n    return s\n", 24),
+        ("v_noz", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 14),
+        ("conddef-z", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n        z := 5\n        s = s + z\n    return s\n", 24),
     ):
         for mode, flags in (("O1-baseline", []), ("O2-regalloc", ["--opt-level", "2"])):
             rc = build_and_run(src, flags)
@@ -460,8 +460,8 @@ def check_regalloc_else_def_carry() -> tuple:
     断言 O2（真实分配）== 期望；O1（无分配路径基线）同断言。
     """
     for name, src, expect in (
-        ("else1", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
-        ("else-while", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    while i < 4:\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
+        ("else1", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
+        ("else-while", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    while i < 4:\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
     ):
         for mode, flags in (("O1-baseline", []), ("O2-regalloc", ["--opt-level", "2"])):
             rc = build_and_run(src, flags)
@@ -483,8 +483,8 @@ def check_regalloc_else_controls() -> tuple:
     断言 O2（真实分配）== 期望。
     """
     for name, src, expect in (
-        ("then2", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 30),
-        ("cont", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=5:\n            break\n        if i==0:\n            i = i + 1\n            continue\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 31),
+        ("then2", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 30),
+        ("cont", "fn main()->int:\n    i : ., mut = 0\n    s : ., mut = 0\n    x : int, mut = 3\n    loop:\n        if i>=5:\n            break\n        if i==0:\n            i = i + 1\n            continue\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 31),
     ):
         rc = build_and_run(src, ["--opt-level", "2"])
         ok = rc == expect

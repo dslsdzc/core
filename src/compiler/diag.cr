@@ -45,7 +45,7 @@ fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
         return
     if str_len(ltxt) == 0:
         return
-    ln_str := int_str(line)
+    ln_str : ., mut = int_str(line)
     if line < 10:
         ln_str = " " + ln_str
     print(ln_str)
@@ -111,7 +111,7 @@ fn error_cat_prefix(cat: int) -> string:
         _ => "E"
 
 fn pad_diag_num(num: int) -> string:
-    s := int_str(num)
+    s : ., mut = int_str(num)
     if num < 10:
         s = "0" + s
     return s

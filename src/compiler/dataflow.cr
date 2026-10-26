@@ -37,15 +37,15 @@ fn init_df():
 
 fn sg_push(kind: int):
     grow_sg(g_sg_count + 1)
-    idx := g_sg_count
+    idx : ., mut = g_sg_count
     cell_store(g_sgs, idx * ESZ_SG + OFF_SG_KIND, kind)
     cell_store(g_sgs, idx * ESZ_SG + OFF_SG_ENTER, g_df_node_count)
     cell_store(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, -1)
     cell_store(g_sgs, idx * ESZ_SG + OFF_SG_NSTART, g_df_node_count)
     cell_store(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT, 0)
     // Parent: find innermost currently open subgraph
-    parent := -1
-    pi := idx - 1
+    parent : ., mut = -1
+    pi : ., mut = idx - 1
     loop:
         if pi < 0:
             break
@@ -67,7 +67,7 @@ fn sg_pop():
     if g_sg_count <= 0:
         return
     idx : ., mut = -1
-    pi := g_sg_count - 1
+    pi : ., mut = g_sg_count - 1
     loop:
         if pi < 0:
             break
@@ -180,7 +180,7 @@ fn df_connect_state(node_id: int, opcode: int, s3: int):
 // The replay keeps node creation order as program order, resets the chain head
 // per function, and closes loop and for regions at OFF_SG_EXIT.
 fn df_state_close_regions_at(head: string, next: string, pos: int):
-    sg := cell_load(head, pos * 8)
+    sg : ., mut = cell_load(head, pos * 8)
     loop:
         if sg < 0:
             break

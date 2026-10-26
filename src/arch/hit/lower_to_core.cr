@@ -317,9 +317,9 @@ fn hit_pool_patch_add(pos: int, k: int):
 // after printing an error, and the caller exits 1.
 fn hit_lower_instr(j: int) -> int:
     op := iri_op(j)
-    d := iri_dest(j)
-    s1 := iri_s1(j)
-    s2 := iri_s2(j)
+    d : ., mut = iri_dest(j)
+    s1 : ., mut = iri_s1(j)
+    s2 : ., mut = iri_s2(j)
     s3 := iri_s3(j)
     ti := iri_tk(j)
     if op == IR_CONST:

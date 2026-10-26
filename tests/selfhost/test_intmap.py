@@ -34,7 +34,7 @@ fn main() -> int:
     println_i(m.get(1))
     println_i(m.size())
 
-    c := intMapWith(4, 3, 2, 1, 1, 123, 0)
+    c : ., mut = intMapWith(4, 3, 2, 1, 1, 123, 0)
     i : ., mut = 0
     loop:
         if i >= 50:
@@ -52,8 +52,8 @@ fn main() -> int:
         if i >= 500:
             break
         state = (state * 1103515245 + 12345) % 2147483648
-        key := state % 100
-        op := state % 3
+        key : ., mut = state % 100
+        op : ., mut = state % 3
         if op == 0:
             r.put(key, key * 7 + i)
         else:

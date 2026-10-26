@@ -95,7 +95,7 @@ fn rpc_key_at(buf: string, pos: int, key: string) -> int:
     loop:
         if i >= kl:
             break
-        c := load8(buf, pos + i)
+        c : ., mut = load8(buf, pos + i)
         kc := load8(key, i)
         if c >= 65 && c <= 90:
             c = c + 32

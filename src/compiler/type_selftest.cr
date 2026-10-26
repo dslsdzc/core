@@ -487,7 +487,7 @@ fn ts_isat_run() -> int:
         ts_isat_b2i(iface_satisfies(TI_INT, str_intern("int")) == -1), 1)
     // 10. 与 check_iface 逐例比较：满足、参数计数不符、返回类型码不符
     // 三种形态。缺方法形态在第 2 和第 11 例分别检查 0 和零驻留表增长。
-    isat_eq := -1
+    isat_eq : ., mut = -1
     if ts_isat_b2i(check_iface(str_intern("T0bS"), isat_ii)) == iface_satisfies(isat_s_ti, str_intern("T0bShow")):
         if ts_isat_b2i(check_iface(str_intern("T0bC"), isat_ii)) == iface_satisfies(isat_c_ti, str_intern("T0bShow")):
             if ts_isat_b2i(check_iface(str_intern("T0bR"), isat_ii)) == iface_satisfies(isat_r_ti, str_intern("T0bShow")):
@@ -858,7 +858,7 @@ fn ts_ifc_add_impl(tname_ni: int, mname: string, pc: int, mode0: int, n0: int, n
         alloc_node(EXPR_PARAM, str_intern("p"), 0, 0, m, TY_INT, pn2, 0, 0)
         pj = pj + 1
     fn_node := alloc_node(EXPR_FN, mangled_ni, pf, pc, 0, rnode, -1, 0, 0)
-    fi := add_func(mn, pc, 0, fn_node)
+    fi : ., mut = add_func(mn, pc, 0, fn_node)
     grow_methods(g_method_count + 1)
     cell_store(g_methods, g_method_count * 24, tname_ni)
     cell_store(g_methods, g_method_count * 24 + 8, str_intern(mname))
@@ -1484,7 +1484,7 @@ fn ts_ccr_run() -> int:
         fails = fails + 3   // 后续三例无法运行 -> 计失败（不得漏算且不报错）
     // 4 不可译行（子行越界）-> 装填拒绝（save 拒落盘），最后（使类型表失效）
     bad_row := alloc_type(TYP_ARRAY, 999999, 0)
-    rej := ccr_type_populate()
+    rej : ., mut = ccr_type_populate()
     if bad_row < 0:
         rej = 1
     // 夹具未建成 -> 不算通过（防假通过）
@@ -2063,7 +2063,7 @@ fn type_selftest_run() -> int:
         // memo 表扩容：1200 个互异对触发装填因子检查和重建。
     // 能执行到下一行，说明重建没有死循环。
     d2 : ., mut = 0
-    last := 0
+    last : ., mut = 0
     loop:
         if d2 >= 1200:
             break
@@ -2398,7 +2398,7 @@ fn type_selftest_run() -> int:
     t5s_m2 := (g_sh_slot_term == -1 && g_sh_slot_aux != 0)
     sh_tk_split(IR_STORE, 0)
     t5s_m3 := (g_sh_slot_term == -1 && g_sh_slot_aux == 0)
-    t5s_m_ok := 1
+    t5s_m_ok : ., mut = 1
     if t5s_m1 == 0 || t5s_m2 == 0 || t5s_m3 == 0:
         t5s_m_ok = 0
     total = total + 1

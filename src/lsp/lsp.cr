@@ -31,7 +31,7 @@ fn lsp_request_matches_snapshot(root: int) -> int:
     un := json_obj_get(td, "uri")
     if un < 0 || json_get(un, 0) != J_STR:
         return 0
-    uri := lsp_str_pool_copy(json_get(un, 1), json_get(un, 2))
+    uri : ., mut = lsp_str_pool_copy(json_get(un, 1), json_get(un, 2))
     return str_eq(lsp_uri_to_path(uri), g_lsp_snapshot_path)
 
 // Copy a byte range from the JSON string pool to a stable heap string. The pool
@@ -200,7 +200,7 @@ fn lsp_did_open(root: int):
     if td < 0:
         return
     uri_node := json_obj_get(td, "uri")
-    text_node := json_obj_get(td, "text")
+    text_node : ., mut = json_obj_get(td, "text")
     if uri_node < 0 || text_node < 0:
         return
     if json_get(uri_node, 0) != J_STR || json_get(text_node, 0) != J_STR:
@@ -256,7 +256,7 @@ fn lsp_did_close(root: int):
     params := json_obj_get(root, "params")
     if params < 0:
         return
-    td := json_obj_get(params, "textDocument")
+    td : ., mut = json_obj_get(params, "textDocument")
     if td < 0:
         return
     uri_node := json_obj_get(td, "uri")

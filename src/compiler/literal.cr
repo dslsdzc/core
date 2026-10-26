@@ -4,7 +4,7 @@
 
 // 2^k（纯整数，k >= 0）
 fn pow2i(k: int) -> int:
-    v : int = 1
+    v : int, mut = 1
     i : ., mut = 0
     loop:
         if i >= k:
@@ -20,14 +20,14 @@ fn pow2i(k: int) -> int:
 fn str_to_f64_bits(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
-    neg : int = 0
+    neg : int, mut = 0
     if i < sl && cell_load_byte(s, i) == 45:
         neg = 1
         i = i + 1
-    ip : int = 0
-    fp : int = 0
-    den : int = 1
-    sd : int = 0
+    ip : int, mut = 0
+    fp : int, mut = 0
+    den : int, mut = 1
+    sd : int, mut = 0
     ip_digits : ., mut = 0
     fp_digits : ., mut = 0
     too_wide : ., mut = 0
@@ -65,7 +65,7 @@ fn str_to_f64_bits(s: string) -> int:
             return (-9223372036854775807 - 1)
         return 0
     // 小数 64 位（长除：r=fp，每轮 r×2 vs den）
-    frac64 : int = 0
+    frac64 : int, mut = 0
     r : ., mut = fp
     bits : ., mut = 0
     loop:
@@ -88,8 +88,8 @@ fn str_to_f64_bits(s: string) -> int:
             break
         t2 = t2 / 2
         bi = bi + 1
-    mant : int = 0
-    exp : int = 0
+    mant : int, mut = 0
+    exp : int, mut = 0
     if bi > 0:
         sh := 53 - bi
         if sh >= 0:
@@ -119,7 +119,7 @@ fn str_to_f64_bits(s: string) -> int:
             mant = frac64 / pow2i(-sh)
         exp = 1023 + (bf - 65)
     // Assemble; mant is truncated to 52 bits without rounding.
-    bits64 : int = 0
+    bits64 : int, mut = 0
     if exp > 0 && exp < 2047:
         bits64 = (mant % 4503599627370496) + exp * 4503599627370496
     if neg != 0:

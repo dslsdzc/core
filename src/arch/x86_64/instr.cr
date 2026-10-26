@@ -32,7 +32,7 @@ fn get_reg_for_var(var_idx: int) -> int:
         mo := mi * OPT_META_STRIDE
         mk := r32(g_opt_meta, mo)
         if mk == OPT_KEY_REG_ASSIGN:
-            data_len := r32(g_opt_meta, mo + 4)
+            data_len : ., mut = r32(g_opt_meta, mo + 4)
             // Defensive record bound: in-memory records are OPT_META_STRIDE
             // bytes. A corrupt length must not walk past the record.
             if data_len > OPT_META_STRIDE - 8:
@@ -41,7 +41,7 @@ fn get_reg_for_var(var_idx: int) -> int:
             loop:
                 if di >= data_len:
                     break
-                vi := r32(g_opt_meta, mo + 8 + di)
+                vi : ., mut = r32(g_opt_meta, mo + 8 + di)
                 if vi == var_idx:
                     return r32(g_opt_meta, mo + 8 + di + 4)
                 di = di + 8
@@ -70,8 +70,8 @@ fn g2_slot(v: int) -> int:
     return 0
 
 fn g2_str_off(si: int) -> int:
-    o := 0
-    i := 0
+    o : ., mut = 0
+    i : ., mut = 0
     loop:
         if i >= g_x86_str_count:
             break
@@ -88,8 +88,8 @@ fn g2_str_off(si: int) -> int:
     return o + 8  // +8 for this string's header
 
 fn g2_rodata_sz() -> int:
-    o := 0
-    i := 0
+    o : ., mut = 0
+    i : ., mut = 0
     loop:
         if i >= g_x86_str_count:
             break
@@ -133,7 +133,7 @@ fn emit_sib(buf: string, pos: int, scale: int, index: int, base: int) -> int:
 fn e2_mov(b: string, p: int, d: int, s: int) -> int:
     // mov r64, r64 — opcode 0x89 MOV r/m, r, mod=3 (register)
     // REX: W=1, R=source>>3, B=dest>>3
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, s/8, 0, d/8)
     e2_w8(b, cp, 137)
     cp = cp + 1  // opcode 0x89 MOV r/m, r
@@ -142,7 +142,7 @@ fn e2_mov(b: string, p: int, d: int, s: int) -> int:
 
 fn e2_ld(b: string, p: int, r: int, o: int) -> int:
     // mov r64, [src] — opcode 0x8B MOV r, r/m, 3 addressing modes
-    cp := p
+    cp : ., mut = p
     if o >= E2_REG_SLOT_BASE:
         // Register-to-register: mov r_dest, r_src (copies value from alloc'd reg)
         src_reg := o - E2_REG_SLOT_BASE
@@ -171,7 +171,7 @@ fn e2_st(b: string, p: int, r: int, o: int) -> int:
         // register destination: use 3-operand mov (mod=3)
         dst_reg := o - E2_REG_SLOT_BASE
         return e2_mov(b, p, dst_reg, r)
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, r/8, 0, 0)  // REX.W + REX.R(if r>=8)
     e2_w8(b, cp, 137)
     cp = cp + 1  // opcode 0x89 MOV r/m, r
@@ -185,7 +185,7 @@ fn e2_st(b: string, p: int, r: int, o: int) -> int:
     return cp - p
 
 fn e2_li(b: string, p: int, o: int, v: int) -> int:
-    cp := p
+    cp : ., mut = p
     // mov [rbp+disp], imm64 — two-step for values outside signed 32-bit range
     if v < -2147483647 - 1 || v > 2147483647:
         // Step 1: mov rax, imm64 (REX.W + 0xB8 MOV r, imm + rax + 8B imm)
@@ -222,7 +222,7 @@ fn e2_li(b: string, p: int, o: int, v: int) -> int:
 
 fn e2_lr(b: string, p: int, rel: int) -> int:
     // lea r10, [rip + rel] — dest=r10, REX.R=1 since r10>=8
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, 1, 0, 0)
     e2_w8(b, cp, 141)
     cp = cp + 1  // LEA opcode 0x8D
@@ -232,7 +232,7 @@ fn e2_lr(b: string, p: int, rel: int) -> int:
 
 fn e2_lrb(buf: string, p: int, rel: int) -> int:
     // lea r11, [rip + rel] — dest=r11, REX.R=1 since r11>=8
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, 1, 0, 0)
     e2_w8(buf, cp, 141)
     cp = cp + 1
@@ -244,7 +244,7 @@ fn e2_lrb(buf: string, p: int, rel: int) -> int:
 // callers that already hold a value in r11 (e.g. an untagged index) must not
 // use r11 as the scratch. Encoding length and the disp32 offset stay identical.
 fn e2_lrb_reg(buf: string, p: int, reg: int) -> int:
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
     e2_w8(buf, cp, 141)
     cp = cp + 1
@@ -254,7 +254,7 @@ fn e2_lrb_reg(buf: string, p: int, reg: int) -> int:
 
 fn e2_lb(b: string, p: int, o: int) -> int:
     // lea r10, [rbp + offset]
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, 1, 0, 0)  // REX.W + REX.R (r10 >= 8)
     e2_w8(b, cp, 141)
     cp = cp + 1  // LEA opcode 0x8D
@@ -353,7 +353,7 @@ fn e2_ptr_bounds_check(b: string, p: int, base_var: int, alloc_sz: int, access_w
 // 仅做 null 检查（没有分配信息时，s3=0 的快速路径）。
 // test r10, r10（REX.WRB 0x4D 0x85 0xD2）；null -> ud2（SIGILL）
 fn e2_ptr_null_check(b: string, p: int) -> int:
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, 10/8, 0, 10/8)
     e2_w8(b, cp, 133)
     cp = cp + 1
@@ -375,7 +375,7 @@ fn e2_movabs_rdi(b: string, p: int, v: int) -> int:
     return 10
 fn e2_alu(b: string, p: int, op: int) -> int:
     // ALU r/m, r: REX.W + REX.RB (r11, r10) + opcode + ModRM reg=11, rm=10
-    cp := p
+    cp : ., mut = p
     cp = cp + emit_rex(b, cp, 1, 1, 0, 1)  // W=1, R=1(r11/8), B=1(r10/8)
     e2_w8(b, cp, op)
     cp = cp + 1
@@ -385,7 +385,7 @@ fn e2_alu(b: string, p: int, op: int) -> int:
 // ── SSE2 double 运算（IEEE 754 标准，float 支持）──
 // movsd xmm0, [rbp+disp] —  0F 10 /0
 fn e2_sd_load(b: string, p: int, o: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 242)
     w8(b, cp+1, 15)
     w8(b, cp+2, 16)
@@ -401,7 +401,7 @@ fn e2_sd_load(b: string, p: int, o: int) -> int:
     return cp - p
 // movsd xmm1, [rbp+disp] —  0F 10 /1
 fn e2_sd_load1(b: string, p: int, o: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 242)
     w8(b, cp+1, 15)
     w8(b, cp+2, 16)
@@ -417,7 +417,7 @@ fn e2_sd_load1(b: string, p: int, o: int) -> int:
     return cp - p
 // movsd xmm{rn}, [rbp+disp] —  0F 10 /rn（rn=0..7，SysV float 参数）
 fn e2_sd_load_x(b: string, p: int, o: int, rn: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 242)
     w8(b, cp+1, 15)
     w8(b, cp+2, 16)
@@ -440,7 +440,7 @@ fn e2_store_ret(b: string, p: int, d: int) -> int:
 
 // 压栈 binary64 值（8 字节，apx 快路径）：sub rsp,8 + movsd [rsp],xmm0
 fn e2_push_xmm0(b: string, p: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 72)
     w8(b, cp+1, 131)
     w8(b, cp+2, 236)
@@ -455,7 +455,7 @@ fn e2_push_xmm0(b: string, p: int) -> int:
     return cp - p
 
 fn e2_sd_cvt(b: string, p: int, o: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 242)
     w8(b, cp+1, 72)
     w8(b, cp+2, 15)
@@ -473,7 +473,7 @@ fn e2_sd_cvt(b: string, p: int, o: int) -> int:
 
 // movsd [rbp+disp], xmm0 —  0F 11 /0
 fn e2_sd_store(b: string, p: int, o: int) -> int:
-    cp := p
+    cp : ., mut = p
     w8(b, cp, 242)
     w8(b, cp+1, 15)
     w8(b, cp+2, 17)
@@ -498,8 +498,8 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
         // lea reg, [rip+0]; mov reg, [reg]. Using the destination as the RIP
         // scratch keeps r11 (often the untagged index) intact.
-        sz := e2_lrb_reg(buf, pos, reg)
-        cp2 := pos + sz
+        sz : ., mut = e2_lrb_reg(buf, pos, reg)
+        cp2 : ., mut = pos + sz
         cp2 = cp2 + emit_rex(buf, cp2, 1, reg/8, 0, reg/8)
         e2_w8(buf, cp2, 139)
         cp2 = cp2 + 1  // 0x8B MOV r, r/m
@@ -582,7 +582,7 @@ fn e2_sd_st_var(buf: string, pos: int, var_idx: int) -> int:
 // 局部 -> 现 `e2_st` 原字节。消费点：HIT 表路径 dest 回存（hit_ev_emit_one）+ IR_AWAIT dest。
 fn e2_st_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
     if e2_is_glob(var_idx) != 0:
-        cp := e2_lea_glob(buf, pos, var_idx)
+        cp : ., mut = e2_lea_glob(buf, pos, var_idx)
         // mov [r11], reg — REX.WRB + 0x89
         cp = cp + emit_rex(buf, pos+cp, 1, reg/8, 0, 11/8)
         e2_w8(buf, pos+cp, 137)
@@ -827,7 +827,7 @@ fn e2_emit_match_binary(buf: string, p: int, s2: int, idx: string, n: int, defau
                 rank = rank + 1 + left_n
 
         q := tree_base + k * E2_MATCH_NODE_SZ
-        ci := cell_load(idx, mid * 8)
+        ci : ., mut = cell_load(idx, mid * 8)
         cbase := (s2 + ci) * CCR_V10_CASE_DISK
         cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
         imm : ., mut = cval
@@ -1036,10 +1036,10 @@ fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
                     n := e2_match_sort_cases(s2, s3, idx)
                     first := cell_load(idx, 0)
                     minv := e2_match_case_value(s2, first)
-                    default_lbl := e2_match_default_label(s2, s3)
+                    default_lbl : ., mut = e2_match_default_label(s2, s3)
                     table_id := g_match_table_ro_cursor
                     table_abs := ro_tables_start + table_bytes
-                    def_abs := e2_label_abs_pos(default_lbl)
+                    def_abs : ., mut = e2_label_abs_pos(default_lbl)
                     if def_abs < 0:
                         def_abs = table_abs
                     vi : ., mut = 0
@@ -1081,7 +1081,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     s2 := iri_s2(instr_idx)
     s3 := iri_s3(instr_idx)
     ti := iri_tk(instr_idx)
-    cp := 0
+    cp : ., mut = 0
 
     if op == IR_NOP:
         return 0
@@ -1382,7 +1382,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + e2_mov(buf, pos+cp, 10, 2)
         else if s3 >= OP_EQ && s3 <= OP_GE:
             cp = cp + e2_alu(buf, pos+cp, 57)  // cmp
-            sop := 148
+            sop : ., mut = 148
             if s3 == OP_NE:
                 sop = 149
             else if s3 == OP_LT:
@@ -1952,8 +1952,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         do2 := g2_slot(d)
         name_ni := s3
         if name_ni >= 0:
-            si := -1
-            sfi := 0
+            si : ., mut = -1
+            sfi : ., mut = 0
             loop:
                 if sfi >= g_struct_count:
                     break
@@ -1980,7 +1980,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // the destination variable's array element type. A missing value is a
         // schedule bug: fall back explicitly to one target slot, never an
         // inlined x86 constant.
-        st := s2
+        st : ., mut = s2
         if st <= 0:
             st = mp_stride(TI_INT)
         sz := s1 * st
@@ -2458,7 +2458,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                     if g_x86_big_enabled != 0:
                         if ckind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
                             tagged = 1
-                    imm := cval
+                    imm : ., mut = cval
                     if tagged != 0:
                         imm = cval * 2
                     cp = cp + e2_big_mov_imm64(buf, pos+cp, 11, imm)

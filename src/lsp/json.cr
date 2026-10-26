@@ -72,7 +72,7 @@ fn _jr64(buf: string, pos: int) -> int:
     // twice to preserve sign extension.
     lo := load8(buf, pos) + load8(buf, pos + 1) * 256 + load8(buf, pos + 2) * 65536 + load8(buf, pos + 3) * 16777216
     hi := load8(buf, pos + 4) + load8(buf, pos + 5) * 256 + load8(buf, pos + 6) * 65536 + load8(buf, pos + 7) * 16777216
-    hi_part := hi * 65536
+    hi_part : ., mut = hi * 65536
     hi_part = hi_part * 65536
     return lo + hi_part
 
@@ -131,7 +131,7 @@ fn _json_grow_strs(needed: int):
 fn json_new(kind: int) -> int:
     need := g_json_count * J_NODE_BYTES + J_NODE_BYTES
     _json_grow_nodes(need)
-    i := g_json_count * J_NODE_SLOTS
+    i : ., mut = g_json_count * J_NODE_SLOTS
     _jw64(g_json_nodes, i * 8, kind)
     _jw64(g_json_nodes, (i + 1) * 8, 0)
     _jw64(g_json_nodes, (i + 2) * 8, 0)
@@ -355,7 +355,7 @@ fn _jparse_str() -> int:
                 if g_json_parse_pos + 4 > _jp_len():
                     g_json_parse_failed = 1
                     return -1
-                cp := _jparse_hex4(g_json_parse_pos)
+                cp : ., mut = _jparse_hex4(g_json_parse_pos)
                 if cp < 0:
                     return -1
                 g_json_parse_pos = g_json_parse_pos + 4

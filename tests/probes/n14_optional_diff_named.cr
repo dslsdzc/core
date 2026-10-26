@@ -3,7 +3,7 @@ struct NA:
 struct NB:
     x: int
 fn main() -> int:
-    a : NA? = NA { x= 1 }
+    a : NA?, mut = NA { x= 1 }
     b : NB? = NB { x= 2 }
     a = b
     return 0

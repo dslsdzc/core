@@ -34,7 +34,7 @@
 // Convert a scaled integer to decimal text and remove trailing zeros.
 fn dex_str(v: dex) -> string, pub:
     n : ., mut = @raw_int(v)    // scaled integer value
-    neg : int = 0
+    neg : int, mut = 0
     if n < 0:
         neg = 1
         n = 0 - n
