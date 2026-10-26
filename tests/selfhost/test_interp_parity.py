@@ -171,6 +171,12 @@ CASES = [
         "parity", 1, 1,
     ),
     (
+        "load8_string_callee",
+        "",
+        'return load8("abc", 0)',
+        "parity", 97, 97,
+    ),
+    (
         "recursion_fib_callee",
         "fn fib(n: int)->int:\n    if n < 2:\n        return n\n    return fib(n-1) + fib(n-2)\n",
         "return fib(10)",

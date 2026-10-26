@@ -339,6 +339,17 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                 cell_load(g_ir_vals, s1 * 8),
                 ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8)),
                 ir_interp_word(cell_load(g_ir_vals, (s1 + 2) * 8))))
+    if ir_interp_name_is(fn_ni, "load8") != 0:
+        if d >= 0 && s2 >= 2:
+            base8 := cell_load(g_ir_vals, s1 * 8)
+            idx8 := ir_interp_word(cell_load(g_ir_vals, s1 + 1 * 8))
+            if base8 >= 0 && base8 < g_str_count:
+                cell_store(g_ir_vals, d * 8, ir_interp_tag(str_load8(base8, idx8)))
+            else:
+                bs8 : ., mut = ""
+                unsafe:
+                    bs8 = @str_of(base8)
+                cell_store(g_ir_vals, d * 8, ir_interp_tag(cell_load_byte(bs8, idx8)))
     if x86_frontend_builtin_is_str_ptr_load(fn_name) != 0:
         if d >= 0 && s2 >= 2:
             b := cell_load(g_ir_vals, s1 * 8)

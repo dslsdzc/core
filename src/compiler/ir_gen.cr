@@ -3242,6 +3242,7 @@ fn gen_expr(node: int) -> int:
         saw_bool : ., mut = 0
         saw_enum : ., mut = 0
         saw_string : ., mut = 0
+        saw_nonempty_string : ., mut = 0
         an0 = first_arm
         loop:
             if an0 < 0:
@@ -3267,6 +3268,8 @@ fn gen_expr(node: int) -> int:
                     match_mode = 0
             else if k0 == EXPR_STRING:
                 saw_string = 1
+                if istr_len(ast_int_val(ap0)) > 0:
+                    saw_nonempty_string = 1
                 match_mode = 0
             else if k0 == EXPR_IDENT && str_eq(istr_get(ast_int_val(ap0)), "_") != 0:
                 // The lexer classifies a bare `_` as an identifier because `_`
@@ -3375,6 +3378,16 @@ fn gen_expr(node: int) -> int:
         if saw_string != 0 && match_mode == 0 && irv_type(match_val) == TI_STR:
             match_len_var = new_ir_var("m_len", TI_INT)
             emit(IR_CALL, match_len_var, match_val, 1, str_intern("str_len"), TI_INT)
+        match_first_var : ., mut = -1
+        if saw_nonempty_string != 0 && match_mode == 0 && match_len_var >= 0:
+            fb0 := new_ir_var("_fb0", TI_STR)
+            fb1 := new_ir_var("_fb1", TI_INT)
+            fbz := new_ir_var("_fbz", TI_INT)
+            emit(IR_CONST, fbz, 0, 0, 0, TI_INT)
+            emit(IR_STORE, -1, fb0, match_val, 0, 0)
+            emit(IR_STORE, -1, fb1, fbz, 0, 0)
+            match_first_var = new_ir_var("m_first", TI_INT)
+            emit(IR_CALL, match_first_var, fb0, 2, str_intern("load8"), TI_INT)
         an : ., mut = first_arm
         arm_idx : ., mut = 0
         loop:
@@ -3631,6 +3644,14 @@ fn gen_expr(node: int) -> int:
                     len_ok := new_label()
                     emit_cond_match(lcmp, fall_lbl, len_ok)
                     emit(IR_LABEL, -1, len_ok, 0, 0, 0)
+                if match_first_var >= 0 && istr_len(ast_int_val(arm_pat)) > 0:
+                    pfirst := new_ir_var("pfirst", TI_INT)
+                    emit(IR_CONST, pfirst, str_load8(ast_int_val(arm_pat), 0), 0, 0, TI_INT)
+                    fcmp := new_ir_var("fcmp", TI_INT)
+                    emit(IR_BINARY, fcmp, match_first_var, pfirst, OP_EQ, 0)
+                    first_ok := new_label()
+                    emit_cond_match(fcmp, fall_lbl, first_ok)
+                    emit(IR_LABEL, -1, first_ok, 0, 0, 0)
                 eq0 := new_ir_var("_seq0", TI_STR)
                 eq1 := new_ir_var("_seq1", TI_STR)
                 emit(IR_STORE, -1, eq0, match_val, 0, 0)
