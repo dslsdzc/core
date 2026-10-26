@@ -220,6 +220,29 @@ fn main() -> int:
 """
 
 
+# ── B8：全局数组动态下标（读/写；修复前 `e2_load_var` 全局路径用 r11 scratch
+# 覆盖已解 tag 的 index ⇒ 读到 0 / 写错槽）──
+B8_GLOBAL_ARRAY_INDEX = """
+g : [int;4], mut = [1, 2, 3, 4]
+fn main() -> int:
+    i : ., mut = 2
+    if g[i] != 3:
+        return 1
+    g[i] = 9
+    if g[i] != 9:
+        return 2
+    if g[2] != 9:
+        return 3
+    j : ., mut = 1 + 1
+    if g[j] != 9:
+        return 4
+    g[3] = g[i] + 1
+    if g[3] != 10:
+        return 5
+    return 42
+"""
+
+
 def main():
     # B6(b) 正片段（**连续序列**）：lea r11,[rip+disp32]（4c 8d 1d ??×4）后紧跟
     # movsd xmm0,[r11]（f2 **41** 0f 10 03；41 = REX.B，缺它即变成 [rbx]）。
@@ -246,6 +269,8 @@ def main():
         case_elf_match("b6b_extern_global_arg_rip_form", B6B_EXTERN, b6b_frags),
         # B7：非回归
         case_run("b7_non_dex_global_return", B7_RET_GLOBAL, 5),
+        # B8：全局数组动态下标读/写（修复前读 0、写错槽）
+        case_run("b8_global_array_dynamic_index", B8_GLOBAL_ARRAY_INDEX, 42, interp_rc=42),
     ]
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

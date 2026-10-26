@@ -94,6 +94,22 @@ fn main() -> int:
         42,
     ),
     (
+        "nested_self_method",
+        """
+struct Acc:
+    n: int
+impl Acc:
+    fn inner(&self) -> int:
+        return self.n
+    fn outer(&self) -> int:
+        return self.inner() + 1
+fn main() -> int:
+    a := Acc { n = 41 }
+    return a.outer()
+""",
+        42,
+    ),
+    (
         "mut_self_method",
         """
 struct Counter:
