@@ -1304,32 +1304,6 @@ fn sh_match_payload_root(pat_node: int, i: int) -> int:
         j = j - 1
     return -1
 
-// Enum payload 内的首个 refutable 节点（-1 = 全部为 ident/wildcard）。
-// 扫描区间 = [首个子模式子树起点, pat_node)。parser 在分配外层节点前连续分配
-// 完整 payload 子树，因此该区间覆盖所有子模式，包括“复合子模式不在首位”的
-// A(x, X(y)) —— 只按 ast_b + i 会漏掉后面的复合子模式。
-fn sh_match_payload_bad(pat_node: int) -> int:
-    if pat_node < 0:
-        return -1
-    count := ast_c(pat_node)
-    if count <= 0:
-        return -1
-    first := ast_b(pat_node)
-    if first < 0 || first >= pat_node:
-        return pat_node
-    start := sh_match_pat_subtree_start(first)
-    if start < 0 || start >= pat_node:
-        return pat_node
-    i := start
-    loop:
-        if i >= pat_node:
-            return -1
-        k := ast_kind(i)
-        if k != EXPR_IDENT && k != EXPR_WILDCARD && k != EXPR_INT && k != EXPR_BOOL && k != EXPR_CHAR && k != EXPR_STRING:
-            return i
-        i = i + 1
-    return -1
-
 // 变体模式 -> 本枚举变体下标（-1 = 不属本枚举 / 名字不可解析 / scrutinee 不可展开）。
 // 名字有两种形态（parser.cr parse_pattern 的产物）：裸变体名 Red，或限定名
 // Color.Red（parser 用 name + "." + variant 拼接）。限定名取最后一个点之后的段
