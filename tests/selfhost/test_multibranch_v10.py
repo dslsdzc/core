@@ -2592,14 +2592,15 @@ def test_interpolated_string_pattern_rejected():
         )
 
 
-def test_nested_literal_pattern_rejected():
+def test_nested_literal_payload_matches():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        _assert_compile_rejected(
+        _assert_program(
             tmp,
             MATCH_NESTED_LITERAL_SOURCE,
-            "nested_literal",
-            ["error[TM09]", "Nested match patterns are not supported"],
+            1,
+            opts=(0, 2),
+            name="nested_literal",
         )
 
 

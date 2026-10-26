@@ -1297,7 +1297,7 @@ fn sh_match_payload_bad(pat_node: int) -> int:
         if i >= pat_node:
             return -1
         k := ast_kind(i)
-        if k != EXPR_IDENT && k != EXPR_WILDCARD:
+        if k != EXPR_IDENT && k != EXPR_WILDCARD && k != EXPR_INT && k != EXPR_BOOL && k != EXPR_CHAR && k != EXPR_STRING:
             return i
         i = i + 1
     return -1
