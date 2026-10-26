@@ -833,6 +833,25 @@ fn main() -> int:
     return 42
 """
 
+MATCH_STRING_LENGTHS_SOURCE = """fn pick(s: string) -> int:
+    return match s:
+        "a" => 1,
+        "bb" => 2,
+        "ccc" => 3,
+        _ => 4
+
+fn main() -> int:
+    if pick("a") != 1:
+        return 10
+    if pick("bb") != 2:
+        return 11
+    if pick("ccc") != 3:
+        return 12
+    if pick("zzzz") != 4:
+        return 13
+    return 42
+"""
+
 MATCH_CHAR_SOURCE = """fn code_a() -> int:
     return 'A' as int
 
@@ -1705,6 +1724,20 @@ def _stdlib_func_names():
     return names
 
 
+def _user_call_names(data, fn_name):
+    names = _str_table(data)
+    nodes = _nod_records(data)
+    out = set()
+    for name, enter, exit in _function_ranges(data):
+        if name != fn_name:
+            continue
+        for i in range(enter, exit):
+            rec = nodes[i]
+            if rec[0] == 4 and 0 <= rec[4] < len(names):
+                out.add(names[rec[4]])
+    return out
+
+
 def _user_op_nodes(data, opcode):
     """Nodes with `opcode` in fixture-defined functions, excluding the prelude."""
     nodes = _nod_records(data)
@@ -2429,6 +2462,23 @@ def test_string_match_uses_sequential_path():
         assert _pattern_match_nodes(data) == [], "string patterns must not become CASE rows"
         _assert_program(
             tmp, MATCH_STRING_SOURCE, 42, opts=(0, 2), name="match_string"
+        )
+
+
+def test_string_match_uses_length_bucket():
+    """The string arm chain computes str_len once before per-arm str_eq calls."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRING_LENGTHS_SOURCE, "match_string_lengths")
+        assert "str_len" in _user_call_names(data, "pick"), (
+            "string match did not emit the length bucket"
+        )
+        _assert_program(
+            tmp,
+            MATCH_STRING_LENGTHS_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_string_lengths",
         )
 
 
