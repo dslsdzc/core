@@ -2422,6 +2422,194 @@ fn dt_move_col(rows: string, pats: string, cols: string, tis: string,
         cell_store(out_tis, c * 8, cell_load(tis, src * 8))
         c = c + 1
 
+// One string literal equality test. Success jumps to the arm label; failure
+// jumps to the next test in the same bucket or to the default edge.
+fn dt_emit_str_eq(val: int, ni: int, ok: int, miss: int):
+    lit := new_ir_var("dt_slit", TI_STR)
+    track_str(ni)
+    emit(IR_CONST, lit, ni, 0, 0, TI_STR)
+    e0 := new_ir_var("dt_eq0", TI_STR)
+    e1 := new_ir_var("dt_eq1", TI_STR)
+    emit(IR_STORE, -1, e0, val, 0, 0)
+    emit(IR_STORE, -1, e1, lit, 0, 0)
+    cmp := new_ir_var("dt_seq", TI_BOOL)
+    emit(IR_CALL, cmp, e0, 2, str_intern("str_eq"), TI_BOOL)
+    emit_cond_match(cmp, miss, ok)
+
+// Index tree for a string column: str_len once, then one test per distinct
+// length; within a length bucket one load8 and one test per distinct first
+// byte; within a first-byte bucket one str_eq per literal. A length bucket
+// with a single literal needs no first-byte test (length already identifies it).
+fn dt_emit_string_switch(val: int, cids: string, cn: int,
+                         case_lbls: string, default_lbl: int):
+    if cn <= 0:
+        emit(IR_JUMP, -1, default_lbl, 0, 0, 0)
+        return
+    // Distinct lengths in first-appearance order.
+    lens := alloc((cn + 1) * 8)
+    ln : ., mut = 0
+    j : ., mut = 0
+    k : ., mut = 0
+    loop:
+        if j >= cn:
+            break
+        L := istr_len(cell_load(cids, j * 8))
+        dup : ., mut = 0
+        k = 0
+        loop:
+            if k >= ln:
+                break
+            if cell_load(lens, k * 8) == L:
+                dup = 1
+                break
+            k = k + 1
+        if dup == 0:
+            cell_store(lens, ln * 8, L)
+            ln = ln + 1
+        j = j + 1
+    len_var := new_ir_var("dt_slen", TI_INT)
+    emit(IR_CALL, len_var, val, 1, str_intern("str_len"), TI_INT)
+    len_lbls := alloc((ln + 1) * 8)
+    i : ., mut = 0
+    loop:
+        if i >= ln:
+            break
+        L := cell_load(lens, i * 8)
+        lbl := new_label()
+        cell_store(len_lbls, i * 8, lbl)
+        pv := new_ir_var("dt_lv", TI_INT)
+        emit(IR_CONST, pv, L, 0, 0, TI_INT)
+        cmp := new_ir_var("dt_lc", TI_INT)
+        emit(IR_BINARY, cmp, len_var, pv, OP_EQ, 0)
+        miss := default_lbl
+        if i + 1 < ln:
+            miss = new_label()
+        emit_cond_match(cmp, miss, lbl)
+        if i + 1 < ln:
+            emit(IR_LABEL, -1, miss, 0, 0, 0)
+        i = i + 1
+    // Length buckets in the same order.
+    i = 0
+    loop:
+        if i >= ln:
+            break
+        L := cell_load(lens, i * 8)
+        emit(IR_LABEL, -1, cell_load(len_lbls, i * 8), 0, 0, 0)
+        cnt : ., mut = 0
+        j = 0
+        loop:
+            if j >= cn:
+                break
+            if istr_len(cell_load(cids, j * 8)) == L:
+                cnt = cnt + 1
+            j = j + 1
+        if cnt <= 1:
+            // Length identifies the literal; compare it directly.
+            j = 0
+            loop:
+                if j >= cn:
+                    break
+                if istr_len(cell_load(cids, j * 8)) == L:
+                    dt_emit_str_eq(val, cell_load(cids, j * 8),
+                        cell_load(case_lbls, j * 8), default_lbl)
+                    break
+                j = j + 1
+        else:
+            // Distinct first bytes in this length bucket.
+            fbytes := alloc((cnt + 1) * 8)
+            fbcount : ., mut = 0
+            j = 0
+            loop:
+                if j >= cn:
+                    break
+                ni := cell_load(cids, j * 8)
+                if istr_len(ni) == L:
+                    B : ., mut = 0
+                    if L > 0:
+                        B = str_load8(ni, 0)
+                    dup : ., mut = 0
+                    k : ., mut = 0
+                    loop:
+                        if k >= fbcount:
+                            break
+                        if cell_load(fbytes, k * 8) == B:
+                            dup = 1
+                            break
+                        k = k + 1
+                    if dup == 0:
+                        cell_store(fbytes, fbcount * 8, B)
+                        fbcount = fbcount + 1
+                j = j + 1
+            first_var : ., mut = -1
+            if L > 0:
+                fb0 := new_ir_var("_dt_fb0", TI_STR)
+                fb1 := new_ir_var("_dt_fb1", TI_INT)
+                fbz := new_ir_var("_dt_fbz", TI_INT)
+                emit(IR_CONST, fbz, 0, 0, 0, TI_INT)
+                emit(IR_STORE, -1, fb0, val, 0, 0)
+                emit(IR_STORE, -1, fb1, fbz, 0, 0)
+                first_var = new_ir_var("dt_sfb", TI_INT)
+                emit(IR_CALL, first_var, fb0, 2, str_intern("load8"), TI_INT)
+            fbls := alloc((fbcount + 1) * 8)
+            k = 0
+            loop:
+                if k >= fbcount:
+                    break
+                B := cell_load(fbytes, k * 8)
+                lbl := new_label()
+                cell_store(fbls, k * 8, lbl)
+                cmp := new_ir_var("dt_fc", TI_INT)
+                if L > 0:
+                    pv := new_ir_var("dt_fv", TI_INT)
+                    emit(IR_CONST, pv, B, 0, 0, TI_INT)
+                    emit(IR_BINARY, cmp, first_var, pv, OP_EQ, 0)
+                else:
+                    emit(IR_CONST, cmp, 1, 0, 0, TI_INT)
+                miss := default_lbl
+                if k + 1 < fbcount:
+                    miss = new_label()
+                emit_cond_match(cmp, miss, lbl)
+                if k + 1 < fbcount:
+                    emit(IR_LABEL, -1, miss, 0, 0, 0)
+                k = k + 1
+            // First-byte buckets.
+            k = 0
+            loop:
+                if k >= fbcount:
+                    break
+                emit(IR_LABEL, -1, cell_load(fbls, k * 8), 0, 0, 0)
+                B := cell_load(fbytes, k * 8)
+                gidx := alloc((cnt + 1) * 8)
+                gn : ., mut = 0
+                j = 0
+                loop:
+                    if j >= cn:
+                        break
+                    ni := cell_load(cids, j * 8)
+                    if istr_len(ni) == L:
+                        B2 : ., mut = 0
+                        if L > 0:
+                            B2 = str_load8(ni, 0)
+                        if B2 == B:
+                            cell_store(gidx, gn * 8, j)
+                            gn = gn + 1
+                    j = j + 1
+                g : ., mut = 0
+                loop:
+                    if g >= gn:
+                        break
+                    idx := cell_load(gidx, g * 8)
+                    miss := default_lbl
+                    if g + 1 < gn:
+                        miss = new_label()
+                    dt_emit_str_eq(val, cell_load(cids, idx * 8),
+                        cell_load(case_lbls, idx * 8), miss)
+                    if g + 1 < gn:
+                        emit(IR_LABEL, -1, miss, 0, 0, 0)
+                    g = g + 1
+                k = k + 1
+        i = i + 1
+
 // Emit one decision node. Returns 0 on success, -1 on an unsupported shape
 // (already emitted a fall edge; callers must not try to rewind IR).
 fn dt_compile(rows: string, pats: string, cols: string, tis: string,
@@ -2539,6 +2727,12 @@ fn dt_compile(rows: string, pats: string, cols: string, tis: string,
         if cn == 2:
             complete = 1
     case_lbls := alloc((cn + 1) * 8)
+    j : ., mut = 0
+    loop:
+        if j >= cn:
+            break
+        cell_store(case_lbls, j * 8, new_label())
+        j = j + 1
     default_lbl := new_label()
     // Emit tests. For enums read the tag once; scalar/string columns compare
     // the value directly. Every miss goes to the default edge, which either
@@ -2547,58 +2741,60 @@ fn dt_compile(rows: string, pats: string, cols: string, tis: string,
     if ck == 1:
         tag = new_ir_var("dt_tag", TI_INT)
         emit(IR_LOAD_ENUM_TAG, tag, cell_load(mcols, 0), 0, 0, 0)
-    j : ., mut = 0
-    loop:
-        if j >= cn:
-            break
-        cl := new_label()
-        cell_store(case_lbls, j * 8, cl)
-        k2 := cell_load(ckinds, j * 8)
-        id2 := cell_load(cids, j * 8)
-        miss_lbl := default_lbl
-        if j + 1 < cn:
-            miss_lbl = new_label()
-        cmp := new_ir_var("dt_cmp", TI_INT)
-        if k2 == 1:
-            vtag := new_ir_var("dt_vtag", TI_INT)
-            emit(IR_CONST, vtag, id2, 0, 0, TI_INT)
-            emit(IR_BINARY, cmp, tag, vtag, OP_EQ, 0)
-            emit_cond_match(cmp, miss_lbl, cl)
-        else if k2 == 5:
-            bv : ., mut = 0
-            if id2 != 0:
-                bv = 1
-            pv := new_ir_var("dt_pv", TI_BOOL)
-            emit(IR_CONST, pv, bv, 0, 0, TI_BOOL)
-            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
-            emit_cond_match(cmp, miss_lbl, cl)
-        else if k2 == 4:
-            pv := new_ir_var("dt_pv", TI_INT)
-            emit(IR_CONST, pv, id2, 0, 0, TI_INT)
-            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
-            emit_cond_match(cmp, miss_lbl, cl)
-        else if k2 == 6:
-            // Char slots are untagged intern indexes; compare as TI_CHAR.
-            pv := new_ir_var("dt_pv", TI_CHAR)
-            track_str(id2)
-            emit(IR_CONST, pv, id2, 0, 0, TI_CHAR)
-            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
-            emit_cond_match(cmp, miss_lbl, cl)
-        else if k2 == 7:
-            pv := new_ir_var("dt_pv", TI_STR)
-            track_str(id2)
-            emit(IR_CONST, pv, id2, 0, 0, TI_STR)
-            e0 := new_ir_var("dt_e0", TI_STR)
-            e1 := new_ir_var("dt_e1", TI_STR)
-            emit(IR_STORE, -1, e0, cell_load(mcols, 0), 0, 0)
-            emit(IR_STORE, -1, e1, pv, 0, 0)
-            emit(IR_CALL, cmp, e0, 2, str_intern("str_eq"), TI_BOOL)
-            emit_cond_match(cmp, miss_lbl, cl)
-        else:
-            emit(IR_JUMP, -1, fall, 0, 0, 0)
-        if j + 1 < cn:
-            emit(IR_LABEL, -1, miss_lbl, 0, 0, 0)
-        j = j + 1
+    if ck == 7:
+        dt_emit_string_switch(cell_load(mcols, 0), cids, cn, case_lbls, default_lbl)
+    else:
+        j : ., mut = 0
+        loop:
+            if j >= cn:
+                break
+            cl := cell_load(case_lbls, j * 8)
+            k2 := cell_load(ckinds, j * 8)
+            id2 := cell_load(cids, j * 8)
+            miss_lbl := default_lbl
+            if j + 1 < cn:
+                miss_lbl = new_label()
+            cmp := new_ir_var("dt_cmp", TI_INT)
+            if k2 == 1:
+                vtag := new_ir_var("dt_vtag", TI_INT)
+                emit(IR_CONST, vtag, id2, 0, 0, TI_INT)
+                emit(IR_BINARY, cmp, tag, vtag, OP_EQ, 0)
+                emit_cond_match(cmp, miss_lbl, cl)
+            else if k2 == 5:
+                bv : ., mut = 0
+                if id2 != 0:
+                    bv = 1
+                pv := new_ir_var("dt_pv", TI_BOOL)
+                emit(IR_CONST, pv, bv, 0, 0, TI_BOOL)
+                emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+                emit_cond_match(cmp, miss_lbl, cl)
+            else if k2 == 4:
+                pv := new_ir_var("dt_pv", TI_INT)
+                emit(IR_CONST, pv, id2, 0, 0, TI_INT)
+                emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+                emit_cond_match(cmp, miss_lbl, cl)
+            else if k2 == 6:
+                // Char slots are untagged intern indexes; compare as TI_CHAR.
+                pv := new_ir_var("dt_pv", TI_CHAR)
+                track_str(id2)
+                emit(IR_CONST, pv, id2, 0, 0, TI_CHAR)
+                emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+                emit_cond_match(cmp, miss_lbl, cl)
+            else if k2 == 7:
+                pv := new_ir_var("dt_pv", TI_STR)
+                track_str(id2)
+                emit(IR_CONST, pv, id2, 0, 0, TI_STR)
+                e0 := new_ir_var("dt_e0", TI_STR)
+                e1 := new_ir_var("dt_e1", TI_STR)
+                emit(IR_STORE, -1, e0, cell_load(mcols, 0), 0, 0)
+                emit(IR_STORE, -1, e1, pv, 0, 0)
+                emit(IR_CALL, cmp, e0, 2, str_intern("str_eq"), TI_BOOL)
+                emit_cond_match(cmp, miss_lbl, cl)
+            else:
+                emit(IR_JUMP, -1, fall, 0, 0, 0)
+            if j + 1 < cn:
+                emit(IR_LABEL, -1, miss_lbl, 0, 0, 0)
+            j = j + 1
     // Default edge: wildcard rows for non-exhaustive constructor sets. For a
     // complete enum/bool switch it is unreachable (wild rows already appear in
     // every case branch), so keep the fall edge.
@@ -4148,38 +4344,37 @@ fn gen_expr(node: int) -> int:
             match_mode = 0
 
         // ── Decision-tree eligibility ────────────────────────────────────
-        // The local matrix compiler handles nested enum/struct/tuple and scalar
-        // columns. Optional representation dispatch and strings (separate
-        // grouping pass) keep the sequential path; unsupported shapes fall back
-        // before any IR is emitted.
+        // The local matrix compiler handles nested enum/struct/tuple, scalar
+        // and string columns. Optional representation dispatch keeps the
+        // sequential path; unsupported shapes fall back before any IR is
+        // emitted.
         dt_mode : ., mut = 0
         if match_mode == 0 && match_ti >= 0 && match_val >= 0:
             if get_type_kind(match_ti) != TYP_OPTIONAL:
                 if irv_rep(match_val) < 0:
-                    if saw_string == 0:
-                        dt_mode = 1
-                        ck0 : ., mut = -1
-                        an0 = first_arm
-                        loop:
-                            if an0 < 0:
-                                break
-                            ap0 := ast_a(an0)
-                            if ap0 < 0:
+                    dt_mode = 1
+                    ck0 : ., mut = -1
+                    an0 = first_arm
+                    loop:
+                        if an0 < 0:
+                            break
+                        ap0 := ast_a(an0)
+                        if ap0 < 0:
+                            dt_mode = 0
+                            break
+                        if dt_pat_supported(ap0, match_ti) == 0:
+                            dt_mode = 0
+                            break
+                        // One decision column cannot mix enum variants with
+                        // scalars; the sequential path owns that shape.
+                        k0 := dt_ctor_kind(ap0)
+                        if k0 != 0:
+                            if ck0 < 0:
+                                ck0 = k0
+                            else if ck0 != k0:
                                 dt_mode = 0
                                 break
-                            if dt_pat_supported(ap0, match_ti) == 0:
-                                dt_mode = 0
-                                break
-                            // One decision column cannot mix enum variants with
-                            // scalars; the sequential path owns that shape.
-                            k0 := dt_ctor_kind(ap0)
-                            if k0 != 0:
-                                if ck0 < 0:
-                                    ck0 = k0
-                                else if ck0 != k0:
-                                    dt_mode = 0
-                                    break
-                            an0 = ast_c(an0)
+                        an0 = ast_c(an0)
 
         // Pass B: only for supported matches. Resolve enum tags and dedupe by
         // (kind, value), keeping the first arm.
@@ -4283,11 +4478,11 @@ fn gen_expr(node: int) -> int:
         // String length bucketing: compute the scrutinee length once so arms
         // with a different literal length skip the str_eq call entirely.
         match_len_var : ., mut = -1
-        if saw_string != 0 && match_mode == 0 && irv_type(match_val) == TI_STR:
+        if saw_string != 0 && match_mode == 0 && dt_mode == 0 && irv_type(match_val) == TI_STR:
             match_len_var = new_ir_var("m_len", TI_INT)
             emit(IR_CALL, match_len_var, match_val, 1, str_intern("str_len"), TI_INT)
         match_first_var : ., mut = -1
-        if saw_nonempty_string != 0 && match_mode == 0 && match_len_var >= 0:
+        if saw_nonempty_string != 0 && match_mode == 0 && dt_mode == 0 && match_len_var >= 0:
             fb0 := new_ir_var("_fb0", TI_STR)
             fb1 := new_ir_var("_fb1", TI_INT)
             fbz := new_ir_var("_fbz", TI_INT)
