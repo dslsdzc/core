@@ -3453,6 +3453,24 @@ fn gen_expr(node: int) -> int:
                     if g_optrep_on != 0 && match_val >= 0:
                         rep_v = irv_rep(match_val)
                     if rep_v < 0:
+                        payload_lbl : ., mut = -1
+                        scp : ., mut = ast_c(arm_pat)
+                        swp : ., mut = ast_b(arm_pat)
+                        pj : ., mut = 0
+                        if nested_bad == 0:
+                            if scp > 0 && swp >= 0:
+                                loop:
+                                    if pj >= scp:
+                                        break
+                                    sp : ., mut = -1
+                                    if swp + pj >= 0:
+                                        sp = ast_a(swp + pj)
+                                    if sp >= 0:
+                                        skp := ast_kind(sp)
+                                        if skp == EXPR_INT || skp == EXPR_BOOL || skp == EXPR_CHAR || skp == EXPR_STRING:
+                                            payload_lbl = new_label()
+                                            break
+                                    pj = pj + 1
                         tag_var := new_ir_var("tag", TI_INT)
                         emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
                         vtag := new_ir_var("vtag", TI_INT)
@@ -3461,7 +3479,30 @@ fn gen_expr(node: int) -> int:
                         emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
                         if has_next == 1:
                             fall_lbl = new_label()
-                        emit_cond_match(cmp_var, fall_lbl, body_lbl)
+                        tag_ok := body_lbl
+                        if payload_lbl >= 0:
+                            tag_ok = payload_lbl
+                        emit_cond_match(cmp_var, fall_lbl, tag_ok)
+                        if payload_lbl >= 0:
+                            emit(IR_LABEL, -1, payload_lbl, 0, 0, 0)
+                            scp = ast_c(arm_pat)
+                            swp = ast_b(arm_pat)
+                            pj = 0
+                            loop:
+                                if pj >= scp:
+                                    break
+                                sp : ., mut = -1
+                                if swp + pj >= 0:
+                                    sp = ast_a(swp + pj)
+                                if sp >= 0:
+                                    skp := ast_kind(sp)
+                                    if skp == EXPR_INT || skp == EXPR_BOOL || skp == EXPR_CHAR || skp == EXPR_STRING:
+                                        fv := new_ir_var("fld", TI_INT)
+                                        irv_set_type(fv, agg_payload_read_form(arm_pat, pj))
+                                        emit(IR_LOAD_FIELD, fv, match_val, 0, pj + 1, 0)
+                                        if gen_structpat_field_test(sp, fv, fall_lbl) < 0:
+                                            emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
+                                pj = pj + 1
                     else:
                         is_some_pat : ., mut = 0
                         if str_eq(istr_get(variant_ni), "Some") != 0:
