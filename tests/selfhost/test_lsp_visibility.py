@@ -40,7 +40,7 @@ def main():
         _send(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
         _read_frame(proc)
         uri = "file:///tmp/pub_lsp_visibility.cr"
-        src = "import hashmap\nfn main() -> int:\n    m := intMap()\n    return 0\n"
+        src = "import hashmap\nfn main() -> int:\n    m : IntMap = intMap()\n    return 0\n"
         _send(proc, {"jsonrpc": "2.0", "method": "textDocument/didOpen",
                      "params": {"textDocument": {"uri": uri, "version": 1, "text": src}}})
         diag = _read_frame(proc)
@@ -56,6 +56,13 @@ def main():
             assert name in items, (name, sorted(items))
         for hidden in ("IntMap.findKey", "IntMap.findSlot", "IntMap.grow"):
             assert hidden not in items, (hidden, sorted(items))
+        # Hover follows the same export table: the pub type is documented.
+        _send(proc, {"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover",
+                     "params": {"textDocument": {"uri": uri},
+                                "position": {"line": 2, "character": 8}}})
+        hov = _read_frame(proc)
+        assert hov is not None and hov.get("result"), hov
+        assert "struct IntMap" in hov["result"]["contents"], hov
     finally:
         proc.stdin.close()
         proc.wait(timeout=5)

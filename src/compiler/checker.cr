@@ -744,6 +744,16 @@ fn def_decl_fn_sym(name_idx: int, ti: int, node: int):
     sym_set_owner(si, lib_of_node(node))
     sym_set_pub(si, fn_node_is_pub(node))
 
+fn def_decl_variant_sym(name_idx: int, ti: int, enum_name: int, enum_line: int):
+    def_sym(name_idx, SYM_FN, ti, -1)
+    si := g_sym_count - 1
+    owner := lib_of_line(enum_line)
+    sym_set_owner(si, owner)
+    is_pub : ., mut = 0
+    if owner >= 0 && lib_export_find_kind(owner, enum_name, SYM_TYPE) >= 0:
+        is_pub = 1
+    sym_set_pub(si, is_pub)
+
 fn def_let_sym(name_idx: int, ti: int, is_mut: int):
     def_sym(name_idx, SYM_LOCAL, ti, -1)
     sym_set_mut(g_sym_count - 1, is_mut)
@@ -1562,7 +1572,7 @@ fn collect_decls():
             if vi >= ei_variant_count(i):
                 break
             vname_idx := ei_variant_name(i, vi)
-            def_sym(vname_idx, SYM_FN, type_idx, -1)
+            def_decl_variant_sym(vname_idx, type_idx, name_idx, ei_decl_line(i))
             vi = vi + 1
         i = i + 1
 
