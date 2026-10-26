@@ -181,6 +181,7 @@ g_ei_vt_cap : int, mut
 g_cov_bits : string, mut
 g_cov_cap : int, mut
 g_cov_len : int, mut
+g_cov_base : int, mut
 // g_optrep_on is 1 when this compilation unit uses optional representations. The
 // AST pre-scan sets it for EXPR_OPTIONAL, Some, or None. When off, no hidden globals
 // are registered and no representation instructions are emitted, so non-optional

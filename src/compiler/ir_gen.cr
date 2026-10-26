@@ -1064,7 +1064,18 @@ fn structpat_field_load_ti_from(ft: int) -> int:
 // comparison fails. Returns 1 when a test was emitted, 0 for ident/wildcard
 // (no test), and -1 for an unsupported nested subpattern (caller must fail
 // closed instead of jumping to the body).
-fn gen_pattern_test(sub: int, fv: int, fall: int) -> int:
+// Declared payload type-node -> IR read form. Aggregates are pointers/tags
+// (TI_INT); dex and char payloads need their exact slot form.
+fn payload_tn_read_form(tn: int) -> int:
+    if tn < 0:
+        return TI_INT
+    if agg_read_form_is_dex(tn) != 0:
+        return TI_DEX_S
+    if agg_read_form_is_char(tn) != 0:
+        return TI_CHAR
+    return TI_INT
+
+fn gen_pattern_test(sub: int, fv: int, fall: int, ti: int) -> int:
     if sub < 0:
         return 0
     k := ast_kind(sub)
@@ -1072,7 +1083,160 @@ fn gen_pattern_test(sub: int, fv: int, fall: int) -> int:
         return gen_nested_struct_test(sub, fv, fall)
     if k == EXPR_TUPLEPAT:
         return gen_nested_tuple_test(sub, fv, fall)
+    if k == EXPR_ENUMPAT:
+        return gen_enum_pattern_test(sub, fv, fall, ti)
     return gen_structpat_field_test(sub, fv, fall)
+
+// Test every refutable payload sub-pattern against one payload value whose
+// declared type is val_ti (used for optional `Some(...)` payloads, which have a
+// single inner type instead of a variant row).
+fn gen_payload_tests(pat: int, val: int, fall: int, val_ti: int) -> int:
+    c := ast_c(pat)
+    if c <= 0:
+        return 1
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return 1
+        sub := sh_match_payload_root(pat, i)
+        if sub < 0:
+            return -1
+        k := ast_kind(sub)
+        if k == EXPR_IDENT || k == EXPR_WILDCARD:
+            i = i + 1
+            continue
+        if val_ti < 0:
+            return -1
+        if gen_pattern_test(sub, val, fall, val_ti) < 0:
+            return -1
+        i = i + 1
+    return 1
+
+// Resolve the enum row of a variant pattern. IR lowering has no inferred
+// scrutinee type, so fall back to the constructor symbol for the bare variant
+// name (qualified `Enum.Variant` is reduced by get_variant_name_idx).
+fn enum_row_of_pat(val_ti: int, pat: int) -> int:
+    if val_ti >= 0:
+        ea := find_enum_row_of(val_ti)
+        if ea >= 0:
+            return ea
+    vni := get_variant_name_idx(ast_a(pat))
+    if vni < 0:
+        return -1
+    si := find_gsym(vni)
+    if si < 0:
+        return -1
+    return find_enum_row_of(sym_type(si))
+
+// Declared type of payload position `pos` for an enum/optional match pattern.
+fn enum_payload_decl_ti(match_ti: int, pat: int, pos: int) -> int:
+    ea := enum_row_of_pat(match_ti, pat)
+    if ea >= 0:
+        vi := sh_enum_variant_index(ea, get_variant_name_idx(ast_a(pat)))
+        if vi >= 0:
+            tn := ei_variant_type_node(ea, vi, pos)
+            if tn >= 0:
+                return res_type_node(tn)
+        return -1
+    if match_ti >= 0 && get_type_kind(match_ti) == TYP_OPTIONAL:
+        if sh_match_opt_pat(match_ti, pat) == 0:
+            return get_type_data(match_ti)
+    return -1
+
+// Bind the ident sub-patterns inside a validated enum payload. Composite
+// sub-patterns recurse; literals/wildcards bind nothing.
+fn gen_enum_binds(pat: int, val: int, val_ti: int):
+    if pat < 0 || val < 0:
+        return
+    ea := enum_row_of_pat(val_ti, pat)
+    if ea < 0:
+        return
+    vi := sh_enum_variant_index(ea, get_variant_name_idx(ast_a(pat)))
+    if vi < 0:
+        return
+    c := ast_c(pat)
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return
+        sub := sh_match_payload_root(pat, i)
+        if sub < 0:
+            return
+        k := ast_kind(sub)
+        if k == EXPR_WILDCARD:
+            i = i + 1
+            continue
+        if k == EXPR_IDENT || k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT || k == EXPR_ENUMPAT:
+            tn := ei_variant_type_node(ea, vi, i)
+            if tn < 0:
+                return
+            ft := res_type_node(tn)
+            if ft < 0 || ti_has_generic_param(ft) != 0:
+                return
+            fv := new_ir_var("fld", TI_INT)
+            irv_set_type(fv, payload_tn_read_form(tn))
+            if g_optrep_on != 0 && get_type_kind(ft) == TYP_OPTIONAL:
+                irv_set_decl_ti(fv, ft)
+            emit(IR_LOAD_FIELD, fv, val, 0, i + 1, 0)
+            if k == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    bind_local(nn, fv)
+            else if k == EXPR_STRUCTPAT:
+                gen_structpat_binds(sub, fv)
+            else if k == EXPR_TUPLEPAT:
+                gen_tuplepat_binds(sub, fv)
+            else:
+                gen_enum_binds(sub, fv, ft)
+        i = i + 1
+
+// Nested enum pattern: compare the tag, then recursively test every payload
+// sub-pattern. The payload root is recovered from the AST allocation order
+// (parser stores only the first sub-pattern in ast_b).
+fn gen_enum_pattern_test(pat: int, val: int, fall: int, val_ti: int) -> int:
+    ea := enum_row_of_pat(val_ti, pat)
+    if ea < 0:
+        return -1
+    vni := get_variant_name_idx(ast_a(pat))
+    if vni < 0:
+        return -1
+    vi := sh_enum_variant_index(ea, vni)
+    if vi < 0:
+        return -1
+    tag := new_ir_var("tag", TI_INT)
+    emit(IR_LOAD_ENUM_TAG, tag, val, 0, 0, 0)
+    vtag := new_ir_var("vtag", TI_INT)
+    emit(IR_CONST, vtag, vni, 0, 0, TI_INT)
+    cmp := new_ir_var("cmp", TI_INT)
+    emit(IR_BINARY, cmp, tag, vtag, OP_EQ, 0)
+    ok := new_label()
+    emit_cond_match(cmp, fall, ok)
+    emit(IR_LABEL, -1, ok, 0, 0, 0)
+    c := ast_c(pat)
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return 1
+        sub := sh_match_payload_root(pat, i)
+        if sub < 0:
+            return -1
+        k := ast_kind(sub)
+        if k == EXPR_IDENT || k == EXPR_WILDCARD:
+            i = i + 1
+            continue
+        tn := ei_variant_type_node(ea, vi, i)
+        if tn < 0:
+            return -1
+        ft := res_type_node(tn)
+        if ft < 0 || ti_has_generic_param(ft) != 0:
+            return -1
+        fv := new_ir_var("fld", TI_INT)
+        irv_set_type(fv, payload_tn_read_form(tn))
+        emit(IR_LOAD_FIELD, fv, val, 0, i + 1, 0)
+        if gen_pattern_test(sub, fv, fall, ft) < 0:
+            return -1
+        i = i + 1
+    return 1
 
 fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
     si := find_struct_by_name(ast_a(pat))
@@ -1101,7 +1265,7 @@ fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
                 fv := new_ir_var("fld", TI_INT)
                 irv_set_type(fv, structpat_field_load_ti_from(ft))
                 emit(IR_LOAD_FIELD, fv, val, 0, jdi, 0)
-                if gen_pattern_test(sub, fv, fall) < 0:
+                if gen_pattern_test(sub, fv, fall, ft) < 0:
                     return -1
         i = i + 1
     return 1
@@ -1129,7 +1293,7 @@ fn gen_nested_tuple_test(pat: int, val: int, fall: int) -> int:
             fv := new_ir_var("fld", TI_INT)
             irv_set_type(fv, structpat_field_load_ti_from(ft))
             emit(IR_LOAD_FIELD, fv, val, 0, idx, 0)
-            if gen_pattern_test(sub, fv, fall) < 0:
+            if gen_pattern_test(sub, fv, fall, ft) < 0:
                 return -1
         i = i + 1
     return 1
@@ -1141,7 +1305,7 @@ fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
     if k == EXPR_IDENT || k == EXPR_WILDCARD:
         return 0
     if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT:
-        return gen_pattern_test(sub, fv, fall)
+        return gen_pattern_test(sub, fv, fall, -1)
     ok_lbl := new_label()
     cmp_var : ., mut = -1
     if k == EXPR_INT:
@@ -1224,14 +1388,16 @@ fn gen_structpat_binds(pat: int, match_val: int):
                                     irv_set_decl_ti(fv, ft)
                                 emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
                                 bind_local(nn, fv)
-                            else if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT:
+                            else if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT || k == EXPR_ENUMPAT:
                                 fv := new_ir_var("fld", TI_INT)
                                 irv_set_type(fv, structpat_field_load_ti_from(ft))
                                 emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
                                 if k == EXPR_STRUCTPAT:
                                     gen_structpat_binds(sub, fv)
-                                else:
+                                else if k == EXPR_TUPLEPAT:
                                     gen_tuplepat_binds(sub, fv)
+                                else:
+                                    gen_enum_binds(sub, fv, ft)
         i = i + 1
 
 // Bind ident subpatterns for a tuple pattern in the arm scope. Each binding reads
@@ -1274,6 +1440,8 @@ fn gen_tuplepat_binds(pat: int, match_val: int):
                         gen_structpat_binds(sub, fv)
                     else if k == EXPR_TUPLEPAT:
                         gen_tuplepat_binds(sub, fv)
+                    else if k == EXPR_ENUMPAT:
+                        gen_enum_binds(sub, fv, ft)
         i = i + 1
 
 // Return the literal initializer AST node for an immutable module-level
@@ -3298,6 +3466,12 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_MATCH:
         match_expr := ast_a(node)
         first_arm := ast_b(node)
+        // Checker-cached scrutinee type (needed to resolve payload declarations
+        // when variant names are shared by several enums).
+        match_ti : ., mut = -1
+        md := ast_data(node)
+        if md > 0:
+            match_ti = md - 1
         match_val := gen_expr(match_expr)
         match_val = force_if_thunk(match_val)
         // Allocate a result variable for the match expression value
@@ -3509,15 +3683,6 @@ fn gen_expr(node: int) -> int:
                     is_wildcard = 1
                 else:
                     is_ident_bind = 1
-            // Nested refutable sub-patterns (string/char/int/... inside an enum
-            // payload) are Task 5b. Do not silently treat the outer variant as an
-            // unconditional match: route the arm to the fall edge instead. The
-            // scan must cover the full payload subtree: composite sub-patterns
-            // are not contiguous from ast_b (e.g. A(x, X(y))).
-            nested_bad : ., mut = 0
-            if pat_kind == EXPR_ENUMPAT:
-                if sh_match_payload_bad(arm_pat) >= 0:
-                    nested_bad = 1
             if match_mode != 0:
                 // MATCH owns the dispatch: suppress the sequential compare chain
                 // and the payload-binding reads (sub-patterns already forced the
@@ -3525,7 +3690,6 @@ fn gen_expr(node: int) -> int:
                 pat_kind = -2
                 is_wildcard = 0
                 is_ident_bind = 0
-                nested_bad = 0
             // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
             body_lbl := new_label()
@@ -3536,77 +3700,44 @@ fn gen_expr(node: int) -> int:
             if is_wildcard == 1 || is_ident_bind == 1:
                 emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
             else if pat_kind == EXPR_ENUMPAT:
-                if nested_bad != 0:
+                variant_ni := get_variant_name_idx(ast_a(arm_pat))
+                // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
+                //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
+                //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
+                //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
+                // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
+                if g_optrep_on != 0 && match_val >= 0:
+                    rep_v = irv_rep(match_val)
+                is_opt_pat : ., mut = 0
+                if str_eq(istr_get(variant_ni), "Some") != 0 || str_eq(istr_get(variant_ni), "None") != 0:
+                    is_opt_pat = 1
+                opt_ti : ., mut = -1
+                if match_ti >= 0 && get_type_kind(match_ti) == TYP_OPTIONAL:
+                    is_opt_pat = 1
+                    opt_ti = match_ti
+                else if match_val >= 0:
+                    dti := irv_decl_ti(match_val)
+                    if dti >= 0 && get_type_kind(dti) == TYP_OPTIONAL:
+                        is_opt_pat = 1
+                        opt_ti = dti
+                if rep_v < 0 && is_opt_pat == 0:
                     if has_next == 1:
                         fall_lbl = new_label()
-                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
-                else:
-                    variant_ni := get_variant_name_idx(ast_a(arm_pat))
-                    // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
-                    //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
-                    //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
-                    //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
-                    // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
-                    if g_optrep_on != 0 && match_val >= 0:
-                        rep_v = irv_rep(match_val)
-                    if rep_v < 0:
-                        payload_lbl : ., mut = -1
-                        scp : ., mut = ast_c(arm_pat)
-                        swp : ., mut = ast_b(arm_pat)
-                        pj : ., mut = 0
-                        if nested_bad == 0:
-                            if scp > 0 && swp >= 0:
-                                loop:
-                                    if pj >= scp:
-                                        break
-                                    sp : ., mut = -1
-                                    if swp + pj >= 0:
-                                        sp = ast_a(swp + pj)
-                                    if sp >= 0:
-                                        skp := ast_kind(sp)
-                                        if skp == EXPR_INT || skp == EXPR_BOOL || skp == EXPR_CHAR || skp == EXPR_STRING:
-                                            payload_lbl = new_label()
-                                            break
-                                    pj = pj + 1
-                        tag_var := new_ir_var("tag", TI_INT)
-                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                        vtag := new_ir_var("vtag", TI_INT)
-                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                        cmp_var := new_ir_var("cmp", TI_INT)
-                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
-                        if has_next == 1:
-                            fall_lbl = new_label()
-                        tag_ok := body_lbl
-                        if payload_lbl >= 0:
-                            tag_ok = payload_lbl
-                        emit_cond_match(cmp_var, fall_lbl, tag_ok)
-                        if payload_lbl >= 0:
-                            emit(IR_LABEL, -1, payload_lbl, 0, 0, 0)
-                            scp = ast_c(arm_pat)
-                            swp = ast_b(arm_pat)
-                            pj = 0
-                            loop:
-                                if pj >= scp:
-                                    break
-                                sp : ., mut = -1
-                                if swp + pj >= 0:
-                                    sp = ast_a(swp + pj)
-                                if sp >= 0:
-                                    skp := ast_kind(sp)
-                                    if skp == EXPR_INT || skp == EXPR_BOOL || skp == EXPR_CHAR || skp == EXPR_STRING:
-                                        fv := new_ir_var("fld", TI_INT)
-                                        irv_set_type(fv, agg_payload_read_form(arm_pat, pj))
-                                        emit(IR_LOAD_FIELD, fv, match_val, 0, pj + 1, 0)
-                                        if gen_structpat_field_test(sp, fv, fall_lbl) < 0:
-                                            emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
-                                pj = pj + 1
+                    if gen_enum_pattern_test(arm_pat, match_val, fall_lbl, match_ti) < 0:
+                        emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
                     else:
-                        is_some_pat : ., mut = 0
-                        if str_eq(istr_get(variant_ni), "Some") != 0:
-                            is_some_pat = 1
-                        tag_lbl := new_label()
-                        if has_next == 1:
-                            fall_lbl = new_label()
+                        emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                else:
+                    is_some_pat : ., mut = 0
+                    if str_eq(istr_get(variant_ni), "Some") != 0:
+                        is_some_pat = 1
+                    tag_lbl := new_label()
+                    if has_next == 1:
+                        fall_lbl = new_label()
+                    inner_ti : ., mut = -1
+                    if opt_ti >= 0:
+                        inner_ti = get_type_data(opt_ti)
+                    if rep_v >= 0:
                         zb := new_ir_var("_rz", TI_INT)
                         emit(IR_CONST, zb, 0, 0, 0, TI_INT)
                         isb := new_ir_var("rep_isbare", TI_INT)
@@ -3614,19 +3745,37 @@ fn gen_expr(node: int) -> int:
                             emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
                         else:
                             emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
-                        // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
-                        // 装箱 -> 落 tag 比对。
+                        // Some：裸 -> 直接对值做载荷测试；装箱 -> 落 tag 比对。
+                        // None：裸 -> 不命中（落 fall）；装箱 -> 落 tag 比对。
                         if is_some_pat != 0:
-                            emit_cond_match(isb, tag_lbl, body_lbl)
+                            bare_ok := new_label()
+                            emit_cond_match(isb, tag_lbl, bare_ok)
+                            emit(IR_LABEL, -1, bare_ok, 0, 0, 0)
+                            if gen_payload_tests(arm_pat, match_val, fall_lbl, inner_ti) < 0:
+                                emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
+                            else:
+                                emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
                         else:
                             emit_cond_match(isb, fall_lbl, tag_lbl)
-                        emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
-                        tag_var := new_ir_var("tag", TI_INT)
-                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                        vtag := new_ir_var("vtag", TI_INT)
-                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                        cmp_var := new_ir_var("cmp", TI_INT)
-                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                    // 无表示位（字段/全局未覆盖面）-> 既有装箱假定：直接 tag 分派。
+                    emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
+                    tag_var := new_ir_var("tag", TI_INT)
+                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
+                    vtag := new_ir_var("vtag", TI_INT)
+                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
+                    cmp_var := new_ir_var("cmp", TI_INT)
+                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                    if ast_c(arm_pat) > 0:
+                        payload_ok := new_label()
+                        emit_cond_match(cmp_var, fall_lbl, payload_ok)
+                        emit(IR_LABEL, -1, payload_ok, 0, 0, 0)
+                        fv := new_ir_var("fld", TI_INT)
+                        emit(IR_LOAD_FIELD, fv, match_val, 0, 1, 0)
+                        if gen_payload_tests(arm_pat, fv, fall_lbl, inner_ti) < 0:
+                            emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
+                        else:
+                            emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                    else:
                         emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_STRUCTPAT:
                 // Struct pattern: sequential field tests. The lowerer never
@@ -3676,7 +3825,7 @@ fn gen_expr(node: int) -> int:
                             fv := new_ir_var("fld", TI_INT)
                             irv_set_type(fv, structpat_field_load_ti_from(ft))
                             emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
-                            if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                            if gen_pattern_test(sub, fv, fall_lbl, ft) < 0:
                                 can_match = 0
                                 break
                     si_i = si_i + 1
@@ -3724,7 +3873,7 @@ fn gen_expr(node: int) -> int:
                     fv := new_ir_var("fld", TI_INT)
                     irv_set_type(fv, structpat_field_load_ti_from(ft))
                     emit(IR_LOAD_FIELD, fv, match_val, 0, idx, 0)
-                    if gen_pattern_test(sub, fv, fall_lbl) < 0:
+                    if gen_pattern_test(sub, fv, fall_lbl, ft) < 0:
                         can_match = 0
                         break
                     ti_i = ti_i + 1
@@ -3859,9 +4008,21 @@ fn gen_expr(node: int) -> int:
                         emit(IR_LABEL, -1, boxed_lbl, 0, 0, 0)
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0)
                         emit(IR_LABEL, -1, end_lbl, 0, 0, 0)
-                    spn := ast_b(arm_pat) + fi
-                    if spn >= 0 && ast_kind(spn) == EXPR_IDENT:
-                        bind_local(ast_int_val(spn), fv)
+                    spn := sh_match_payload_root(arm_pat, fi)
+                    if spn >= 0:
+                        sk := ast_kind(spn)
+                        if sk == EXPR_IDENT:
+                            nn := ast_int_val(spn)
+                            if str_eq(istr_get(nn), "_") == 0:
+                                bind_local(nn, fv)
+                        else if sk == EXPR_STRUCTPAT:
+                            gen_structpat_binds(spn, fv)
+                        else if sk == EXPR_TUPLEPAT:
+                            gen_tuplepat_binds(spn, fv)
+                        else if sk == EXPR_ENUMPAT:
+                            pft := enum_payload_decl_ti(match_ti, arm_pat, fi)
+                            if pft >= 0:
+                                gen_enum_binds(spn, fv, pft)
                     fi = fi + 1
             if is_ident_bind == 1:
                 // Irrefutable binding arm: the name is the scrutinee itself.
