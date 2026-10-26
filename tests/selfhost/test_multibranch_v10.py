@@ -871,6 +871,32 @@ fn main() -> int:
     return 42
 """
 
+MATCH_STRING_DISPATCH_SOURCE = """fn pick(s: string) -> int:
+    return match s:
+        "a" => 1,
+        "ab" => 2,
+        "b" => 3,
+        "" => 4,
+        _ => 5
+
+fn main() -> int:
+    if pick("a") != 1:
+        return 10
+    if pick("ab") != 2:
+        return 11
+    if pick("b") != 3:
+        return 12
+    if pick("") != 4:
+        return 13
+    if pick("ac") != 5:
+        return 14
+    if pick("ba") != 5:
+        return 15
+    if pick("abc") != 5:
+        return 16
+    return 42
+"""
+
 MATCH_CHAR_SOURCE = """fn code_a() -> int:
     return 'A' as int
 
@@ -1873,6 +1899,14 @@ def _user_call_names(data, fn_name):
     return out
 
 
+
+def _func_op_records(data, fn_name, opcode):
+    nodes = _nod_records(data)
+    for name, enter, exit in _function_ranges(data):
+        if name == fn_name:
+            return [nodes[i] for i in range(enter, exit) if nodes[i][0] == opcode]
+    return []
+
 def _user_op_nodes(data, opcode):
     """Nodes with `opcode` in fixture-defined functions, excluding the prelude."""
     nodes = _nod_records(data)
@@ -2590,13 +2624,33 @@ def test_ident_fallback_executes_old_path():
         )
 
 
-def test_string_match_uses_sequential_path():
+def test_string_match_uses_dispatch_tree():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRING_SOURCE, "match_string")
         assert _pattern_match_nodes(data) == [], "string patterns must not become CASE rows"
+        assert "str_len" in _user_call_names(data, "pick")
+        assert "load8" in _user_call_names(data, "pick")
         _assert_program(
             tmp, MATCH_STRING_SOURCE, 42, opts=(0, 2), name="match_string"
+        )
+
+
+def test_string_dispatch_tree_shares_length_and_first_byte_tests():
+    """One length test per distinct length, one first-byte test per bucket."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRING_DISPATCH_SOURCE, "dt_string")
+        # lengths 0/1/2 => 3 length comparisons; length 1 has "a" and "b" =>
+        # 2 first-byte comparisons. The old per-arm chain emitted 4 + 3.
+        bins = _func_op_records(data, "pick", 2)  # IR_BINARY
+        assert len(bins) == 5, f"expected 5 bucket comparisons, got {len(bins)}"
+        calls = _func_op_records(data, "pick", 4)  # IR_CALL
+        assert len(calls) == 6, f"expected str_len+load8+4*str_eq, got {len(calls)}"
+        names = _user_call_names(data, "pick")
+        assert {"str_len", "load8", "str_eq"} <= names, names
+        _assert_program(
+            tmp, MATCH_STRING_DISPATCH_SOURCE, 42, opts=(0, 2), name="dt_string"
         )
 
 
