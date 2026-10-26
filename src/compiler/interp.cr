@@ -60,34 +60,11 @@ IR_INTERP_MAX_DEPTH : int = 400
 // overwrite the outer frame.
 g_interp_stack : string, mut
 
-// Raw 64-bit bitwise operations. The slots hold untagged words here, so no
-// word/tag conversion is applied; Bits32/Bits64 own that boundary.
-fn ir_interp_raw_bitop(s3: int, a: int, b: int) -> int:
-    // `a`/`b` are raw mathematical words. corec itself is built with raw ints
-    // (bigint_mode off), so the @bit* builtins are raw here; no extra tag/untag
-    // conversion belongs at this layer.
-    if s3 == OP_RAW_AND:
-        return @bitAnd(a, b)
-    if s3 == OP_RAW_OR:
-        return @bitOr(a, b)
-    if s3 == OP_RAW_XOR:
-        return @bitXor(a, b)
-    if s3 == OP_RAW_SHL:
-        return @bitShl(a, b)
-    if s3 == OP_RAW_SHR:
-        return @bitShr(a, b)
-    if s3 == OP_RAW_ROTL:
-        return @bitRotl(a, b)
-    return @bitRotr(a, b)
-
 fn ir_interp_binary_raw(d: int, s1: int, s2: int, s3: int):
     if d < 0:
         return
     lv := cell_load(g_ir_vals, s1 * 8)
     rv := cell_load(g_ir_vals, s2 * 8)
-    if s3 >= OP_RAW_AND && s3 <= OP_RAW_ROTR:
-        cell_store(g_ir_vals, d * 8, ir_interp_raw_bitop(s3, lv, rv))
-        return
     if s3 == 1:
         cell_store(g_ir_vals, d * 8, lv + rv)
     else if s3 == 2:
@@ -161,10 +138,6 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
     if s3 == 22:
         // Raw pointer add: untag both operands, return the raw word.
         cell_store(g_ir_vals, d * 8, ir_interp_word(lv) + ir_interp_word(rv))
-        return
-    if s3 >= OP_RAW_AND && s3 <= OP_RAW_ROTR:
-        // Bitwise operands are already untagged words.
-        cell_store(g_ir_vals, d * 8, ir_interp_raw_bitop(s3, lv, rv))
         return
     if s3 == 12 || s3 == 13:
         // Boolean and/or store raw 0/1.
@@ -596,10 +569,6 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                     cell_store(g_ir_vals, d2 * 8, 1)
                 else:
                     cell_store(g_ir_vals, d2 * 8, 0)
-            else if t3 == UOP_UNTAG:
-                cell_store(g_ir_vals, d2 * 8, ir_interp_word(ov2))
-            else if t3 == UOP_TAG:
-                cell_store(g_ir_vals, d2 * 8, ir_interp_tag(ov2))
         // Keep callee locals in the shared value store. Skipping these opcodes
         // would leave loop-carried assignments unchanged.
         if op2 == 6 && d2 >= 0:
@@ -1025,10 +994,6 @@ fn ir_interpret() -> int:
                     cell_store(g_ir_vals, d * 8, 1)
                 else:
                     cell_store(g_ir_vals, d * 8, 0)
-            if s3 == UOP_UNTAG:
-                cell_store(g_ir_vals, d * 8, ir_interp_word(ov))
-            if s3 == UOP_TAG:
-                cell_store(g_ir_vals, d * 8, ir_interp_tag(ov))
 
         // Alloc / Store / Load / Field / Index
         if op == 6:

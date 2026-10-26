@@ -100,27 +100,30 @@ fn main() -> int:
 """
 
 BITS_BYTES_SOURCE = """import bits
+import rawbuf
 
 fn main() -> int:
     b := alloc(8)
-    bits32StoreBE(b, 0, bits32(16909060))
-    if load8(b, 0) != 1:
+    rawWriteU32BE(b, 0, 16909060)
+    if rawRead8(b, 0) != 1:
         return 1
-    if load8(b, 1) != 2:
+    if rawRead8(b, 1) != 2:
         return 2
-    if load8(b, 2) != 3:
+    if rawRead8(b, 2) != 3:
         return 3
-    if load8(b, 3) != 4:
+    if rawRead8(b, 3) != 4:
         return 4
-    if bits32LoadBE(b, 0).toInt() != 16909060:
+    if rawReadU32BE(b, 0) != 16909060:
         return 5
-    bits32StoreLE(b, 0, bits32(16909060))
-    if load8(b, 0) != 4:
+    rawWriteU32LE(b, 0, 16909060)
+    if rawRead8(b, 0) != 4:
         return 6
-    if load8(b, 3) != 1:
+    if rawRead8(b, 3) != 1:
         return 7
-    if bits32LoadLE(b, 0).toInt() != 16909060:
+    if rawReadU32LE(b, 0) != 16909060:
         return 8
+    if bits32(rawReadU32LE(b, 0)).toInt() != 16909060:
+        return 9
     return 42
 """
 
