@@ -2060,6 +2060,579 @@ fn dex_decl_form_of_expr(node: int) -> int:
 // --- IR generation for expressions ---
 // Returns the IR variable index holding the result
 
+// ─── Maranget decision-tree lowering ───────────────────────────────
+// Algorithm: Maranget, "Compiling Pattern Matching to Good Decision Trees"
+// (ML 2008), matrix specialization. The column selector is the FCR (fewer
+// child rules) heuristic from "When Do Match-Compilation Heuristics Matter?";
+// representation-specific field/tag accessors follow the Knit&Frog approach
+// (Baudon et al., 2022) rather than assuming one universal constructor layout.
+//
+// Everything below is local: the pattern matrix, occurrence columns and
+// constructor lists are alloc'd per compile call and passed down the
+// recursion. The recursion stack *is* the decision tree; leaves jump to
+// pre-allocated arm labels. No global node/edge tables.
+
+fn dt_pat_wild(p: int) -> int:
+    if p < 0:
+        return 1
+    k := ast_kind(p)
+    if k == EXPR_WILDCARD:
+        return 1
+    if k == EXPR_IDENT:
+        if str_eq(istr_get(ast_int_val(p)), "_") != 0:
+            return 1
+    return 0
+
+fn dt_ctor_kind(p: int) -> int:
+    if p < 0:
+        return 0
+    k := ast_kind(p)
+    if k == EXPR_ENUMPAT:
+        return 1
+    if k == EXPR_STRUCTPAT:
+        return 2
+    if k == EXPR_TUPLEPAT:
+        return 3
+    if k == EXPR_INT:
+        return 4
+    if k == EXPR_BOOL:
+        return 5
+    if k == EXPR_CHAR:
+        return 6
+    if k == EXPR_STRING:
+        return 7
+    return 0
+
+fn dt_ctor_id(p: int) -> int:
+    k := dt_ctor_kind(p)
+    if k == 1:
+        return get_variant_name_idx(ast_a(p))
+    if k == 2:
+        return ast_a(p)
+    if k == 3:
+        return ast_b(p)
+    if k == 4 || k == 5 || k == 6 || k == 7:
+        return ast_int_val(p)
+    return -1
+
+fn dt_enum_vi(p: int, ti: int) -> int:
+    ea := enum_row_of_pat(ti, p)
+    if ea < 0:
+        return -1
+    return sh_enum_variant_index(ea, get_variant_name_idx(ast_a(p)))
+
+fn dt_ctor_arity(p: int, ti: int) -> int:
+    k := dt_ctor_kind(p)
+    if k == 1:
+        ea := enum_row_of_pat(ti, p)
+        vi := dt_enum_vi(p, ti)
+        if ea < 0 || vi < 0:
+            return -1
+        return ei_variant_type_count(ea, vi)
+    if k == 2:
+        si := find_struct_by_name(ast_a(p))
+        if si < 0:
+            return -1
+        return si_field_count(si)
+    if k == 3:
+        return ast_b(p)
+    return 0
+
+// Sub-pattern at slot i of a constructor pattern (-1 = implicit wildcard).
+fn dt_subpat(p: int, i: int) -> int:
+    if p < 0 || i < 0:
+        return -1
+    k := dt_ctor_kind(p)
+    if k == 1:
+        if i < ast_c(p):
+            return sh_match_payload_root(p, i)
+        return -1
+    if k == 2:
+        si := find_struct_by_name(ast_a(p))
+        if si < 0:
+            return -1
+        c := ast_c(p)
+        w0 := ast_b(p)
+        j : ., mut = 0
+        loop:
+            if j >= c:
+                return -1
+            w := w0 + j
+            if w >= 0:
+                if struct_field_index_by_name(si, ast_b(w)) == i:
+                    return ast_a(w)
+            j = j + 1
+        return -1
+    if k == 3:
+        if i < ast_b(p):
+            w := ast_a(p) + i
+            if w >= 0:
+                return ast_a(w)
+        return -1
+    return -1
+
+// Declared type of slot i. Struct fields reuse the checker-cached wrapper type
+// when present, else the row declaration; unresolved generics fail closed.
+fn dt_subpat_ti(p: int, i: int, ti: int) -> int:
+    if p < 0 || i < 0:
+        return -1
+    k := dt_ctor_kind(p)
+    if k == 1:
+        ea := enum_row_of_pat(ti, p)
+        vi := dt_enum_vi(p, ti)
+        if ea < 0 || vi < 0:
+            return -1
+        if i >= ei_variant_type_count(ea, vi):
+            return -1
+        tn := ei_variant_type_node(ea, vi, i)
+        if tn < 0:
+            return -1
+        return res_type_node(tn)
+    if k == 2:
+        si := find_struct_by_name(ast_a(p))
+        if si < 0:
+            return -1
+        c := ast_c(p)
+        w0 := ast_b(p)
+        j : ., mut = 0
+        loop:
+            if j >= c:
+                return struct_row_field_ti(si, i)
+            w := w0 + j
+            if w >= 0:
+                if struct_field_index_by_name(si, ast_b(w)) == i:
+                    fd := ast_data(w)
+                    if fd > 0:
+                        return fd - 1
+                    return struct_row_field_ti(si, i)
+            j = j + 1
+        return -1
+    if k == 3:
+        if ti < 0 || get_type_kind(ti) != TYP_TUPLE:
+            return -1
+        ac := get_type_data(ti)
+        if i >= ac:
+            return -1
+        return cell_load(g_gen_apply_data, (get_type_extra(ti) + i) * 8)
+    return -1
+
+fn dt_pat_supported(p: int, ti: int) -> int:
+    if p < 0 || dt_pat_wild(p) != 0:
+        return 1
+    k := dt_ctor_kind(p)
+    if k == 0:
+        return 0
+    arity := dt_ctor_arity(p, ti)
+    if arity < 0:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= arity:
+            return 1
+        sub := dt_subpat(p, i)
+        if sub >= 0:
+            ft := dt_subpat_ti(p, i, ti)
+            if ft < 0:
+                return 0
+            if ti_has_generic_param(ft) != 0:
+                return 0
+            if dt_pat_supported(sub, ft) == 0:
+                return 0
+        i = i + 1
+    return 1
+
+// How many distinct non-wild head constructors a column has. -1 = mixed kinds.
+fn dt_col_distinct(rows: string, pats: string, row_count: int, col_count: int, col: int) -> int:
+    seen_k := alloc((row_count + 1) * 8)
+    seen_id := alloc((row_count + 1) * 8)
+    n : ., mut = 0
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            return n
+        p := cell_load(pats, (r * col_count + col) * 8)
+        if dt_pat_wild(p) == 0:
+            ck := dt_ctor_kind(p)
+            if ck == 0:
+                return -1
+            if n > 0 && cell_load(seen_k, 0) != ck:
+                return -1
+            cid := dt_ctor_id(p)
+            dup : ., mut = 0
+            j : ., mut = 0
+            loop:
+                if j >= n:
+                    break
+                if cell_load(seen_k, j * 8) == ck:
+                    if cell_load(seen_id, j * 8) == cid:
+                        dup = 1
+                        break
+                j = j + 1
+            if dup == 0:
+                cell_store(seen_k, n * 8, ck)
+                cell_store(seen_id, n * 8, cid)
+                n = n + 1
+        r = r + 1
+    return n
+
+fn dt_find_ctor_pat(pats: string, row_count: int, col_count: int, cid: int) -> int:
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            return -1
+        p := cell_load(pats, r * col_count * 8)
+        if dt_pat_wild(p) == 0:
+            if dt_ctor_id(p) == cid:
+                return p
+        r = r + 1
+    return -1
+
+fn dt_col_first_pat(rows: string, pats: string, row_count: int, col_count: int, col: int) -> int:
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            return -1
+        p := cell_load(pats, (r * col_count + col) * 8)
+        if dt_pat_wild(p) == 0:
+            return p
+        r = r + 1
+    return -1
+
+    // Keep only rows whose head is a wildcard; drop the head column.
+fn dt_default_rows(rows: string, pats: string, row_count: int, col_count: int,
+                   out_rows: string, out_pats: string) -> int:
+    n : ., mut = 0
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            return n
+        p := cell_load(pats, r * col_count * 8)
+        if dt_pat_wild(p) != 0:
+            cell_store(out_rows, n * 8, cell_load(rows, r * 8))
+            c : ., mut = 1
+            loop:
+                if c >= col_count:
+                    break
+                cell_store(out_pats, (n * (col_count - 1) + c - 1) * 8,
+                    cell_load(pats, (r * col_count + c) * 8))
+                c = c + 1
+            n = n + 1
+        r = r + 1
+    return n
+
+    // Expand one constructor case into (other columns ++ constructor sub-columns).
+    // Returns the new row count. `out_*` capacity = row_count and
+    // row_count * (col_count - 1 + arity) respectively.
+fn dt_specialize(rows: string, pats: string, cols: string, tis: string,
+                 row_count: int, col_count: int, ck: int, cid: int, arity: int,
+                 ctor_pat: int,
+                 out_rows: string, out_pats: string, out_cols: string, out_tis: string) -> int:
+    new_cols := col_count - 1 + arity
+    val := cell_load(cols, 0)
+    val_ti := cell_load(tis, 0)
+    sub_cols := alloc((arity + 1) * 8)
+    sub_tis := alloc((arity + 1) * 8)
+    i : ., mut = 0
+    loop:
+        if i >= arity:
+            break
+        fv := new_ir_var("dt_fld", TI_INT)
+        ft := -1
+        if ctor_pat >= 0:
+            ft = dt_subpat_ti(ctor_pat, i, val_ti)
+        if ft >= 0:
+            irv_set_type(fv, structpat_field_load_ti_from(ft))
+        offset := i
+        if ck == 1:
+            offset = i + 1
+        emit(IR_LOAD_FIELD, fv, val, 0, offset, 0)
+        cell_store(sub_cols, i * 8, fv)
+        cell_store(sub_tis, i * 8, ft)
+        i = i + 1
+    n : ., mut = 0
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            return n
+        p := cell_load(pats, r * col_count * 8)
+        take : ., mut = 0
+        if dt_pat_wild(p) != 0:
+            take = 1
+        else if dt_ctor_kind(p) == ck:
+            if dt_ctor_id(p) == cid:
+                take = 1
+        if take != 0:
+            cell_store(out_rows, n * 8, cell_load(rows, r * 8))
+            c : ., mut = 1
+            loop:
+                if c >= col_count:
+                    break
+                cell_store(out_pats, (n * new_cols + c - 1) * 8,
+                    cell_load(pats, (r * col_count + c) * 8))
+                cell_store(out_cols, (c - 1) * 8, cell_load(cols, c * 8))
+                cell_store(out_tis, (c - 1) * 8, cell_load(tis, c * 8))
+                c = c + 1
+            i = 0
+            loop:
+                if i >= arity:
+                    break
+                sub := -1
+                if dt_pat_wild(p) == 0:
+                    sub = dt_subpat(p, i)
+                cell_store(out_pats, (n * new_cols + col_count - 1 + i) * 8, sub)
+                cell_store(out_cols, (col_count - 1 + i) * 8, cell_load(sub_cols, i * 8))
+                cell_store(out_tis, (col_count - 1 + i) * 8, cell_load(sub_tis, i * 8))
+                i = i + 1
+            n = n + 1
+        r = r + 1
+    return n
+
+// Reorder `best` to column 0. Column order is the only thing that changes.
+fn dt_move_col(rows: string, pats: string, cols: string, tis: string,
+               row_count: int, col_count: int, best: int,
+               out_pats: string, out_cols: string, out_tis: string):
+    r : ., mut = 0
+    c : ., mut = 0
+    loop:
+        if r >= row_count:
+            break
+        c = 0
+        loop:
+            if c >= col_count:
+                break
+            src := c
+            if c == 0:
+                src = best
+            else if c == best:
+                src = 0
+            cell_store(out_pats, (r * col_count + c) * 8,
+                cell_load(pats, (r * col_count + src) * 8))
+            c = c + 1
+        r = r + 1
+    c = 0
+    loop:
+        if c >= col_count:
+            break
+        src := c
+        if c == 0:
+            src = best
+        else if c == best:
+            src = 0
+        cell_store(out_cols, c * 8, cell_load(cols, src * 8))
+        cell_store(out_tis, c * 8, cell_load(tis, src * 8))
+        c = c + 1
+
+// Emit one decision node. Returns 0 on success, -1 on an unsupported shape
+// (already emitted a fall edge; callers must not try to rewind IR).
+fn dt_compile(rows: string, pats: string, cols: string, tis: string,
+              row_count: int, col_count: int, fall: int, arm_lbls: string) -> int:
+    if row_count <= 0:
+        emit(IR_JUMP, -1, fall, 0, 0, 0)
+        return 0
+    // Leaf: the first row is irrefutable for every remaining column.
+    allw : ., mut = 1
+    i : ., mut = 0
+    loop:
+        if i >= col_count:
+            break
+        p := cell_load(pats, i * 8)
+        if dt_pat_wild(p) == 0:
+            allw = 0
+            break
+        i = i + 1
+    if allw != 0:
+        ai := cell_load(rows, 0)
+        emit(IR_JUMP, -1, cell_load(arm_lbls, ai * 8), 0, 0, 0)
+        return 0
+    // FCR column selection.
+    best : ., mut = -1
+    best_score : ., mut = 1000000
+    c : ., mut = 0
+    loop:
+        if c >= col_count:
+            break
+        n := dt_col_distinct(rows, pats, row_count, col_count, c)
+        if n > 0 && n < best_score:
+            best_score = n
+            best = c
+        c = c + 1
+    if best < 0:
+        emit(IR_JUMP, -1, fall, 0, 0, 0)
+        return -1
+    mpats := alloc(row_count * col_count * 8)
+    mcols := alloc(col_count * 8)
+    mtis := alloc(col_count * 8)
+    dt_move_col(rows, pats, cols, tis, row_count, col_count, best, mpats, mcols, mtis)
+    p0 := dt_col_first_pat(rows, mpats, row_count, col_count, 0)
+    if p0 < 0:
+        emit(IR_JUMP, -1, fall, 0, 0, 0)
+        return -1
+    ck := dt_ctor_kind(p0)
+    cid := dt_ctor_id(p0)
+    arity := dt_ctor_arity(p0, cell_load(mtis, 0))
+    if arity < 0:
+        emit(IR_JUMP, -1, fall, 0, 0, 0)
+        return -1
+    // struct/tuple: one constructor, expand without a runtime test. A mixed
+    // constructor set here means the checker let an impossible shape through;
+    // fail closed rather than dropping rows.
+    if ck == 2 || ck == 3:
+        if dt_col_distinct(rows, mpats, row_count, col_count, 0) != 1:
+            emit(IR_JUMP, -1, fall, 0, 0, 0)
+            return -1
+        new_cols := col_count - 1 + arity
+        orows := alloc((row_count + 1) * 8)
+        opats := alloc((row_count + 1) * (new_cols + 1) * 8)
+        ocols := alloc((new_cols + 1) * 8)
+        otis := alloc((new_cols + 1) * 8)
+        n := dt_specialize(rows, mpats, mcols, mtis, row_count, col_count,
+            ck, cid, arity, p0, orows, opats, ocols, otis)
+        return dt_compile(orows, opats, ocols, otis, n, new_cols, fall, arm_lbls)
+    // Collect distinct constructors for the switched column.
+    ckinds := alloc((row_count + 1) * 8)
+    cids := alloc((row_count + 1) * 8)
+    cn : ., mut = 0
+    r : ., mut = 0
+    loop:
+        if r >= row_count:
+            break
+        p := cell_load(mpats, r * col_count * 8)
+        if dt_pat_wild(p) == 0:
+            k2 := dt_ctor_kind(p)
+            id2 := dt_ctor_id(p)
+            dup : ., mut = 0
+            j : ., mut = 0
+            loop:
+                if j >= cn:
+                    break
+                if cell_load(ckinds, j * 8) == k2:
+                    if cell_load(cids, j * 8) == id2:
+                        dup = 1
+                        break
+                j = j + 1
+            if dup == 0:
+                cell_store(ckinds, cn * 8, k2)
+                cell_store(cids, cn * 8, id2)
+                cn = cn + 1
+        r = r + 1
+    // Default matrix = wildcard rows with the head column removed.
+    drows := alloc((row_count + 1) * 8)
+    dpats := alloc((row_count + 1) * (col_count - 1 + 1) * 8)
+    dcols := alloc(col_count * 8)
+    dtis := alloc(col_count * 8)
+    dn := dt_default_rows(rows, mpats, row_count, col_count, drows, dpats)
+    c = 1
+    loop:
+        if c >= col_count:
+            break
+        cell_store(dcols, (c - 1) * 8, cell_load(mcols, c * 8))
+        cell_store(dtis, (c - 1) * 8, cell_load(mtis, c * 8))
+        c = c + 1
+    // Completeness: every variant of an enum, or both booleans. Ints/chars/
+    // strings are infinite and always need the default edge.
+    complete : ., mut = 0
+    if ck == 1:
+        ea := enum_row_of_pat(cell_load(mtis, 0), p0)
+        if ea >= 0 && cn == ei_variant_count(ea):
+            complete = 1
+    else if ck == 5:
+        if cn == 2:
+            complete = 1
+    case_lbls := alloc((cn + 1) * 8)
+    default_lbl := new_label()
+    // Emit tests. For enums read the tag once; scalar/string columns compare
+    // the value directly. Every miss goes to the default edge, which either
+    // continues the wildcard matrix or falls through to the merge label.
+    tag := -1
+    if ck == 1:
+        tag = new_ir_var("dt_tag", TI_INT)
+        emit(IR_LOAD_ENUM_TAG, tag, cell_load(mcols, 0), 0, 0, 0)
+    j : ., mut = 0
+    loop:
+        if j >= cn:
+            break
+        cl := new_label()
+        cell_store(case_lbls, j * 8, cl)
+        k2 := cell_load(ckinds, j * 8)
+        id2 := cell_load(cids, j * 8)
+        miss_lbl := default_lbl
+        if j + 1 < cn:
+            miss_lbl = new_label()
+        cmp := new_ir_var("dt_cmp", TI_INT)
+        if k2 == 1:
+            vtag := new_ir_var("dt_vtag", TI_INT)
+            emit(IR_CONST, vtag, id2, 0, 0, TI_INT)
+            emit(IR_BINARY, cmp, tag, vtag, OP_EQ, 0)
+            emit_cond_match(cmp, miss_lbl, cl)
+        else if k2 == 5:
+            bv : ., mut = 0
+            if id2 != 0:
+                bv = 1
+            pv := new_ir_var("dt_pv", TI_BOOL)
+            emit(IR_CONST, pv, bv, 0, 0, TI_BOOL)
+            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+            emit_cond_match(cmp, miss_lbl, cl)
+        else if k2 == 4:
+            pv := new_ir_var("dt_pv", TI_INT)
+            emit(IR_CONST, pv, id2, 0, 0, TI_INT)
+            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+            emit_cond_match(cmp, miss_lbl, cl)
+        else if k2 == 6:
+            // Char slots are untagged intern indexes; compare as TI_CHAR.
+            pv := new_ir_var("dt_pv", TI_CHAR)
+            track_str(id2)
+            emit(IR_CONST, pv, id2, 0, 0, TI_CHAR)
+            emit(IR_BINARY, cmp, cell_load(mcols, 0), pv, OP_EQ, 0)
+            emit_cond_match(cmp, miss_lbl, cl)
+        else if k2 == 7:
+            pv := new_ir_var("dt_pv", TI_STR)
+            track_str(id2)
+            emit(IR_CONST, pv, id2, 0, 0, TI_STR)
+            e0 := new_ir_var("dt_e0", TI_STR)
+            e1 := new_ir_var("dt_e1", TI_STR)
+            emit(IR_STORE, -1, e0, cell_load(mcols, 0), 0, 0)
+            emit(IR_STORE, -1, e1, pv, 0, 0)
+            emit(IR_CALL, cmp, e0, 2, str_intern("str_eq"), TI_BOOL)
+            emit_cond_match(cmp, miss_lbl, cl)
+        else:
+            emit(IR_JUMP, -1, fall, 0, 0, 0)
+        if j + 1 < cn:
+            emit(IR_LABEL, -1, miss_lbl, 0, 0, 0)
+        j = j + 1
+    // Default edge: wildcard rows for non-exhaustive constructor sets. For a
+    // complete enum/bool switch it is unreachable (wild rows already appear in
+    // every case branch), so keep the fall edge.
+    emit(IR_LABEL, -1, default_lbl, 0, 0, 0)
+    if complete == 0 && dn > 0:
+        dt_compile(drows, dpats, dcols, dtis, dn, col_count - 1, fall, arm_lbls)
+    else:
+        emit(IR_JUMP, -1, fall, 0, 0, 0)
+    j = 0
+    loop:
+        if j >= cn:
+            break
+        emit(IR_LABEL, -1, cell_load(case_lbls, j * 8), 0, 0, 0)
+        k2 := cell_load(ckinds, j * 8)
+        id2 := cell_load(cids, j * 8)
+        a2 : ., mut = 0
+        if k2 == 1:
+            ea := enum_row_of_pat(cell_load(mtis, 0), p0)
+            vi := sh_enum_variant_index(ea, id2)
+            if ea >= 0 && vi >= 0:
+                a2 = ei_variant_type_count(ea, vi)
+        new_cols := col_count - 1 + a2
+        orows := alloc((row_count + 1) * 8)
+        opats := alloc((row_count + 1) * (new_cols + 1) * 8)
+        ocols := alloc((new_cols + 1) * 8)
+        otis := alloc((new_cols + 1) * 8)
+        ctor_pat := dt_find_ctor_pat(mpats, row_count, col_count, id2)
+        n := dt_specialize(rows, mpats, mcols, mtis, row_count, col_count,
+            k2, id2, a2, ctor_pat, orows, opats, ocols, otis)
+        dt_compile(orows, opats, ocols, otis, n, new_cols, fall, arm_lbls)
+        j = j + 1
+    return 0
+
+
 fn gen_expr(node: int) -> int:
     if node < 0:
         return -1
@@ -3574,6 +4147,40 @@ fn gen_expr(node: int) -> int:
         if wild_total > 1:
             match_mode = 0
 
+        // ── Decision-tree eligibility ────────────────────────────────────
+        // The local matrix compiler handles nested enum/struct/tuple and scalar
+        // columns. Optional representation dispatch and strings (separate
+        // grouping pass) keep the sequential path; unsupported shapes fall back
+        // before any IR is emitted.
+        dt_mode : ., mut = 0
+        if match_mode == 0 && match_ti >= 0 && match_val >= 0:
+            if get_type_kind(match_ti) != TYP_OPTIONAL:
+                if irv_rep(match_val) < 0:
+                    if saw_string == 0:
+                        dt_mode = 1
+                        ck0 : ., mut = -1
+                        an0 = first_arm
+                        loop:
+                            if an0 < 0:
+                                break
+                            ap0 := ast_a(an0)
+                            if ap0 < 0:
+                                dt_mode = 0
+                                break
+                            if dt_pat_supported(ap0, match_ti) == 0:
+                                dt_mode = 0
+                                break
+                            // One decision column cannot mix enum variants with
+                            // scalars; the sequential path owns that shape.
+                            k0 := dt_ctor_kind(ap0)
+                            if k0 != 0:
+                                if ck0 < 0:
+                                    ck0 = k0
+                                else if ck0 != k0:
+                                    dt_mode = 0
+                                    break
+                            an0 = ast_c(an0)
+
         // Pass B: only for supported matches. Resolve enum tags and dedupe by
         // (kind, value), keeping the first arm.
         vals := alloc((arm_total + 1) * 16)   // unique cases: kind@0, value@8
@@ -3643,6 +4250,36 @@ fn gen_expr(node: int) -> int:
                     break
                 lat_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
                 cj0 = cj0 + 1
+        // Emit the decision tree before the arm bodies: leaves jump to the
+        // pre-allocated body labels, which are emitted by the arm loop below.
+        arm_lbls : string, mut = alloc(0)
+        if dt_mode != 0:
+            arm_lbls = alloc((arm_total + 1) * 8)
+            an0 = first_arm
+            ai0 : ., mut = 0
+            loop:
+                if an0 < 0:
+                    break
+                cell_store(arm_lbls, ai0 * 8, new_label())
+                ai0 = ai0 + 1
+                an0 = ast_c(an0)
+            dt_rows := alloc((arm_total + 1) * 8)
+            dt_pats := alloc((arm_total + 1) * 8)
+            dt_cols := alloc(8)
+            dt_tis := alloc(8)
+            cell_store(dt_cols, 0, match_val)
+            cell_store(dt_tis, 0, match_ti)
+            ai0 = 0
+            an0 = first_arm
+            loop:
+                if an0 < 0:
+                    break
+                cell_store(dt_rows, ai0 * 8, ai0)
+                cell_store(dt_pats, ai0 * 8, ast_a(an0))
+                ai0 = ai0 + 1
+                an0 = ast_c(an0)
+            dt_compile(dt_rows, dt_pats, dt_cols, dt_tis, arm_total, 1, merge_lbl, arm_lbls)
+
         // String length bucketing: compute the scrutinee length once so arms
         // with a different literal length skip the str_eq call entirely.
         match_len_var : ., mut = -1
@@ -3692,7 +4329,14 @@ fn gen_expr(node: int) -> int:
                 is_ident_bind = 0
             // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
-            body_lbl := new_label()
+            body_lbl : ., mut = -1
+            if dt_mode != 0:
+                body_lbl = cell_load(arm_lbls, arm_idx * 8)
+                // The tree already dispatched this arm. Keep pat_kind intact
+                // for body binding, but suppress the sequential test chain.
+                is_wildcard = 1
+            else:
+                body_lbl = new_label()
             fall_lbl : ., mut = merge_lbl
             has_next := 0
             if ast_c(an) >= 0:

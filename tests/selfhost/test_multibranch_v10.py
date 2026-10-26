@@ -1146,6 +1146,31 @@ fn main() -> int:
     return 42
 """
 
+MATCH_DT_SHARED_TAGS_SOURCE = """enum Inner:
+    X(int), Y(int)
+
+enum Outer:
+    A(Inner, Inner), B
+
+fn pick(o: Outer) -> int:
+    return match o:
+        A(X(1), _) => 1,
+        A(X(2), _) => 2,
+        A(Y(3), _) => 3,
+        _ => 0
+
+fn main() -> int:
+    if pick(A(X(1), Y(0))) != 1:
+        return 1
+    if pick(A(X(2), Y(0))) != 2:
+        return 2
+    if pick(A(Y(3), X(0))) != 3:
+        return 3
+    if pick(B()) != 0:
+        return 4
+    return 42
+"""
+
 MATCH_MULTI_PAYLOAD_BIND_SOURCE = """enum Pair:
     A(int, int), B
 
@@ -2694,6 +2719,18 @@ def test_nested_literal_payload_matches():
             name="nested_literal",
         )
 
+
+
+def test_decision_tree_shares_enum_tag_tests():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_DT_SHARED_TAGS_SOURCE, "dt_shared_tags")
+        # Three sequence arms share A and the first Inner tag. The decision tree
+        # reads Outer's tag once and the first payload's tag once; the old
+        # sequential chain reads both once per arm.
+        tags = _user_op_nodes(data, 23)  # IR_LOAD_ENUM_TAG
+        assert len(tags) == 2, f"expected 2 shared tag loads, got {len(tags)}"
+        _assert_program(tmp, MATCH_DT_SHARED_TAGS_SOURCE, 42, opts=(0, 2), name="dt_shared_tags")
 
 def test_nested_composite_payload_matches():
     cases = [
