@@ -1289,7 +1289,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, 175)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 11%8)
-        else if s3 == OP_SHL:
+        else if s3 == OP_SHL || s3 == OP_RAW_SHL:
             // mov rcx, r11; shl r10, cl
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 0)
             e2_w8(buf, pos+cp, 137)
@@ -1299,7 +1299,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, 211)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 4, 10%8)
-        else if s3 == OP_SHR:
+        else if s3 == OP_SHR || s3 == OP_RAW_SHR:
             // mov rcx, r11; shr r10, cl
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 0)
             e2_w8(buf, pos+cp, 137)
@@ -1393,10 +1393,26 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, 182)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 0)
-        else if s3 == OP_AND:
+        else if s3 == OP_AND || s3 == OP_RAW_AND:
             cp = cp + e2_alu(buf, pos+cp, 33)
-        else if s3 == OP_OR:
+        else if s3 == OP_OR || s3 == OP_RAW_OR:
             cp = cp + e2_alu(buf, pos+cp, 9)
+        else if s3 == OP_RAW_XOR:
+            // xor r10, r11 — REX.W + 0x31 + ModRM(3, r10, r11)
+            cp = cp + e2_alu(buf, pos+cp, 49)
+        else if s3 == OP_RAW_ROTL || s3 == OP_RAW_ROTR:
+            // mov rcx, r11; rol/ror r10, cl
+            cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 0)
+            e2_w8(buf, pos+cp, 137)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 3, 11%8, 1)
+            cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8)
+            e2_w8(buf, pos+cp, 211)
+            cp = cp + 1
+            ext := 0
+            if s3 == OP_RAW_ROTR:
+                ext = 1
+            cp = cp + emit_modrm(buf, pos+cp, 3, ext, 10%8)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
@@ -1430,6 +1446,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, 182)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 0)
+        else if s3 == UOP_UNTAG:
+            // sar r10, 1 — tagged int -> raw mathematical word
+            cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8)
+            e2_w8(buf, pos+cp, 193)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 3, 7, 10%8)
+            e2_w8(buf, pos+cp, 1)
+            cp = cp + 1
+        else if s3 == UOP_TAG:
+            // shl r10, 1 — raw mathematical word -> tagged int
+            cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8)
+            e2_w8(buf, pos+cp, 193)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 3, 4, 10%8)
+            e2_w8(buf, pos+cp, 1)
+            cp = cp + 1
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
