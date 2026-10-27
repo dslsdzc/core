@@ -243,6 +243,33 @@ fn main() -> int:
     return p.shownPing()
 """
 
+ORPHAN_IMPL_SOURCE = """import zz_pub_visibility_fixture
+
+impl ShownIface for ShownStruct:
+    fn shownPing(&self) -> int:
+        return self.y
+
+fn main() -> int:
+    return 0
+"""
+
+DOUBLE_IMPL_SOURCE = """import zz_pub_visibility_fixture
+
+struct P:
+    n: int
+
+impl ShownIface for P:
+    fn shownPing(&self) -> int:
+        return 1
+
+impl ShownIface for P:
+    fn shownPing(&self) -> int:
+        return 2
+
+fn main() -> int:
+    return 0
+"""
+
 SAME_NAME_TYPES_SOURCE = """import zz_pub_visibility_fixture
 
 enum ShownEnum:
@@ -364,6 +391,14 @@ def test_cross_library_enum_interface_alias():
                 assert want in text, (name, text)
             # A hidden struct can flow through a pub function's return value, but
             # its fields must not become readable or writable across libraries.
+            for name, source, want in (
+                ("orphan_impl", ORPHAN_IMPL_SOURCE, "Orphan impl"),
+                ("double_impl", DOUBLE_IMPL_SOURCE, "Conflicting impl"),
+            ):
+                built, _ = _build(tmp, name, source)
+                text = built.stdout + built.stderr
+                assert built.returncode == 1, (name, text)
+                assert want in text, (name, text)
             for name, source in (
                 ("hidden_field_read", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    return h.x\n"),
                 ("hidden_field_write", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    h.x = 5\n    return 0\n"),
