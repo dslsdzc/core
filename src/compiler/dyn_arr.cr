@@ -460,6 +460,9 @@ fn grow_ir_globals(needed: int):
     nb := alloc(nc * 24)
     cell_copy(g_ir_globals, g_ir_global_cap * 24, nb)
     g_ir_globals = nb
+    nbl := alloc(nc * 8)
+    cell_copy(g_ir_global_lib, g_ir_global_cap * 8, nbl)
+    g_ir_global_lib = nbl
     g_ir_global_cap = nc
 
 fn grow_ir_str_consts(needed: int):
@@ -1398,7 +1401,23 @@ fn grow_methods(needed: int):
     nb := alloc(nc * 24)
     cell_copy(g_methods, g_method_cap * 24, nb)
     g_methods = nb
+    nbl := alloc(nc * 8)
+    cell_copy(g_method_lib, g_method_cap * 8, nbl)
+    g_method_lib = nbl
     g_method_cap = nc
+fn grow_decl_map(needed: int):
+    if needed < g_decl_map_cap:
+        return
+    nc : ., mut = g_decl_map_cap * 2
+    if nc < 32:
+        nc = 32
+    if nc < needed:
+        nc = needed + 32
+    nb := alloc(nc * 40)
+    cell_copy(g_decl_map, g_decl_map_cap * 40, nb)
+    g_decl_map = nb
+    g_decl_map_cap = nc
+
 fn grow_borrow_markers(needed: int):
     if needed < g_borrow_scope_markers_cap:
         return

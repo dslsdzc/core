@@ -109,6 +109,8 @@ g_ir_local_cap : int, mut
 g_ir_globals : string, mut
 g_ir_global_count : int, mut
 g_ir_global_cap : int, mut
+// Owner library per IR global slot (parallel to g_ir_globals, not serialized).
+g_ir_global_lib : string, mut
 g_ir_str_consts : string, mut
 g_ir_str_const_count : int, mut
 g_ir_str_const_cap : int, mut
@@ -236,6 +238,14 @@ g_type_alias_cap : int, mut
 g_methods : string, mut
 g_method_count : int, mut
 g_method_cap : int, mut
+// Declaration owner per method row (parser-side only; not serialized).
+g_method_lib : string, mut
+// Library declaration map: source name, declaration kind, owner library,
+// internal unique name, type index. Used to give colliding declarations
+// distinct type identities without putting visibility into the type records.
+g_decl_map : string, mut
+g_decl_map_count : int, mut
+g_decl_map_cap : int, mut
 g_scope_bounds : string, mut
 g_scope_depth : int, mut
 g_scope_bounds_cap : int, mut
@@ -766,6 +776,7 @@ fn reset_frontend_state():
     g_iface_count = 0
     g_impl_for_count = 0
     g_method_count = 0
+    g_decl_map_count = 0
     g_type_alias_count = 0
     g_generic_constr_count = 0
     g_gen_param_count = 0

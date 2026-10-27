@@ -406,13 +406,26 @@ fn global_decl_optional(name_ni: int) -> int:
         if gi >= g_global_let_count:
             break
         lnode := cell_load(g_global_lets, gi * 8)
-        if ast_a(lnode) == name_ni:
+        if ast_a(lnode) == name_ni && global_decl_in_ctx(lnode):
             tn := ast_b(lnode)
             if tn >= 0 && res_type_node(tn) >= 0:
                 if get_type_kind(res_type_node(tn)) == TYP_OPTIONAL:
                     return 1
             return 0
         gi = gi + 1
+    if g_cur_lib >= 0:
+        gi = 0
+        loop:
+            if gi >= g_global_let_count:
+                break
+            lnode2 := cell_load(g_global_lets, gi * 8)
+            if ast_a(lnode2) == name_ni:
+                tn2 := ast_b(lnode2)
+                if tn2 >= 0 && res_type_node(tn2) >= 0:
+                    if get_type_kind(res_type_node(tn2)) == TYP_OPTIONAL:
+                        return 1
+                return 0
+            gi = gi + 1
     return 0
 
 // 被调方返回类型是否可选。判据走返回类型节点（`EXPR_FN.type_val`）而非
@@ -548,18 +561,48 @@ fn struct_row_field_ti(si: int, fi: int) -> int:
     return res_type_node(si_field_type_node(si, fi))
 
 // 全局槽声明类型（-1 = 非全局/无类型节点）
+// Does this global declaration belong to the library currently being
+// generated? g_cur_lib < 0 keeps the legacy name-only behaviour.
+fn global_decl_in_ctx(lnode: int) -> bool:
+    if g_cur_lib < 0:
+        return true
+    return lib_of_node(lnode) == g_cur_lib
+
+fn global_decl_owner(name_ni: int) -> int:
+    gi : ., mut = 0
+    loop:
+        if gi >= g_global_let_count:
+            return -1
+        lnode := cell_load(g_global_lets, gi * 8)
+        if ast_a(lnode) == name_ni:
+            return lib_of_node(lnode)
+        gi = gi + 1
+    return -1
+
 fn global_decl_ti(name_ni: int) -> int:
     gi : ., mut = 0
     loop:
         if gi >= g_global_let_count:
             break
         lnode := cell_load(g_global_lets, gi * 8)
-        if ast_a(lnode) == name_ni:
+        if ast_a(lnode) == name_ni && global_decl_in_ctx(lnode):
             tn := ast_b(lnode)
             if tn >= 0:
                 return res_type_node(tn)
             return -1
         gi = gi + 1
+    if g_cur_lib >= 0:
+        gi = 0
+        loop:
+            if gi >= g_global_let_count:
+                break
+            lnode2 := cell_load(g_global_lets, gi * 8)
+            if ast_a(lnode2) == name_ni:
+                tn2 := ast_b(lnode2)
+                if tn2 >= 0:
+                    return res_type_node(tn2)
+                return -1
+            gi = gi + 1
     return -1
 
 // 枚举变体携带值声明类型（-1 = 非用户枚举构造器/未知）
@@ -828,9 +871,9 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
         if find_local(ni) >= 0:
             return oe_bare()
         // 无表示位（上方已排除可选槽）= 非可选槽
-        gv := find_global(ni)
+        gv := find_global_ctx(ni, node)
         if gv >= 0:
-            if global_decl_optional(ni) != 0:
+            if global_optional_ctx(ni, node) != 0:
                 return oe_boxed()
             return oe_bare()
         return oe_bare()  // 枚举裸变体等 T 值
@@ -1028,8 +1071,44 @@ fn find_local(name_idx: int) -> int:
         i = i - 1
     return -1
 
+// Run a lookup under the library that owns the referenced AST node. The graph
+// is generated with g_cur_lib unset, so collisions must be resolved at the
+// specific identifier/pattern site instead of for the whole function.
+fn ir_ctx_lib(node: int) -> int:
+    if node < 0:
+        return -1
+    return lib_of_node(node)
+
+fn find_global_ctx(name_idx: int, node: int) -> int:
+    saved := g_cur_lib
+    g_cur_lib = ir_ctx_lib(node)
+    r := find_global(name_idx)
+    g_cur_lib = saved
+    return r
+
+fn find_global_const_ctx(name_idx: int, node: int) -> int:
+    saved := g_cur_lib
+    g_cur_lib = ir_ctx_lib(node)
+    r := find_global_const_node(name_idx)
+    g_cur_lib = saved
+    return r
+
+fn global_optional_ctx(name_idx: int, node: int) -> int:
+    saved := g_cur_lib
+    g_cur_lib = ir_ctx_lib(node)
+    r := global_decl_optional(name_idx)
+    g_cur_lib = saved
+    return r
+
 fn find_global(name_idx: int) -> int:
     i : ., mut = g_ir_global_count - 1
+    loop:
+        if i < 0:
+            break
+        if cell_load(g_ir_globals, i * 24) == name_idx && cell_load(g_ir_global_lib, i * 8) == g_cur_lib:
+            return cell_load(g_ir_globals, i * 24 + 8)
+        i = i - 1
+    i = g_ir_global_count - 1
     loop:
         if i < 0:
             return -1
@@ -1453,13 +1532,26 @@ fn find_global_const_node(name_idx: int) -> int:
         if i < 0:
             break
         node := cell_load(g_global_lets, i * 8)
-        if ast_a(node) == name_idx && ast_data(node) == 0:
+        if ast_a(node) == name_idx && ast_data(node) == 0 && global_decl_in_ctx(node):
             value_node := ast_c(node)
             if value_node >= 0:
                 value_kind := ast_kind(value_node)
                 if value_kind == EXPR_INT || value_kind == EXPR_BOOL || value_kind == EXPR_DEX:
                     return value_node
         i = i - 1
+    if g_cur_lib >= 0:
+        i = g_global_let_count - 1
+        loop:
+            if i < 0:
+                break
+            node2 := cell_load(g_global_lets, i * 8)
+            if ast_a(node2) == name_idx && ast_data(node2) == 0:
+                value_node2 := ast_c(node2)
+                if value_node2 >= 0:
+                    vk2 := ast_kind(value_node2)
+                    if vk2 == EXPR_INT || vk2 == EXPR_BOOL || vk2 == EXPR_DEX:
+                        return value_node2
+            i = i - 1
 
     return -1
 
@@ -2887,11 +2979,11 @@ fn gen_expr(node: int) -> int:
         lv := find_local(name_idx)
         if lv >= 0:
             return lv
-        const_node : ., mut = find_global_const_node(name_idx)
+        const_node : ., mut = find_global_const_ctx(name_idx, node)
         // 容量批 T2：可选全局槽不得常量折叠，字面量初值（`g : int? = 5`）的读点若被
         // 折成裸常量 5，则 match 的 tag 读会解引用该裸值(both paths fail at run time)。
         // 折叠只对非可选全局生效（零足迹）；可选全局由运行期初始化写入装箱对象。
-        if const_node >= 0 && g_optrep_on != 0 && global_decl_optional(name_idx) != 0:
+        if const_node >= 0 && g_optrep_on != 0 && global_optional_ctx(name_idx, node) != 0:
             const_node = -1
         if const_node >= 0:
             const_type : ., mut = TI_INT
@@ -2903,7 +2995,7 @@ fn gen_expr(node: int) -> int:
             cv := new_ir_var("const", const_type)
             emit(IR_CONST, cv, ast_int_val(const_node), 0, 0, const_type)
             return cv
-        gv := find_global(name_idx)
+        gv := find_global_ctx(name_idx, node)
         if gv >= 0:
             return gv
         // A bare enum variant (c := Red, no parentheses) emits MAKE_ENUM with no
@@ -5659,7 +5751,7 @@ fn global_init_val(name_idx: int) -> int:
         if i < 0:
             break
         node := cell_load(g_global_lets, i * 8)
-        if ast_a(node) == name_idx:
+        if ast_a(node) == name_idx && global_decl_in_ctx(node):
             value_node := ast_c(node)
             if value_node >= 0:
                 vk := ast_kind(value_node)
@@ -5676,6 +5768,23 @@ fn global_init_val(name_idx: int) -> int:
                     if ast_kind(inner) == EXPR_DEX:
                         return 0 - ast_int_val(inner)
         i = i - 1
+    if g_cur_lib >= 0:
+        i = g_global_let_count - 1
+        loop:
+            if i < 0:
+                break
+            node2 := cell_load(g_global_lets, i * 8)
+            if ast_a(node2) == name_idx:
+                value_node2 := ast_c(node2)
+                if value_node2 >= 0:
+                    vk2 := ast_kind(value_node2)
+                    if vk2 == EXPR_INT || vk2 == EXPR_BOOL || vk2 == EXPR_DEX:
+                        return ast_int_val(value_node2)
+                    if vk2 == EXPR_UNARY && ast_c(value_node2) == UOP_NEG:
+                        inner2 := ast_a(value_node2)
+                        if ast_kind(inner2) == EXPR_INT || ast_kind(inner2) == EXPR_BOOL || ast_kind(inner2) == EXPR_DEX:
+                            return 0 - ast_int_val(inner2)
+            i = i - 1
     return 0
 
 // 类型节点 -> `[T; N]` 的元素数 N（`[T]` 切片 = 0）；非聚合 = -1。
@@ -5711,7 +5820,7 @@ fn global_needs_runtime_init(name_idx: int) -> int:
         if i < 0:
             break
         node := cell_load(g_global_lets, i * 8)
-        if ast_a(node) == name_idx:
+        if ast_a(node) == name_idx && global_decl_in_ctx(node):
             // 容量批 T2：可选全局槽必须走运行期初始化，静态度量（.quad 裸值）写进槽后
             // 读侧按装箱解引用 -> 双路径 139(run-time failure)。装箱在 inject_global_inits
             // 内完成；非可选全局不受影响（零足迹）。
@@ -5750,6 +5859,13 @@ fn global_var_of(name_idx: int) -> int:
     loop:
         if gi >= g_ir_global_count:
             break
+        if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
+            return cell_load(g_ir_globals, gi * 24 + 8)
+        gi = gi + 1
+    gi = 0
+    loop:
+        if gi >= g_ir_global_count:
+            return -1
         if cell_load(g_ir_globals, gi * 24) == name_idx:
             return cell_load(g_ir_globals, gi * 24 + 8)
         gi = gi + 1
@@ -5758,12 +5874,14 @@ fn global_var_of(name_idx: int) -> int:
 // 把需要运行期初始化的文件级 let 降级为 IR 序列（写进当前函数 = main 序言）。
 // 顺序 = g_global_lets 源序（跨全局依赖如 `b : [int;2] = a;` 因此正确）。
 fn inject_global_inits():
+    saved_lib := g_cur_lib
     i : ., mut = 0
     loop:
         if i >= g_global_let_count:
             break
         lnode := cell_load(g_global_lets, i * 8)
         name_idx := ast_a(lnode)
+        g_cur_lib = lib_of_node(lnode)
         if global_needs_runtime_init(name_idx) != 0:
             gv := global_var_of(name_idx)
             if gv >= 0:
@@ -5791,15 +5909,20 @@ fn inject_global_inits():
                         v = box_for_optional_slot(vn, v, global_decl_ti(name_idx))
                     emit(IR_STORE, -1, gv, v, 0, 0)
         i = i + 1
+    g_cur_lib = saved_lib
 
 // Register one IR global, deduplicated by name_idx.
 fn reg_one_global(name_idx: int):
+    saved_lib := g_cur_lib
+    decl_owner := global_decl_owner(name_idx)
+    if decl_owner >= 0:
+        g_cur_lib = decl_owner
     found : ., mut = 0
     gi : ., mut = 0
     loop:
         if gi >= g_ir_global_count:
             break
-        if cell_load(g_ir_globals, gi * 24) == name_idx:
+        if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
             found = 1
             break
         gi = gi + 1
@@ -5814,7 +5937,7 @@ fn reg_one_global(name_idx: int):
             if gli >= g_global_let_count:
                 break
             lnode := cell_load(g_global_lets, gli * 8)
-            if ast_a(lnode) == name_idx:
+            if ast_a(lnode) == name_idx && global_decl_in_ctx(lnode):
                 ltn := ast_b(lnode)
                 if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
                     if ast_int_val(lnode) != 0:
@@ -5841,17 +5964,20 @@ fn reg_one_global(name_idx: int):
                 if i2 >= g_global_let_count:
                     break
                 lnode2 := cell_load(g_global_lets, i2 * 8)
-                if ast_a(lnode2) == name_idx:
+                if ast_a(lnode2) == name_idx && global_decl_in_ctx(lnode2):
                     vn := ast_c(lnode2)
                     if vn >= 0 && ast_kind(vn) == EXPR_DEX:
                         iv = ast_a(vn)
                     break
                 i2 = i2 + 1
         cell_store(g_ir_globals, g_ir_global_count * 24 + 16, iv)
+        cell_store(g_ir_global_lib, g_ir_global_count * 8, g_cur_lib)
         g_ir_global_count = g_ir_global_count + 1
+    g_cur_lib = saved_lib
 
 fn ir_gen_globals():
     ccr_set_raw_mode_from_source()
+    saved_lib := g_cur_lib
     // The parser records only file-scope declarations in g_global_lets.
     // Do not scan every EXPR_LET here: that also includes function locals.
     i : ., mut = 0
@@ -5859,9 +5985,11 @@ fn ir_gen_globals():
         if i >= g_global_let_count:
             break
         node := cell_load(g_global_lets, i * 8)
+        g_cur_lib = lib_of_node(node)
         reg_one_global(ast_a(node))
         i = i + 1
 
+    g_cur_lib = lib_find("@core")
     // Manually register ir_gen.cr's own globals — the parser's auto-detection
     // of file-scope declarations is known to miss some (see CLAUDE.md Known Issues).
     reg_one_global(str_intern("g_sg_alloc_total"))
@@ -5894,6 +6022,7 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_arena_cap"))
     reg_one_global(str_intern("g_arena_pool_data"))
     reg_one_global(str_intern("g_arena_free_list"))
+    g_cur_lib = saved_lib
     reg_optrep_globals()
 
 // 表示方式初始化（两条 IR 生成入口都必须先调：ir_gen_all 批量路径 + main.cr 文件路径
@@ -5990,6 +6119,7 @@ fn reg_hidden_global(name_ni: int) -> int:
     cell_store(g_ir_globals, g_ir_global_count * 24, name_ni)
     cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
     cell_store(g_ir_globals, g_ir_global_count * 24 + 16, 0)
+    cell_store(g_ir_global_lib, g_ir_global_count * 8, g_cur_lib)
     g_ir_global_count = g_ir_global_count + 1
     return gvar
 
@@ -6298,6 +6428,7 @@ fn ccr_set_raw_mode_from_source():
 
 fn ir_gen_all():
     ccr_set_raw_mode_from_source()
+    saved_lib := g_cur_lib
     g_ir_var_count = 0
     g_ir_instr_count = 0
     g_ir_func_count = 0
@@ -6341,6 +6472,7 @@ fn ir_gen_all():
     // 纯度 + 状态依赖边序列最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
     // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。
     df_state_finalize()
+    g_cur_lib = saved_lib
 
 // Compute function body fingerprint: hash of the function body source text.
 // Used for cache hit detection. If the body hasn't changed, the output IR

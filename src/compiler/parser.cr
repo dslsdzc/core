@@ -2630,6 +2630,7 @@ fn parse_declaration():
                 cell_store(g_methods, g_method_count * 24, type_ni)
                 cell_store(g_methods, g_method_count * 24 + 8, method_ni)
                 cell_store(g_methods, g_method_count * 24 + 16, mangled_ni)
+                cell_store(g_method_lib, g_method_count * 8, lib_of_line(tok_ln(t)))
                 g_method_count = g_method_count + 1
             else:
                 advance_tok()
