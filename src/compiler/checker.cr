@@ -1892,6 +1892,34 @@ fn remap_impl_pairs():
                 cell_store(g_impl_for, i * 16 + 8, uty)
         i = i + 1
 
+// Coherence: an impl may be foreign only when at least one side is declared in
+// the implementing library, and a (interface, type) pair may be implemented
+// only once.
+fn check_impl_coherence():
+    i : ., mut = 0
+    loop:
+        if i >= g_impl_for_count:
+            return
+        line := cell_load(g_impl_for_line, i * 8)
+        if line > 0:
+            ctx := lib_of_line(line)
+            trait_ni := cell_load(g_impl_for, i * 16)
+            type_ni := cell_load(g_impl_for, i * 16 + 8)
+            towner := decl_owner_for_unique(trait_ni)
+            yowner := decl_owner_for_unique(type_ni)
+            if towner >= 0 && towner != ctx:
+                if yowner < 0 || yowner != ctx:
+                    check_error(EC_N_UNDEFINED, "Orphan impl: interface '" + istr_get(decl_src_for_unique(trait_ni)) + "' and type '" + istr_get(decl_src_for_unique(type_ni)) + "' are both foreign", line, 1)
+            j : ., mut = 0
+            loop:
+                if j >= i:
+                    break
+                if cell_load(g_impl_for, j * 16) == trait_ni && cell_load(g_impl_for, j * 16 + 8) == type_ni:
+                    check_error(EC_N_DUPLICATE, "Conflicting impl for interface '" + istr_get(decl_src_for_unique(trait_ni)) + "' and type '" + istr_get(decl_src_for_unique(type_ni)) + "'", line, 1)
+                    break
+                j = j + 1
+        i = i + 1
+
 fn find_func_owned(name_idx: int, owner: int) -> int:
     i : ., mut = 0
     loop:
@@ -5719,6 +5747,7 @@ fn check_all():
     assign_unique_func_links()
     remap_impl_pairs()
     check_impl_visibility()
+    check_impl_coherence()
     prelude_builtin_init()
 
     // SYM_SO_FN is materialized by the side-table fallback in find_gsym and

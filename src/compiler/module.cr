@@ -476,6 +476,10 @@ fn so_materialize(side_i: int) -> int:
     sym_set_kind(si, SYM_SO_FN)
     sym_set_type(si, cell_load(g_so_side_tags, side_i * 8))
     sym_set_node(si, cell_load(g_so_side_type, side_i * 8))
+    // External packages are imported by the entry unit; their public symbols
+    // belong to that unit's library, not to the global namespace.
+    sym_set_owner(si, lib_lookup_path(g_source_name))
+    sym_set_pub(si, 1)
     g_sym_count = si + 1
     return si
 
