@@ -8,7 +8,7 @@
 //   sys_syscall4_stub）把第 4 参经 r10 传递——本程序为该径的**持久套件覆盖**
 //   （波 1 Task 6 的覆盖仅是 /tmp 探针，未入树）。
 //
-// 判据形式（suite 惯例 = run_suite「main 返回 0 为通过」，见 src/ci/run.sh）：
+// 判断形式（suite 惯例 = run_suite「main 返回 0 为通过」，见 src/ci/run.sh）：
 //   子进程退出码经 wait 状态位 8..15 正确回传 → 本程序 rc=0；否则回传 rc=1/2
 //   （等价 exit 断言：断言对象即 `system("exit 3") == 3` 本身）。
 import io

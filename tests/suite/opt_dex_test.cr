@@ -1,10 +1,10 @@
-// 可选 dex（`dex?`）整族 —— **suite 常规腿**（批 5；run_suite 每档独立 build+run）
+// 可选 dex（`dex?`）整族 —— **suite 常规语料路径**（批 5；run_suite 每档独立 build+run）
 //
-// 与 py 套件 `tests/selfhost/test_opt_dex.py` 的分工：本档是**常规语料腿**（走 `src/ci/run.sh`
+// 与 py 套件 `tests/selfhost/test_opt_dex.py` 的分工：本档是**常规语料路径**（走 `src/ci/run.sh`
 // 的 suite job），只放**修后应绿**的正例（RED 基线 / 禁第三态纪律 / 编译期拒绝面 / apx 槽自证
 // 在 py 套件里——suite 档跑红会拖挂整个 suite job）。
 //
-// 判据：全部经 **`@raw_int`** 锚定（唯一显式形式通道）——7.0 的 scaled 表示 7000000 / 10^6 == 7。
+// 判断依据：全部经 **`@raw_int`** 锚定（唯一显式形式通道）——7.0 的 scaled 表示 7000000 / 10^6 == 7。
 // 不直接比 decimal，否则踩 TODO #2026-09-16-30（apx 字面量走 lexer 位模式，~2ulp 截断）。
 //
 // 两条硬约束（见 py 套件头注）：

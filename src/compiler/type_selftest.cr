@@ -315,7 +315,7 @@ fn ts_t5_run() -> int:
     // 8. ti 类型替换端到端：克隆体内的泛型形参位替换成实参类型节点；
     // 异键异实例，同键缓存命中。夹具形参实参是切片 [int]，键 "[int]"。
     // ti 路径产生 EXPR_ARRAY 类型节点；名字路径只会产生 EXPR_IDENT("[int]")，
-    // 这是非法声明名。因此本判据能区分 ti 路径是否生效。
+    // 这是非法声明名。因此本条判断能区分 ti 路径是否生效。
     // 替换只覆盖函数体节点。EXPR_FN 分支不克隆形参，形参类型由 fi_param_type
     // 的裸码承担，所以克隆体形参仍指向源节点，与实例化的既有语义一致。
     t5_m_ni := str_intern("T5_M")
@@ -355,7 +355,7 @@ fn ts_t5_run() -> int:
 // 判定顺序：A 形状，C 用户接口，B 本质类型。结果 -1 表示无法判定，
 // 不得当成 0 或 1。轴 C 的条件与 check_iface 相同：方法名存在、参数计数
 // 和返回类型匹配。域限定为命名记录。
-// 主判据：1. 1/0/-1 原样返回，不是查不到就返回 0；2. 与 check_iface 逐例
+// 主要判断依据：1. 1/0/-1 原样返回，不是查不到就返回 0；2. 与 check_iface 逐例
 // 比较；3. 判定路径不调用 str_intern；4. 形状表的注册、覆盖和复位。
 
 // 追加接口方法，写入位置与 parser 的 interface 分支相同：mbase + name、param_count、ret_ti。
@@ -708,7 +708,7 @@ fn ts_x2_run() -> int:
             iface_satisfies(x2_tup, str_intern("X2NameProd")) == 1 &&
             iface_satisfies(TI_INT, str_intern("X2NameSeq")) == 0), 1)
     iface_shape_reset()
-    // 复位检查口径不变（count = 0 + 旧键 -1）；新增生产注册表的
+    // 复位检查规则不变（count = 0 + 旧键 -1）；新增生产注册表的
     // 复位后可重建断言（生产重置点 = reset_frontend_state 清 count，随 init_types 尾部
     // 的 iface_shape_builtin_init 重建 -> 长驻进程每请求一致）。
     x2_restored : ., mut = 0
@@ -898,7 +898,7 @@ fn ts_ifc_run() -> int:
     fails = fails + ts_check("ifc.sig_named_param_bound",
         ts_isat_b2i(iface_satisfies(ifc_h_ti, str_intern("IfcI0")) == 1 &&
             iface_satisfies(ifc_p_ti, str_intern("IfcI0")) == 0), 1)
-    // 2 签名类型项化（返回值）：命名返回型 vs 原生返回型 -> 0；同命名型 -> 1（编码闭合的直接判据）
+    // 2 签名类型项化（返回值）：命名返回型 vs 原生返回型 -> 0；同命名型 -> 1（编码闭合的直接判断）
     fails = fails + ts_check("ifc.sig_named_ret_bound",
         ts_isat_b2i(iface_satisfies(ifc_r_ti, str_intern("IfcI0")) == 0 &&
             iface_satisfies(ifc_h_ti, str_intern("IfcI0")) == 1), 1)
@@ -1815,7 +1815,7 @@ fn ts_ccr2_run() -> int:
     fails = fails + ts_check("ct2.reject_unbuildable_sig", rej2, -1)
     return fails
 
-// === 否定分支同类原子身份判据的邻域覆盖（11 例）===
+// === 否定分支同类原子身份判断的邻域覆盖（11 例）===
 // 覆盖：
 // 1. 同身份仍相交，防止过度加强成一律判不交。
 // 2. μ 变元作字面返回 -1 并置未实现位，走 lit_implies 的域外路径，结果不得被稀释。
@@ -1864,7 +1864,7 @@ fn ts_t2_neg_run() -> int:
             ty_sub(sum_11, tt_not(sum_11)) == 0 && ty_uncovered() == 0), 1)
     // 10. 同枚举不同变体：AK_SUM 槽 1 是变体令牌，而 te_chain_cmp 对槽 >= 1
     // 走实参位规则（te_arg_cmp -> ty_equiv），两个不同令牌会结构判等，b 槽
-    // 只是标注，于是误判序列相同。逐元素令牌同一性判据返回 1。
+    // 只是标注，于是误判序列相同。逐元素令牌同一性判断返回 1。
     // t3.*_over_claim 三个用例属于同一族：同枚举 T3Color 的 T3Blue 和 T3Red。
     sum_12b := tt_atom(AK_SUM, -1, tt_cons(sh_name_token(e1), tt_cons(sh_name_token(v2), tt_nil())))
     ty_budget_reset(200000)
@@ -2234,7 +2234,7 @@ fn type_selftest_run() -> int:
         (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), true)
     // 反例 2：IR_DEREF / IR_STORE_PTR 的旧辅码是访问宽度（8 字节），数值 8
     // 同时是 TI_DEX_S 记录。前端 v10 Task 5 起不再发射该宽度；此处保留分类器
-    // 钉子：旧宽度码若被重引入，仍必须落辅码面（term = -1），不得当成类型行。
+    // 固定用例：旧宽度码若被重引入，仍必须落辅码面（term = -1），不得当成类型行。
     total = total + 1
     fails = fails + ts_check_b("t4.tk_deref_width8_rejected",
         (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), true)
@@ -2814,7 +2814,7 @@ fn type_selftest_run() -> int:
         (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), true)
 
     // --- iface_kind_of 与桥接分派共用同一张表 ---
-    // 判据是全表逐格比较，不抽样：生产入口的每个格子必须等于冻结期望表。
+    // 判断方式是全表逐格比较，不抽样：生产入口的每个格子必须等于冻结期望表。
     // 字面拷贝对照物已删除，改用 ts_t4_ak_expected 和
     // ts_t4_native_ak_expected。它们只保存期望数据，不是第二份生产实现。
     // 只比较两个版本是否相等，会漏掉入口被换成第三个实现、或两个版本一起错
@@ -3782,7 +3782,7 @@ fn type_selftest_run() -> int:
     // 变体项是 AK_SUM 序列 [枚举名令牌, 变体名令牌]。两个令牌按节点
     // 同一性判为确定不同 0。t3_w 是包含两个空析取支的并：
     // q1 = R∩¬R∩¬G，q2 = G∩¬R∩¬G，二者都为空；q3 = B∩¬R∩¬G = B。
-    // B 与 q1 的 lit_implies 在令牌不变槽上曾经返回未知，同类令牌判据
+    // B 与 q1 的 lit_implies 在令牌不变槽上曾经返回未知，同类令牌判断
     // 加入后返回 0，外层并分支也返回 0，所以 B ⊆ t3_w 成立。
     // 下面的三个断言固定这个行为。
     total = total + 1
@@ -3908,7 +3908,7 @@ fn type_selftest_run() -> int:
     init_types()
     ty_budget_reset(200000)
     t4_null := alloc_type(TYP_NULL, 0, 0)            // None 的类型表记录，每个出现点一条。
-    t4_null2 := alloc_type(TYP_NULL, 0, 0)           // 第二个出现点（规范化判据用）
+    t4_null2 := alloc_type(TYP_NULL, 0, 0)           // 第二个出现点（规范化判断用）
     t4_int_opt := alloc_type(TYP_OPTIONAL, TI_INT, 0)
     t4_str_opt := alloc_type(TYP_OPTIONAL, TI_STR, 0)
     t4_intt := sh_term_of_ti(TI_INT)

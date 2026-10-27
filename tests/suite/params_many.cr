@@ -1,4 +1,4 @@
-// TODO #2026-09-10-4 收口（波 1 Task 5 Minor 4）：≥18 形参静默误编译修复后的 runtime 用例。
+// TODO #2026-09-10-4 已处理（波 1 Task 5 Minor 4）：≥18 形参静默误编译修复后的 runtime 用例。
 //
 // 修复前 ≥18 形参的函数在 .ccr 中 name_idx=0/param_count=0（FuncInfo 形参槽区
 // 16 槽被无界写越界踩掉 return_type/ast_node），同源 checker 发 TF01 误归、IR
@@ -7,9 +7,9 @@
 // 覆盖形：
 //   * 18 形参 = 6 寄存器参 + 12 栈参（跨过修复前的 16 槽边界）
 //   * 22 形参 = 6 寄存器参 + 16 栈参 = 128B 栈清理（> 127B ⇒ add rsp, imm32
-//     7B 形；imm8 形编码不下，此形修复前结构不可达 = Minor 4 的收口条件）
+//     7B 形；imm8 形编码不下，此形修复前结构不可达 = Minor 4 的处理条件）
 //
-// 判据：main rc=0（逐形参值全对；任一错位返回该参数序号+1 便于定位）。
+// 判断依据：main rc=0（逐形参值全对；任一错位返回该参数序号+1 便于定位）。
 // 运行：./build/corec build tests/suite/params_many.cr -o /tmp/pm --static && /tmp/pm
 
 fn check18(a0: int, a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8: int, a9: int, a10: int, a11: int, a12: int, a13: int, a14: int, a15: int, a16: int, a17: int) -> int:

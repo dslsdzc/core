@@ -671,7 +671,7 @@ fn alloc_registers():
 
         // ── 阶段 3：候选构建（窗口 = [first_ref,last_ref] + 上下文修正）──
         var_reg : string, mut = alloc(vc * 8)  // 活跃集：函数内 var 到 reg 序 (0..4)
-        var_end : string, mut = alloc(vc * 8)  // 活跃集窗口终点（free 判据，
+        var_end : string, mut = alloc(vc * 8)  // 活跃集窗口终点（free 判断，
                                               // 携带值扩窗后 ≠ live_last，须存）
         var_asg : string, mut = alloc(vc * 8)  // 终分配：函数内 var 到物理 reg
         reg_occ : string, mut = alloc(MAX_REGS * 8)
