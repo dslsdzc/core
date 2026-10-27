@@ -75,8 +75,25 @@ def test_import_graph_identity():
         assert run.returncode == 42, run.stdout + run.stderr
 
 
+def test_module_init_topological_order():
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "b.cr").write_text("barray : [int; 2], mut = [7, 8]\nbval : int, pub, mut = barray[0]\n")
+        src = d / "main.cr"
+        src.write_text("import b\nmarr : [int; 2], mut = [bval, 0]\nfn main() -> int:\n    return marr[0]\n")
+        elf = d / "main.elf"
+        built = subprocess.run(
+            [str(COREC), "build", str(src), "-o", str(elf), "--static"],
+            capture_output=True, text=True, cwd=str(BASE), timeout=120,
+        )
+        assert built.returncode == 0, built.stdout + built.stderr
+        run = subprocess.run([str(elf)], capture_output=True, text=True, timeout=5)
+        assert run.returncode == 7, run.stdout + run.stderr
+
+
 if __name__ == "__main__":
     test_lib_manager_selftest()
     test_import_direction_is_enforced()
     test_import_graph_identity()
+    test_module_init_topological_order()
     print("LIB MANAGER PASS")

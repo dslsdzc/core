@@ -5882,15 +5882,58 @@ fn global_var_of(name_idx: int) -> int:
         gi = gi + 1
     return -1
 
+fn global_seg_index(node: int) -> int:
+    line := ast_line(node)
+    if line <= 0 || line > g_line_count:
+        return 0
+    fid := cell_load(g_line_fileid, (line - 1) * 8)
+    if fid < 0:
+        return 0
+    si : ., mut = 1
+    loop:
+        if si >= g_seg_count:
+            return 0
+        if cell_load(g_seg_fileids, si * 8) == fid:
+            return si
+        si = si + 1
+    return 0
+
 // 把需要运行期初始化的文件级 let 降级为 IR 序列（写进当前函数 = main 序言）。
-// 顺序 = g_global_lets 源序（跨全局依赖如 `b : [int;2] = a;` 因此正确）。
+// 顺序 = 模块依赖拓扑序的近似：导入文件按 load 顺序追加在 main 之后，因此
+// 反段序（深层导入 -> 直接导入 -> main）让被依赖文件的全局先初始化；同文件内
+// 保持源序。
 fn inject_global_inits():
     saved_lib := g_cur_lib
+    n := g_global_let_count
+    order := alloc((n + 1) * 8)
     i : ., mut = 0
     loop:
-        if i >= g_global_let_count:
+        if i >= n:
             break
-        lnode := cell_load(g_global_lets, i * 8)
+        cell_store(order, i * 8, i)
+        i = i + 1
+    i = 1
+    loop:
+        if i >= n:
+            break
+        key := cell_load(order, i * 8)
+        kseg := global_seg_index(cell_load(g_global_lets, key * 8))
+        j : ., mut = i - 1
+        loop:
+            if j < 0:
+                break
+            prev := cell_load(order, j * 8)
+            if global_seg_index(cell_load(g_global_lets, prev * 8)) >= kseg:
+                break
+            cell_store(order, (j + 1) * 8, prev)
+            j = j - 1
+        cell_store(order, (j + 1) * 8, key)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
+            break
+        lnode := cell_load(g_global_lets, cell_load(order, i * 8) * 8)
         name_idx := ast_a(lnode)
         g_cur_lib = lib_of_node(lnode)
         if global_needs_runtime_init(name_idx) != 0:
