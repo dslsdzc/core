@@ -184,7 +184,7 @@ neg("type_ta02", write("ta02", 'fn main() -> int:\n    x : int = "s"\n    return
 neg("type_r02", write("r02", "fn main() -> int:\n    arr := [1, 2, 3]\n    return arr[5]\n"), "R02")
 neg("type_tm03", write("tm03", "enum E:\n    A, B\nfn main() -> int:\n    e := A()\n    return match e:\n        A => 1,\n"), "TM03")
 neg("type_tk05", write("tk05", "fn main() -> int:\n    arr := [1, 2, 3]\n    s := arr[0..5]\n    return 0\n"), "TK05")
-neg("safety_tu03", write("tu03", "fn main() -> int:\n    p := 4096 as *int\n    return *p\n"), "TU03")
+neg("safety_tu03", write("tu03", "fn main() -> int:\n    p := 4096 cast *int\n    return *p\n"), "TU03")
 # TF01 撤条后的**负控**（A₂）：真 TF01（string 值返 int 声明）⇒ 仍阻断（rc=1 + 零产物）——「撤条 ≠ 放行」
 neg("type_tf01", write("tf01", 'fn main() -> int:\n    s := "x"\n    return s\n'), "TF01")
 

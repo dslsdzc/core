@@ -358,27 +358,19 @@ fn parse_unary() -> int:
         op := parse_unary()
         return alloc_node(EXPR_UNARY, op, 0, UOP_DEREF, 0, 0, 0, tok_ln(t), tok_cl(t))
     node : ., mut = parse_postfix()
-    // Handle 'as' type cast: expr as Type
-    if check(T_AS):
-        advance_tok()
-        typ := parse_type()
-        return alloc_node(EXPR_AS, node, typ, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    // `expr cast Type`. The V3 `cast<T>(expr)` form was removed: V4 rejects
+    // `<T>` and the two spellings produced the same EXPR_AS node.
+    loop:
+        if check(T_CAST):
+            advance_tok()
+            typ := parse_type()
+            node = alloc_node(EXPR_AS, node, typ, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        else:
+            break
     return node
 
 fn parse_postfix() -> int:
     node : ., mut = parse_primary()
-    // Handle cast<T>(expr), which has the same meaning as expr as T
-    if ast_kind(node) == EXPR_IDENT:
-        ni := ast_int_val(node)
-        if str_eq(istr_get(ni), "cast") != 0 && tok_k(cur_tok()) == T_LT:
-            advance_tok()
-            typ : ., mut = parse_type()
-            advance_tok()  // skip T_GT
-            if tok_k(cur_tok()) == T_LPAREN:
-                advance_tok()
-                inner := parse_expr(0)
-                advance_tok()  // skip T_RPAREN
-                return alloc_node(EXPR_AS, inner, typ, 0, 0, 0, 0, tok_ln(node), tok_cl(node))
     loop:
         t := cur_tok()
         if tok_k(t) == T_LPAREN:

@@ -29,7 +29,7 @@ Core 使用下列核心关键字：
 ```text
 fn mut return if else loop while for break continue
 true false struct enum extern impl match import pub
-go await unsafe flow yield interface type mod as
+go await unsafe flow yield interface type mod cast
 auto fileid self in none unit never dyn
 catch spec
 ```
@@ -488,12 +488,33 @@ expected type 已知时参数类型可以省略：
 f : fn(int) -> int = fn(x) => x * 2
 ```
 
-### 5.5 转换 `as`
+### 5.5 转换 `cast`
+
+`cast` 是显式转换运算符，写在表达式与目标类型之间。没有隐式数值转换。
 
 ```core
 x : int = 3
-d : dex = x as dex
-ptr : *int = addr as *int
+d : dex = x cast dex
+n : int = d cast int
+```
+
+允许的类型对：
+
+| 源类型 | 目标类型 | 语义 | 位置 |
+|---|---|---|---|
+| `T` | `T` | 恒等 | 任意位置 |
+| `int` | `dex` | 精确转换为十进制 | 任意位置 |
+| `dex` | `int` | 向零截断 | 任意位置 |
+| `int` | `*T` | 整数地址转指针 | 任意位置，解引用时检查 |
+| `*T` | `*U` | 指针重解释 | 任意位置，解引用时检查 |
+| `&T`、`&mut T` | `*T` | 引用转裸指针 | 任意位置，解引用时检查 |
+
+表外的组合是编译错误，报 `error[TA09]`。这包括 `int` 与 `bool` 互转、`int` 与 `string` 互转、`char` 参与的任何转换，以及枚举与整数互转。
+
+```core
+unsafe:
+    ptr : *int = addr cast *int
+    *ptr = 42
 ```
 
 ### 5.6 管道 `|>`
@@ -754,7 +775,7 @@ fn same(x: .):
 
 ```core
 unsafe:
-    ptr : *int = addr as *int
+    ptr : *int = addr cast *int
     *ptr = 42
 ```
 
@@ -1275,7 +1296,7 @@ x := *p           // 解引用时由编译器验证可访问范围
 
 ```core
 unsafe:
-    ptr := addr as *int
+    ptr := addr cast *int
     *ptr = 42
 ```
 

@@ -298,7 +298,7 @@ class Parser:
         file_id = self.expect(TokenType.IDENT).lexeme
         alias = None
         # D7（T0 布局规格 §2.2）：`import math : m` 的别名 `:` 后**必有**后继 token ⇒ COLON_DECL
-        if self.check(TokenType.AS) or self.check(TokenType.COLON_DECL):
+        if self.check(TokenType.COLON_DECL):
             self.advance()
             alias = self.expect(TokenType.IDENT).lexeme
         self._end_decl()
@@ -1296,7 +1296,7 @@ class Parser:
                                      TokenType.RETURN, TokenType.BREAK, TokenType.CONTINUE,
                                      TokenType.GO, TokenType.AWAIT,
                                      TokenType.TRUE, TokenType.FALSE, TokenType.UNIT,
-                                     TokenType.AUTO, TokenType.INTERFACE, TokenType.AS):
+                                     TokenType.AUTO, TokenType.INTERFACE, TokenType.CAST):
                 fname = self.advance().lexeme  # keyword as field name
             else:
                 fname = self.expect(TokenType.IDENT).lexeme

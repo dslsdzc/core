@@ -184,8 +184,8 @@ def main():
                       "fn main() -> int:\n    x := 5\n    y := *x\n    return 0\n"))
     ok.append(case_ok("reg_cmp_unchecked",
                       'fn main() -> int:\n    b := "a" == 1\n    return 0\n'))
-    ok.append(case_ok("reg_as_identity",
-                      'fn main() -> int:\n    s := "a"\n    x := s as int\n    return 0\n'))
+    ok.append(case_reject("reg_cast_string_int",
+                          'fn main() -> int:\n    s := "a"\n    x := s cast int\n    return 0\n', "TA09"))
 
     # ─── R2 P2b Task 5：容器面（**唯一接线点** = 索引兜底拒绝 → IP_INDEX 查表）───
     # 接线口径 = 与改动前**一字等价**：门体即原 `EC_TK_INDEX` 调用；可达集（= 三个结果分支

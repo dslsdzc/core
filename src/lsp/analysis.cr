@@ -1227,7 +1227,7 @@ fn analysis_document_symbol() -> string:
 
 // Token kind to legend index. T_IDENT returns -1 because it is classified by name.
 fn analysis_kind_type(k: int) -> int:
-    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_AS || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_EXTERN || k == T_CATCH || k == T_FAIL || k == T_SPEC:
+    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_CAST || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_EXTERN || k == T_CATCH || k == T_FAIL || k == T_SPEC:
         return 0
     if k == T_UNIT || (k >= T_INT_TYPE && k <= T_AUTO_TYPE) || k == T_REF || k == T_DYN || k == T_NEVER:
         return 1

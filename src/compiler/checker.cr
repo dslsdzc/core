@@ -5594,19 +5594,52 @@ fn infer_expr(node: int) -> int:
         // bind_tuple_pattern_idents).
         return TI_UNIT
     if ast_kind(node) == EXPR_AS:
-        // expr as Type — type cast
+        // `expr cast Type`: whitelist only. The old behavior accepted every
+        // type pair and copied the bits, which is silent reinterpretation
+        // (`1.5 as int` returned 96), not a conversion.
         inner_ti := infer_expr(ast_a(node))
         type_node := ast_b(node)
         target_ti := res_type_node(type_node)
-        if get_type_kind(target_ti) == TYP_PTR:
-            inner_kind := get_type_kind(inner_ti)
+        if inner_ti < 0 || target_ti < 0:
+            return ti_error()
+        if inner_ti == TI_NEVER:
+            return target_ti
+        if inner_ti == target_ti:
+            return target_ti
+        inner_kind := get_type_kind(inner_ti)
+        target_kind := get_type_kind(target_ti)
+        // int <-> dex. The conversion is exact by construction; the generator
+        // emits I2F/F2I.
+        if inner_ti == TI_INT && target_ti == TI_DEX:
+            return TI_DEX
+        if inner_ti == TI_DEX && target_ti == TI_INT:
+            return TI_INT
+        // int <-> char. Temporary: the runtime value of char is the intern
+        // index, not a code point. Kept because match compares character
+        // literals through this conversion; see the 2026-10-27 cast plan.
+        if inner_ti == TI_INT && target_ti == TI_CHAR:
+            return TI_CHAR
+        if inner_ti == TI_CHAR && target_ti == TI_INT:
+            return TI_INT
+        // Pointer family. The cast itself is not the safety boundary: an
+        // external address may be formed anywhere, and the dereference gate
+        // (TU03) requires `unsafe`. This keeps the existing pointer model.
+        if target_kind == TYP_PTR:
             asp : ., mut = 1
             if inner_kind == TYP_PTR:
                 asp = get_type_extra(inner_ti)
             else if inner_kind == TYP_REF:
                 asp = 0
+            else if inner_ti == TI_STR:
+                // alloc() returns a string buffer; viewing it as a pointer is
+                // the tracked-pointer path, not an external address.
+                asp = 0
+            else if inner_ti != TI_INT:
+                check_error(EC_TA_CAST, "cast from " + type_display(inner_ti) + " to " + type_display(target_ti) + " is not allowed", ast_line(node), ast_col(node))
+                return ti_error()
             return alloc_type(TYP_PTR, get_type_data(target_ti), asp)
-        return target_ti
+        check_error(EC_TA_CAST, "cast from " + type_display(inner_ti) + " to " + type_display(target_ti) + " is not allowed", ast_line(node), ast_col(node))
+        return ti_error()
     if ast_kind(node) == EXPR_STMT:
         infer_expr(ast_a(node))
         return TI_UNIT

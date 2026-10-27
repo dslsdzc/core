@@ -443,9 +443,9 @@ JUMP_SRC = """fn main() -> int:
     a : ., mut = 10
     b := 3
     if a > b:
-        c := a as int
+        c := a cast int
         a = c
-    d := a as int
+    d := a cast int
     return d
 """
 JUMP_EVENTS = ["ev load", "ev store", "ev store", "ev jump s1=4", "ev load", "ev store"]
@@ -456,10 +456,10 @@ JUMP_RC = 10  # 10>3 真 → c=10、a=10 → d=10
 DISP_SRC = """fn main() -> int:
     a : ., mut = 10
     b := 3
-    c := a as int
+    c := a cast int
     a = c
-    d := b as int
-    e := a as int
+    d := b cast int
+    e := a cast int
     a = d
     return a
 """

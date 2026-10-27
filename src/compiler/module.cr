@@ -210,9 +210,7 @@ fn build_line_fileid():
     g_line_count = 0
     g_line_cap = 0
     fi : ., mut = 0
-    loop:
-        if fi >= g_file_count:
-            break
+    while fi < g_file_count:
         fni := cell_load(g_files, fi * 24)
         sm := cell_load(g_files, fi * 24 + 16)
         if sm >= 0 && sm < sm_file_count():
@@ -221,17 +219,13 @@ fn build_line_fileid():
             lib_id := sm_file_lib(sm)
             // Manifest lines sit between registered files and have no fileid.
             // Fill those rows explicitly so a stale cell cannot name a real file.
-            loop:
-                if g_line_count >= base:
-                    break
+            while g_line_count < base:
                 grow_line_file(g_line_count + 1)
                 cell_store(g_line_fileid, g_line_count * 8, -1)
                 cell_store(g_line_lib, g_line_count * 8, sm_file_lib(sm_for_line(g_line_count + 1)))
                 g_line_count = g_line_count + 1
             l : ., mut = 0
-            loop:
-                if l >= cnt:
-                    break
+            while l < cnt:
                 grow_line_file(base + l + 1)
                 cell_store(g_line_fileid, (base + l) * 8, fni)
                 cell_store(g_line_lib, (base + l) * 8, lib_id)

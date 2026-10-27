@@ -141,7 +141,7 @@ fn lookup_keyword(s: string) -> int:
         "interface" => T_INTERFACE
         "type" => T_TYPE
         "mod" => T_MOD
-        "as" => T_AS
+        "cast" => T_CAST
         "auto" => T_AUTO
         "fileid" => T_FILEID
         "self" => T_SELF

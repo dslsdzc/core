@@ -16,12 +16,12 @@
 反向对照覆盖 if 型 / 函数级返回型 / 重赋值型 / 循环内使用型四类。
 
 **覆盖面的两条事实（新基 `84a4debe` 实测；勿据此加假钉）**：
-  · 本基上 `&局部` 一律是 `TYP_REF`（#153 裁定二），且 `&局部 as *T`（REF→PTR cast）**本身即
+  · 本基上 `&局部` 一律是 `TYP_REF`（#153 裁定二），且 `&局部 cast *T`（REF→PTR cast）**本身即
     TF01** ⇒ 由 `&局部` **构造不出** `TYP_PTR` 的区域局部形状。**本套件的钉子实际走 REF 分支**；
     判定的 PTR 半边在当前基上对这一面是**惰性的**（并集保留，PTR 侧对 alloc()/FFI 派生值有效）。
     **不得为凑 PTR 形状编造钉子** —— 凑出来的会是假钉。
   · `fn ... -> *int { …; return &arr[0]; }` 在本基上是 **TF01（返回型不符）**，**基线与本批都是**，
-    与逃逸面无关（连 `&seed as *int` 亦然）⇒ 钉子的返回型写 `&int`。
+    与逃逸面无关（连 `&seed cast *int` 亦然）⇒ 钉子的返回型写 `&int`。
 
 运行面 = `ccr`（region_check 在 `check` 面早退 —— main.cr:458-460 在 IR 生成前返回
 ⇒ 旧 `test_region_cfg.py::test_region_check_pointer_escape` 走的 `check` 面根本不经过

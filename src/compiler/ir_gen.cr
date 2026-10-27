@@ -5479,8 +5479,8 @@ fn gen_expr(node: int) -> int:
         inner_var : ., mut = gen_expr(ast_a(node))
         inner_var = force_if_thunk(inner_var)
         target_ti : ., mut = ti_from_type_expr(ast_b(node))
+        source_ti := irv_type(inner_var)
         if get_type_kind(target_ti) == TYP_PTR:
-            source_ti := irv_type(inner_var)
             source_kind := get_type_kind(source_ti)
             asp : ., mut = 1
             if source_kind == TYP_PTR:
@@ -5488,6 +5488,30 @@ fn gen_expr(node: int) -> int:
             else if source_kind == TYP_REF || is_byte_buf_var(inner_var) != 0:
                 asp = 0
             target_ti = alloc_type(TYP_PTR, get_type_data(target_ti), asp)
+        // int -> dex lands in the exact form (scaled by 10^6). A store into an
+        // `apx` slot converts it through dex_store_adjust like any other dex
+        // value.
+        if source_ti == TI_INT && target_ti == TI_DEX:
+            return dex_scale_int(inner_var)
+        if target_ti == TI_DEX && source_ti == TI_DEX_S:
+            return inner_var
+        // dex -> int: bring the value to the exact (scaled) form, copy it into
+        // an int word, then divide out 10^6. Integer division truncates toward
+        // zero, so -1.5 becomes -1. The copy is the same operation @raw_int
+        // performs, and it is what makes the following DIV a plain int DIV
+        // instead of the exact-dex operand path.
+        if target_ti == TI_INT && (source_ti == TI_DEX_S || source_ti == TI_DEX):
+            scaled : ., mut = inner_var
+            if source_ti == TI_DEX:
+                scaled = dex_bits_to_scaled(inner_var)
+            raw := new_ir_var("_raw", TI_INT)
+            emit(IR_STORE, -1, raw, scaled, 0, 0)
+            c := new_ir_var("_dxs", TI_INT)
+            emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
+            out := new_ir_var("_cast", TI_INT)
+            emit(IR_BINARY, out, raw, c, OP_DIV, TI_INT)
+            return out
+        // The rest of the whitelist (identity, char, pointer) moves no bits.
         cast_var := new_ir_var("_cast", target_ti)
         emit(IR_LOAD, cast_var, inner_var, 0, 0, target_ti)
         return cast_var
@@ -5896,9 +5920,7 @@ fn global_seg_index(node: int) -> int:
     if sm < 0:
         return 0
     si : ., mut = 1
-    loop:
-        if si >= g_import_count:
-            return 0
+    while si < g_import_count:
         if cell_load(g_import_sm, si * 8) == sm:
             return si
         si = si + 1

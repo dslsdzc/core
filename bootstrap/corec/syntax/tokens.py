@@ -39,7 +39,7 @@ class TokenType(Enum):
     MOD = auto()
     IMPORT = auto()
     FILEID = auto()
-    AS = auto()
+    CAST = auto()
     AUTO = auto()
     UNSAFE = auto()
     SELF = auto()
@@ -151,7 +151,7 @@ KEYWORDS = {
     "mod": TokenType.MOD,
     "import": TokenType.IMPORT,
     "fileid": TokenType.FILEID,
-    "as": TokenType.AS,
+    "cast": TokenType.CAST,
     "unsafe": TokenType.UNSAFE,
     "self": TokenType.SELF,
     "auto": TokenType.AUTO,
