@@ -1,4 +1,4 @@
-// 可选 dex（`dex?`）整族 —— **suite 常规语料路径**（批 5；run_suite 每档独立 build+run）
+// 可选 dex（`dex?`）整族 —— **suite 常规语料路径**（阶段 5；run_suite 每档独立 build+run）
 //
 // 与 py 套件 `tests/selfhost/test_opt_dex.py` 的分工：本档是**常规语料路径**（走 `src/ci/run.sh`
 // 的 suite job），只放**修后应绿**的正例（RED 基线 / 禁第三态纪律 / 编译期拒绝面 / apx 槽自证

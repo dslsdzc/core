@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""`.cir` 快照「串域跨进程 id」缺陷修复判据（`CIR_CACHE_VER 20→21`；TODO #2026-09-18-9）。
+"""`.cir` 快照「串域跨进程 id」缺陷修复判定依据（`CIR_CACHE_VER 20→21`；TODO #2026-09-18-9）。
 
 **缺陷**：快照把串操作数存成**写侧进程的绝对 intern id**，装载侧原样恢复且不重映射
 ⇒ 读侧编号取决于「哪些函数被生成、哪些被装载」⇒ 凡**首次 intern 发生在 IR 生成期**的
 串（多字段 `@fields`、合成变量名…）在暖态取到**别的串**（实测可到含 NUL 的垃圾字节），
 两次 `build` 均 `rc=0`、ELF/.ccr 静默不同（VER 17–20 四代全复现 ⇒ 非本代引入）。
-**修法（本批）**：生成期 intern 日志（`str_intern` 唯一插入路径记录**每次新 intern**）
+**修法（本次）**：生成期 intern 日志（`str_intern` 唯一插入路径记录**每次新 intern**）
 + 装载期**按序重放** ⇒ 读侧串表与写侧同态 ⇒ 全部 id 原样有效。
 
-判据（每条自带锚定值与反例说明；`COREC_BIN=/path/corec` 换被测编译器）：
+判定依据（每条自带锚定值与反例说明；`COREC_BIN=/path/corec` 换被测编译器）：
   A 入口（6 行复现）：冷/暖 **输出逐字相同** + **ELF 逐字节同** + **`.ccr` 逐字节同**；
     锚定值 = 冷 `fields=[x,y] len=3`（暖必须同值）。
   B 判别实验（firstintern）：`ONE=x`（解析期已 intern）与 `TWO=x,y`（gen 期首次 intern）
-    暖态**都必须正确**——单字段那半是「类判据 = intern 时机」的对照。
+    暖态**都必须正确**——单字段那半是「类判定依据 = intern 时机」的对照。
   C 路径 2（var 名 `irv_name`）：含合成变量名（`_cat0`/`_cat1`）语料的冷/暖 `.ccr`
     **逐字节同**（var 名是串域的第二注入入口，且只有 .ccr 面能观测到它们）。
   D 路径 3（重放序：混合命中态 = 删条目回归）：删**首/中/末**条目后重跑，输出 + ELF +
     `.ccr` 都必须与冷态相同（F5 形态正式化）；删**多条**时 `.ccr` 逐字节同**不成立** =
     已登记的**另一类**（NOD 段 TYPE 项索引随重生成顺序变化，ELF/行为不受影响）⇒ 本条只要求
-    输出 + ELF，并把 NOD 差异**打印上报**（不作判据——不制造黑洞判据）。
+    输出 + ELF，并把 NOD 差异**打印上报**（不作判定依据——不制造黑洞判定依据）。
   E 突变自证：`--inject-cir-skip-journal`（跳过重放）⇒ **必红**（暖态输出 ≠ 冷态锚定值）；
     且**非真空控制** = 同一 flag 在**无 gen 期合成串**语料上**不改变输出**（证明突变对
     「缺陷面」敏感、对无关语料惰性，不是把整条管线打坏）。
@@ -239,7 +239,7 @@ def path_a_repro():
         entries = [e for e in leg.cache_entries() if "::fields_of_point.cir" in e]
         if entries:
             ver, (base, cnt) = journal_section(leg.dir / ".core/cache/cir" / entries[0])
-            # 版本钉改 `>= 21`（2026-09-18 插值展开批 v22）：**日志段布局自 v21 引入且其后各代未变**
+            # 版本固定改 `>= 21`（2026-09-18 插值展开阶段 v22）：**日志段布局自 v21 引入且其后各代未变**
             # ⇒ 用下界（否则每次换代都会假红）；机制面（count ≥ 1 = 真走过日志路径）不变。
             check("F1 v21+ 条目日志段（count≥1）", ver >= 21 and cnt >= 1,
                   f"ver={ver} base={base} journal_count={cnt}")
@@ -251,7 +251,7 @@ def path_a_repro():
 
 
 def path_b_firstintern():
-    """B：判别实验——intern 时机是类判据（对照：解析期已 intern 的 `"x"` 必须对）。"""
+    """B：判别实验——intern 时机是类判定依据（对照：解析期已 intern 的 `"x"` 必须对）。"""
     leg = Leg("firstintern", FIRSTINTERN)
     try:
         leg.reset_cache()
@@ -307,7 +307,7 @@ def path_d_mixed():
                 # 字节起即不同）。`.ccr` 逐字节同**不要求**：实测混合态可在 **NOD 段**
                 # 出现 20B 级差异（TYPE 项索引随重生成顺序变化；**段级定位**已做：STR/
                 # SYM/ENT/REG/EDG/TYPE/IFACE 全同、仅 NOD 不同）——那是**另一类**已登记面，
-                # 与本缺陷（串域）无关，故只上报不判红（不制造黑洞判据，也不假装覆盖）。
+                # 与本缺陷（串域）无关，故只上报不判红（不制造黑洞判定依据，也不假装覆盖）。
                 check(f"D {label} 输出+ELF 同", ok_out and ok_elf,
                       f"out={ok_out} elf={elf_d} | .ccr: {ccr_d}")
                 if not ok_ccr:
@@ -316,7 +316,7 @@ def path_d_mixed():
                     seg_diffs = ccr_diff_segments(cold["ccr"], got["ccr"])
                     # REG 也属非语义面：混合命中态下寄存器分配/活跃区间会随重放顺序
                     # 变化，但输出与 ELF 逐字节同（本 check 已断言）。STR/SYM/ENT/EDG/
-                    # TYPE/IFACE 仍必须全同——那些才是串域 id 的直接载体。
+                    # TYPE/IFACE 仍必须全同——那些才是串域 id 的直接文件。
                     check(f"D {label} .ccr 差异仅限 NOD/REG（非语义面）",
                           seg_diffs == {"NOD"} or seg_diffs == {"REG"} or seg_diffs == {"NOD", "REG"},
                           f"差异段 = {sorted(seg_diffs)}")
@@ -362,7 +362,7 @@ def main():
     if not COREC.exists():
         print(f"缺编译器 {COREC}（先 build_selfhost_native.py，或设 COREC_BIN）")
         return 2
-    print(f"=== `.cir` 串域暖态判据（CIR_CACHE_VER 21）· 被测 = {COREC} ===")
+    print(f"=== `.cir` 串域暖态判定依据（CIR_CACHE_VER 21）· 被测 = {COREC} ===")
     cold, _warm = path_a_repro()
     path_b_firstintern()
     path_c_varname()

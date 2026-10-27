@@ -10,18 +10,18 @@
   * `src/compiler/dataflow.cr`  — `.cir` 显示名（`return "NoBoundsCheck"`）
   * `src/lsp/analysis.cr`       — `@` 补全表（has_prefix + citem 两处）
 
-**明确不动**（本套件以钉子固定）：IR 操作码常量 `IR_NO_BOUNDS_CHECK = 35`（内部标识，
+**明确不动**（本套件以固定用例固定）：IR 操作码常量 `IR_NO_BOUNDS_CHECK = 35`（内部标识，
 非语言面名字，改名 = 无谓 churn）；`tests/suite/at_test.cr.bak`（游离备份文件，非编译单元，
 删改需维护者许可）；`docs/superpowers/**` 与 `docs/pseudocode/**`（历史档案 / 生成物）。
 
-判据（14 例）分四腿：
+判定依据（14 例）分四路径：
   A 旧名响亮失败（5）— build ×2 形态 + check 定位 ×2 + `run` 面
   B 新名等价正控（5）— 两形态编译运行 + `run` 面 + 两条入仓语料（at_test / at_test_mini7）
   C `.cir` 显示名（2）— 括号形态出现新名 / 语句形态零 IR（F4 既有语义，防改名顺带改语义）
   D 分派点与常量守门（2）— 四处同步（静态，防单点漏改/旧名复活）+ 操作码 35 不变
 
-注：LSP 补全的**行为面**由 `tests/selfhost/test_lsp.py`（未挂 CI，手工判据）覆盖；
-本套件 D 腿只做「补全表字符串已同步」的静态守门。
+注：LSP 补全的**行为面**由 `tests/selfhost/test_lsp.py`（未挂 CI，手工判定依据）覆盖；
+本套件 D 路径只做「补全表字符串已同步」的静态守门。
 """
 
 import os
@@ -220,7 +220,7 @@ def main():
 def cir_name_case(dump, new_present):
     """`.cir` 显示名面：括号形态（唯一可达形态）出现 `NoBoundsCheck` 行；旧名文本零残留。
 
-    语句形态（`@NoBoundsCheck;`）按 F4 既有语义**零 IR**（改名前实测同形）——本判据钉住
+    语句形态（`@NoBoundsCheck;`）按 F4 既有语义**零 IR**（改名前实测同形）——本判定依据固定
     「改名未顺带改形态语义」。
     """
     name = "cir_paren_display_name" if new_present else "cir_stmt_zero_ir"
@@ -251,7 +251,7 @@ def _read(rel):
 def dispatch_sites_case():
     """名分派四处同步：每处只认新名（旧名 literal 零残留）。
 
-    静态守门——防「单点漏改」或「旧名以别名形式复活」（本批决定的语义 = 不留别名，
+    静态守门——防「单点漏改」或「旧名以别名形式复活」（本次决定的语义 = 不留别名，
     故旧名 literal 在四处**任何一处**出现都判红）。
     """
     sites = {
@@ -275,7 +275,7 @@ def dispatch_sites_case():
 
 
 def opcode_constant_case():
-    """IR 操作码常量**不改**（内部标识，非语言面名字）——钉住本批的取舍。"""
+    """IR 操作码常量**不改**（内部标识，非语言面名字）——固定本次的取舍。"""
     text = _read("src/compiler/ast.cr")
     needle = "IR_NO_BOUNDS_CHECK   : int = 35"
     if needle not in text:

@@ -1,4 +1,4 @@
-// apx（dex）形式转换缺口族——**suite 常规语料路径**（apx 批 T5；run_suite 每档独立 build+run）
+// apx（dex）形式转换缺口族——**suite 常规语料路径**（apx 阶段 T5；run_suite 每档独立 build+run）
 //
 // 与 py 套件 `tests/selfhost/test_apx_conversion.py` 的分工：本档是**常规语料路径**（走
 // `src/ci/run.sh` 的 suite job），只放**已绿**形态；负例/哨兵/自证在 py 套件里
@@ -31,9 +31,9 @@ fn main() -> int:
     if s.m(d) != 7:
         return 1
 
-    // 2. 模块限定调用（apx 批 T2 新增活点；与直调同值对拍）
+    // 2. 模块限定调用（apx 阶段 T2 新增活点；与直调同值对拍）
     //    ⚠ **必须先绑定到变量**：模块限定调用**直接作实参**（`str_eq(m.f(x), "y")`）在
-    //    本批起点即 **SIGSEGV 139**——**既有缺陷，非本批引入**（T3/T5 实测：T3 二进制、
+    //    本次起点即 **SIGSEGV 139**——**既有缺陷，非本次引入**（T3/T5 实测：T3 二进制、
     //    预变更二进制、**冻结基线 97f4394f** 三者同崩）⇒ 见 TODO #2026-09-16-31；本档走绑定形。
     ma := dex.dex_str(d)
     me := dex_str(d)

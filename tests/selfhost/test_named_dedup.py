@@ -12,7 +12,7 @@
   ③ 读取面：AST 中每个解析为已注册命名类型的 EXPR_IDENT，`res_type_node(node)` 须等于侧表
      命中 ti（替弱断言 f1.row_count 的那条）。
 
-判据 = rc=0 ∧ `mismatches=0` ∧ `ident_checks>0`（非空转：至少真的检查到类型名引用）。
+判定依据 = rc=0 ∧ `mismatches=0` ∧ `ident_checks>0`（非空转：至少真的检查到类型名引用）。
 负控（注入故障）不在树内：需某生产点绕过侧表后**重建编译器**实测（输出 mismatches>0、rc=1），
 见 .superpowers/sdd/r2p2-task-3-report.md 的 C-4 节。
 

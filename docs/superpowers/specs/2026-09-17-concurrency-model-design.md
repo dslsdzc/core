@@ -264,7 +264,7 @@ shared_mapping = true
 | 2 | FILL 的预留区域如何与 arena_reset 生命周期对齐 | 维护者 |
 | 3 | LOAN 与 borrow checker 的关系，借出期间的访问禁令是否复用现有规则 | 维护者 |
 | 4 | `explain concurrency` 的冷态和热态输出如何保持一致，决策记录如何随缓存条目存取 | 维护者 |
-| 5 | `[concurrency]` 和 `[experimental.concurrency]` 的 TOML 段解析放在哪一批 | 维护者 |
+| 5 | `[concurrency]` 和 `[experimental.concurrency]` 的 TOML 段解析放在哪一组 | 维护者 |
 | 6 | 通道 FIFO 提升为语义序后，现有 6 个 go/chan 测试如何更新基准值 | 维护者 |
 | 7 | 多 M 启用后，wait list 的无锁假设如何验证 | 维护者 |
 

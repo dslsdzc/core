@@ -9,8 +9,8 @@ Core 的开发流程参考 Rust/Linux：main 即 mainline，任何人（含维�
 2. 提交改动（使用 jj，见下节），并推送分支。
 3. 开 PR，base 指向 `develop` 集成分支（main 不接受直接合入；main 的合入仅维护者可执行），按 `.github/pull_request_template.md` 填写：
    - 变更描述、测试记录、语义保留影响（IR/类型语义是否变化）。
-4. 等待审查（≥1 审批，审批人限维护者）。
-5. 审批通过且 PR 层 CI 全部通过后，维护者手动 squash 合入 develop（merge queue 因免费计划不可用，已降级；见 spec 3.3 节），源分支由 GitHub 自动删除。
+4. 等待审查（≥1 审阶段，审阶段人限维护者）。
+5. 审阶段通过且 PR 层 CI 全部通过后，维护者手动 squash 合入 develop（merge queue 因免费计划不可用，已降级；见 spec 3.3 节），源分支由 GitHub 自动删除。
 
 ## 强制规则
 

@@ -147,17 +147,17 @@
 
 - 节点到区域映射（region_of_nod）：v7 文件无 g_df_node_region 表，REG enter/exit 端点推导或实例重建期派生，Task 0 盘点定夺 = 不含（零现消费方 + YAGNI；区域面仅 REG 行遍历，按需后补推导可行，见第 1.2 节注）
 - 登记表与 g_opt_meta 双份同步责任 = 实例，写入点成对纪律（代码注记 + 注入钩子测试覆盖），实证（2026-09-10 Task 3/5：28/28 判定通道 byte-identical 语料 + test_live_ranges 红路径断言面，见第 7 节）
-- 判定34 引擎实现 = 注册契约演进点（needs_* = 1 的实例出现时），不属本设计，落点实证：needs_eviction/needs_call_sites 声明字段已实施（g_instance_decl 行扩展，行数据 {0,0}，见第 7 节）
+- 判定34 引擎实现 = 注册契约演进点（needs_* = 1 的实例出现时），不属本设计，位置实证：needs_eviction/needs_call_sites 声明字段已实施（g_instance_decl 行扩展，行数据 {0,0}，见第 7 节）
 - F4 挂账（双坐标域：live 表函数内 vs 条目全局，内核自有表内部一致性，非中立性阻塞），随完成留挂（见第 4.5 节/第 7 节，后续专项）
-- 中性化注释层残留（中立性原则达注释层，Task 4 review Minor 3），登记清单入 第 7 节（只登记不入代码，措辞批范围克制，注释清理 = 未来 doc pass）
+- 中性化注释层残留（中立性原则达注释层，Task 4 review Minor 3），登记清单入 第 7 节（只登记不入代码，措辞阶段范围克制，注释清理 = 未来 doc pass）
 
 ## 7. 执行注记（2026-09-10 Task 1-5 完成回填）
 
 > 本节约 = 设计实施确认（plan `2026-09-10-corearch-kernel-completion.md` Tasks 1-5）。
-> 提交落点：Task 1 = 035ea289（+ 补正 72c40389）/ Task 2 = 99fc6af3 / Task 3 = b4d8c74f /
+> 提交位置：Task 1 = 035ea289（+ 补正 72c40389）/ Task 2 = 99fc6af3 / Task 3 = b4d8c74f /
 > Task 4 = b9685f5c / Task 5（完成）= 本状态行随完成提交落盘。行为零变化检查（第 4 节检查 1-2）
 > 与中立性 guard（第 4 节检查 3，tests/selfhost/test_ent_kernel_neutrality.py 入回归面；注：
-> src/ci/run.sh 现仅跑四旧套件族，guard 与新内核套件由每批显式调用，CI 聚合层恢复时补入）全通过。
+> src/ci/run.sh 现仅跑四旧套件族，guard 与新内核套件由每阶段显式调用，CI 聚合层恢复时补入）全通过。
 > Task 4 终态：方法查询 nod_inputs 已交付（第 1.2 节 M-1 注记取代，见第 1.2 节）。
 
 ### 7.1 第 4.5 节审计结论实施确认（A/B 通道清零，红到绿记录核）
@@ -204,14 +204,14 @@
  pairs）+ test_backend_bootstrap 11/11 O2 stage 链 byte-identical（--check-regalloc 红/绿
  路径经登记通道）。
 
-### 7.4 34 声明落点（Task 4）
+### 7.4 34 声明位置（Task 4）
 
 - needs_eviction/needs_call_sites 声明字段 = g_instance_decl 行扩展（INST_DECL_STRIDE
  32 到 40 + INST_OFF_NEEDS_EVICTION=32/CALL_SITES=36 + 访问器 inst_needs_eviction/
  inst_needs_call_sites + instance_decl_add 签名扩展，corearch.cr）；行数据 x86/表路径
  = {0, 0}（表路径无驱逐/调用点事件，恒 O0 直线）。引擎不实现（用户裁决，第 3.2 节引用：
  静态放置无驱逐事件 + callee-saved 平凡满足）；契约完整性 = 字段存在 + 判定区头注文档
- （34 TODO 尾追加落点注）；kern_verify_all（现名 regalloc_verify_all）输出面注记 + 第 3.3 节
+ （34 TODO 尾追加位置注）；kern_verify_all（现名 regalloc_verify_all）输出面注记 + 第 3.3 节
  双向输出面确认。needs_* = 1 的未来实例出现时 = 注册契约演进点（第 6 节挂账维持）。
 
 ### 7.5 F4 挂账 + region_of_nod 已决 + 注释层残留清单（Task 5 完成）
@@ -222,7 +222,7 @@
  行遍历，按需后补推导可行（见第 1.2 节/第 6 节）。
 - 注释层残留清单（Task 4 review Minor 3 登记化，中立性原则达注释层）：guard 剥注释
  后不拦（代码面 = 中立性已证），注释层寄存器时代术语 ~10 主簇（终态扫描，行号 = 2026-09-10
- 完成日定位点，ent_kernel.cr），只登记不入代码（措辞批范围克制；注释清理 = 未来 doc
+ 完成日定位点，ent_kernel.cr），只登记不入代码（措辞阶段范围克制；注释清理 = 未来 doc
  pass，本清单 = 工作集）：
 
   1. 头注 :3-8， 来源句“自 regalloc.cr 逐函数纯搬”+ 中立声明反证句“无寄存器名/ABI

@@ -14,7 +14,7 @@
 | 成立 | 20 | 见 3 节（含 5 条准确样板：显式标「设计态/未实现/需要」） |
 | 不成立 | 13 | 危险 7（1 节）+ 陈旧 6（2 节） |
 | 无法判定 | 2 | 4 节（须实跑 / 仓外树未核） |
-| 修订去向 | 13 条全部已修 | 本批 3 提交：`820648bc`（CLAUDE.md）· `d2265f7b`（spec-design + ir-schema + ir-op-semantics）· `43427334`（project-book + onboarding + verifier + errors.md）；0 条「不改」（无审计误判） |
+| 修订去向 | 13 条全部已修 | 本次 3 提交：`820648bc`（CLAUDE.md）· `d2265f7b`（spec-design + ir-schema + ir-op-semantics）· `43427334`（project-book + onboarding + verifier + errors.md）；0 条「不改」（无审计误判） |
 
 失真集中面（四类文件）：`ir-op-semantics`（迁移期快照）· `ir-schema`（`.csr` 纯设计标 active）· `CLAUDE.md`（清单 + Known Issues；agent 必读）· `project-book`/`onboarding`（已退役格式残留）。
 同期新增发现（审计外，已一并修）：`CLAUDE.md` 的 `.ccr` 版本 `v8 到 v9`（同类）；`src/compiler/linker.cr` = 0 字节空文件（新登记）。
@@ -25,7 +25,7 @@
 
 ### D1 `spec-design.md` 称变体/量词「EBNF 已有」（4 处）
 
-- 断言：`:46`「变体标注（EBNF 已有）」· `:260`「EBNF 已定义（2026-09 起归口 grammar/core.ebnf；corespec.ebnf 为迁移期残留）」· `:283`「变体标注（EBNF 已有）」· `:301`「loop variant，EBNF 已有」。
+- 断言：`:46`「变体标注（EBNF 已有）」· `:260`「EBNF 已定义（2026-09 起归属 grammar/core.ebnf；corespec.ebnf 为迁移期残留）」· `:283`「变体标注（EBNF 已有）」· `:301`「loop variant，EBNF 已有」。
 - 实核：`grep -nE "variant|forall|exists|#check|#ensure|spec " grammar/core.ebnf` 到 0 命中；`grammar/core.ebnf:12` `FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`（无标注槽）；`grammar/corespec.ebnf:1` 自述「2026-09-06 退役…规约语法并入 `grammar/core.ebnf`（迁移事项）」。
 - 修订去向：4 处改「EBNF 尚未定义，待实现」；`:260` 处改为修订块（含两条实核 + 「量词属待实现语法」）；原文以引用形式保留在注内。得到 `d2265f7b`。
 
@@ -95,7 +95,7 @@
 | 是11 | `design/ir-op-semantics.md:47` | 51 条目 | `ast.cr` `IR_*` 定义 = 50（+`IR_APPROX` 见 S1）|
 | 是12 | `design/ir-op-semantics.md:189` | BC6 `CORE_SAFE` 默认开启 | `src/compiler/ext_mgr.cr:40-41` |
 | 是13 | `design/ir-op-semantics.md:194` | BC10 `e2_ptr_null_check` | `instr.cr` 5 处 |
-| 是14 | `developer/syntax.md:501` | 归口 core.ebnf = 迁移事项；实现状态设计态 | 与源码一致是（样板） |
+| 是14 | `developer/syntax.md:501` | 归属 core.ebnf = 迁移事项；实现状态设计态 | 与源码一致是（样板） |
 | 是15 | `developer/tutorial.md:161` | 「未实现：本节为设计预览」 | 一致是（样板） |
 | 是16 | `coq/README.md:3` | 真源 = 本文件（`coq/` 证明待建） | `docs/coq/` 仅 README 是（样板） |
 | 是17 | `design/spec-design.md:445` | 「`.csr` 现在只服务外部验证器，需要编译器内部回读通道」 | 一致（准确：未声称已建）是（样板） |
@@ -107,7 +107,7 @@
 
 ## 4. 无法判定 2 条
 
-| # | 出处 | 断言 | 缺什么 | 本批处置 |
+| # | 出处 | 断言 | 缺什么 | 本次处置 |
 |---|---|---|---|---|
 | U1 | `CLAUDE.md` Known Issues（`pass_cse/O1`） | 「`--opt-level 1` 可能崩溃」 | 须一次 `-O 1` 自举链实测（审计零构建） | 就地标注「未复核；不得据它推断 O1 可用/不可用」，得到 `820648bc` |
 | U2 | `design/ir-op-semantics.md 0 节` | 真源 = `~/compcert/…` | 未核该树存在性/版本（同 D7 类） | 加定位点注（2 节-S6），得到 `d2265f7b` |
@@ -132,7 +132,7 @@ grep -n "IR_APPROX" src/compiler/ast.cr ; grep -n "CCR_VERSION\|CCR_SEG_COUNT" s
 # S3/S4
 sed -n '127,131p' src/ci/run.sh ; ls tests/selfhost/test_*.py | wc -l
 # 是10
-sed -n "$(grep -n 'fn diag_gate_exempt' src/compiler/diag.cr | cut -d: -f1),+40p" src/compiler/diag.cr | grep -oE "EC_[A-Z_]+" | sort -u | wc -l   # 到 8（2026-09-18 批 8 A₂ 撤 TF01 后；旧值 9 留痕）
+sed -n "$(grep -n 'fn diag_gate_exempt' src/compiler/diag.cr | cut -d: -f1),+40p" src/compiler/diag.cr | grep -oE "EC_[A-Z_]+" | sort -u | wc -l   # 到 8（2026-09-18 阶段 8 A₂ 撤 TF01 后；旧值 9 留痕）
 # S5
 python3 - <<'EOF'
 import re

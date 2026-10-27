@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""apx（dex）形式转换缺口族回归套件（apx 批 T5；自举编译器 build/corec）。
+"""apx（dex）形式转换缺口族回归套件（apx 阶段 T5；自举编译器 build/corec）。
 
 覆盖 = TODO #2026-09-16-17（方法调用实参不转换）· #2026-09-16-18（第 9 个 binary64 栈参）· ⑦a（全局运行期初值）
-      + apx 批 T2 新增两活点：**模块限定调用** `m.f(x)` 与**指针写** `*p = d`
+      + apx 阶段 T2 新增两活点：**模块限定调用** `m.f(x)` 与**指针写** `*p = d`
       + 聚合四类写点（字段 / 元素 / 元组 / 枚举载荷）+ 比较点声明面查表（L10）
 
 **两条硬约束（写本文件的探针前必读）**
@@ -11,13 +11,13 @@
   ② **`apx` 探针一律用显式形 `d : dex, apx = …`**——类型位写 `.`（推断）时 `declared_ti`
      落 `TI_UNIT`（`ir_gen.cr:2377-2393`）⇒ **apx 槽压根不建立**，探针退化为普通精确 dex
      ⇒ **全部假绿**（apx 审计 errata E1；本套件 `test_decl_form_selfcheck` 就是这条的机器守卫）。
-  ③ **apx 面没有解释器腿**：`corec run` 对 `IR_I2F/IR_F2I` 显式拒收 rc=255（能力边界，
-     `interp.cr:263-266`/`:704-705`）⇒ 主判据 = ELF 侧读数；**拒收本身是「apx 槽确已建立」
+  ③ **apx 面没有解释器路径**：`corec run` 对 `IR_I2F/IR_F2I` 显式拒收 rc=255（能力边界，
+     `interp.cr:263-266`/`:704-705`）⇒ 主判定依据 = ELF 侧读数；**拒收本身是「apx 槽确已建立」
      的反向自证**（见 `test_apx_slot_present_selfcheck`）。
 
-**判据分工（实测，勿混淆）**：本套件是 apx 面的**载荷判据**。ELF canary + `.ccr` 四条
-（`ptr_arith`/`generics_test` 两语料）对 apx 面**零覆盖**——apx 批 T3 突变双向实测：把 apx 面
-改坏两次，canary 与 `.ccr` 四条**在两种突变下全部 IDENTICAL**。⇒ **跨面回归必须由该面的判据
+**判定依据分工（实测，勿混淆）**：本套件是 apx 面的**载荷判定依据**。ELF canary + `.ccr` 四条
+（`ptr_arith`/`generics_test` 两语料）对 apx 面**零覆盖**——apx 阶段 T3 突变双向实测：把 apx 面
+改坏两次，canary 与 `.ccr` 四条**在两种突变下全部 IDENTICAL**。⇒ **跨面回归必须由该面的判定依据
 承担**，不得以「canary 还绿着」代替（详见 `2026-09-16-criteria-strength-audit.md` §0ter）。
 
 **期望值一律经 `@raw_int` 锚定**（唯一显式形式通道，`ir_gen.cr:1699-1708`）——直接比较
@@ -65,7 +65,7 @@ def build_and_run(source, tag):
         chk = subprocess.run([str(COREC), "check", path], cwd=BASE,
                              capture_output=True, text=True, timeout=180)
         if chk.returncode != 0:
-            # 已知**软诊断**容忍（体例照 TODO #2026-09-16-14：把现状固化成判据）：
+            # 已知**软诊断**容忍（体例照 TODO #2026-09-16-14：把现状固化成判定依据）：
             #   B04「Cannot use 'x' while it is borrowed」= borrow checker 无 NLL 的既有面，
             #   是**软**诊断（`build` 仍 rc=0、产物照出）⇒ 只容忍「**恰 {B04}**」；
             #   出现任何其它诊断码 ⇒ 仍按失败处理（防它掩盖真回归）。
@@ -86,7 +86,7 @@ def build_and_run(source, tag):
 
 
 # ── 探针表：name, source, 期望 ELF rc, 备注 ──
-# 期望值 7（或 1）= 该形态「正确」。**期望 15 已退役**（2026-09-17 批 5 重锁：`dex?` 整族修复后
+# 期望值 7（或 1）= 该形态「正确」。**期望 15 已退役**（2026-09-17 阶段 5 重锁：`dex?` 整族修复后
 # 无「期望 15」行；旧值留痕见 CASES 中 `relocked_optional_dex_pinch` 上注；退役断言见
 # `test_sentinel_annotation_present`）。
 CASES = [
@@ -124,7 +124,7 @@ fn main() -> int:
     if !str_eq(b, "7"):
         return 4
     return 7
-""", 7, "模块限定调用 m.f(x)（apx 批 T2 新增活点；rc=4 即该形态未转换）"),
+""", 7, "模块限定调用 m.f(x)（apx 阶段 T2 新增活点；rc=4 即该形态未转换）"),
     # ── #2026-09-16-18：第 9 个 binary64 栈参（= #2026-09-16-17 同一修复）──
     ("stack_arg_9th_method", """
 struct S9:
@@ -223,7 +223,7 @@ fn main() -> int:
     p := &x
     *p = d
     return @raw_int(x) / 1000000
-""", 7, "指针写 `*p = d`（apx 批 T2 新增活点；check 另发 B04 软诊断 = TODO #2026-09-16-14 既有面）"),
+""", 7, "指针写 `*p = d`（apx 阶段 T2 新增活点；check 另发 B04 软诊断 = TODO #2026-09-16-14 既有面）"),
     # ── ⑦a：全局运行期初值 ──
     ("global_runtime_init_apx", """
 fn sc() -> dex:
@@ -276,7 +276,7 @@ fn g12(t, x: dex) -> int:
 fn main() -> int:
     d : dex, apx = 7.0
     return g12(1, d)
-""", 7, "推断形参实例化后 dex 形参（非回归钉）"),
+""", 7, "推断形参实例化后 dex 形参（非回归固定）"),
     ("nonreg_exact_struct", """
 struct S3:
     f: dex
@@ -302,17 +302,17 @@ fn main() -> int:
             return @raw_int(x) / 1000000
 """, 7, "精确形对照（枚举载荷）"),
     # ══════════════════════════════════════════════════════════════════════════
-    # ✅ **已重锁（2026-09-17 批 5 / opt-dex；TODO #2026-09-16-29 = 原 #91）—— 旧值 15 留痕**
+    # ✅ **已重锁（2026-09-17 阶段 5 / opt-dex；TODO #2026-09-16-29 = 原 #91）—— 旧值 15 留痕**
     #   · **旧值（留痕，不得复活）**：本行原期望 **15**（= `4619567317775286272 / 10⁶` 低 8 位），
-    #     作为「`dex?` 整族未被形式转换覆盖」的**零足迹绊线**存在于 apx 批（#2026-09-16-29 段）。
-    #   · **归因（显式）**：批 5 把 `dex?` 的写点门/槽型/形参槽/返回门/读点定型一律改为
+    #     作为「`dex?` 整族未被形式转换覆盖」的**零足迹绊线**存在于 apx 阶段（#2026-09-16-29 段）。
+    #   · **归因（显式）**：阶段 5 把 `dex?` 的写点门/槽型/形参槽/返回门/读点定型一律改为
     #     **按声明面定形式**（G1 裁决 = scaled；`ir_gen.cr` 的 `dex_opt_type_node`/`dex_opt_slot_ti`）
     #     ⇒ LET 写点不再把 bits 原样入槽 ⇒ 本行**必然变值**（15 → 7）。
-    #   · **重锁（同批）**：期望值改为 **7**（= 7000000 / 10⁶）；改名 `relocked_optional_dex_pinch`
+    #   · **重锁（同阶段）**：期望值改为 **7**（= 7000000 / 10⁶）；改名 `relocked_optional_dex_pinch`
     #     （原 `SENTINEL_optional_dex_pinch`——「哨兵」语义已随修复退役，名字留痕在注释里）。
-    #   · ⛔ **不得把 15 抄回来**（本仓已两次栽在「抄错形/抄错值」上）；判据网侧另设
+    #   · ⛔ **不得把 15 抄回来**（本仓已两次栽在「抄错形/抄错值」上）；判定依据网侧另设
     #     `test_sentinel_annotation_present` 的**退役断言**（无「期望 15」行）双保险。
-    #   · 覆盖面（本批新增的完整判据网）见 `tests/selfhost/test_opt_dex.py`（30 例 + 四态对拍）。
+    #   · 覆盖面（本次新增的完整判定依据网）见 `tests/selfhost/test_opt_dex.py`（30 例 + 四态对拍）。
     # ══════════════════════════════════════════════════════════════════════════
     ("relocked_optional_dex_pinch", """
 fn main() -> int:
@@ -323,7 +323,7 @@ fn main() -> int:
             return @raw_int(v) / 1000000
         none =>:
             return 0
-""", 7, "重锁（批 5 · 原哨兵值 15 已退役；留痕见上注）"),
+""", 7, "重锁（阶段 5 · 原哨兵值 15 已退役；留痕见上注）"),
 ]
 
 
@@ -349,7 +349,7 @@ def test_cases():
 
 
 def test_sentinel_annotation_present():
-    """哨兵判据（**两态口径**，2026-09-17 批 5 重锁后更新）：
+    """哨兵判定依据（**两态规则**，2026-09-17 阶段 5 重锁后更新）：
       · 若存在「期望 15」的行 ⇒ 必须带 SENTINEL 标记（旧规则保留：将来某面若再需绊线仍适用）；
       · **本档现状**（`dex?` 已修）⇒ 断言「**无任何期望 15 的行**」= 绊线已退役。
         若有人把 15 抄回来（或把修复回退）⇒ 本断言红 + 用例读数红（双保险）。"""
@@ -359,7 +359,7 @@ def test_sentinel_annotation_present():
             print("[PASS] sentinel 标注在位（期望 15 的行必须带 SENTINEL 标记）")
             return 0
     assert all(w != 15 for _n, _s, w, _nt in CASES), "仍有「期望 15」行"
-    print("[PASS] 零足迹哨兵**已退役**（批 5：`dex?` 修复后无「期望 15」行；旧值 15 留痕于 CASES 上注）")
+    print("[PASS] 零足迹哨兵**已退役**（阶段 5：`dex?` 修复后无「期望 15」行；旧值 15 留痕于 CASES 上注）")
     return 0
 
 
@@ -377,9 +377,9 @@ def test_decl_form_selfcheck():
     if v1 < 10**10:
         print(f"[FAIL] 显式形未建立 apx 槽（.cir 无 bits 常量；最大 dex 常量 = {v1}）")
         return 1
-    # ── 推断形（`.` + apx）：**批 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）──
-    # **旧值留痕（本套件原判据）**：`check` rc=0 且 `.cir` **无** bits 常量（推断形不建立 apx 槽 ⇒ 探针退化）。
-    # 该「无 bits 常量」的判据在硬错下**不再可达**（源根本不编译）⇒ 按「显式归因 + 同批重锁 + 旧值留痕」重锁为**拒收断言**。
+    # ── 推断形（`.` + apx）：**阶段 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）──
+    # **旧值留痕（本套件原判定依据）**：`check` rc=0 且 `.cir` **无** bits 常量（推断形不建立 apx 槽 ⇒ 探针退化）。
+    # 该「无 bits 常量」的判定依据在硬错下**不再可达**（源根本不编译）⇒ 按「显式归因 + 同阶段重锁 + 旧值留痕」重锁为**拒收断言**。
     chk_inf = run_corec(["check"], inferred)
     bld_inf = run_corec(["build", "--static", "-o", "/tmp/_apx_conv_inf.bin"], inferred)
     art_inf = os.path.exists("/tmp/_apx_conv_inf.bin") or os.path.exists("/tmp/_apx_conv_inf.bin.ccr")
@@ -402,7 +402,7 @@ def test_decl_form_selfcheck():
 
 
 def test_double_form_parity():
-    """C1 双形对拍（通用腿）：同一形态的 **apx 形 vs 精确形** 结果必须一致。"""
+    """C1 双形对拍（通用路径）：同一形态的 **apx 形 vs 精确形** 结果必须一致。"""
     pairs = [
         ("field", """
 struct S3:

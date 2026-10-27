@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""TODO 标识迁移判据（2026-09-17 批；**机械、可复跑**——纯 python、无编译器依赖）。
+"""TODO 标识迁移判定依据（2026-09-17 阶段；**机械、可复跑**——纯 python、无编译器依赖）。
 
 背景：TODO 编号由「全局单调号 `#NN`」迁移为「日期 + 序号 `#YYYY-MM-DD-N`」
 （缘起 = 2026-09-16 一天 5 次编号碰撞；计划与完整映射表见
 `docs/superpowers/plans/2026-09-17-todo-id-migration.md`，映射表真源 = `TODO.md` 头部）。
 
-判据（逐条 = 该批的验收条件）：
+判定依据（逐条 = 该阶段的验收条件）：
   J1 **无残留**：全仓不存在「旧形态」`TODO #<数字>`（数字后**不接** `-MM-DD-`）。
      排除面 = 映射表本身 + `（原 #NN）` 留痕注记 + 计划文档 + 历史实施档案
      （`docs/superpowers/implementation/`，其正文按当时编号原文冻结）。
@@ -13,20 +13,20 @@
      ⊇ 被引集合）；另**报告**「零引用标题」清单（非失败——无人引用 ≠ 悬空）。
   J3 **映射完备**：`TODO.md` 迁移对照表覆盖 `#1..#101` 每个号（`#66` 为空号须显式注记），
      表行数 == 新 id 数 == 标题数（**自洽计数，不写死绝对值**——条目会持续新增，
-    写死必然过期：2026-09-17 第 4 批新增三条即触发过一次），且新 id 全局唯一。
-     **口径换代（2026-09-17 维护者跨批裁定）**：旧号列允许 `—`（= 迁移后新增、**无旧号**）；
+    写死必然过期：2026-09-17 第 4 阶段新增三条即触发过一次），且新 id 全局唯一。
+     **规则换代（2026-09-17 维护者跨阶段裁定）**：旧号列允许 `—`（= 迁移后新增、**无旧号**）；
      数字列仍受 `#1..#101` 封存上界约束（禁造历史不存在的号）。**行式放松的保护由
-     `check_j3_mutations` 三条突变自证钉住**（M-a/M-b/M-c 缺一不可）；旧口径原文与
+     `check_j3_mutations` 三条突变自证固定**（M-a/M-b/M-c 缺一不可）；旧规则原文与
      「为何放松」留痕于 `j3_problems` 头注。
   J4 **突变自证**：内存内把一处新 id 引用**还原成旧号** ⇒ J1 的判定函数必须转红；
-     还原前（真实现状）⇒ 绿。证明 J1 有牙（不是恒绿的空判据）。
+     还原前（真实现状）⇒ 绿。证明 J1 有效（不是恒绿的空判定依据）。
   J6 **同日段内 id 唯一**：`### YYYY-MM-DD-N.` 标题中同一 id 不得出现两次
-     （2026-09-18 补：两个 PR 各写一个 `2026-09-18-3` 而 J1–J5 全绿 ⇒ 该缺口由本判据机械拦）；
+     （2026-09-18 补：两个 PR 各写一个 `2026-09-18-3` 而 J1–J5 全绿 ⇒ 该缺口由本判定依据机械拦）；
   J5 **零源码语义改动**（静态面）：`.cr` 文件里不出现任何 `TODO #<旧号>` 形态（含于 J1），
-     且本判据不依赖编译器 ⇒ 可在最便宜的 CI job 跑。
+     且本判定依据不依赖编译器 ⇒ 可在最便宜的 CI job 跑。
 
-挂点状态：本文件由迁移批新增，**未挂 CI**（登记于 `tests/harness/ci_hook_allowlist.txt`
-带理由）——挂点属 CI 配置变更，须由后续批裁量。
+挂点状态：本文件由迁移阶段新增，**未挂 CI**（登记于 `tests/harness/ci_hook_allowlist.txt`
+带理由）——挂点属 CI 配置变更，须由后续阶段裁量。
 """
 
 import os
@@ -37,19 +37,19 @@ BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 TODO = os.path.join(BASE, "TODO.md")
 PLAN = os.path.join(BASE, "docs", "superpowers", "plans", "2026-09-17-todo-id-migration.md")
 EX_DIRS = {".git", ".jj", "build", ".superpowers", "__pycache__", "node_modules",
-           # 2026-09-17 批 5 实测补入：`.core/` = 编译器**增量缓存**（`.core/cache/cir/*.cir`
-           # 二进制快照；构建后在仓根生成）。原集合漏了它 ⇒ 本判据的 J1/J2 全仓扫描会**逐个读**
-           # 这些快照——实测（本工作区 1.4GB / 1657 条）令本判据**卡死 14+ 分钟**（判据进程
+           # 2026-09-17 阶段 5 实测补入：`.core/` = 编译器**增量缓存**（`.core/cache/cir/*.cir`
+           # 二进制快照；构建后在仓根生成）。原集合漏了它 ⇒ 本判定依据的 J1/J2 全仓扫描会**逐个读**
+           # 这些快照——实测（本工作区 1.4GB / 1657 条）令本判定依据**卡死 14+ 分钟**（判定依据进程
            # `rchar` 2.4GB+、CPU 0.7%，`/proc/<pid>/fd` 显示打开 `…/cache/cir/src_compiler_main.cr::dirname.cir`）。
            # **排除是判定中立的**：快照 = 编译产物（二进制），非仓库文本内容；与已排除的 `build/`
-           # 同类。**两态对照证据**：排除前后本判据 J1=0 残留 / J2=0 悬空 / 标题 103 / J3 PASS 逐项相同
+           # 同类。**两态对照证据**：排除前后本判定依据 J1=0 残留 / J2=0 悬空 / 标题 103 / J3 PASS 逐项相同
            # （见 `docs/superpowers/specs/2026-09-17-opt-dex-batch-report.md` §9）。
            ".core"}
 
 OLD_FORM = re.compile(r"TODO\s*#(\d+)(?![\d-])")          # 旧形态：数字后不接 `-MM-DD-`
 NEW_FORM = re.compile(r"#(\d{4}-\d{2}-\d{2}-\d+)")
 TABLE_ROW = re.compile(r"^\|\s*#(\d+)\s*\|\s*`#(\d{4}-\d{2}-\d{2}-\d+)`")
-# 迁移后**新增**条目行（从未有过旧号）：旧号列一律写 `—`（维护者 2026-09-17 跨批裁定；禁止塞数字
+# 迁移后**新增**条目行（从未有过旧号）：旧号列一律写 `—`（维护者 2026-09-17 跨阶段裁定；禁止塞数字
 # ——那会凭空造出历史不存在的旧号）。行式独立于 TABLE_ROW（后者只认数字列）。
 TABLE_ROW_NEW = re.compile(r"^\|\s*—\s*\|\s*`#(\d{4}-\d{2}-\d{2}-\d+)`")
 TABLE_HEAD = "## 编号迁移对照表"
@@ -197,19 +197,19 @@ def check_j2(verbose=True):
 def j3_problems(todo_text):
     """J3 判定函数（**纯函数**——真实现状与三条突变共用同一实现，防两处漂移）。
 
-    口径（**2026-09-17 维护者跨批裁定**）：
+    规则（**2026-09-17 维护者跨阶段裁定**）：
       ① **总体性不放松**：表的新 id 集合（含 `—` 行）== 标题集合；
       ② 旧号列 ∈ {数字, `—`}；数字部分仍须 **1..SEALED_MAX 全覆盖**（`#66` 空号例外）；
       ③ 越过 `SEALED_MAX` 的数字 ⇒ 红（迁移后新增条目一律写 `—`，**禁造历史不存在的旧号**）；
       ④ 行数自洽 + 新 id 唯一 + 行式可解析（`malformed` 捕获「行式悄悄失效」）。
 
-    **旧口径原文（留痕，不静默改）**：
+    **旧规则原文（留痕，不静默改）**：
       `max_old = max(table)`；`missing = 1..max_old` 缺号；`n_rows == 新 id 数`（n_rows 只数
       `TABLE_ROW` 数字行式）；`set(news) == set(heads)`。
     **为何放松**：其 `n_rows`/`max_old` 两项编码了一个**从未成立的假设**——*每条新 id 都有旧号*。
     迁移后新增条目（如 `#2026-09-17-4`）**从来没有旧号** ⇒ 原式必红，且**无法用合法数据修**
     （往旧号列塞数字 = 凭空造历史不存在的号 = 新的假引用类，被维护者明确否决）。
-    ⇒ 放松的**只是行式**（允许 `—`）；**保护未丢**，由 `check_j3_mutations` 的三条突变自证钉住。
+    ⇒ 放松的**只是行式**（允许 `—`）；**保护未丢**，由 `check_j3_mutations` 的三条突变自证固定。
     """
     num, new_only, malformed = table_rows(todo_text)
     heads = headings_from_todo(todo_text)
@@ -240,7 +240,7 @@ def j3_problems(todo_text):
 
 
 def check_j3(verbose=True):
-    """映射完备（口径与留痕见 `j3_problems` 头注）。"""
+    """映射完备（规则与留痕见 `j3_problems` 头注）。"""
     probs, num, ids, heads = j3_problems(read(TODO))
     if verbose:
         for p in probs:
@@ -276,13 +276,13 @@ def check_j3_mutations():
         if probs:
             print(f"[PASS] {name} ⇒ J3 红（{probs[0][:64]}…）")
         else:
-            print(f"[FAIL] {name} ⇒ J3 未红（口径放松后保护丢失）")
+            print(f"[FAIL] {name} ⇒ J3 未红（规则放松后保护丢失）")
             bad += 1
     return bad == 0
 
 
 def check_j4(verbose=True):
-    """突变自证：新 id 引用还原为旧号 ⇒ J1 转红（J1 有牙）。"""
+    """突变自证：新 id 引用还原为旧号 ⇒ J1 失败（J1 有效）。"""
     table = mapping_from_todo(read(TODO))
     # 找一个含新 id 引用的源文件（排除计划文档与 TODO.md 的表格）
     victim = None
@@ -328,7 +328,7 @@ def check_j6(verbose=True):
 
     为何需要：同一 id 出现两次 ⇒ J2 的「引用 ↔ 标题」双向匹配退化为多对一（引用指向哪一个不可判），
     且落地后必与《编号约定》「N 按标题行行号升序、当日最大 +1」冲突 ⇒ 属结构性可机械拦的一类。
-    判据 = 标题集合内不得有重复；含**突变自证**（内存内复制一条标题 ⇒ 必红；真实现状 ⇒ 绿）。
+    判定依据 = 标题集合内不得有重复；含**突变自证**（内存内复制一条标题 ⇒ 必红；真实现状 ⇒ 绿）。
     """
     txt = read(TODO)
     dup = j6_duplicates(txt)
@@ -346,7 +346,7 @@ def check_j6(verbose=True):
 
 
 def main():
-    print("=== TODO 标识迁移判据（J1-J6）===")
+    print("=== TODO 标识迁移判定依据（J1-J6）===")
     results = [check_j1(), check_j2(), check_j3(), check_j3_mutations(), check_j4(), check_j6()]
     print(f"{sum(results)}/{len(results)} 通过")
     return 0 if all(results) else 1

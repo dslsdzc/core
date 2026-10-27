@@ -9,12 +9,12 @@
     切片 = 视图 ⇒ 现状 `TI_UNIT`，登记面 A.2 #15 未接线）。
 结果分支（arr→元素+F2 / slice→元素 / str→int）**原地保留**（同时决定结果类型；A.2 #16-18）。
 
-**行为保持是本文件的判据**：以下每一例的 check rc / 诊断码 / 诊断文案 / 产物有无，改动前后
+**行为保持是本文件的判定依据**：以下每一例的 check rc / 诊断码 / 诊断文案 / 产物有无，改动前后
 **逐例相同**（旧二进制 = P3b Task 0 提交 `9aa1786c` 的构建，见报告 §5 的同源对拍）。本套件同时又
-是**新接线的咬合面**：range 分支若丢掉固定性维度（切片 range 改判为可索引），`slice_range_unit_pinned`
+是**新接线的命中面**：range 分支若丢掉固定性维度（切片 range 改判为可索引），`slice_range_unit_pinned`
 转红；索引兜底门若把形状拒绝集换错（如把 STRING 移出可索引形状），`str_index_*` 一族的负控转红。
 
-判据口径：正例三路同证（check rc=0 ∧ ELF rc=N ∧ interp rc=N）；负例 = check rc=1 + 措辞断言
+判定依据规则：正例三路同证（check rc=0 ∧ ELF rc=N ∧ interp rc=N）；负例 = check rc=1 + 措辞断言
 + `build` **无产物**（收紧面同址）。`COREC_BIN` 环境变量可指向基线二进制做同源对拍（默认
 `build/corec`）；临时源文件一律写在仓库根（cwd —— `/tmp` 下探针会触发 import 解析假失败）。
 """
@@ -86,10 +86,10 @@ def case_dual(name, source, expect_rc):
 
 
 def case_reject(name, source, needles, soft):
-    """负例：check rc≠0 + 诊断针 + `build` 面形态与既有诊断门同型（逐例钉住，防静默迁移）。
+    """负例：check rc≠0 + 诊断针 + `build` 面形态与既有诊断门同型（逐例固定，防静默迁移）。
 
     `soft=True`：软诊断（`check_error`）= check rc=1 而 **build rc=0 + 产物照出**（与既有
-    约束检查同门；TK01 索引门属此类——本套件把它钉住）。`soft=False`：硬错误 = build rc≠0 +
+    约束检查同门；TK01 索引门属此类——本套件把它固定）。`soft=False`：硬错误 = build rc≠0 +
     **无产物**（F2 的字面越界 / F11 的切片界属此类）。两态都必须与改动前逐例相同。"""
     r, out, src = _compile(source, cmd="check")
     try:
@@ -184,7 +184,7 @@ fn main() -> int:
     return s[0]
 """
 
-# ─── 结果分支/表示面钉子（行为保持：既有诊断与 range 结果形态逐字不变）──
+# ─── 结果分支/表示面固定用例（行为保持：既有诊断与 range 结果形态逐字不变）──
 OOB_LITERAL = """
 fn main() -> int:
     a := [1, 2]
@@ -199,7 +199,7 @@ fn main() -> int:
 """
 
 # range 的**切片**分支现状 = `TI_UNIT`（A.2 #15 登记：IP_INDEX_RANGE 未接线）⇒ 二次切片当下
-# 不可索引（TK01）。本钉即 range 分支固定性维度的咬合面：若丢掉固定性（切片 range 改产视图），
+# 不可索引（TK01）。本固定即 range 分支固定性维度的命中面：若丢掉固定性（切片 range 改产视图），
 # 本例转 rc=0 = 静默放宽 ⇒ 红。
 SLICE_RANGE_UNIT = """
 fn main() -> int:
@@ -224,7 +224,7 @@ def main():
         case_reject("bool_index_rejected", BOOL_INDEX, ["error[TK01]", "Cannot index non-array type"], True),
         case_reject("ptr_index_rejected", PTR_INDEX, ["error[TK01]", "Cannot index non-array type"], True),
         case_reject("struct_index_rejected", STRUCT_INDEX, ["error[TK01]", "Cannot index non-array type"], True),
-        # ── 表示面钉子：F2/F11 既有诊断（硬错误）、range 切片分支的 unit 结果（行为保持）──
+        # ── 表示面固定用例：F2/F11 既有诊断（硬错误）、range 切片分支的 unit 结果（行为保持）──
         case_reject("arr_oob_literal_pinned", OOB_LITERAL, ["index out of bounds: 5 (array length 2)"], False),
         case_reject("slice_bounds_pinned", SLICE_BOUNDS, ["slice out of bounds:"], False),
         case_reject("slice_range_unit_pinned", SLICE_RANGE_UNIT, ["error[TK01]"], True),

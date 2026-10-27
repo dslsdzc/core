@@ -89,7 +89,7 @@ python3 build_selfhost_native.py       # Stage 0：Python bootstrap 生成 build
 模型：feature 分支合入 develop，再合入 main。
 
 - main 是正式版线，仅维护者 DslsDZC 可合入（ruleset：update 规则 + 无管理员绕过）。
-- develop 是集成分支，日常 PR 的目标（ruleset：PR 通道 + 审批 + merge queue + CI 要求）。
+- develop 是集成分支，日常 PR 的目标（ruleset：PR 通道 + 审阶段 + merge queue + CI 要求）。
 - 日常开发 feature 分支的 base 是 develop；PR 都指向 develop。
 
 `jj` 常用命令（仓库 hook 会拦截 `git` 写操作；提交经 SSH 自动签名，无需人工操作）：
@@ -99,7 +99,7 @@ jj bookmark create feature/xxx         # 每个改动独立分支
 # ……开发提交……
 jj git push -b feature/xxx             # 推送 GitHub
 gh pr create --base develop --fill     # 不能指向 main
-# 审查通过（审批 + CI 通过）后手动 squash 合入 develop（merge queue 因免费计划降级，见 gitflow spec 第 3.3 节）
+# 审查通过（审阶段 + CI 通过）后手动 squash 合入 develop（merge queue 因免费计划降级，见 gitflow spec 第 3.3 节）
 jj git fetch && jj bookmark move develop -r develop@origin   # 同步远端 develop
 ```
 
@@ -123,4 +123,4 @@ jj git fetch && jj bookmark move develop -r develop@origin   # 同步远端 deve
 - [ ] 构建和测试：先运行 `python3 build_selfhost_native.py`，再运行相关套件（长任务建议 `cpulimit -l 10` 或 `nice -n 19`）
 - [ ] 如果修改文档：保留头部定位声明，链接指向真实的新路径，不复制职责重叠的内容
 - [ ] 执行 `jj git push -b feature/xxx`，然后 `gh pr create --base develop --fill`
-- [ ] 审查意见处理完毕（审批通过 + CI 通过）后手动 squash 合入 develop；不自行合入 main
+- [ ] 审查意见处理完毕（审阶段通过 + CI 通过）后手动 squash 合入 develop；不自行合入 main

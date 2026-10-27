@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""枚举/结构体容量面回归（TODO #2026-09-12-2 → **容量批 T3 解除**）。
+"""枚举/结构体容量面回归（TODO #2026-09-12-2 → **容量阶段 T3 解除**）。
 
 **旧态（#2026-09-12-2 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
 与 `StructInfo` 字段槽区（`MAX_STRUCT_FIELDS=16` 槽）是**定长内嵌槽区** ⇒ >16 越界写（踩 count/邻记录）
 ⇒ parser 写点护栏 + `error[P022]`/`error[P023]` 定位硬错（rc=1 + 无产物）。
 
-**新态（容量批 T3，裁-CAP-2 (a)「记录布局迁侧表」）**：字段/变体/载荷**迁侧表** ⇒ 三面**无硬上限**；
+**新态（容量阶段 T3，裁-CAP-2 (a)「记录布局迁侧表」）**：字段/变体/载荷**迁侧表** ⇒ 三面**无硬上限**；
 `P022`/`P023` **退役**（零 raise）；覆盖位自 `2^vi` 单 int 换为**无界位图**（`mc_*`）⇒ ≥63 变体的
 穷尽性/冗余臂判定恢复正确（旧态实测 70 变体 SIGFPE rc=136）。
 
-判据（本实例实跑）：≤16 与 >16 一律 **编译 + 运行值正确**（三路同证）；穷尽性/冗余臂的**真错**仍
-定位硬错（TM03/TM04）；越界写类旧闸的**死亡证据** = 本批能力变更（旧 17-拒绝用例转正）。
+判定依据（本实例实跑）：≤16 与 >16 一律 **编译 + 运行值正确**（三路同证）；穷尽性/冗余臂的**真错**仍
+定位硬错（TM03/TM04）；越界写类旧闸的**死亡证据** = 本次能力变更（旧 17-拒绝用例转正）。
 """
 
 import os
@@ -81,7 +81,7 @@ def case_reject(name, source, needles, cmd="build", forbid=()):
     **必须**同时断言 needle（定位诊断文本）——仅断言 rc != 0 会被「读回侧闸」式的兜底
     误当通过：修复前 build 面本来就 rc=1（`.ccr` 读回闸），而写入侧的静默面（check rc=0）
     与「越界写已发生」并不因此消失。
-    forbid = 流水线阶段串（如 `save .ccr`）——钉「拒绝发生在**前端**（parse 阶段诊断闸，
+    forbid = 流水线阶段串（如 `save .ccr`）——固定「拒绝发生在**前端**（parse 阶段诊断闸，
     `main.cr` 的 `[3/5] parse...` 之后），**不进入** lower/写 .ccr/ELF」：护栏在读回侧
     （读回闸兜底）≠ 护栏在写入侧（TODO #2026-09-12-2 的原话）。
     """
@@ -103,7 +103,7 @@ def case_reject(name, source, needles, cmd="build", forbid=()):
                 return False
         for fd in forbid:
             if fd in blob:
-                print(f"[FAIL] {name}: 拒绝晚于前端——输出含流水线阶段 {fd!r}（越界写已进入 IR/载体面）")
+                print(f"[FAIL] {name}: 拒绝晚于前端——输出含流水线阶段 {fd!r}（越界写已进入 IR/文件面）")
                 return False
         if cmd == "build":
             for p in (out, out + ".ccr"):
@@ -158,7 +158,7 @@ def struct_src(n, extra="return 0"):
 
 def main():
     ok = [
-        # ── 16 = 旧边界（含）：三面全对（回归钉）──
+        # ── 16 = 旧边界（含）：三面全对（回归固定）──
         case_run("enum16_exhaustive_ok", enum_exhaustive_src(16, 9), 9),
         case_run("enum16_decl_only_ok", enum_src(16), 0),
         case_run("payload16_ok", payload_src(16, "x := B()\nreturn 4\n"), 4),

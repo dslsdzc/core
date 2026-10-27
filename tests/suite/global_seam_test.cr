@@ -1,4 +1,4 @@
-// 全局行 operand seam 回归语料（2026-09-16 批；run_suite 逐档 build + run ⇒ 期望 rc=0）。
+// 全局行 operand seam 回归语料（2026-09-16 阶段；run_suite 逐档 build + run ⇒ 期望 rc=0）。
 // 覆盖：B1 IR_BINARY(TI_DEX) 全局操作数 · B2 IR_I2F 全局源 · B4 IR_SLICE 全局数组/低界 ·
 //       B5 IR_AWAIT 全局源（全部 = 修复前 ELF 侧静默错值/139 的形态；逐点局部对照见
 //       tests/selfhost/test_global_seams.py）。

@@ -10,7 +10,7 @@
   ① 判定「哪几段是 Core 源」（`is_core`）；
   ② 逐字节安全地抽取/回填（`migrate_py` / `migrate_md`），宿主非 Core 面零改动。
 
-判据（双轨，见 T6b 任务书）：
+判定依据（双轨，见 T6b 任务书）：
   - 机械轨：每个被改写的段做 V2（与改前**逐 token 相同**）+ V4a/V4b（注释行/空行**不下降**）；
   - 真实轨：`tests/bootstrap/*.py` 必须全绿、`tests/selfhost/*.py` 能跑的必须绿。
 
@@ -33,11 +33,11 @@ import v4_migrate as M  # noqa: E402
 T = M.T
 
 # ── 「是 Core 源」的判定 ──────────────────────────────────────────────────────
-# **不用「改完能 v4 解析」当判据**：语料里有大量**故意写坏**的负例夹具（未知标签 /
-# 嵌套 fn / 非穷尽 match / 语法错），它们的 v4 解析**本就必须失败**。用解析成功当判据
-# 会把这一类整批漏掉（实测：734 过 / 461 漏，漏的几乎全是负例夹具）。
+# **不用「改完能 v4 解析」当判定依据**：语料里有大量**故意写坏**的负例夹具（未知标签 /
+# 嵌套 fn / 非穷尽 match / 语法错），它们的 v4 解析**本就必须失败**。用解析成功当判定依据
+# 会把这一类整阶段漏掉（实测：734 过 / 461 漏，漏的几乎全是负例夹具）。
 #
-# 改判据：**声明头 / 语句形态**正则 + v3 词法可切（`transform_text` 不抛）双条件。
+# 改判定依据：**声明头 / 语句形态**正则 + v3 词法可切（`transform_text` 不抛）双条件。
 # 前者抓 Core 的形态，后者排除散文（散文的括号/花括号通常不平衡 ⇒ transform 抛）。
 CORE_DECL_RE = re.compile(
     r'\bfn\s+(?:[A-Za-z_]\w*\s*[\[\(]|[A-Za-z_]\w*\s*->)'   # fn f(...) / fn f[T](...) / fn f() -> T
@@ -91,7 +91,7 @@ _IDLIKE = re.compile(r'^[A-Za-z_]\w*$')
 
 def _v2_norm(tok):
     t, lx = tok
-    if lx == 'None':          # E5：v4 关键字拼写（`None` ⇒ `none`）——**本批唯一的非形状改写**
+    if lx == 'None':          # E5：v4 关键字拼写（`None` ⇒ `none`）——**本次唯一的非形状改写**
         lx = 'none'
     return ('ID', lx) if _IDLIKE.match(lx) else (t, lx)
 
@@ -354,7 +354,7 @@ def migrate_segment(s, label):
     # 臂体是 `Pat =>: ` + region —— 两个前端**都不吃**，见 parser.cr `parse_match_expr`：
     # 臂体恒为 `parse_expr()`）。
     # 空 region：`EMPTY_ACTIONS` 的键是 `(文件路径, 行号)`，内嵌段的行号与宿主文件不同 ⇒
-    # 永不命中表 ⇒ 一律进 `unresolved` ⇒ 本工具按「停下上报」处置（正是 T4 口径要的）。
+    # 永不命中表 ⇒ 一律进 `unresolved` ⇒ 本工具按「停下上报」处置（正是 T4 规则要的）。
     # 臂体块 ⇒ 文档形（`Pat =>:` + region）。先做，再进 `transform_text`：
     # 否则 `v4_migrate.classify` 把它当 `arm` ⇒ 单行 `=> return E`（非文档形）。
     arm_in = arm_block_to_region_src(s2)

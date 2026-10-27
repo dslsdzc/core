@@ -10,7 +10,7 @@
     `SyntaxError: 2:6: Unexpected token: fn`（不崩、不静默通过）。
   * docs/spec-design.md:341：实现层函数值（TYP_FN/闭包）按 YAGNI 挂起。
   ⇒ 正确修复 = 响亮定位错误（rc=1 + error[P21]），不是「支持」，更不是崩溃。
-    （原 TODO 记的「判据 = 最小复现 rc=0」隐含「应支持」，与本判定冲突；
+    （原 TODO 记的「判定依据 = 最小复现 rc=0」隐含「应支持」，与本判定冲突；
      本文件与 src/ci/run.sh 的 SKIP 理由一并记录裁决。）
 
 RED（修复前实测 2026-09-11，核心版 0390f0f4）：
@@ -37,7 +37,7 @@ RED（修复前实测 2026-09-11，核心版 0390f0f4）：
   2. parser 同族 6 处 `}`-键循环补 EOF 护栏（struct 字面量 / struct 模式 /
      struct 体 / enum 体 / interface 体 / impl 体）：失步至 EOF 一律退出。
 
-判据：嵌套形态 rc=1 + error[P21] + 定位行号 + 无 139 + 毫秒级；失步型 EOF 探针
+判定依据：嵌套形态 rc=1 + error[P21] + 定位行号 + 无 139 + 毫秒级；失步型 EOF 探针
 （各构造截断在 EOF）rc=1 且不崩；扁平对照 rc=0 且运行结果正确；两个 suite fixture
 由 rc=139 变为 rc=1 + P21。
 """
@@ -164,7 +164,7 @@ def main() -> int:
     failures = []
     checks = 0
 
-    # ① 主判据：TODO #2026-09-10-12 最小复现形态（修复前 rc=139）
+    # ① 主判定依据：TODO #2026-09-10-12 最小复现形态（修复前 rc=139）
     checks += 1
     f = case_reject_nested("nested_min_todo16", NESTED_MIN, "inner")
     if f:

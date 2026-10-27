@@ -2,19 +2,19 @@
 """可选 dex（`dex?`）整族回归套件（TODO #2026-09-16-29 / 原 #91；自举编译器 build/corec）。
 
 覆盖 = 四态对拍（裸/装箱 × bits/scaled）+ 家族面（LET / 赋值 / 取址·INV-1 / 指针写·INV-2 /
-形参 / 返回 / 结构体字面量字段 / 字段赋值 / 全局槽 / 枚举载荷 / `?` 解包）+ 编译期拒绝面 + 非回归钉子。
+形参 / 返回 / 结构体字面量字段 / 字段赋值 / 全局槽 / 枚举载荷 / `?` 解包）+ 编译期拒绝面 + 非回归固定用例。
 
-**判据模型（G10，维护者 2026-09-17 裁决——三条纪律都写进断言，缺一不可）**
-  ① **主判据 = 四态对拍**：四条同义探针（裸/装箱 × bits/scaled）的 ELF 读数**互等**，且
+**判定依据模型（G10，维护者 2026-09-17 裁决——三条纪律都写进断言，缺一不可）**
+  ① **主判定依据 = 四态对拍**：四条同义探针（裸/装箱 × bits/scaled）的 ELF 读数**互等**，且
      **锚定格**（scaled 两格）== 语义值（本档 = 7）——「四格互等」**必须含锚定格**，
      否则「四格一起错」也算互等（假绿）。
-  ② **禁第三态**（本档核心）：`kind=="bits"` 的探针，解释器腿必须是 **255**
+  ② **禁第三态**（本档核心）：`kind=="bits"` 的探针，解释器路径必须是 **255**
      （= bits→scaled 转换在场时 `IR_I2F/IR_F2I` 的能力边界拒收；`interp.cr:263-266`/`:704-705`）。
      **255 是期望值**，不是「只要不改就算过」；出现任何第三个值一律判红。
-  ③ **不许单腿绿结案**：ELF 绿 ∧ interp 落第三态 ⇒ 仍判红（两腿写进同一条断言）。
+  ③ **不许单路径绿结案**：ELF 绿 ∧ interp 落第三态 ⇒ 仍判红（两路径写进同一条断言）。
 
 **为什么 bits 源的 interp 必须是 255（而不是正确值）**：`dex?` 载荷的规范形式 = **scaled**
-（G1 裁决：装箱对象是聚合类载体、无形式位可挂；rep 位 1 比特承载不了 2 位信息）⇒ 任何 bits 源
+（G1 裁决：装箱对象是聚合类文件、无形式位可挂；rep 位 1 比特承载不了 2 位信息）⇒ 任何 bits 源
 在写点都要经 `dex_bits_to_scaled`（F2I）转换 ⇒ 解释器**必然**拒收 rc=255。
 ⇒ `255` 同时是「转换确已发生」的**正据**（apx 审计 §errata E1 的同一用法）。
 **若将来实现的转换不产生 F2I，此期望值须重新推导——不得静默放宽。**
@@ -24,9 +24,9 @@
 `enum_payload_opt_bits` 15 · **`param_bits` ELF 0 / interp 15（双路径分歧）** ·
 **`param_branch_bits` ELF 101 / interp 172（分歧）**；四态其余三格与全部 scaled 格已绿。
 
-**修复后（批 5 T2，2026-09-17）**：**30/30 全绿** = 四态对拍（互等 = 7）· 家族面（LET/赋值/取址 INV-1/
-指针写 INV-2/形参/返回/字段字面量/字段赋值/全局/枚举载荷）· `?` 解包 ×2 · G2 判别判据 ×2（载荷 +
-dex 算术，改前 193 → 8）· M1 tag 对行为钉 ×2（改前 1/1 → 0/255、0/0）· 非 dex 对照（`int?` ×4 ·
+**修复后（阶段 5 T2，2026-09-17）**：**30/30 全绿** = 四态对拍（互等 = 7）· 家族面（LET/赋值/取址 INV-1/
+指针写 INV-2/形参/返回/字段字面量/字段赋值/全局/枚举载荷）· `?` 解包 ×2 · G2 判别判定依据 ×2（载荷 +
+dex 算术，改前 193 → 8）· M1 tag 对行为固定 ×2（改前 1/1 → 0/255、0/0）· 非 dex 对照（`int?` ×4 ·
 `dex?, apx` 标签面）· apx 槽自证 · 编译期拒绝面。分步归因（R2 → R1 → R3 各修哪些）见
 `docs/superpowers/plans/2026-09-17-opt-dex.md` §7quater。
 
@@ -98,7 +98,7 @@ def build_and_run(source, tag):
 
 
 def run_interp(source):
-    """解释器腿：把源**内联**给 `corec run`（run 的参数是代码字符串，不是文件路径）。"""
+    """解释器路径：把源**内联**给 `corec run`（run 的参数是代码字符串，不是文件路径）。"""
     src = f"// opt-dex-{uuid.uuid4()}\n" + source
     p = subprocess.run([str(COREC), "run", src], cwd=BASE,
                        capture_output=True, text=True, timeout=180)
@@ -106,7 +106,7 @@ def run_interp(source):
 
 
 def build_and_reject(source, tag):
-    """**拒收面**（kind == "reject"，批 8 条目 5 追加）：check 必须
+    """**拒收面**（kind == "reject"，阶段 8 条目 5 追加）：check 必须
     rc=1 + `error[P26]` + 定位，build rc=1 且**零产物**。返回 (check_rc, diag, loc, build_rc, artifact)。"""
     src = f"// opt-dex-{uuid.uuid4()}\n" + source
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
@@ -134,7 +134,7 @@ MATCH_BODY = """    return match x:
         none => 0
 """
 
-# ── 四态对拍四条（仅源形式与是否 Some 不同；主判据的基元）──
+# ── 四态对拍四条（仅源形式与是否 Some 不同；主判定依据的基元）──
 FOUR_STATE = {
     "fs_bare_bits":    ("bits",   "    d : dex, apx = 7.0\n    x : dex? = d\n"),
     "fs_bare_scaled":  ("scaled", "    e : dex = 7.0\n    x : dex? = e\n"),
@@ -147,13 +147,13 @@ def _four_state_src(setup):
     return "fn main() -> int:\n" + setup + MATCH_BODY
 
 
-# ── 家族/钉子探针表：name, source, 期望 ELF rc, kind, 备注 ──
-# kind 语义（判据模型 ②③）：
+# ── 家族/固定用例探针表：name, source, 期望 ELF rc, kind, 备注 ──
+# kind 语义（判定依据模型 ②③）：
 #   "bits"   = 源为 apx 位模式 ⇒ 写点必转换 ⇒ ELF == 期望 ∧ interp == 255（转换在场正据）
 #   "scaled" = 源为精确形式 ⇒ 无需转换 ⇒ ELF == 期望 ∧ interp == 期望
 #   "int"    = 非 dex 面（对照）⇒ ELF == 期望 ∧ interp == 期望
 CASES = [
-    # ── 家族写点/边界面（修前 15 的九条 = 本批 RED 主体）──
+    # ── 家族写点/边界面（修前 15 的九条 = 本次 RED 主体）──
     ("assign_bits", """
 fn main() -> int:
     d : dex, apx = 7.0
@@ -260,7 +260,7 @@ fn main() -> int:
                 none =>:
                     return 0
 """, 7, "bits", "用户枚举的可选 dex 载荷（修前 15）"),
-    # ── 已覆盖面/钉子（改法不得改坏）──
+    # ── 已覆盖面/固定用例（改法不得改坏）──
     ("field_assign_bits", """
 struct S:
     f: dex?
@@ -273,14 +273,14 @@ fn main() -> int:
             return @raw_int(v) / 1000000
         none =>:
             return 0
-""", 7, "bits", "字段**赋值**面（`:1498` norm→box 的正确序 ⇒ 修前已绿；钉子）"),
+""", 7, "bits", "字段**赋值**面（`:1498` norm→box 的正确序 ⇒ 修前已绿；固定用例）"),
     ("try_unpack_bits", """
 fn main() -> int:
     d : dex, apx = 7.0
     x : dex? = d
     y := x?
     return @raw_int(y) / 1000000
-""", 7, "bits", "`?` 解包（修前已绿：槽型=bits 自洽；钉住槽型声明化后仍绿）"),
+""", 7, "bits", "`?` 解包（修前已绿：槽型=bits 自洽；固定槽型声明化后仍绿）"),
     ("try_to_dex_bits", """
 fn main() -> int:
     d : dex, apx = 7.0
@@ -288,7 +288,7 @@ fn main() -> int:
     y := x?
     z : dex = y
     return @raw_int(z) / 1000000
-""", 7, "bits", "`?` 解包再入 `dex` 槽（修前已绿；钉子）"),
+""", 7, "bits", "`?` 解包再入 `dex` 槽（修前已绿；固定用例）"),
     ("dexopt_apx_tag", """
 fn main() -> int:
     x : dex?, apx = 7.0
@@ -297,9 +297,9 @@ fn main() -> int:
             return @raw_int(v) / 1000000
         none =>:
             return 0
-""", 0, "reject", "`dex?, apx`：**批 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）。"
-     "**旧值留痕（批 5–批 7）**：`check=0 · ELF=interp=7`（kind=`scaled`，标签被静默忽略 ⇒ 落精确世界，"
-     "`TODO #2026-09-17-4` 登记面）——本批按计划条目 5 判据要件③「显式归因 + 同批重锁 + 旧值留痕」重锁。"),
+""", 0, "reject", "`dex?, apx`：**阶段 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）。"
+     "**旧值留痕（阶段 5–阶段 7）**：`check=0 · ELF=interp=7`（kind=`scaled`，标签被静默忽略 ⇒ 落精确世界，"
+     "`TODO #2026-09-17-4` 登记面）——本次按计划条目 5 判定依据要件③「显式归因 + 同阶段重锁 + 旧值留痕」重锁。"),
     ("param_scaled", """
 fn g(x: dex?) -> int:
     return match x:
@@ -345,19 +345,19 @@ fn g(x: dex?) -> int:
 fn main() -> int:
     d : dex, apx = 7.0
     return g(Some(d))
-""", 7, "bits", "形参面 ← `Some(apx)`（修前 ELF 已绿：枚举构造点漏斗覆盖；钉子）"),
+""", 7, "bits", "形参面 ← `Some(apx)`（修前 ELF 已绿：枚举构造点漏斗覆盖；固定用例）"),
     ("nonopt_direct_bits", """
 fn g(x: dex) -> int:
     return @raw_int(x) / 1000000
 fn main() -> int:
     d : dex, apx = 7.0
     return g(d)
-""", 7, "bits", "非可选 dex 直调（apx 批已覆盖面；非回归钉）"),
-    # ── G2（读点定型）判别判据：**载荷参与 dex 运算**（match 型载荷读槽的形式若丢，
+""", 7, "bits", "非可选 dex 直调（apx 阶段已覆盖面；非回归固定）"),
+    # ── G2（读点定型）判别判定依据：**载荷参与 dex 运算**（match 型载荷读槽的形式若丢，
     #    `dex_scale_int` 会把已 scaled 的载荷再 ×S = 双倍缩放）。改前实测 ELF 193
-    #    （= 7000001 mod 256）、改后 8 ⇒ 该对探针有**判别力**（非「两态同值」的空判据）。
+    #    （= 7000001 mod 256）、改后 8 ⇒ 该对探针有**判别力**（非「两态同值」的空判定依据）。
     #    注：`?` 解包路径**不**具备判别力（其 dest 型 = `irv_type(inner)` = 槽型，本来自洽）
-    #    ⇒ 本判据必须走 **match 载荷绑定**这一读点。
+    #    ⇒ 本判定依据必须走 **match 载荷绑定**这一读点。
     ("g2_payload_dex_arith_scaled", """
 fn main() -> int:
     e : dex = 7.0
@@ -367,7 +367,7 @@ fn main() -> int:
             return @raw_int(v + 1.0) / 1000000
         none =>:
             return 0
-""", 8, "scaled", "G2 判别判据·精确源：match 载荷 + dex 算术（7.0 + 1.0 = 8；改前 193 = 双倍缩放）"),
+""", 8, "scaled", "G2 判别判定依据·精确源：match 载荷 + dex 算术（7.0 + 1.0 = 8；改前 193 = 双倍缩放）"),
     ("g2_payload_dex_arith_bits", """
 fn main() -> int:
     d : dex, apx = 7.0
@@ -377,12 +377,12 @@ fn main() -> int:
             return @raw_int(v + 1.0) / 1000000
         none =>:
             return 0
-""", 8, "bits", "G2 判别判据·apx 源（写点归一 + 读点定型两段都得对才 = 8）"),
-    # ── M1 tag 对改判的**行为钉**（维护者 2026-09-17 附加判据）──
+""", 8, "bits", "G2 判别判定依据·apx 源（写点归一 + 读点定型两段都得对才 = 8）"),
+    # ── M1 tag 对改判的**行为固定**（维护者 2026-09-17 附加判定依据）──
     # 机理：`dex?` 槽型由 `TI_INT`（改前）→ `TI_DEX_S`（改后），而旧 M1 tag 闭包
     # 与序言 tag 卫生**同判定式**（`== TI_INT`）；该旧 tag 路径已随 v9.1 默认 BigInt
-    # 切换删除。此处保留**行为往返一致**判据（不是断言编码细节）：
-    # **要求 = 行为往返一致**（不是断言「不再编码」——那是把实现细节当判据）：
+    # 切换删除。此处保留**行为往返一致**判定依据（不是断言编码细节）：
+    # **要求 = 行为往返一致**（不是断言「不再编码」——那是把实现细节当判定依据）：
     # 同一函数内**共置**「会走 M1 tag 编码的 int 链」（ADD/SUB 种子 + 拷贝元）与 `dex?` 值
     # （形参 + 局部），断言**两侧各自往返无损**。出现任何新行为差异 ⇒ 报 lead（不得用「分类变化」一句带过）。
     ("mw_tag_coexist_bits", """
@@ -402,7 +402,7 @@ fn mw_coexist_bits(e: dex?) -> int:
 fn main() -> int:
     d : dex, apx = 7.0
     return mw_coexist_bits(d)
-""", 0, "bits", "M1 tag 对行为钉（bits 形）：int 多字链与 `dex?` 共置 ⇒ 两侧往返一致（0 全过 / 1 dex 侧坏 / 2 int 侧坏）"),
+""", 0, "bits", "M1 tag 对行为固定（bits 形）：int 多字链与 `dex?` 共置 ⇒ 两侧往返一致（0 全过 / 1 dex 侧坏 / 2 int 侧坏）"),
     ("mw_tag_coexist_scaled", """
 fn mw_coexist_scaled(e: dex?) -> int:
     a := 2000000000
@@ -420,8 +420,8 @@ fn mw_coexist_scaled(e: dex?) -> int:
 fn main() -> int:
     e : dex = 7.0
     return mw_coexist_scaled(e)
-""", 0, "scaled", "M1 tag 对行为钉·精确形对照（解释器腿可跑：ELF == interp == 0）"),
-    # ── 非 dex 对照（零足迹面：不得被本批改动）──
+""", 0, "scaled", "M1 tag 对行为固定·精确形对照（解释器路径可跑：ELF == interp == 0）"),
+    # ── 非 dex 对照（零足迹面：不得被本次改动）──
     ("int_opt_lit", """
 fn g(x: int?) -> int:
     return match x:
@@ -483,7 +483,7 @@ fn main() -> int:
 
 
 def test_four_state_parity():
-    """① 主判据：四态 ELF 互等 **且** 锚定格 == 语义值；② 每格按 kind 过 interp 纪律。"""
+    """① 主判定依据：四态 ELF 互等 **且** 锚定格 == 语义值；② 每格按 kind 过 interp 纪律。"""
     fails = []
     got = {}
     for name in FOUR_STATE:
@@ -500,10 +500,10 @@ def test_four_state_parity():
         if len(set(vals)) != 1:
             fails.append(f"四态**互等**失败：{got}")
         elif got["fs_bare_scaled"] != ANCHOR or got["fs_boxed_scaled"] != ANCHOR:
-            fails.append(f"锚定格 != {ANCHOR}：{got}（锚定格必须钉住语义值，否则四格一起错也算互等）")
+            fails.append(f"锚定格 != {ANCHOR}：{got}（锚定格必须固定语义值，否则四格一起错也算互等）")
         else:
             print(f"[PASS] 四态对拍：{got} —— 四格互等 = {ANCHOR}（含锚定格）")
-    # interp 纪律（逐格；与 ELF 同判，禁「单腿绿结案」）
+    # interp 纪律（逐格；与 ELF 同判，禁「单路径绿结案」）
     for name in FOUR_STATE:
         kind, _setup = FOUR_STATE[name]
         src = _four_state_src(_setup)
@@ -552,8 +552,8 @@ def test_cases():
 
 def test_apx_slot_witness():
     """「探针不触发」守卫（照 apx 套件 `test_decl_form_selfcheck` 体例）：
-    kind=="bits" 的探针源**必须**真的建立 apx 槽——判据 = `.cir` 出现 binary64 位模式常量
-    （`const dex = <大整数>`）；scaled 源**不得**出现（否则分类错了 ⇒ 判据面被污染）。"""
+    kind=="bits" 的探针源**必须**真的建立 apx 槽——判定依据 = `.cir` 出现 binary64 位模式常量
+    （`const dex = <大整数>`）；scaled 源**不得**出现（否则分类错了 ⇒ 判定依据面被污染）。"""
     bad = 0
     for name, src, _want, kind, _note in CASES:
         if kind == "int" or kind == "reject":

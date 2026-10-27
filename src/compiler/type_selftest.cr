@@ -1462,7 +1462,7 @@ fn ts_ccr_purity_ok() -> int:
 fn ts_ccr_run() -> int:
     fails : ., mut = 0
     init_types()   // 干净表（9 原生行，不受前段夹具影响）
-    // 接口表同批清零（段体含 IFACE 五小节 -> 上游 ifc/isat 夹具的死节点
+    // 接口表同阶段清零（段体含 IFACE 五小节 -> 上游 ifc/isat 夹具的死节点
     // （EXPR_IDENT 指向已被 init_types 作废的命名记录 -> res_type_node 落 dyn 行）会令签名项
     // 不可建 -> 装填拒绝。本组语义 = 干净类型表 + 干净接口表的段体往返夹具。
     g_iface_count = 0
@@ -2476,7 +2476,7 @@ fn type_selftest_run() -> int:
     total = total + 1
     fails = fails + ts_check_b("bridge.grow_cap_doubled", (g_term_map_cap >= 2048), true)
     // 再增加 1100 条互异记录，触发第二次扩容。检查条目数恰好增加 1100，
-    // 容量至少 4096，首批记录仍命中。
+    // 容量至少 4096，首阶段记录仍命中。
     g2_before := sh_map_entries()
     gj : ., mut = 0
     loop:

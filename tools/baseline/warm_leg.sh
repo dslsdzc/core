@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# #2026-09-15-5 批 T3：**暖态腿** runner —— 「同一路径二跑」两态一致性 + 暖态生效档数（命中实证）。
+# #2026-09-15-5 阶段 T3：**暖态路径** runner —— 「同一路径二跑」两态一致性 + 暖态生效档数（命中实证）。
 #
 # 背景（T1 实锤，`/tmp/fct4/task1-report.md`）：`.cir` 缓存命中会跳过 `ir_gen_func` 的全部
 # 生成期副作用；缺口（类型行不随快照）曾使安全检查诊断**暖态静默消失**（冷 rc=1 TU03 →
-# 暖 rc=0 + 照常出 ELF）。既有 runner 逐档 `clean-cache` ⇒ 判据面对暖态**结构性零覆盖**；
+# 暖 rc=0 + 照常出 ELF）。既有 runner 逐档 `clean-cache` ⇒ 判定依据面对暖态**结构性零覆盖**；
 # 且**既有语料不含 TU03 形态**（全仓 `as *T` 零命中）⇒ 只把二跑加进 72/29 档会**恒绿而空洞**。
-# 故本腿分两层（见 `--with-corpus`）：
+# 故本路径分两层（见 `--with-corpus`）：
 #   · 广度层（默认）：父 runner 传进来的清单（`<tag>\t<file>` 行）逐档二跑 —— 抓**广谱**
 #     暖态回归（任一类码在暖态变脸都红）；对 pre-fix 冻结基线**预期绿**（T1 E4：码集零差异）。
-#   · 牙齿层（`--with-corpus`）：入仓语料 `tests/probes/warm/*.cr`（**定路径**是该语料的设计
+#   · 有效性用例层（`--with-corpus`）：入仓语料 `tests/probes/warm/*.cr`（**定路径**是该语料的设计
 #     要点）—— 缺陷面（TU03）与旁面（TK01）**期望值逐档断言**；pre-fix 二进制在本层**必红**
-#     （这就是「腿有牙」的判据，见 warm-task3-report.md 突变 M1）。
+#     （这就是「路径有效」的判定依据，见 warm-task3-report.md 突变 M1）。
 #
 # 用法:
 #   printf '%s\t%s\n' tag file | bash tools/baseline/warm_leg.sh <corec二进制> <outdir> [--with-corpus]
-#   bash tools/baseline/warm_run.sh <corec二进制> <outdir>          # 牙齿层专用入口（等价 --with-corpus 空清单）
+#   bash tools/baseline/warm_run.sh <corec二进制> <outdir>          # 有效性用例层专用入口（等价 --with-corpus 空清单）
 #
-# 判据（任一不满足 ⇒ 记 FAIL；全部跑完后 rc=1）:
+# 判定依据（任一不满足 ⇒ 记 FAIL；全部跑完后 rc=1）:
 #   ① 冷/暖 **rc 一致**；② 冷/暖 **诊断码集一致**（`error[XX]` 去重排序）；
-#   ③ 牙齿层：期望值逐档命中（`tu03_*` ⇒ rc=1 且含 TU03；`tk01_*` ⇒ rc=1 且含 TK01；正控 ⇒ rc=0）。
+#   ③ 有效性用例层：期望值逐档命中（`tu03_*` ⇒ rc=1 且含 TU03；`tk01_*` ⇒ rc=1 且含 TK01；正控 ⇒ rc=0）。
 # 产物: <outdir>/<tag>_<base>.{cold.log,warm.log} · <outdir>/stats.tsv · <outdir>/warm.out
 # 暖态生效档数 = 冷跑后有条目、且暖跑后**至少 1 条条目 size/mtime 未变**（= 真命中）的档数。
 #   `%y` 取到纳秒：同秒重写不会被误判为命中。
@@ -86,7 +86,7 @@ nfail=0; nhit=0; ntot=0
     ntot=$((ntot + 1)); run_one "$tag" "$f"
   done
   if [ "$WITH_CORPUS" = 1 ]; then
-    echo "=== 牙齿层（入仓语料 tests/probes/warm/，**期望值逐档断言**）==="
+    echo "=== 有效性用例层（入仓语料 tests/probes/warm/，**期望值逐档断言**）==="
     nc=0
     for f in tests/probes/warm/*.cr; do
       nc=$((nc + 1)); ntot=$((ntot + 1))

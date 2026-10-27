@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""TF01 收口回归：函数体落空分析 + lits_copy 返回型（2026-09-13 修复）。
+"""TF01 处理回归：函数体落空分析 + lits_copy 返回型（2026-09-13 修复）。
 
 背景（RED，修复前实测；`check src/compiler` 长期恰 2 条 error[TF01]，被当作
-「既有 red 划界」携带多批，同时卡住 check 作业/失败关闭工作流/P4 Task 2 的
+「既有 red 划界」携带多阶段，同时卡住 check 作业/失败关闭工作流/P4 Task 2 的
 corearch 清单）：
 
   ① 误报面（checker 落空分析缺失）：`fn f() -> int { loop { return 5; } }`
@@ -13,7 +13,7 @@ corearch 清单）：
      ⇒ error[TF01]。类型模型里 `alloc` = `() -> string`（checker.cr
      `bi_add("alloc", TI_STR)`），声明 int 是真·类型洗白。自源实测：`lits_copy`。
      修法 = 声明改 string（连同消费面 `lits_contradictory_buf` 形参），
-     **不是**放宽模型——本文件负控钉住该形态仍须拒。
+     **不是**放宽模型——本文件负控固定该形态仍须拒。
 
 修复：
   * checker.cr `stmt_cannot_fall_through`/`loop_body_has_break`/`seg_has_break`：
@@ -25,7 +25,7 @@ corearch 清单）：
   * type_engine.cr `lits_copy` 返回型 int → string；`lits_contradictory_buf`
     形参 buf int → string（两个调用点传的都是 string：g_ty_lits / lits_copy）。
 
-判据：正控（确定不可走完的体接受 rc=0 无 TF01）+ 负控（可落空的体仍拒
+判定依据：正控（确定不可走完的体接受 rc=0 无 TF01）+ 负控（可落空的体仍拒
 rc=1 恰 1 条 TF01）+ 端到端（接受面编译运行语义不变 rc=42）。
 """
 
@@ -145,7 +145,7 @@ POS_STMT_WRAPPED = "fn f() -> int:\n    loop:\n        return 5\n"
 # alloc 的模型一致声明（string）——与本组同族：真错面的「正确写法」
 POS_ALLOC_STRING = "fn f() -> string:\n    b := alloc(8)\n    return b\n"
 
-# 遍历分支的牙（各自钉住 break 扫描的一个下钻面——删除对应分支即本档转红）：
+# 遍历分支的有效性用例（各自固定 break 扫描的一个下钻面——删除对应分支即本档转红）：
 # · match 臂链（EXPR_ARM 链 ≠ 连续槽）：臂内无 break ⇒ 外 loop 不落空
 POS_MATCH_NO_BREAK = """
 fn f(x: int) -> int:
@@ -177,7 +177,7 @@ fn f() -> int:
             return 5
 """
 
-# 登记边界（**本批显式登记，非静默**）：非落空体内 return 的**值类型**不核对——
+# 登记边界（**本次显式登记，非静默**）：非落空体内 return 的**值类型**不核对——
 # checker 现模型无「逐 return 核对」面（站点 5 只看块末类型），本条只把「无 break 的
 # loop 收尾」从 TF01 误报中解放。**逐 return 核对已落地**（nail3），因此按本条原注的
 # 约定改判为拒绝：string 值返 `-> int` 是真实不匹配，不再豁免。
@@ -189,14 +189,14 @@ BOUNDARY_RETURN_VALUE_CHECKED = "fn f() -> int:\n    loop:\n        return \"x\"
 #   误发 TF01；改后：调用推断 = never ⇒ 返回位豁免（checker.cr:2234）⇒ 接受。
 NEVER_RETURN_SRC = ("fn boom() -> never:\n    loop:\nfn f() -> int:\n    return boom()\nfn main() -> int:\n    return f()\n")
 
-# 变量传播面（与 test_iface_ops 的重钉项 t6_S1_never_unit 同源）：`x` 绑定 = never
+# 变量传播面（与 test_iface_ops 的重固定项 t6_S1_never_unit 同源）：`x` 绑定 = never
 # ⇒ `return x` 的块类型 = never ⇒ 返回位豁免（改前 = unit ⇒ 误发 TF01）。
 NEVER_PROPAGATE_SRC = ("fn boom() -> never:\n    loop:\nfn main() -> int:\n    x := boom()\n    return x\n")
 
 # 端到端（发射面回归）：分支不执行 ⇒ 运行 rc=42；改前 build rc=1（TA02 在硬名单 ⇒ 无产物）。
 RUN_NEVER_DEAD_BRANCH = ("fn boom() -> never:\n    loop:\nfn main() -> int:\n    if 1 > 2:\n        x : int = boom()\n    return 42\n")
 
-# ─── 负控：可落空的体（修复前报 TF01，修复后**必须仍拒**——静默接受洞的钉子）───
+# ─── 负控：可落空的体（修复前报 TF01，修复后**必须仍拒**——静默接受洞的固定用例）───
 
 NEG_FALLTHRU = "fn f() -> int:\n    1 + 1\n"
 
@@ -229,7 +229,7 @@ NEG_NESTED_THEN_BREAK = "fn f() -> int:\n    loop:\n        loop:\n            b
 
 # while 保守面：不判 diverging（常量真条件不做分析）⇒ 落空 = 照旧 TF01。
 # 条件用 `c == true` 而非裸标识符：`while c {` 会被 parser 当**结构体字面量**
-# （parse_while_expr 缺 if 同款的 g_parse_no_struct_literal 守卫——既有面，本批不修，
+# （parse_while_expr 缺 if 同款的 g_parse_no_struct_literal 守卫——既有面，本次不修，
 # 见报告 §登记）。
 NEG_WHILE = "fn f(c: bool) -> int:\n    while c == true:\n        break\n"
 

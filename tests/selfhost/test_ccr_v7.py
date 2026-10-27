@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""v7 .ccr 真图载体 IO 测试（Task 3 收官——本文件 = v7 测试族唯一真源：
-Task 1 骨架（version 7 段表架构 + NOD 邻接 + EDG 段必落；R2 P6 T3 起 version 9 / NOD 40B）+ Task 2 ENT 主干化
+"""v7 .ccr 真图文件 IO 测试（Task 3 收官——本文件 = v7 测试族唯一真源：
+Task 1 结构（version 7 段表架构 + NOD 邻接 + EDG 段必落；R2 P6 T3 起 version 9 / NOD 40B）+ Task 2 ENT 主干化
 （corec 产实记录 + loader 激活 + SYM/REG 回填）+ Task 3 迁移吸收 test_ccr_v6.py
 全量用例（SYM/REG 目标形状、GC-3 root span 上界、GC-4 save 位置级守卫、
 ENT 实记录 + opt_meta 恒空）+ cache-hit 恢复路径回归（Task 1 review Minor M2）
@@ -60,14 +60,14 @@ Task 3 新增（2026-09-10）：
   · test_v7_loader_rejects_ent_var_foreign_block（R1）/ _ent_var_namespace_oob /
     _ent_def_nod_oob / _ent_def_ne_live_start（R2）——ENT 校验负分支补面。
 
-Task 3 判据重定（2026-09-11 效应/纯度修正批——见文件末「Task 3 新增三」段）：
+Task 3 判定依据重定（2026-09-11 效应/纯度修正阶段——见文件末「Task 3 新增三」段）：
   触及 state 边/纯度的改动**必然改** `.ccr` 的 NOD/EDG（Task 1/2 实测：extern/
-  spawn/yield 入链 ⇒ EDG kind=1 边 +N）⇒ 旧判据「与旧版逐字节相同」退役，替代
-  判据 = 语义零变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致；TODO.md）。
+  spawn/yield 入链 ⇒ EDG kind=1 边 +N）⇒ 旧判定依据「与旧版逐字节相同」退役，替代
+  判定依据 = 语义零变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致；TODO.md）。
   本文件承载边集语义断言三条：① 可证纯调用无 kind=1 入边（test_v7_edge_
   semantics_pure_call_untouched）；② 效应调用四类（store 体/extern/不可解析
   builtin/间接 IR_DYN_DISPATCH）必有 kind=1 入边（..._effect_call_in_chain）；
-  ③ 每函数链独立——.ccr 层零跨函数 kind=1 边 + byte mutation 咬合控制
+  ③ 每函数链独立——.ccr 层零跨函数 kind=1 边 + byte mutation 命中控制
   （test_v7_state_chain_per_function_independence）。期望表（EXPECT_DATA 41 /
   EXPECT_STATE 13）经 Task 1/2/3 实测**未变**：fixture（PROBE_SRC）只含
   pure_add 调用（可证纯 ⇒ 不入链）与 store 族，无新入链 opcode ⇒ 不重锁。
@@ -401,7 +401,7 @@ def model_compute_entries(nod, funcs, gcount, regs):
         存 [first_ref, last_ref]——不得以 df 边替代）；
       · 定值点 = IR_STORE 的 s1 ∈ 窗口 ∪ 其余 op（STORE_INDEX_VAR/STORE_PTR/
         DYN_DISPATCH 排除）的 dest ∈ 窗口；
-      · 版本切分：上一版本收口 end = min(def−1, last_ref)（dest/s1 列含定值
+      · 版本切分：上一版本处理 end = min(def−1, last_ref)（dest/s1 列含定值
         自身 → last_ref ≥ 次定值 → 恒 def−1）；末版 LE = last_ref（全局坐标）；
       · 从未定值但有引用的 var（参数等）：def=-1 条目，区间 = [first_ref,
         last_ref]（差异①实现语义——loader 只校验 els < ele ≤ instr_cnt）；
@@ -514,7 +514,7 @@ def model_func_ranges(rows, blocks, funcs, gcount):
 
 
 def test_v7_ent_hand_expected_small():
-    """ENT 实记录 + 字段语义手算期望（Task 2 测试载体——已知小程序
+    """ENT 实记录 + 字段语义手算期望（Task 2 测试文件——已知小程序
     identity/main，文件前两函数 = 节点 0..17，每函数首节点 = arena_new）：
 
     手算（v6 §4.1 规则 + regalloc 实现语义——差异① def=-1 条目区间 =
@@ -947,7 +947,7 @@ def test_v7_layout_and_walk():
 
 
 def test_v7_object_surface_recipe_readable():
-    """内核语义对象模型（内核完备 Task 1）——对象面配方可读判据（设计 spec
+    """内核语义对象模型（内核完备 Task 1）——对象面配方可读判定依据（设计 spec
     §4.4）：corearch 直载 .ccr 后经 --dump-objects 通道（对象面访问器
     nod_op/nod_dest/nod_s1-3/nod_tk + nod_edge_first/count + v7_edge_to/kind
     读内核对象缓冲）输出逐节点语义字段 + 出边遍历。断言三层：
@@ -1875,20 +1875,20 @@ def test_v7_cache_hit_restore_path():
         shutil.rmtree(cache_dir, ignore_errors=True)
 
 
-# === Task 3 新增三：判据重定——边集语义断言（取代「.ccr 逐字节同旧版」）===
+# === Task 3 新增三：判定依据重定——边集语义断言（取代「.ccr 逐字节同旧版」）===
 # 时点（2026-09-11 效应/纯度修正 Task 3）：`.ccr` 的 NOD/EDG 对任何触及 state 边/
 # 纯度的改动**预期会变**（Task 1/2 实测：extern/spawn/yield 由不入链改为入链 ⇒
-# EDG kind=1 边 +N）——旧判据「与旧版逐字节相同」不再适用。替代判据 =「语义零
-# 变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致）」（见 TODO.md 判据条目）。
+# EDG kind=1 边 +N）——旧判定依据「与旧版逐字节相同」不再适用。替代判定依据 =「语义零
+# 变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致）」（见 TODO.md 判定依据条目）。
 #
 # 本段三条性质各自带正/负控，且负控 = 同一 fixture 内的**真数据对照**（谓词必须
 # 在同一份产物上取反过，防「恒真/恒假」的退化实现假绿）：
 #   ① 可证纯调用 ⇒ 无 kind=1 入边（负控 = 同文件 effect 调用必有入边）；
 #   ② 效应调用（store 体 / extern / 不可解析 builtin / 间接调用）⇒ 必有 kind=1
 #      入边（负控 = 同文件 pure_add 调用无入边）；
-#   ③ 每函数链独立（跨函数不连）—— .ccr 层（本判据的产物面）；负控 = byte
+#   ③ 每函数链独立（跨函数不连）—— .ccr 层（本判定依据的产物面）；负控 = byte
 #      mutation（把 main 内一条 kind=1 边的 to_nod 改写到后一函数区间）后同一
-#      判据函数必须报出该违规（咬合证明）。
+#      判定依据函数必须报出该违规（命中证明）。
 # 期望值全部来自实现后实测（2026-09-11 探针：pure_add / id 调用 state_in=[]、
 # effect/ext_probe/cell_load/dyn_dispatch 四类 state_in=[前驱]、全文件 329 条 kind=1
 # 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
@@ -1946,7 +1946,7 @@ def _func_of(spans, n):
 
 
 def _chain_cross_violations(edges, spans):
-    """性质③判据函数：kind=1 边两端不同属一个函数区间（或落在区间外）的违规表
+    """性质③判定依据函数：kind=1 边两端不同属一个函数区间（或落在区间外）的违规表
     [(from, to), ...]（文件序）。空表 = 每函数链独立。"""
     out = []
     for f in sorted(edges):
@@ -1960,12 +1960,12 @@ def _chain_cross_violations(edges, spans):
 
 
 def test_v7_edge_semantics_pure_call_untouched():
-    """性质① 可证纯调用 ⇒ **无** kind=1 入边（判据重定——取代「.ccr 字节同旧」）。
+    """性质① 可证纯调用 ⇒ **无** kind=1 入边（判定依据重定——取代「.ccr 字节同旧」）。
 
     正控：CHAIN_SRC 的两个可证纯调用——纯函数调用（pure_add）与普通纯函数调用
     （id）——必须存在且不被任何 kind=1 边指入。负控（同文件真数据对照）：同一份
     产物的 effect 调用节点必须被指入——若实现退化成「一律不入链」，负控挂；退化
-    成「一律入链」，正控挂。两断合起来才把「按真纯度入链」钉死（谓词在同一数据
+    成「一律入链」，正控挂。两断合起来才把「按真纯度入链」固定（谓词在同一数据
     上取过反）。"""
     ccr_path = os.path.join(BASE, 'build/test_v7_sem_pure.ccr')
     try:
@@ -2003,11 +2003,11 @@ def test_v7_edge_semantics_pure_call_untouched():
 
 
 def test_v7_edge_semantics_effect_call_in_chain():
-    """性质② 效应调用 ⇒ **必有** kind=1 入边（四类载体：store 体效应调用 /
+    """性质② 效应调用 ⇒ **必有** kind=1 入边（四类文件：store 体效应调用 /
     extern / 不可解析 runtime builtin / 间接调用 IR_DYN_DISPATCH）。
 
     正控：四类节点各自存在（非空守卫）且逐个被 kind=1 边指入。负控（同文件真数据
-    对照）：同一份产物里 pure_add 调用节点无入边——谓词非恒真。**咬合**：Task 2
+    对照）：同一份产物里 pure_add 调用节点无入边——谓词非恒真。**命中**：Task 2
     实现前该断言在 C 层实测 RED（`chain.extern_op_pierced: got 0 want 3`——extern
     调用无入链分支）；同一改动面在 .ccr 层即 EDG kind=1 边缺失。"""
     ccr_path = os.path.join(BASE, 'build/test_v7_sem_effect.ccr')
@@ -2053,14 +2053,14 @@ def test_v7_edge_semantics_effect_call_in_chain():
 
 
 def test_v7_state_chain_per_function_independence():
-    """性质③ 每函数链独立（跨函数不连）——.ccr 层（本判据的产物面；链在
+    """性质③ 每函数链独立（跨函数不连）——.ccr 层（本判定依据的产物面；链在
     df_replay_state_chain 内每函数重置链头 ⇒ 序列化 EDG 内 kind=1 边两端必同属
     一个函数区间）。
 
-    正控：全文件 kind=1 边零跨函数（判据函数返回空表）+ 非退化守卫（链边 ≥ 3 且
+    正控：全文件 kind=1 边零跨函数（判定依据函数返回空表）+ 非退化守卫（链边 ≥ 3 且
     ≥ 2 个函数各自携带 kind=1 边——空集/单函数上该断言恒真，不算过）。
-    负控（咬合）：byte mutation——取 main 内一条 kind=1 边的 EDG 记录，把 to_nod
-    改写到后一函数区间（保持 to > from 的前向不变量，V7File 走查仍过）→ 同一判据
+    负控（命中）：byte mutation——取 main 内一条 kind=1 边的 EDG 记录，把 to_nod
+    改写到后一函数区间（保持 to > from 的前向不变量，V7File 走查仍过）→ 同一判定依据
     函数必须报出恰好该条跨函数边（[] → [(from, to')]，谓词在同一产物字节上取反）。"""
     ccr_path = os.path.join(BASE, 'build/test_v7_sem_chain.ccr')
     bad_path = ccr_path + '.xfn'
@@ -2087,7 +2087,7 @@ def test_v7_state_chain_per_function_independence():
         # 正控：零跨函数
         assert _chain_cross_violations(edges, spans) == [], \
             f"cross-function chain edges: {_chain_cross_violations(edges, spans)}"
-        # 负控（咬合）：把 main 内一条 kind=1 边改写到后一函数区间
+        # 负控（命中）：把 main 内一条 kind=1 边改写到后一函数区间
         main_k = _func_of(spans, _func_span(v7, 'main')[0])
         victim = None
         for f in sorted(edges):

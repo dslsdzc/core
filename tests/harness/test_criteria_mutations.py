@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""判据强度**突变自证**（判据网加固批，2026-09-16；纯 python、无需编译器）。
+"""判定依据强度**突变自证**（判定依据网加固阶段，2026-09-16；纯 python、无需编译器）。
 
-目的（判据强度审计 §0 的机械承接面）：把「**什么坏实现能骗过这条断言？**」
-从写注释时的自问，变成**可复跑的证据**——每个被判据网加固批改强的判据，此处
+目的（判定依据强度审计 §0 的机械承接面）：把「**什么坏实现能骗过这条断言？**」
+从写注释时的自问，变成**可复跑的证据**——每个被判定依据网加固阶段改强的判定依据，此处
 构造一个**能骗过旧（弱）形态、且真的坏**的输入，断言：
 
-  ① **旧形态**对该输入**绿**（= 旧判据确实弱，如实记录弱点而非猜测）；
-  ② **新形态**对该输入**红**（= 加固真的咬得住）。
+  ① **旧形态**对该输入**绿**（= 旧判定依据确实弱，如实记录弱点而非猜测）；
+  ② **新形态**对该输入**红**（= 加固真的检出得住）。
 
-被测判据（→ TODO 条目 → 审计表 B 编号）：
+被测判定依据（→ TODO 条目 → 审计表 B 编号）：
   M1 事件 1-4 step 模板        → #2026-09-16-22 / B2（test_hit_table.ev14_template_problems）
   M2 dump 未用字段值域白名单    → #2026-09-16-24 / B3（test_hit_table.dump_sentinel_problems）
   M3 STR 段冷/暖**同态**契约（v21 重定）→ #2026-09-16-25 / B4（test_cir_warm_path.str_contract_equal）
-     · v21（2026-09-18 串域批）前口径 = 「暖 = 冷**前缀**」且被当预存允许；该预存被证为缺陷本体
+     · v21（2026-09-18 串域阶段）前规则 = 「暖 = 冷**前缀**」且被当预存允许；该预存被证为缺陷本体
        ⇒ 前缀样本由正控改列为**坏实现**，正控改为「冷 = 暖逐条相同」
   M4 `--dump-tk-terms` 剔除面白名单 → #2026-09-16-26 / B5（test_ccr_types.dump_strip_face_problems）
 
-口径：全部为**内存内**突变（不改仓库任何文件、不写盘、零副作用）——突变体 =
-真实载体（真实 TOML 表文本 / 真实 ELF 区字节 / 真实 dump 文本）
+规则：全部为**内存内**突变（不改仓库任何文件、不写盘、零副作用）——突变体 =
+真实文件（真实 TOML 表文本 / 真实 ELF 区字节 / 真实 dump 文本）
 的**最小坏实现**式改写。
 
-判据自身失败即 rc=1（CI 挂 bootstrap-tests；见 src/ci/run.sh）。
+判定依据自身失败即 rc=1（CI 挂 bootstrap-tests；见 src/ci/run.sh）。
 
-**批 8 追加（2026-09-18 复核 Important）**：M1–M4 为**纯内存**突变；批 8 的四条突变是「改编译器源码 ⇒
+**阶段 8 追加（2026-09-18 复核 Important）**：M1–M4 为**纯内存**突变；阶段 8 的四条突变是「改编译器源码 ⇒
 重建 ⇒ 探针读数反向」形态，无法内存复刻 ⇒ 此处接机检其可机械验证的两半（**锚点仍唯一命中** + **期望值
-与判据常数一致**，见 `main()` 的 M7–M10 段）；**真跑腿**（重建 + 探针）以 `COREC_MUT_SELF=1` 开启。
+与判定依据常数一致**，见 `main()` 的 M7–M10 段）；**真跑路径**（重建 + 探针）以 `COREC_MUT_SELF=1` 开启。
 """
 
 import os
@@ -43,7 +43,7 @@ import test_cir_warm_path as CW      # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 旧（弱）形态的忠实复刻——**只用作「骗得过」的反证基线**，不参与任何判据
+# 旧（弱）形态的忠实复刻——**只用作「骗得过」的反证基线**，不参与任何判定依据
 # ══════════════════════════════════════════════════════════════════════
 
 def old_ev14_prefix_ok(events) -> bool:
@@ -73,7 +73,7 @@ def old_dump_blacklist_ok(out: str) -> bool:
 
 
 def old_str_size_only_ok(cold_seg: bytes, warm_seg: bytes) -> bool:
-    """#2026-09-16-25 旧形态：STR 段只登记尺寸、**不入判据**（恒绿——差异被显式豁免）。"""
+    """#2026-09-16-25 旧形态：STR 段只登记尺寸、**不入判定依据**（恒绿——差异被显式豁免）。"""
     return True
 
 
@@ -91,12 +91,12 @@ def old_strip_compare_ok(out_flag: str, out_plain: str) -> bool:
 # ══════════════════════════════════════════════════════════════════════
 
 def mut_self_item2():
-    """M7 **真跑腿**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
+    """M7 **真跑路径**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
     ⇒ 六位位码探针须回 **24**（= 修复前读数；2026-09-18 复核重跑实测）；同时**原树正控**同探针须为 **30**。
     成本 ≈ 1 次重建（~1 min）+ 2 次探针编译。用途：把「突变能命中目标」从文档承诺变成**机检**。"""
     # ⚠ v4 迁移：载荷由 v3 形（`{ … ; }`）改为 v4 形（`:` + layout 缩进 + 无 `;`），
     #   且可选字面量 `None` → **`none`**（v4 拼音面；`None` 在 v4 是 `error[N01] Undefined name`）。
-    #   语义（六位位码）不变：未突变树 = 30、突变树 = 24（本批 v4 形载荷实核 30）。
+    #   语义（六位位码）不变：未突变树 = 30、突变树 = 24（本次 v4 形载荷实核 30）。
     probe = ("fn b2i(x: bool) -> int:\n"
              "    if x:\n"
              "        return 1\n"
@@ -170,13 +170,13 @@ def main() -> int:
          tbl.replace('modrm_rm_role = "dst"\nrm_mode = 0',
                      'modrm_rm_role = "dst"\nrm_mode = 1', 1)),
     ]
-    # 注（口径）：`rex_b 1→0` **不列入**——REX 位落在首字节，旧 `[:2]` 也咬得住
-    # （它属「旧判据也够」的面，不是弱点样本；弱点是首 2B 之外的部分）。
+    # 注（规则）：`rex_b 1→0` **不列入**——REX 位落在首字节，旧 `[:2]` 也检出得住
+    # （它属「旧判定依据也够」的面，不是弱点样本；弱点是首 2B 之外的部分）。
     for label, mtxt in muts:
         _ok, mev, _r = HT.load_v2_model(mtxt)
         cases.append((f"M1/#2026-09-16-22 事件模板：{label}",
                       old_ev14_prefix_ok(mev), HT.ev14_template_problems(mev)))
-    # 正控：真实表必须**零问题**（防「判据恒红」也当咬得住）
+    # 正控：真实表必须**零问题**（防「判定依据恒红」也当检出得住）
     cases.append(("M1/#2026-09-16-22 正控：真实 core-x86.toml",
                   old_ev14_prefix_ok(events0), HT.ev14_template_problems(events0),
                   {"expect_strong_clean": True}))
@@ -201,8 +201,8 @@ def main() -> int:
                       HT.dump_sentinel_problems(out)[0]))
     # 形态白名单（旧黑名单完全看不到的维度）：行内**多出一个字段/尾随垃圾** ⇒
     # 整行不匹配 `ev <n> dst=<v> s1=<v> s2=<v>$` ⇒ 红。
-    # 注（口径，勿夸大）：**用于**字段（s1/s2 被该事件消费时）取 255/大值**不是**
-    # 哨兵伪影、本判据也不主张覆盖——哨兵契约只针对**未用**字段（store dst /
+    # 注（规则，勿夸大）：**用于**字段（s1/s2 被该事件消费时）取 255/大值**不是**
+    # 哨兵伪影、本判定依据也不主张覆盖——哨兵契约只针对**未用**字段（store dst /
     # load s2），故「s1=255」不列入突变样本。
     out_junk = good_dump.replace("  ev store dst=0 s1=0 s2=0\n",
                                  "  ev store dst=0 s1=0 s2=0 extra=1\n", 1)
@@ -220,10 +220,10 @@ def main() -> int:
     cold = mk_str([b"main", b"a", b"b", b"_eq0"])
     for label, warm in [
             ("同尺寸改内容", mk_str([b"main", b"a", b"XX", b"_eq0"])),
-            # v21 判据重定（2026-09-18 串域批 · TODO #2026-09-18-9）：旧口径「暖 = 冷前缀」
-            # 曾被当作**预存口径允许的差异**（老正控）；该「预存」已被证为**缺陷本体**
-            # ⇒ 本样本由正控**改列为坏实现**（新判据下必红；旧 size-only 形态下恒绿）。
-            ("暖态截短（旧口径「前缀」；v21 起必红）", mk_str([b"main", b"a", b"b"])),
+            # v21 判定依据重定（2026-09-18 串域阶段 · TODO #2026-09-18-9）：旧规则「暖 = 冷前缀」
+            # 曾被当作**预存规则允许的差异**（老正控）；该「预存」已被证为**缺陷本体**
+            # ⇒ 本样本由正控**改列为坏实现**（新判定依据下必红；旧 size-only 形态下恒绿）。
+            ("暖态截短（旧规则「前缀」；v21 起必红）", mk_str([b"main", b"a", b"b"])),
             ("中间漏一条（后续条目错位）", mk_str([b"main", b"b", b"_eq0"])),
             ("暖态多一条", mk_str([b"main", b"a", b"b", b"_eq0", b"bin"]))]:
         ok_s, _det = CW.str_contract_equal(cold, warm)
@@ -262,10 +262,10 @@ def main() -> int:
                   old_strip_compare_ok(reorder, plain),
                   CT.dump_strip_face_problems(reorder, plain)[0]))
 
-    # ── M7–M10（批 8，2026-09-18 复核 Important ②③）：四条批级突变的**锚点与期望一致性** ──
+    # ── M7–M10（阶段 8，2026-09-18 复核 Important ②③）：四条阶段级突变的**锚点与期望一致性** ──
     # 四条突变都是「改编译器源码 ⇒ 重建 ⇒ 探针读数反向」的形态 ⇒ **无法**用本档纯内存体例复刻；
     # 故接机检其**可机械验证的两半**：① 突变锚点在源码中**仍存在且唯一**（锚漂移 = 突变打空而无人知）；
-    # ② 记录的期望值与被测判据（套件常量 / run.sh 注）**一致**（防「文档期望 ≠ 判据常数」）。
+    # ② 记录的期望值与被测判定依据（套件常量 / run.sh 注）**一致**（防「文档期望 ≠ 判定依据常数」）。
     # **真·重建复跑**（可选、默认关）：`COREC_MUT_SELF=1 python3 tests/harness/test_criteria_mutations.py`
     #   —— 在 /tmp 副本上做 M7 突变（分派块失效化）⇒ 重建 ⇒ 运行六位位码探针 ⇒ 期望 **24**。
     batch8 = []
@@ -284,7 +284,7 @@ def main() -> int:
     post = "BITCODE_POST = 30" in opt_eq
     runsh = (BASE / "src/ci/run.sh").read_text()
     rs = ("修复前 = 24" in runsh and "修复后 = 30" in runsh)
-    batch8.append(("M7/批8-条目2 分派块失效化", n1 == 1 and n2 == 1 and pre and post and rs,
+    batch8.append(("M7/阶段8-条目2 分派块失效化", n1 == 1 and n2 == 1 and pre and post and rs,
                    f"锚点×2={n1}/{n2}（各自须 =1）· BITCODE_PRE/POST 24/30={pre}/{post} · run.sh 注 24/30={rs}"))
 
     # M8：条目 3（extern 可选 ⇒ P24）——突变 = 撤 parser 的 extern_opt 检查 ⇒ 4 拒收例回 check=0
@@ -293,20 +293,20 @@ def main() -> int:
     n2 = _once("src/compiler/parser.cr", "if extern_opt != 0:")
     n3 = _once("src/compiler/ast.cr", "EC_P_EXTERN_OPTIONAL : int = 1024")
     ext = (BASE / "tests/selfhost/test_extern_opt.py").read_text()
-    batch8.append(("M8/批8-条目3 extern 可选 P24", n1 == 1 and n2 == 1 and n3 == 1 and "error[P24]" in ext,
+    batch8.append(("M8/阶段8-条目3 extern 可选 P24", n1 == 1 and n2 == 1 and n3 == 1 and "error[P24]" in ext,
                    f"锚点={n1}/{n2} · 码 1024={n3} · 套件期望 error[P24]={'error[P24]' in ext}"))
 
     # M9：条目 4（顶层兜底 ⇒ P25）——突变 = 兜底退回裸 advance_tok() ⇒ 5 拒收例回 check=0
     # 锚点收紧（2026-09-18）：只用单行 `if tok_k(cur_tok()) != T_EOF {` 会被**无关新代码**撞形
-    # （插值展开批的 `interp_parse_holes` 曾加过同形行 ⇒ 本判据在 CI 假红）。改为**顶层兜底特有的两行合体**。
+    # （插值展开阶段的 `interp_parse_holes` 曾加过同形行 ⇒ 本判定依据在 CI 假红）。改为**顶层兜底特有的两行合体**。
     # ⚠ v4 迁移：兜底锚去 `{`（`!= T_EOF:`）、`is_fileid` 锚去 `;`、码锚去 `;`；
-    #   「两行合体」的收紧口径**原样保留**（仍靠特有后继行区分同形行）。
+    #   「两行合体」的收紧规则**原样保留**（仍靠特有后继行区分同形行）。
     n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF:\n        check_error(EC_P_TOPLEVEL_TOKEN,")
     n2 = _once("src/compiler/parser.cr", "EC_P_TOPLEVEL_TOKEN")
     n3 = _once("src/compiler/parser.cr", "is_fileid := tk == T_FILEID")
     n4 = _once("src/compiler/ast.cr", "EC_P_TOPLEVEL_TOKEN  : int = 1025")
     tlr = (BASE / "tests/selfhost/test_toplevel_reject.py").read_text()
-    batch8.append(("M9/批8-条目4 顶层兜底 P25", n1 == 1 and n2 >= 1 and n3 == 1 and n4 == 1
+    batch8.append(("M9/阶段8-条目4 顶层兜底 P25", n1 == 1 and n2 >= 1 and n3 == 1 and n4 == 1
                    and "error[P25]" in tlr,
                    f"兜底锚={n1} · 码锚={n2} · import 整句消费锚={n3} · 码 1025={n4} · 套件 error[P25]={'error[P25]' in tlr}"))
 
@@ -316,7 +316,7 @@ def main() -> int:
     n2 = _once("src/compiler/parser.cr", "if apx_ok == 0:")
     n3 = _once("src/compiler/ast.cr", "EC_P_APX_TAG         : int = 1026")
     ats = (BASE / "tests/selfhost/test_apx_tag_scope.py").read_text()
-    batch8.append(("M10/批8-条目5 apx 白名单 P26", n1 == 1 and n2 == 1 and n3 == 1 and "error[P26]" in ats,
+    batch8.append(("M10/阶段8-条目5 apx 白名单 P26", n1 == 1 and n2 == 1 and n3 == 1 and "error[P26]" in ats,
                    f"锚点={n1}/{n2} · 码 1026={n3} · 套件 error[P26]={'error[P26]' in ats}"))
 
     # ── 汇总 ───────────────────────────────────────────────────────────
@@ -327,10 +327,10 @@ def main() -> int:
         expect_clean = clean.get("expect_strong_clean", False)
         if expect_clean:
             good = weak_ok and not strong_probs
-            why = "正控：新判据必须零问题" if good else "正控失败"
+            why = "正控：新判定依据必须零问题" if good else "正控失败"
         else:
             good = weak_ok and bool(strong_probs)
-            why = ("旧形态骗得过（绿）+ 新形态咬住（红）" if good
+            why = ("旧形态骗得过（绿）+ 新形态检出（红）" if good
                    else f"旧绿={weak_ok} 新问题数={len(strong_probs)}")
         print(f"[{'PASS' if good else 'FAIL'}] {name} —— {why}")
         if not good:
@@ -341,15 +341,15 @@ def main() -> int:
             bad_cases.append(name)
     if os.environ.get("COREC_MUT_SELF") == "1":
         ok, detail = mut_self_item2()
-        print(f"[{'PASS' if ok else 'FAIL'}] M7/批8-条目2 **真跑**（重建 + 探针）—— {detail}")
+        print(f"[{'PASS' if ok else 'FAIL'}] M7/阶段8-条目2 **真跑**（重建 + 探针）—— {detail}")
         if not ok:
             bad_cases.append("M7 真跑")
     n_mut = sum(1 for c in cases if not (len(c) > 3 and c[3]))
     total = len(cases) + len(batch8)
     print(f"[criteria-mutations] {total - len(bad_cases)}/{total} PASS"
           f"（突变体 {n_mut} 例 + 正控 {len(cases) - n_mut} 例；"
-          f"每例 = 旧形态绿 ∧ 新形态红）· 批 8 锚点/期望一致性 {len(batch8)} 例"
-          f"（真跑腿 {'开' if os.environ.get('COREC_MUT_SELF') == '1' else '关（COREC_MUT_SELF=1 开启）'}）")
+          f"每例 = 旧形态绿 ∧ 新形态红）· 阶段 8 锚点/期望一致性 {len(batch8)} 例"
+          f"（真跑路径 {'开' if os.environ.get('COREC_MUT_SELF') == '1' else '关（COREC_MUT_SELF=1 开启）'}）")
     return 0 if not bad_cases else 1
 
 

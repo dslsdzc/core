@@ -1,6 +1,6 @@
 """V4 返回类型推断：省略 `-> T` 时由函数体推出。
 
-判据：
+判定依据：
   * `fn identity(x): return x` 同型返回 int/string。
   * `fn first(xs): return xs[0]` 由索引推出 int。
   * `fn answer(): return 42` 无参函数推出 int。

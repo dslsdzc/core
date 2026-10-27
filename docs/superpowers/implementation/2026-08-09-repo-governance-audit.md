@@ -24,7 +24,7 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 
 - GitFlow 标准：`main` 是正式版线（仅正式版内容，对应 semver 发布）；`develop` 是集成分支（日常 PR 目标）；feature 到 develop 走 PR（审查 + CI + merge queue）；develop 到 main 的合入只有维护者（DslsDZC）能做（GitFlow 的发布负责人语义）
 - 非对称：实际审查只有一项，你审查 RhineIris 的 PR，反向没有审查。你自己的改动也走 PR，合入使用 B 流程（临时豁免，见「机制限制与过渡」）
-- 结构按最终形态，执行按现状：规则按最终形态全部制定（将来贡献者增多时自动生效），执行上优先遵循互审约定。2026-08-09 实测修正：GitHub 原生禁止作者批准自己的 PR，「自批作为后备」不成立，维护者自己的 PR 合入使用 B 流程临时豁免，见「机制限制与过渡」
+- 结构按最终形态，执行按现状：规则按最终形态全部制定（将来贡献者增多时自动生效），执行上优先遵循互审约定。2026-08-09 实测修正：GitHub 原生禁止作者批准自己的 PR，「自阶段作为后备」不成立，维护者自己的 PR 合入使用 B 流程临时豁免，见「机制限制与过渡」
 - 机制限制（如实记录）：GitHub 没有原生开关禁止以 main 为 base 创建 PR。「PR 不能指向 main」由 main 规则组合强制（restrict pushes 仅 DslsDZC + required reviewers 仅 DslsDZC，指向 main 的 PR 没有维护者批准就无法合入），再加上 CONTRIBUTING 约定（PR 一律指向 develop）实现
 - 硬性规则由 hook 强制执行：`CLAUDE.md` 第 2 条（禁止 `git`，全部使用 `jj`）由 hook 拦截
 
@@ -48,12 +48,12 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 |---|---|---|
 | D1 | 禁直推 | Require a pull request before merging（PR 是唯一合入通道） |
 | D2 | 禁强推 | Block force pushes |
-| D3 | 强制审批 | Require 1 approval + required reviewers 仅 DslsDZC（合入 develop 也需要维护者批准，队列自动执行合并） |
-| D4 | 过时审批作废 | Dismiss stale pull request approvals when new commits are pushed |
+| D3 | 强制审阶段 | Require 1 approval + required reviewers 仅 DslsDZC（合入 develop 也需要维护者批准，队列自动执行合并） |
+| D4 | 过时审阶段作废 | Dismiss stale pull request approvals when new commits are pushed |
 | D5 | 对话必须解决 | Require conversation resolution before merging |
 | D6 | 合并前必须更新分支 | Require branches to be up to date（merge queue 下由队列保证，两项要求共同生效） |
-| D7 | 文件路径限制 | 核心路径 `src/compiler/`、`src/arch/` 下的文件变更需审批（额外的防护检查） |
-| D8 | merge queue | Require merge queue（对应 bors）；入口条件是审批通过且 PR 层 CI 通过 |
+| D7 | 文件路径限制 | 核心路径 `src/compiler/`、`src/arch/` 下的文件变更需审阶段（额外的防护检查） |
+| D8 | merge queue | Require merge queue（对应 bors）；入口条件是审阶段通过且 PR 层 CI 通过 |
 | D9 | 合并策略 | Allow squash merges only + 自动删除已合并源分支 |
 | D10 | 状态检查 | PR 层 CI job 名（check / bootstrap-tests / selfhost-tests），CI 已实现（见 CI 一节），配置时直接填入 |
 | D11 | 管理员无绕过 | 规则对仓库管理员同样生效 |
@@ -64,13 +64,13 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 - 实施过渡：两个 ruleset 先以 evaluate（试运行）模式启用，观察确认无干扰后转为 active
 - 2026-08-09 实施偏差（免费计划限制，已实测）：
   - `enforcement: evaluate` 仅 Enterprise 可用。免费计划已直接以 active 创建，没有试运行期，规则立即生效
-  - `merge_queue` 规则被 API 拒绝（"Invalid rule 'merge_queue'" 空原因），降级为手动合入：审批和 CI 状态检查要求保留，D1/D3/D8 的自动串行合入部分由人工点击合入替代
+  - `merge_queue` 规则被 API 拒绝（"Invalid rule 'merge_queue'" 空原因），降级为手动合入：审阶段和 CI 状态检查要求保留，D1/D3/D8 的自动串行合入部分由人工点击合入替代
   - `pull_request` 参数 schema 实测：5 个必填布尔（含 `require_code_owner_review`）、`allowed_merge_methods: ["squash"]` 强制 squash-only
   - `required_status_checks` 参数数组字段名是 `required_status_checks`（非 `checks`）
   - 2026-08-09 实测（流程验证）：
-    - GitHub 原生禁止作者批准自己的 PR（"Can not approve your own pull request"），「自批作为后备」的前提不成立；管理员强制合并也会被 bypass_actors 空集拦截
+    - GitHub 原生禁止作者批准自己的 PR（"Can not approve your own pull request"），「自阶段作为后备」的前提不成立；管理员强制合并也会被 bypass_actors 空集拦截
     - B 流程（既定路径）：维护者自己的 PR 合入时，临时禁用对应 ruleset，squash 合并，然后恢复 active（PR #26 首次执行，2026-08-09）
-    - RhineIris 的审批要计入 required approvals，需要 write 权限（fork 贡献者的审批不满足要求），待决策是否授予 collaborator
+    - RhineIris 的审阶段要计入 required approvals，需要 write 权限（fork 贡献者的审阶段不满足要求），待决策是否授予 collaborator
     - CI 工作流注册冻结持续（GitHub 侧，注册表包含已删文件、缺少新文件），`develop` 的 `required_status_checks` 暂时移除，注册恢复后回填
   - M7（release/* 标签保护）与 D7（文件路径限制）未实施：脚本和已建 ruleset 都没有包含（免费计划可用但暂缓），列入后续项
 
@@ -131,7 +131,7 @@ gh pr create --base main --fill       # develop 到 main 的 PR（required revie
 - [ ] 指向 `main` 的 PR（非维护者创建）无法被批准合入，`required reviewers` 仅 DslsDZC
 - [ ] `develop` 到 `main` 合并只有维护者执行成功
 - [ ] 维护者自有 `feature` PR：B 流程（临时豁免），squash 合入 `develop`，源分支自动删除
-- [ ] RhineIris fork PR：`base=develop`，完整流程，维护者审批后合入 `develop`
+- [ ] RhineIris fork PR：`base=develop`，完整流程，维护者审阶段后合入 `develop`
 - [ ] 未签名提交的 PR 被拒（签名规则生效）；`jj log --no-graph -T 'signature'` 可见签名
 - [ ] 管理员账号直推 `main` 同样被拒（绕过已关闭）
 - [ ] `git` 命令被 hook 拦截；`jj` 一切正常
@@ -159,7 +159,7 @@ gh pr create --base main --fill       # develop 到 main 的 PR（required revie
 - Issue 模板（bug/特性请求）、标签体系，贡献者规模扩大后补
 - Dependabot：不做（仓库零外部依赖）
 - CI 优化：actions/cache 缓存 `build/corec`（多 job 共享构建产物）；`full-bootstrap` 启用（依赖自举阻塞项修复）；`opt-regress`（O0/O1 回归）启用
-- 部署环境门禁（required deployment）：没有发布流水线前不做
+- 部署环境前提（required deployment）：没有发布流水线前不做
 
 ## 当前状态
 

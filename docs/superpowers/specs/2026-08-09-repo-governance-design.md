@@ -44,12 +44,12 @@ Core 的开发流程按最终形态制定规则，执行按当前规模放宽。
 |---|---|---|
 | D1 | 禁止直推 | 必须走 PR |
 | D2 | 禁止强推 | Block force pushes |
-| D3 | 强制审批 | 1 个批准，required reviewers 仅 DslsDZC |
-| D4 | 过时审批作废 | 新提交推送后作废旧批准 |
+| D3 | 强制审阶段 | 1 个批准，required reviewers 仅 DslsDZC |
+| D4 | 过时审阶段作废 | 新提交推送后作废旧批准 |
 | D5 | 对话必须解决 | 合入前解决全部对话 |
 | D6 | 合并前更新分支 | 分支必须是最新的 |
-| D7 | 核心路径限制 | `src/compiler/` 和 `src/arch/` 的变更需要审批 |
-| D8 | merge queue | 要求合并队列，入口是审批通过且 PR CI 通过 |
+| D7 | 核心路径限制 | `src/compiler/` 和 `src/arch/` 的变更需要审阶段 |
+| D8 | merge queue | 要求合并队列，入口是审阶段通过且 PR CI 通过 |
 | D9 | 合并策略 | 只允许 squash merge，自动删除源分支 |
 | D10 | 状态检查 | PR 层 CI job：check、bootstrap-tests、selfhost-tests |
 | D11 | 管理员无绕过 | 规则对管理员同样生效 |
@@ -58,9 +58,9 @@ Core 的开发流程按最终形态制定规则，执行按当前规模放宽。
 
 - GitHub 没有原生开关禁止以 `main` 为 base 创建 PR。`M4` 使指向 `main` 的 PR 无法由维护者以外的人合入。
 - 两个 ruleset 原计划先用 evaluate 模式试运行。免费计划不支持 evaluate，规则直接 active。
-- `merge_queue` 规则在免费计划被 API 拒绝，降级为手动合入。审批和 CI 状态检查保留，自动串行合入由人工点击替代。
+- `merge_queue` 规则在免费计划被 API 拒绝，降级为手动合入。审阶段和 CI 状态检查保留，自动串行合入由人工点击替代。
 - GitHub 禁止作者批准自己的 PR。维护者自己的 PR 合入时，临时禁用对应 ruleset，squash 合并，然后恢复。
-- 贡献者的审批要计入 required approvals，需要 write 权限。fork 贡献者的审批不满足要求。
+- 贡献者的审阶段要计入 required approvals，需要 write 权限。fork 贡献者的审阶段不满足要求。
 - `M7` 标签保护和 `D7` 路径限制暂缓，列入后续项。
 
 ## CI
@@ -156,7 +156,7 @@ gh pr create --base main --fill
 - Issue 模板和标签体系，贡献者规模扩大后补。
 - Dependabot 不做，仓库零外部依赖。
 - CI 优化：缓存 `build/corec`，启用 `full-bootstrap`，启用 `opt-regress`。
-- 部署环境门禁在没有发布流水线前不做。
+- 部署环境前提在没有发布流水线前不做。
 
 ## 当前状态
 

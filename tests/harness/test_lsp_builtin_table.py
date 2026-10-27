@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LSP `@` 内建补全表 ↔ 语言面真源 一致性判据（2026-09-18 判据接线批；纯 python、无编译器依赖）。
+"""LSP `@` 内建补全表 ↔ 语言面真源 一致性判定依据（2026-09-18 判定依据接线阶段；纯 python、无编译器依赖）。
 
 背景：`src/lsp/analysis.cr::analysis_at_items()` 的候选表是**字面量镜像**——它必须等于语言面
 「`@` 名字」的**并集**（两个真源）：
@@ -11,7 +11,7 @@
 **必须排除** `#` 面注解解析器（今日 = `parse_spec_annotations` ⇒ `check`/`ensure`；走 `#` 语法，
 不属 `@` 补全表）——排除是**显式分类**，不是「忽略」。
 
-判据：
+判定依据：
   L1 **真源枚举守卫（防第三真源静默失效）**：`parser.cr` 里 `fn parse_*annotation*` 的集合必须
      == 已分类集合 {`parse_ffi_annotation`（@ 面）· `parse_spec_annotations`（# 面，显式排除）}；
      **多一个就红** ⇒ 强制新增注解被分类（否则将来加注解时本守卫静默变瞎 = 本仓最忌类）。
@@ -119,7 +119,7 @@ def truth_set(ck_text, pp_text):
 
 
 def judge(ck_text, pp_text, lsp_text):
-    """返回 (ok, msgs)。ok=False ⇒ 判据红；msgs 为逐条明细（红=原因 / 绿=读数）。"""
+    """返回 (ok, msgs)。ok=False ⇒ 判定依据红；msgs 为逐条明细（红=原因 / 绿=读数）。"""
     msgs = []
     bad = False
     truth, parsers = truth_set(ck_text, pp_text)
@@ -131,12 +131,12 @@ def judge(ck_text, pp_text, lsp_text):
         bad = True
         new = sorted(parsers - KNOWN_PARSERS)
         gone = sorted(KNOWN_PARSERS - parsers)
-        msgs.append("L1 红：注解解析器集合变了 ⇒ 新增 %s / 消失 %s；**必须分类（@ 面 / # 面）并更新本判据**"
+        msgs.append("L1 红：注解解析器集合变了 ⇒ 新增 %s / 消失 %s；**必须分类（@ 面 / # 面）并更新本判定依据**"
                     % (new or "无", gone or "无"))
 
     # L3 非真空控制
     if not ck or not lsp or truth is None:
-        msgs.append("L3 红：抽取为空（checker=%s lsp=%s truth=%s）⇒ 判据正则失效，拒绝恒绿"
+        msgs.append("L3 红：抽取为空（checker=%s lsp=%s truth=%s）⇒ 判定依据正则失效，拒绝恒绿"
                     % (len(ck or ()), len(lsp or ()), "None" if truth is None else len(truth)))
         return False, msgs
 
@@ -170,11 +170,11 @@ def mutate_first_in_block(text):
         if STR_EQ_NAME.search(lines[i]):
             lines[i] = STR_EQ_NAME.sub('str_eq(name, "__removed__")', lines[i], count=1)
             return "\n".join(lines)
-    raise AssertionError("EXPR_AT 块内未找到可突变点（判据抽取口径可能已漂移）")
+    raise AssertionError("EXPR_AT 块内未找到可突变点（判定依据抽取规则可能已漂移）")
 
 
 def selftest(ck, pp, lsp):
-    """L4 突变自证：内存内改文本，断言判据必红（双向 + 真源面）；未突变必绿。"""
+    """L4 突变自证：内存内改文本，断言判定依据必红（双向 + 真源面）；未突变必绿。"""
     ok0, _ = judge(ck, pp, lsp)
     report("L4 正控（未突变 ⇒ 绿）", ok0, [])
     # ① 删 LSP 表一名

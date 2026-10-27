@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""2(a) 视图内建（`@ptr_of` / `@str_of`）——**两面一致性 + 零代码生成 + fail-closed + 安全面**判据。
+"""2(a) 视图内建（`@ptr_of` / `@str_of`）——**两面一致性 + 零代码生成 + fail-closed + 安全面**判定依据。
 
-**语义（本批口径）**：视图内建 = **同一个 64 位字的两种看法**（零转换、零拷贝、零运行期动作）：
+**语义（本次规则）**：视图内建 = **同一个 64 位字的两种看法**（零转换、零拷贝、零运行期动作）：
     `@ptr_of(s: string) -> int`  ·  `@str_of(p: int) -> string`
-它不是类型转换：`@ptr_of(@str_of(p)) == p` 对**任意**字成立（本判据的 ok 腿就是这么测的——值 42
+它不是类型转换：`@ptr_of(@str_of(p)) == p` 对**任意**字成立（本判定依据的 ok 路径就是这么测的——值 42
 既不是有效指针也不是有效 intern 索引，任何真转换/真解引用都会在此暴露）。
 
-**为什么必须有「两面」判据**（team-lead 硬要求①）：
+**为什么必须有「两面」判定依据**（team-lead 硬要求①）：
 自源（`src/compiler/*.cr`、`src/stdlib/*.cr`）**必须能被 Python bootstrap 编**——
-bootstrap 面缺一条产生式，构建期就红（本批已实测过同族两次：`as`、`|`/`&`）。
+bootstrap 面缺一条产生式，构建期就红（本次已实测过同族两次：`as`、`|`/`&`）。
 ⇒ 新增内建必须在**两面**都是同一套语义与同一套拒绝规则，只测一面 = 把「自源写不出」留到构建期才炸。
 
-**硬要求②（零代码生成）**：不得靠类比 `@addr(fn)` 论证，必须**由判据证明**——
-本档的「往返擦除」腿：`f(p) = @ptr_of(@str_of(p))` 与 `f(p) = p` 的产物（ELF）**逐字节一致**。
+**硬要求②（零代码生成）**：不得靠类比 `@addr(fn)` 论证，必须**由判定依据证明**——
+本档的「往返擦除」路径：`f(p) = @ptr_of(@str_of(p))` 与 `f(p) = p` 的产物（ELF）**逐字节一致**。
 
 **硬要求③（fail-closed）**：未知名两面都必须报错，不得静默当 0。
 
@@ -33,8 +33,8 @@ COREARCH = BASE / "build" / "corearch"
 BOOTSTRAP = BASE / "bootstrap"
 
 # ── 探针 ─────────────────────────────────────────────────────────────────────
-# ok 腿：视图往返。42 既不是有效指针、也不是有效 intern 索引 ⇒ 「视图 = 换看法」成立才可能 = 42。
-# （若实现里偷偷做了解引用/查表，本腿在任一运行期腿都会崩或给别的值。）
+# ok 路径：视图往返。42 既不是有效指针、也不是有效 intern 索引 ⇒ 「视图 = 换看法」成立才可能 = 42。
+# （若实现里偷偷做了解引用/查表，本路径在任一运行期路径都会崩或给别的值。）
 VIEW_ROUNDTRIP = """fn main() -> int:
     p : ., mut = 42
     q : ., mut = 0
@@ -151,8 +151,8 @@ def bootstrap_run_value(src: str):
 
     为什么用 bootstrap 解释器而不是汇编链接成 ELF：`rt.s` 的 `runtime.o` 引用一堆支持符号
     （`hp_load_config`/`sched_*`/`chan_*`/`g_free`…），探针要独立链接必须把整套 stdlib 一起编 ——
-    那是「探针环境」问题，不是**编译器两面**的差异。解释器腿同样走 bootstrap 的 ir_gen ⇒
-    「同一探针在两面得到同一个值」这条判据 ✓ 成立（自托管面另有解释器 + 原生两条腿）。
+    那是「探针环境」问题，不是**编译器两面**的差异。解释器路径同样走 bootstrap 的 ir_gen ⇒
+    「同一探针在两面得到同一个值」这条判定依据 ✓ 成立（自托管面另有解释器 + 原生两条路径）。
     """
     if str(BOOTSTRAP) not in sys.path:
         sys.path.insert(0, str(BOOTSTRAP))
@@ -196,7 +196,7 @@ def corec_check(src: str):
 
 
 def corec_run(src: str):
-    """自托管面 · 解释器腿：`corec run <源码文本>`（**注意：run 收内联源码，不是文件路径**——
+    """自托管面 · 解释器路径：`corec run <源码文本>`（**注意：run 收内联源码，不是文件路径**——
     传路径会得到 `error: Unexpected token in expression`，那是探针错、不是编译器分歧）⇒ rc = 返回值。"""
     subprocess.run([str(COREC), "clean-cache"], cwd=BASE, capture_output=True, timeout=120)
     r = subprocess.run([str(COREC), "run", src], cwd=BASE, capture_output=True,
@@ -207,7 +207,7 @@ def corec_run(src: str):
 
 
 def corec_build_native(src: str):
-    """自托管面 · 原生腿：`build --static` ⇒ (rc, ELF 路径)。"""
+    """自托管面 · 原生路径：`build --static` ⇒ (rc, ELF 路径)。"""
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
         f.write(src)
         path = f.name
@@ -257,22 +257,22 @@ def main():
             ok = False
             fails.append(name)
 
-    # ── ① 两面一致：ok 腿（同一探针：自托管 check/run/native + bootstrap 管线/ELF） ──
+    # ── ① 两面一致：ok 路径（同一探针：自托管 check/run/native + bootstrap 管线/ELF） ──
     rc_c, diags_c = corec_check(VIEW_ROUNDTRIP)
     errs_b, ir_b = bootstrap_pipeline(VIEW_ROUNDTRIP)
     rc_i = corec_run(VIEW_ROUNDTRIP)
     rc_n, elf_n = corec_build_native(VIEW_ROUNDTRIP)
     rc_elf = subprocess.run([str(elf_n)], capture_output=True).returncode if elf_n else -1
     rc_b = bootstrap_run_value(VIEW_ROUNDTRIP)
-    print(f"[① 两面一致·ok 腿] 自托管 check rc={rc_c} {diags_c} · 解释器 rc={rc_i} · native rc={rc_elf} "
+    print(f"[① 两面一致·ok 路径] 自托管 check rc={rc_c} {diags_c} · 解释器 rc={rc_i} · native rc={rc_elf} "
           f"· bootstrap errors={errs_b} · bootstrap 运行值 {rc_b}")
     expect("ok_selfhost_check", rc_c == 0 and not diags_c, diags_c)
     expect("ok_bootstrap_pipeline", not errs_b and ir_b, errs_b)
     expect("ok_value_42_all_faces", rc_i == 42 and rc_elf == 42 and rc_b == 42,
            f"解释器 {rc_i} · native {rc_elf} · bootstrap {rc_b}")
 
-    # ── ② 视图语义（明确 raw 腿；BigInt 默认腿见 ①）──────────────
-    #   BigInt 默认模式不再承诺视图零字节；raw 腿只验证往返语义仍等于直写。
+    # ── ② 视图语义（明确 raw 路径；BigInt 默认路径见 ①）──────────────
+    #   BigInt 默认模式不再承诺视图零字节；raw 路径只验证往返语义仍等于直写。
     _, elf_a = corec_build_raw_native(ERASE_INT_VIEW)
     _, elf_b = corec_build_raw_native(ERASE_INT_PLAIN)
     rc_a = subprocess.run([str(elf_a)], capture_output=True).returncode if elf_a else -1
@@ -315,10 +315,10 @@ def main():
         expect(f"argtype_{nm}_bootstrap_rejected", bool(errs_tb), errs_tb)
 
     # ── ⑥ cli.cr 值面 e2e（2(a) 计划 §2.3：该类今日零覆盖）──
-    # 原生腿：注册（`@ptr_of` 写裸字表）→ 帮助打印（`@str_of` 读裸字表）逐子串断言；
-    # 解释器腿：**只断言 rc**——`cli_help` 在解释器腿不产出（`alloc`+`w64/r64` 的裸内存路径
+    # 原生路径：注册（`@ptr_of` 写裸字表）→ 帮助打印（`@str_of` 读裸字表）逐子串断言；
+    # 解释器路径：**只断言 rc**——`cli_help` 在解释器路径不产出（`alloc`+`w64/r64` 的裸内存路径
     # 在解释器里是近似，`interp.cr:719` 自注）。已实测**迁移前/后同为 166B 输出**（无行为变化），
-    # 故此分歧与 2(a) 无关，不得当成本批引入的差异。
+    # 故此分歧与 2(a) 无关，不得当成本次引入的差异。
     cli_src = BASE / "tests" / "suite" / "cli_view_test.cr"
     cli_text = cli_src.read_text(encoding="utf-8")
     out = Path(tempfile.mkdtemp()) / "cli_view"

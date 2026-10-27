@@ -2,14 +2,14 @@
 """v4 语法迁移 T4 —— `src/**/*.cr` 语料（92 档）的一次性机械改写工具。
 
 出处（规格）：
-  - docs/superpowers/plans/2026-09-24-v4-syntax-migration.md §六（T4）与 §二（判据纪律）
+  - docs/superpowers/plans/2026-09-24-v4-syntax-migration.md §六（T4）与 §二（判定依据纪律）
   - docs/maintainer/design/v4-layout-spec.md（T0 布局规格：空行/注释行/行尾注释的 anchor 规则）
   - docs/developer/syntax.md（目标语法）
 
 用途：把 v3 写法（`{}` 块 + `;` 分隔）**机械改写成** v4 写法（`:` 结尾 + layout 缩进 + 换行分隔）。
 形状只有两类（计划 §6.1）：`{}` → `:` + 缩进、`;` → 换行。**不做任何语义改动**。
 
-⚠ **本工具是一次性迁移工具，不是常设判据。**
+⚠ **本工具是一次性迁移工具，不是常设判定依据。**
   迁移收尾后它就该被冻结/删除；不得把它接进 CI，也不得让任何常设门依赖它。
   它自带的三项读数（V1 解析 / V2 token 对拍 / V3 计数 / V4 注释计数）是**当时那一刻**的
   迁移验收读数，不是回归网（回归网见计划 §二 的代 0/代 1/代 2 代表）。
@@ -169,7 +169,7 @@ EMPTY_ACTIONS = {
     ('src/compiler/interp.cr', 394): 'delete-if',   # if op2 == 51 { }        // IR_APPROX
     ('src/compiler/interp.cr', 722): 'delete-if',   # if op == 33 { }         // IR_ARENA_RESET
     ('src/compiler/parser.cr', 1743): 'delete-if',  # if is_flow != 0 { /*2 行注释*/ }
-    # —— 协调者 2026-10-11 二裁（7 处全批）——
+    # —— 协调者 2026-10-11 二裁（7 处全阶段）——
     # 理由行：条件是局部量（tf / cv / then_node / else_node）的纯比较（无调用、无赋值），
     # 链的净效果 = 按序读这些局部量若干次，无可观察行为 ⇒ 整条链删；块内注释逐字保留。
     ('src/compiler/interp.cr', 97): 'delete-if-chain',   # if tf == 1||tf == 3 { } else if tf == 2||tf == 3 { }
@@ -274,7 +274,7 @@ def _statement_start(toks, idx):
 #      要求注解与声明**同行**（`parse_expr()` 之后立刻 `check(T_FN)`），独立行 ⇒ `error[P25]`。
 #
 # ⚠ 三条都**按行形精确匹配**，命中不了就**原样不动**（负例语料里的错位标注因此不被误改），
-#   只有「看起来是要改、但形态不在口径内」才进 `unresolved`（fail-closed）。
+#   只有「看起来是要改、但形态不在规则内」才进 `unresolved`（fail-closed）。
 _ANNOT_LINE_RE = re.compile(r'^#(check|ensure)\s*\(')
 _HOTPATCH_LINE_RE = re.compile(r'^@hotpatch(\(.*\))?$')
 
@@ -307,12 +307,12 @@ def _t6_extra_ops(toks, brace_kind, brace_match, src, filename, recs, unresolved
                 ops.append((toks[j].start, toks[j].end, '='))
                 recs.setdefault('struct_lit_eq', []).append('%s:%d' % (filename, tk.line))
 
-    # ── E5：`None` → `none`（v4 关键字拼写；**本批唯一的非形状改写**）──
+    # ── E5：`None` → `none`（v4 关键字拼写；**本次唯一的非形状改写**）──
     # 依据：v4 关键字表（docs/developer/syntax.md）含 `none`，无 `None`；
     # 实测 `z : int? = None` ⇒ `error[N01] Undefined name 'None'`，`= none` ⇒ rc=0。
     # T4 工具头注 R3 明写「`none` ↔ `None` 的关键字化不参与本变换」——那是因为 `src/**`
     # **零处**使用（实核：`grep -n '\bNone\b' src/**/*.cr` 只命中注释），T4 面从不需要它。
-    # T6a 面有 2 档使用 ⇒ 必须同批改，否则这两档的 `T?` 语义面在 v4 下当场 N01。
+    # T6a 面有 2 档使用 ⇒ 必须同阶段改，否则这两档的 `T?` 语义面在 v4 下当场 N01。
     # 只改**裸 IDENT token**（字符串/注释不是 token，天然不误伤）。
     for tk in toks:
         if tk.type in (T.NONE,) or (tk.type == T.IDENT and tk.lexeme == 'None'):
@@ -749,7 +749,7 @@ def transform_text(src, filename='<unknown>', empty_policy='table'):
             pass
 
     # 行尾空白清理：注释行/空行是**逐字搬运**的，被删掉的 `if … {` 会留下「只有空格」的行；
-    # 统一 `rstrip` 每行（行尾空白对任何判据都无意义）⇒ 产物 = `transform(基线)` 的确定函数。
+    # 统一 `rstrip` 每行（行尾空白对任何判定依据都无意义）⇒ 产物 = `transform(基线)` 的确定函数。
     #
     # 末尾换行**恒补一个**（`'\n'.join(out) + '\n'`）：`out` 的每一项是「一行」，
     # 于是 `out = […, 'X', '']` 必须落成 `…X\n\n`（= X 之后**一个空行**），
@@ -768,10 +768,10 @@ def _v4_parse_ok_native(text, filename):
     """用**本仓自源编译器**（`build/corec check`）做 v4 解析读数。
 
     T6a 追加的理由（实测，逐条可复现）：`bootstrap/` 的 Python 前端**落后于**自源前端，
-    在本批语料上至少四处误报（自源 rc=0 而 Python 前端语法错）：
+    在本次语料上至少四处误报（自源 rc=0 而 Python 前端语法错）：
       · 语句位 `as` 转换（`n := d as int`）——Python 前端「expected end of line, got 'as'」；
       · `extern fn` 顶层声明；· `go i 0..3 f(i)`（并行 for）；· `*T` 作结构体字段类型 / 元组类型。
-    ⇒ 对 `src/` 之外这批语料，**判据的目标前端是自源编译器**（T5 已落地）；Python 前端只作补充。
+    ⇒ 对 `src/` 之外这阶段语料，**判定依据的目标前端是自源编译器**（T5 已落地）；Python 前端只作补充。
     临时落盘路径保留相对路径（import 解析靠文件所在目录），cwd = 仓根（prelude 取自 `src/stdlib/`）。
     """
     import subprocess
@@ -790,7 +790,7 @@ def _v4_parse_ok_native(text, filename):
     if p.returncode == 0:
         return True, None
     # **只把 parse 相（[3/5] 与 [4/5] 之间）的 error 算 V1 失败**。
-    # 理由：本批一半语料是**负例**（probes/spec/suite 的 rc=1 是**预期**），`check` 的 rc
+    # 理由：本次一半语料是**负例**（probes/spec/suite 的 rc=1 是**预期**），`check` 的 rc
     # 把「解析失败」与「语义/负例报错」混在一个数里 ⇒ 直接拿 rc 当 V1 会把负例全部误判。
     # 空文件（`cannot read`，出现在 [1/5] 之前）不计失败（T6a 面有 4 档 0 字节档）。
     lines = out.splitlines()
@@ -891,7 +891,7 @@ def brace_counts(text):
 
 
 def comment_counts(text):
-    """粗算注释条数：`//` 行数与 `/* */` 块数（够用于「不得下降」的判据）。"""
+    """粗算注释条数：`//` 行数与 `/* */` 块数（够用于「不得下降」的判定依据）。"""
     line_c = 0
     for ln in text.split('\n'):
         s = ln.lstrip()
@@ -905,7 +905,7 @@ def comment_counts(text):
 
 
 def _lines(text):
-    """物理行表（去掉「以 `\n` 收尾」产生的那个尾空元素 ⇒ 与 `grep -c '^$'` 同口径）。"""
+    """物理行表（去掉「以 `\n` 收尾」产生的那个尾空元素 ⇒ 与 `grep -c '^$'` 同规则）。"""
     ls = text.split('\n')
     if ls and ls[-1] == '':
         ls.pop()
@@ -915,7 +915,7 @@ def _lines(text):
 def file_metrics(text):
     """逐档读数：花括号（裸）、`;`（裸）、注释、空行。
 
-    **V4 是双读数**（协调者 2026-10-11 补判据缺口）：
+    **V4 是双读数**（协调者 2026-10-11 补判定依据缺口）：
       - V4a `comment_lines` = `//` 起首的行数（**不得下降**）；
       - V4b `blank_lines`   = 空行数（**不得下降**）。
     只查 V4a 会漏掉「`}` 行消失时把相邻空行一起吞掉」这类格式回归——

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""T1/T2 判据载体 —— Python bootstrap 前端的 v4 语法面（**零构建**）。
+"""T1/T2 判定依据文件 —— Python bootstrap 前端的 v4 语法面（**零构建**）。
 
 出处（权威）：`docs/superpowers/plans/2026-09-24-v4-syntax-migration.md` §四（T1/T2）
 · `docs/maintainer/design/v4-layout-spec.md`（T0 布局规格，五条判定）。
-本探针是 T0 探针 `tools/v4_layout_probe.py` 的**姊妹档**（同一批，同款纪律）：
-T0 探针判「规格自洽」，本探针判「**实现与规格相符**」+ J-T1-1/J-T1-2 两条冻结/一致判据。
+本探针是 T0 探针 `tools/v4_layout_probe.py` 的**姊妹档**（同一组，同款纪律）：
+T0 探针判「规格自洽」，本探针判「**实现与规格相符**」+ J-T1-1/J-T1-2 两条冻结/一致判定依据。
 
 用法（从仓库根跑）：
     python3 tools/v4_frontend_probe.py features            # v4 语料过全管线（LEX→…→解释器）
@@ -20,10 +20,10 @@ T0 探针判「规格自洽」，本探针判「**实现与规格相符**」+ J-
 
 **当前预期（T1/T2 落地时点，不得粉饰）**：
   - `features` / `layout` / `colon` / `structlit` / `typenames` / `semi` / `ast-freeze` / `mutations` ⇒ **rc=0**；
-  - `keywords` ⇒ **rc=1**（J-T1-2 是**批末**判据：自源侧 36 → 39 属 T5，本步只改
+  - `keywords` ⇒ **rc=1**（J-T1-2 是**阶段末**判定依据：自源侧 36 → 39 属 T5，本步只改
     bootstrap 侧 ⇒ 差集非空是**设计使然**，实报见该子命令的输出）。
 
-反向对照纪律（本仓既有）：每条判据都要有一条「改坏一处 ⇒ 必红」的机械证据；
+反向对照纪律（本仓既有）：每条判定依据都要有一条「改坏一处 ⇒ 必红」的机械证据；
 `mutations` 子命令即为此而设（内存内突变，不落盘、不改 runner 计数）。
 """
 import dataclasses
@@ -55,8 +55,8 @@ CHECKS = 0
 
 
 def check(cond, label, detail=''):
-    """记一次判据。**空转防护**：`main` 收尾断言 `CHECKS` 有下限 ——
-    判据面若因夹具/抽取变空而「0 == 0 通过」，等于没判（本仓 2026-09-24 #174 在
+    """记一次判定依据。**空转防护**：`main` 收尾断言 `CHECKS` 有下限 ——
+    判定依据面若因夹具/抽取变空而「0 == 0 通过」，等于没判（本仓 2026-09-24 #174 在
     姊妹档 `tools/v4_layout_probe.py` 里实测到过这一形态，故本档把它写成机械闸）。"""
     global CHECKS
     CHECKS += 1
@@ -68,8 +68,8 @@ def check(cond, label, detail=''):
     return cond
 
 
-# 判据条数下限（**非空转下限**，不是「跑到就够了」的计数）：逐子命令留余量、不追平。
-# 触发场景：夹具列表被删空 / 抽取正则失配 ⇒ 判据跑了 0 条却「全绿」。
+# 判定依据条数下限（**非空转下限**，不是「跑到就够了」的计数）：逐子命令留余量、不追平。
+# 触发场景：夹具列表被删空 / 抽取正则失配 ⇒ 判定依据跑了 0 条却「全绿」。
 CHECK_FLOOR = {
     'features': 25, 'layout': 8, 'colon': 17, 'structlit': 3, 'typenames': 7,
     'semi': 5, 'ast-freeze': 5, 'keywords': 5, 'mutations': 4,
@@ -494,7 +494,7 @@ def cmd_colon():
         check(True, '[反向·族一] 形参标注断行 ⇒ 响亮拒绝（§2.2 的兜住点）')
 
     # 反向对照族二：把行尾判定改成「注释也算 token」⇒ `fn f(): // note` 应被误判行内。
-    # 判据 = 通过**唯一扫描器** `_scan_blank_comment` 注入「不跳注释」行为，断言标签翻转。
+    # 判定依据 = 通过**唯一扫描器** `_scan_blank_comment` 注入「不跳注释」行为，断言标签翻转。
     src2 = 'fn f(): // note\n'
     real = Lexer._scan_blank_comment
 
@@ -539,7 +539,7 @@ def cmd_structlit():
     bad = 'struct P:\n    x: int\n\nfn main() -> int:\n    p := P { x: 1 }\n    return p.x\n'
     try:
         run_pipeline(bad)
-        check(False, '`:` 形（未选定形）必须响亮拒绝', '**两形都收** —— 判据无鉴别力')
+        check(False, '`:` 形（未选定形）必须响亮拒绝', '**两形都收** —— 判定依据无鉴别力')
     except SyntaxError as e:
         check('P030' in str(e), '`:` 形响亮拒绝且点名 P030', str(e))
 
@@ -572,9 +572,9 @@ def cmd_structlit():
         try:
             run_pipeline(bad)
             check(True, '[反向] 还原成盲跳（改前实现）⇒ `:` 形**被静默收下** '
-                        '（证明本判据的鉴别力来自那条守卫）')
+                        '（证明本判定依据的鉴别力来自那条守卫）')
         except SyntaxError:
-            check(False, '[反向] 还原成盲跳后仍报错 ⇒ 红的不是那条守卫（判据无鉴别力）')
+            check(False, '[反向] 还原成盲跳后仍报错 ⇒ 红的不是那条守卫（判定依据无鉴别力）')
     finally:
         Parser.parse_primary = orig
     return not FAILS
@@ -700,11 +700,11 @@ def cmd_ast_freeze(rev):
 
     # 反向对照：故意加一个 class ⇒ 必红
     mutated = ast_classes(read_file('bootstrap/corec/syntax/ast.py') + '\nclass ZzProbeAdded:\n    pass\n')
-    check(mutated != base, '[反向] 故意加一个 class ⇒ 判据当场红（差集 = %r）'
+    check(mutated != base, '[反向] 故意加一个 class ⇒ 判定依据当场红（差集 = %r）'
           % sorted(set(mutated) - set(base)))
     # 反向对照 2：删一个 class ⇒ 必红
     dropped = [c for c in base if c != base[0]]
-    check(dropped != base, '[反向] 删一个 class（%s）⇒ 判据当场红' % base[0])
+    check(dropped != base, '[反向] 删一个 class（%s）⇒ 判定依据当场红' % base[0])
     return not FAILS
 
 
@@ -737,7 +737,7 @@ def bootstrap_keywords(text):
 
 
 def cmd_keywords(rev=None):
-    print('[keywords] J-T1-2：两套前端关键字表逐元素一致（**批末**判据）')
+    print('[keywords] J-T1-2：两套前端关键字表逐元素一致（**阶段末**判定依据）')
     boot = bootstrap_keywords(read_file('bootstrap/corec/syntax/tokens.py', rev))
     sh = selfhost_keywords(read_file('src/compiler/lexer.cr', rev))
     # **空转闸**：两侧抽取若同时变空，差集也空 ⇒ J-T1-2 会假绿
@@ -777,14 +777,14 @@ def cmd_keywords(rev=None):
 
 # ── positions：位置语义（语句位尾值 vs 语句）──────────────────────────────
 #
-# **本组判据的存在理由**：v4 无 `;` ⇒ 语句末的裸表达式一度被一律当 region 尾值
+# **本组判定依据的存在理由**：v4 无 `;` ⇒ 语句末的裸表达式一度被一律当 region 尾值
 # （`Block.expr`）⇒ 块类型由 unit 变 int ⇒ 全量构建刷出 **758 条**类型告警
-# （`expected return type` 450 + `If branches` 308），而**当时全部既有判据都是绿的**——
-# token 级判据（`layout`/`colon`/`semi`）天然看不见 AST 位置语义。漂移已修（见
+# （`expected return type` 450 + `If branches` 308），而**当时全部既有判定依据都是绿的**——
+# token 级判定依据（`layout`/`colon`/`semi`）天然看不见 AST 位置语义。漂移已修（见
 # `bootstrap/corec/frontend/parser.py` 的 `want_value` 位置标志 ∧ `_is_block_like` 节点种类），
 # 但该修复此前只活在代码注释里 ⇒ 本组是它的机械看门人。
 #
-# 口径（v3 逐形等价，维护者裁定）：**位置标志 ∧ 节点种类** ——
+# 规则（v3 逐形等价，维护者裁定）：**位置标志 ∧ 节点种类** ——
 #   · 语句位 region 的块状尾项（`If`/`Match`/`Loop`/`For`/`Unsafe`/`Flow`）⇒ 保 `Block.expr`；
 #   · 语句位 region 的其余尾项（赋值/调用/二元/字面量/`Ident`/索引…）⇒ 包 `ExprStmt`；
 #   · 表达式位 region（`x := if …` 等）⇒ 一律保尾值。
@@ -795,8 +795,8 @@ POSITION_V3_REV = 'bb8cb3537584'
 
 # 夹具：(名, v3 源, v4 源, 期望块清单)。**两侧源必须表达同一程序** ⇒ 块清单须逐行相同。
 # 期望块清单 = 逐个 `Block` 一行 `路径 | 语句种类表 | 尾值种类`（`-` = 无尾值/空语句表）。
-# ⚠ 期望值是**按口径手写的判据**，不是「跑出来是什么就记什么」——若实现与之不符，那是
-#   要上报的发现，不许改判据去附和实现。
+# ⚠ 期望值是**按规则手写的判定依据**，不是「跑出来是什么就记什么」——若实现与之不符，那是
+#   要上报的发现，不许改判定依据去附和实现。
 POSITION_FIXTURES = [
     # ── ① 语句位 · 块状尾项 ⇒ 保尾值 ──
     ('语句位尾随 `if` ⇒ 保尾值（两臂各自成 region）', '''
@@ -1119,12 +1119,12 @@ def cmd_positions():
         check('RBRACE' in v3_src and 'want_value' not in v3_src,
               'v3 基线哨兵：`%s` 的 parser.py 含 `RBRACE` 且不含 `want_value`（防 v4-vs-v4 空绿）'
               % POSITION_V3_REV)
-        # 反向：同一哨兵判据作用到**当前 v4** 的 parser.py 上 ⇒ 必假（证明哨兵不是恒真）
+        # 反向：同一哨兵判定依据作用到**当前 v4** 的 parser.py 上 ⇒ 必假（证明哨兵不是恒真）
         with io.open(os.path.join(BASE, 'bootstrap', 'corec', 'frontend', 'parser.py'),
                      encoding='utf-8') as fh:
             v4_txt = fh.read()
         check(not ('RBRACE' in v4_txt and 'want_value' not in v4_txt),
-              '[反向] 同一哨兵判据作用在 v4 的 parser.py 上 ⇒ 假（哨兵能识破「基线其实是 v4」）',
+              '[反向] 同一哨兵判定依据作用在 v4 的 parser.py 上 ⇒ 假（哨兵能识破「基线其实是 v4」）',
               'v4 文本: 含 RBRACE=%r / 不含 want_value=%r'
               % ('RBRACE' in v4_txt, 'want_value' not in v4_txt))
 
@@ -1147,7 +1147,7 @@ def cmd_positions():
             check(False, name, 'v4 解析失败: %s' % e)
             continue
         n_blocks += len(v4_lines)
-        ok_shape = check(v4_lines == list(gold), '%s —— v4 形状与手写判据相符' % name,
+        ok_shape = check(v4_lines == list(gold), '%s —— v4 形状与手写判定依据相符' % name,
                          '期望 %r 得 %r' % (list(gold), v4_lines))
         if v3_inv is not None:
             got3 = v3_inv.get(name)
@@ -1155,7 +1155,7 @@ def cmd_positions():
                 check(False, '%s —— v3 侧解析失败' % name, got3[:200])
                 continue
             check(got3 == list(gold), '%s —— v3 前端同判（逐形等价）' % name,
-                  'v3 %r vs 判据 %r' % (got3, list(gold)))
+                  'v3 %r vs 判定依据 %r' % (got3, list(gold)))
             check(got3 == v4_lines, '%s —— v3/v4 两侧块清单逐行相同（直対拍）' % name,
                   'v3 %r vs v4 %r' % (got3, v4_lines))
         if not ok_shape:
@@ -1168,7 +1168,7 @@ def cmd_positions():
     check('f.body | LetStmt | -' in probe_sig,
           '抽取哨兵：已知块路径 `f.body` 出现在清单里', repr(probe_sig))
 
-    # ── 反向对照（**必须有牙**）──
+    # ── 反向对照（必须能检出问题）──
     # ⚠ `_is_block_like` 是 staticmethod ⇒ 必须取**描述符**再还原，否则还原成普通函数后
     #   会被当实例方法调用（`takes 1 positional argument but 2 were given`，本档实测撞过）。
     real_block_like = Parser.__dict__['_is_block_like']
@@ -1185,15 +1185,15 @@ def cmd_positions():
     asg_src = [f for f in POSITION_FIXTURES if '语句位尾随赋值' in f[0]][0][2]
     expr_src = [f for f in POSITION_FIXTURES if 'x := if' in f[0]][0][2]
 
-    # R1（**那次的真回归**）：收尾判据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 必红
+    # R1（**那次的真回归**）：收尾判定依据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 必红
     got = _mutate_lines(if_src, '_is_block_like', staticmethod(lambda expr: False))
     check(got != list(POSITION_FIXTURES[0][3]),
-          '[反向] 把收尾判据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 判据当场红',
+          '[反向] 把收尾判定依据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 判定依据当场红',
           '得 %r' % got)
     # R2：反方向——块状判定恒真 ⇒ 普通尾项不再包 ExprStmt ⇒ 必红
     got = _mutate_lines(asg_src, '_is_block_like', staticmethod(lambda expr: True))
     check(got != list([f for f in POSITION_FIXTURES if '语句位尾随赋值' in f[0]][0][3]),
-          '[反向] 块状判定恒真 ⇒ 尾随赋值不再包 `ExprStmt` ⇒ 判据当场红', '得 %r' % got)
+          '[反向] 块状判定恒真 ⇒ 尾随赋值不再包 `ExprStmt` ⇒ 判定依据当场红', '得 %r' % got)
     # R3：表达式位标志失效（`_want_value_expr` 退回语句位）⇒ 声明右值的 region 丢尾值 ⇒ 必红
     gold_expr = list([f for f in POSITION_FIXTURES if 'x := if' in f[0]][0][3])
     try:
@@ -1202,7 +1202,7 @@ def cmd_positions():
     finally:
         Parser._want_value_expr = real_want
     check(got != gold_expr,
-          '[反向] 表达式位标志失效 ⇒ `x := if …` 两臂丢尾值 ⇒ 判据当场红', '得 %r' % got)
+          '[反向] 表达式位标志失效 ⇒ `x := if …` 两臂丢尾值 ⇒ 判定依据当场红', '得 %r' % got)
 
     return not FAILS
 
@@ -1210,14 +1210,14 @@ def cmd_positions():
 # ── mutations：反向对照汇总 ─────────────────────────────────────────────
 
 def cmd_mutations():
-    print('[mutations] 反向对照：每条判据「改坏一处 ⇒ 必红」的机械证据')
+    print('[mutations] 反向对照：每条判定依据「改坏一处 ⇒ 必红」的机械证据')
     # 1) colon：把行尾判定短路成「永远行内」⇒ D9 那格必翻
     got = []
     for t in Lexer('fn add(a: int) -> int:\n').tokenize():
         if t.type in (TokenType.COLON_DECL, TokenType.COLON_BLOCK):
             got.append('BLOCK' if t.type == TokenType.COLON_BLOCK else 'DECL')
     check(got == ['DECL', 'BLOCK'], '正控：D9 两 `:` 的标签', repr(got))
-    check(got != ['DECL', 'DECL'], '[反向] 行尾判定若失效 ⇒ D9 变 [DECL, DECL]（判据红）')
+    check(got != ['DECL', 'DECL'], '[反向] 行尾判定若失效 ⇒ D9 变 [DECL, DECL]（判定依据红）')
 
     # 2) layout：把「首个非空行建立 anchor」改成「固定列 1」⇒ 深缩进开头的源必红
     src = '  fn f() -> int:\n      return 1\n'
@@ -1268,10 +1268,10 @@ def main(argv):
     print()
     floor = CHECK_FLOOR.get(sub, 0)
     if CHECKS < floor:
-        print('VACUOUS: 判据只跑了 %d 条（`%s` 的下限 %d）—— 判据面变空了，本轮的绿不算数'
+        print('VACUOUS: 判定依据只跑了 %d 条（`%s` 的下限 %d）—— 判定依据面变空了，本轮的绿不算数'
               % (CHECKS, sub, floor))
         return 1
-    print('判据条数 = %d（`%s` 下限 %d）' % (CHECKS, sub, floor))
+    print('判定依据条数 = %d（`%s` 下限 %d）' % (CHECKS, sub, floor))
     if ok:
         print('ALL PASS')
         return 0

@@ -10,23 +10,23 @@ Task 4 接线点（三层门形状，改动前原文逐字等价）：
 
 Task 5 接线点（`t5_*` 段；**唯一** = 索引面兜底拒绝 → `IP_INDEX` 查表）：门体即原
 `EC_TK_INDEX` 调用（码/文案/位置逐字不变），可达集 = 数组/切片/串三个**结果分支**之后的落空集，
-与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 全类型行枚举钉死）。字段
+与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 全类型行枚举固定）。字段
 （`IP_FIELD`）/转换（`IP_AS`）/dyn（`IP_METHOD`）三面**未接线**：前两面在现状**无任何拒绝路径**
 （EXPR_FIELD/EXPR_AS 全形 rc=0，门会退化成恒真空转）；dyn 面的拒绝谓词是**逐具体行的方法表
 成员判定**（int/string 候选行今日也发 N08），类级门会抑制它 = 放宽。三者均为 P3 收紧旋钮。
 
-判据口径 = **保语义**（零行为变化）：正控 rc=0 / 负控 rc=1 + 错误码逐字不变 / 登记面（现状
-宽松面）断言「不动」。**关键守卫**（本批最易放宽的两条，见计划 Task 4 的「结构事实」）：
+判定依据规则 = **保语义**（零行为变化）：正控 rc=0 / 负控 rc=1 + 错误码逐字不变 / 登记面（现状
+宽松面）断言「不动」。**关键守卫**（本次最易放宽的两条，见计划 Task 4 的「结构事实」）：
 把 PTR/STRING 填进算术门的 ADD 格 ⇒ ANY 门下 `permits(PTR,ADD)=1` 足以放行 ⇒ `*T + *T`、
-`"a" - "b"` 从 error[TB01] 变静默 —— 本文件的负控段把这两条钉死。
+`"a" - "b"` 从 error[TB01] 变静默 —— 本文件的负控段把这两条固定。
 
 Task 6 段（`t6_*`；`res_type_node`/`res_call_type` 双份 TY→TI 映射合一 → 单表 `ty_code_to_ti`）：
 8 个站点的**域逐站不同**（注册链缺 CHAR/NEVER/7、extern 链含 CHAR、形参链缺 NEVER、
 iface 返回链值域是 TY_* 码…），且这些域差异是**载荷**的（`fn f() -> char` 在注册链 = unit、
-在 extern 链 = char）。本段用「逐条 (码,行号) 多元集」把差异钉死，防后续按「表 + 尾回落」
+在 extern 链 = char）。本段用「逐条 (码,行号) 多元集」把差异固定，防后续按「表 + 尾回落」
 一刀切（= 静默改判定）；两表**唯一语义差 = NEVER 格**（res_call_type 侧 = unit，探针实测可达）。
 
-登记面（现状宽松 = P3 收紧清单的预备队，本批**不得**顺手改）：
+登记面（现状宽松 = P3 收紧清单的预备队，本次**不得**顺手改）：
   · 算术门「任一侧数值即可」：`1 + [int;3]` / `"a" * 2` 静默为 int（无诊断）；
   · 一元透传：`!arr` / `-"a"` / `*x`（x: int）原样返回操作数类型，不校验；
   · 比较不校验操作数：`"a" == 1` 恒 TI_BOOL；
@@ -91,7 +91,7 @@ def case_reject(name, source, code):
 
 
 def case_diag_lines(name, source, expect):
-    """Task 6 站点域判据：rc + **逐条 (码, 行号)** 多元集相等。
+    """Task 6 站点域判定依据：rc + **逐条 (码, 行号)** 多元集相等。
 
     为什么需要行号：TY→TI 的 8 个站点里有 6 处是**内联链**（注册/形参/返回/iface 返回），
     它们对同一份源码可能各报一条同码诊断——「报了几条、报在哪一行」正是区分「哪一站点产出了
@@ -171,7 +171,7 @@ def main():
                           "fn main() -> int:\n    while [1,2,3]:\n    return 0\n", "TC04"))
     ok.append(case_reject("neg_range_str_ends",
                           'fn main() -> int:\n    b := "a".."b"\n    return 0\n', "TB01"))
-    # ─── 登记面（现状宽松；本批断言「不动」= 保留为表的全许可格，P3 才收紧）───
+    # ─── 登记面（现状宽松；本次断言「不动」= 保留为表的全许可格，P3 才收紧）───
     ok.append(case_ok("reg_int_add_arr",
                       "fn main() -> int:\n    a := [1,2,3]\n    c := 1 + a\n    return 0\n"))
     ok.append(case_ok("reg_str_mul_int", 'fn main() -> int:\n    s := "a" * 2\n    return 0\n'))
@@ -188,9 +188,9 @@ def main():
                           'fn main() -> int:\n    s := "a"\n    x := s cast int\n    return 0\n', "TA09"))
 
     # ─── R2 P2b Task 5：容器面（**唯一接线点** = 索引兜底拒绝 → IP_INDEX 查表）───
-    # 接线口径 = 与改动前**一字等价**：门体即原 `EC_TK_INDEX` 调用；可达集（= 三个结果分支
-    # 之后的落空集）与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 钉死）。
-    # 字段/转换/dyn 三面**未接线**（无拒绝路径 / 谓词不是类级位）——本段以「现状不动」钉住，
+    # 接线规则 = 与改动前**一字等价**：门体即原 `EC_TK_INDEX` 调用；可达集（= 三个结果分支
+    # 之后的落空集）与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 固定）。
+    # 字段/转换/dyn 三面**未接线**（无拒绝路径 / 谓词不是类级位）——本段以「现状不动」固定，
     # 防后续把 `IP_FIELD`/`IP_METHOD`/`IP_AS` 硬接成收紧或放宽。
     S5 = "struct S:\n    a: int\n"
     # 正控：三个结果分支（数组→元素 / 切片→元素 / 数组 range→切片）
@@ -217,7 +217,7 @@ def main():
                           "fn main() -> int:\n    t := (1,2)\n    c := t[0]\n    return 0\n", "TK01"))
     ok.append(case_reject("t5_neg_index_dyn",
                           "fn main() -> int:\n    d : dyn = 5\n    c := d[0]\n    return 0\n", "TK01"))
-    # 登记面（现状静默；本批断言「不动」= P3 收紧面）：
+    # 登记面（现状静默；本次断言「不动」= P3 收紧面）：
     #   range 索引的非数组落空 `return TI_UNIT` 无诊断（表 IP_INDEX_RANGE **未接线**——门恒真空转）
     ok.append(case_ok("t5_reg_str_range",
                       'fn main() -> int:\n    s := "ab"\n    t := s[0..1]\n    return 0\n'))
@@ -235,7 +235,7 @@ def main():
     ok.append(case_ok("t5_reg_dyn_field",
                       "fn main() -> int:\n    d : dyn = 5\n    c := d.a\n    return 0\n"))
     #   dyn 面：现状**有**拒绝路径（逐具体行的方法表判定）——int/string 候选行也发 N08；
-    #   类级 IP_METHOD 门会**抑制**它们（= 放宽）⇒ 本段把现有 N08 钉红
+    #   类级 IP_METHOD 门会**抑制**它们（= 放宽）⇒ 本段把现有 N08 固定红
     ok.append(case_reject("t5_dyn_int_method_missing",
                           "fn main() -> int:\n    d : dyn = 5\n    d.nosuch()\n    return 0\n", "N08"))
     ok.append(case_reject("t5_dyn_str_method_missing",
@@ -245,8 +245,8 @@ def main():
                           "N08"))
 
     # ─── R2 P2b Task 6：res_type_node/res_call_type 双份 TY→TI 映射合一（单表 ty_code_to_ti）───
-    # 口径 = **保语义（零行为变化）**：8 个站点的**域逐站不同且载荷**（探针组 F/R/B/A/C，见报告）——
-    # 本段把「站点域差异」钉死，防后续按「表 + 尾回落」一刀切（那会把 S1 的 char/never 从 unit
+    # 规则 = **保语义（零行为变化）**：8 个站点的**域逐站不同且载荷**（探针组 F/R/B/A/C，见报告）——
+    # 本段把「站点域差异」固定，防后续按「表 + 尾回落」一刀切（那会把 S1 的 char/never 从 unit
     # 静默改成 char/never、把 S3 的 char 从 char 改成 unit 等）。行号 = 诊断所在行（区分站点）。
     #   ① 两表基型分支（res_type_node / res_call_type）
     ok.append(case_ok("t6_R_dyn_decl",
@@ -258,25 +258,25 @@ def main():
                       "fn f() -> char:\n    return 'a'\nfn main() -> int:\n    c := f()\n    return 0\n"))
     #   ② **两表唯一差异格 = NEVER**：res_call_type 对调用位点的 `-> never` 返回 unit（现状），
     #      res_type_node 对类型位 `x : never = 1` 映 TI_NEVER——后者由 t6_S1/S3/S4/S6 的排除面互为镜像
-    # TF01 收口（2026-09-13）：`fn g[T](a: T) -> never { loop { } }` 体以**无 break 的 loop**
+    # TF01 处理（2026-09-13）：`fn g[T](a: T) -> never { loop { } }` 体以**无 break 的 loop**
     # 收尾 ⇒ 不落空 ⇒ 站点 5 不再误报 TF01@1（该函数语义上确为 never 函数）。本用例的关注面 =
     # 调用位点（`never` 在调用位点被当 unit ⇒ @raw_int 报 TF07@2），该面**不变**。
     #   ③ 同族 6 处内联链：**逐站域**（同一形在不同站点产出不同类型 ⇒ 域差异载荷）
     #      V4 统一：普通注册链保留 CHAR（与 check_func 的返回行一致），因此
     #      `fn f() -> char` 的调用点不再退化成 unit。旧的「S1 缺 CHAR ⇒
-    #      f 的 return 'a' 报 TF01@2」钉子由本正控取代；NEVER 仍按站域保留，
+    #      f 的 return 'a' 报 TF01@2」固定用例由本正控取代；NEVER 仍按站域保留，
     #      证据面 = t6_S1_never_unit / S3 / S4 / S5。
     ok.append(case_ok("t6_S1_char_covered",
                       "fn f() -> char:\n    return 'a'\nfn main() -> char:\n    x := f()\n    return x\n"))
     ok.append(case_ok("t6_S3_char_covered",
                       "extern fn f() -> char\nfn main() -> char:\n    x := f()\n    return x\n"))
-    # TF01 收口（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）。
-    # R2 P6 Task 4a（E-11）**重钉**（2026-09-14）：本用例改前钉的是**误报**——`f()` 的
+    # TF01 处理（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）。
+    # R2 P6 Task 4a（E-11）**重固定**（2026-09-14）：本用例改前固定的是**误报**——`f()` 的
     #   调用推断此前回 unit（S1 注册链把 NEVER 钳成 unit，checker.cr:1491）⇒ `x` = unit ⇒
     #   `main`（`-> never`）体检查在返回位报 TF01@2。E-11 落地后调用推断 = never（直调
     #   站点守卫）⇒ `x` = never ⇒ 返回位豁免（checker.cr:2234）⇒ **诊断消失、rc=0**。
     #   改前 = 误报在册 / 改后 = 正确行为在册（RED 实跑：改前 rc=1 + TF01@2；改后 rc=0）。
-    #   **S1 链的域差异**（`:1491` 挡 NEVER）**仍然成立**，其证据面改由 t6_S3/S4/S5/S6 四钉子
+    #   **S1 链的域差异**（`:1491` 挡 NEVER）**仍然成立**，其证据面改由 t6_S3/S4/S5/S6 四固定用例
     #   + `type_selftest` 的 `t6.never_cell_diff` 承担，不在本用例。
     ok.append(case_ok("t6_S1_never_unit",
                       "fn f() -> never:\n    loop:\nfn main() -> never:\n    x := f()\n    return x\n"))

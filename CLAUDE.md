@@ -2,7 +2,7 @@
 
 本文件为 Claude Code 提供在本仓库中处理代码时的指引。
 
-## 铁律（Hard Rules）
+## 硬性规则（Hard Rules）
 
 这些规则不可违反，除非用户明确另有指示。
 
@@ -26,9 +26,9 @@ Core 是一门新的通用编程语言，设计取向是「语义保留」（sem
 
 ## 版本控制流程（GitFlow）
 
-- 版本控制统一使用 `jj`（铁律 #2，hook 自动拦截 git）。分支模型分三级：feature、develop、main。
+- 版本控制统一使用 `jj`（硬性规则 #2，hook 自动拦截 git）。分支模型分三级：feature、develop、main。
 - main 是正式版线，只有维护者 DslsDZC 可以合入（ruleset：update 规则，无管理员绕过）。
-- develop 是集成分支，日常 PR 的目标（ruleset：PR 通道、审批、merge queue、CI 检查要求）。
+- develop 是集成分支，日常 PR 的目标（ruleset：PR 通道、审阶段、merge queue、CI 检查要求）。
 - 日常开发（feature 合入 develop）：
 
 ```bash
@@ -117,7 +117,7 @@ CI_JOB_NAME=full-bootstrap src/ci/run.sh    # 三阶段自举：corec2 与 corec
 ```
 
 > 判断标准：修改 `src/compiler/**` 时，至少运行 `selfhost-tests` 和 `full-bootstrap`；只改文档或注释时，`check` 足够。
-> 长编译遵守铁律 #6。
+> 长编译遵守硬性规则 #6。
 
 ### Test suites
 
@@ -146,7 +146,7 @@ python3 tests/selfhost/test_borrow.py      # 自举借用检查器（7 条规则
 > `tests/selfhost/test_*.py` 实际有 50 多个套件，`tests/bootstrap/*.py` 有 7 个套件。
 > 套件全集以 `ls tests/selfhost/test_*.py tests/bootstrap/*.py` 为准，CI 接入点以 `src/ci/run.sh`
 > 的 `selfhost-tests` / `bootstrap-tests` job 为准（每一档都有接入点和计数说明）。完整枚举见
-> `src/ci/run.sh`（每档 rc 汇总）和 `docs/archive/sdd/` 的各批报告。
+> `src/ci/run.sh`（每档 rc 汇总）和 `docs/archive/sdd/` 的各阶段报告。
 
 `tests/suite/` 的集成测试是 `.cr` 源文件，通过 `./build/corec` 运行。
 
@@ -184,7 +184,7 @@ python3 tests/selfhost/test_borrow.py      # 自举借用检查器（7 条规则
 ELF 基准和 `.ccr` 四项检查（CI `selfhost-tests` 内，`bash tools/baseline/canary_check.sh` +
 `tests/harness/test_canary_carrier.py --require-compiler`）：基准值的唯一来源是
 `tools/baseline/canary_values.tsv`。检查规则分两类。ELF 基准检查要求生成结果不变；值发生变化表示
-超出范围，应停止并上报。`.ccr` 四项检查格式和内容形状；值变化不一定是回归，但需要说明原因，在同一批
+超出范围，应停止并上报。`.ccr` 四项检查格式和内容形状；值变化不一定是回归，但需要说明原因，在同一组
 更新基准值并保留旧值。
 > 注：更新基准值的规则：运行结果不一致时先查明原因。原因无法确定时按回归处理，停止并上报。
 > 不要修改值表去匹配输出。
@@ -229,7 +229,7 @@ bootstrap/corec/utils/module_loader.py import 解析
 Python bootstrap 编译所有 `src/compiler/*.cr` 文件。
 
 ```
-src/compiler/     （共 38 个 .cr；2026-09-16 文档审计修订：原清单只列 20 个，R2 各批新增的
+src/compiler/     （共 38 个 .cr；2026-09-16 文档审计修订：原清单只列 20 个，R2 各阶段新增的
                     类型引擎、实现方式、分析文件全部缺失。修订依据是 `ls src/compiler/*.cr`（38 个）
                     逐个手工加注；单元归属按 `build_selfhost_native.py` 的 corec_files(45)/
                     corelsp_files(31)/backend_support_files(9)/common_files(9) 清单，
@@ -423,7 +423,7 @@ tokenizer 参数化（`tokenize(_src: string)`）避开 `g_source` 全局变量�
 ## Key Conventions
 
 - 文件扩展名：`.cr`（源码）、`.cir`（数据流图 IR，图形态）、`.ccr`（格形态 IR，v9 是段表架构的
-  8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)。R2 P4 实现方式批起使用段表，R2 P6 T3 起为 v9，
+  8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)。R2 P4 实现方式阶段起使用段表，R2 P6 T3 起为 v9，
   NOD 40B 表示 TYPE 段项索引；版本以 `src/compiler/ccr_io.cr::CCR_VERSION` 为准；文件名和测试名
   保留「v7」，它是段表架构的代号，见 specs/2026-09-09-lattice-ir-v7-format.md。2026-09-16 审计修订：
   原文写 v8，已过时）、`.corespec`（2026-09-06 退役，规约并入 .cr 语法，见 grammar/core.ebnf
@@ -450,10 +450,10 @@ J1 全仓没有旧形态残留；J2 新 id 与 TODO.md 标题双向一致，没�
 > 注：J4 的突变样本取自本文件，`elf.cr` 未被引用文件条目里的 `TODO #2026-09-10-3` 引用就是这个实现方式。
 > 删除或修改它会让 J4 失去自证能力（运行 `python3 tests/harness/test_todo_id_migration.py` 可以立即确认）。
 
-### 会话级铁律的自动检查（不能绕过）
+### 会话级硬性规则的自动检查（不能绕过）
 
-- 铁律 #2（禁用 git）：`.claude/settings.json` 的 PreToolUse hook 指向 `.claude/hooks/block-git.py`，
+- 硬性规则 #2（禁用 git）：`.claude/settings.json` 的 PreToolUse hook 指向 `.claude/hooks/block-git.py`，
   拦截任意位置的 git 调用（分隔符后、命令替换、`bash -c`、前缀命令后）。引号内的文本和 heredoc 体
   不会被误拦，`jj git push` 放行。回归测试是 `tests/harness/test_block_git.py`。hook 自身异常时
   一律放行（宁可不拦截，也不阻塞会话），因此不要依赖它作为安全边界，只把它当作习惯约束。
-- 铁律 #3（文件永久不允许还原）：`jj restore`、`jj abandon`、覆盖回退既有文件，都必须先取得明确许可。
+- 硬性规则 #3（文件永久不允许还原）：`jj restore`、`jj abandon`、覆盖回退既有文件，都必须先取得明确许可。

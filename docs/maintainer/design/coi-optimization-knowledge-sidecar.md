@@ -237,7 +237,7 @@ cost {
 
 ## 记录类
 
-首批通用记录类：
+首阶段通用记录类：
 
 ```text
 GENERIC_PATTERN
@@ -251,7 +251,7 @@ NORMAL_FORM
 REWRITE_CANDIDATE
 ```
 
-首批目标特定记录类：
+首阶段目标特定记录类：
 
 ```text
 TARGET_PATTERN
@@ -383,12 +383,12 @@ validity > specificity > schema 新旧 > verified
 | 2 | 是否预留分段压缩标志位 | 预留但恒为 0 |
 | 3 | 是否需要跨重编稳定的实体 ID | 不需要，使用 `.ccr` 文件序坐标 |
 | 4 | 结构指纹的算法和确定性要求 | 需要实测 |
-| 5 | 能力条件的词汇表真源 | 首批用 HIT 表，长期与 CapabilityDomain 收敛 |
+| 5 | 能力条件的词汇表真源 | 首阶段用 HIT 表，长期与 CapabilityDomain 收敛 |
 | 6 | 同一 `(source_ref, kind)` 内容不同时保留几条 | 保留全部，另加上界 |
 | 7 | 是否增加来源声明字段 | 增加，仅用于溯源 |
 | 8 | `band` 和 `confidence` 是否并存 | 并存，需要确定优先级 |
 | 9 | `g_opt_meta` 搬迁时机 | 需要维护者决定 |
-| 10 | 栈共享和 CSE 键的处置 | 废弃或迁入 `.coi` 首批 kind |
+| 10 | 栈共享和 CSE 键的处置 | 废弃或迁入 `.coi` 首阶段 kind |
 | 11 | `.coi` 的默认发现路径 | 默认同名，可追加多源 |
 | 12 | `.cir` 是否进入分发包 | 当前读法是不入，需要确认 |
 

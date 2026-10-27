@@ -8,9 +8,9 @@
 #   · 语料分层 / 命名 / 逐档 clean-cache 逐字继承（可 `diff -rq` 互证）；
 #   · **影子模式整体剥除**——`--type-shadow` / `--type-shadow-dump` 两旗标已随 R2 P5 Task 5
 #     删除，原 `shadow` 分支为死码（不移植）；
-#   · `shopt -s nullglob` + 计数断言 **76**（2026-09-16 全局 seam 批 +1 = `global_seam_test.cr`；同日 apx 批 +1 = `apx_conversion_test.cr`；
-#     2026-09-17 批 5（opt-dex）+1 = `opt_dex_test.cr`；**2026-09-18 批8 2(a)（#132）+1 = `cli_view_test.cr`——该次未同步本计数
-#     ⇒ 计数自 2026-09-18 起失配（76≠75），第一腿硬失败至 2026-09-24 本批同步**——Tier 1 为 `tests/suite/*.cr` 通配 ⇒ 新语料自动入档，**只须同步本计数**）：未匹配 glob 不再产生**字面 glob 伪条目**
+#   · `shopt -s nullglob` + 计数断言 **76**（2026-09-16 全局 seam 阶段 +1 = `global_seam_test.cr`；同日 apx 阶段 +1 = `apx_conversion_test.cr`；
+#     2026-09-17 阶段 5（opt-dex）+1 = `opt_dex_test.cr`；**2026-09-18 阶段8 2(a)（#132）+1 = `cli_view_test.cr`——该次未同步本计数
+#     ⇒ 计数自 2026-09-18 起失配（76≠75），第一路径硬失败至 2026-09-24 本次同步**——Tier 1 为 `tests/suite/*.cr` 通配 ⇒ 新语料自动入档，**只须同步本计数**）：未匹配 glob 不再产生**字面 glob 伪条目**
 #     （R2 P6 T0 §3.2 的 `_tmp_p5t3b_probes_*.cr` 教训）；语料数变化 ⇒ 硬失败（须显式改本文件）。
 #
 # 判定用法（同源对拍）：同一二进制跑本 runner 与在位的 `/tmp/p3t0_run.sh check`，
@@ -35,7 +35,7 @@ CORPUS_TOTAL=89   # = t1 **34** + t2 2 + t3 **26** + t4 **23** + t5 4（**2026-1
                   #   t3 从 15 增至 26 = ccr_io 1 + format/elf 3 + os/linux 5 + arch/x86_64 12 +
                   #   lattice 1 + targets/x86_64/linux/elf 4；
                   #   t4 从 19 增至 23：7eb9669d 之后新增 `bits.cr` / `hash.cr` / `hashmap.cr` /
-                  #   `rawbuf.cr`（stdlib 公开面批）。**档数变化必须同批改本行与本注释**，
+                  #   `rawbuf.cr`（stdlib 公开面阶段）。**档数变化必须同阶段改本行与本注释**，
                   #   否则 runner 硬失败。与 `ls` 逐层计数一致。）
 
 run_one() {   # $1 tier tag, $2 file
@@ -45,7 +45,7 @@ run_one() {   # $1 tier tag, $2 file
   $CC check "$f" >| "$OUT/logs/${tag}_${base}.log" 2>&1
   local rc=$?
   echo "$rc" >| "$OUT/logs/${tag}_${base}.rc"
-  printf '%s\t%s\n' "$tag" "$f" >> "$OUT/corpus.tsv"   # 暖态腿清单（单一真源）
+  printf '%s\t%s\n' "$tag" "$f" >> "$OUT/corpus.tsv"   # 暖态路径清单（单一真源）
   printf '%s\t%s\trc=%s\n' "$tag" "$f" "$rc"
 }
 
@@ -82,10 +82,10 @@ if [ "$n_rc" -ne "$CORPUS_TOTAL" ]; then
 fi
 echo "PARITY DONE（$OUT）：$n_rc 档 · rc 分布 $n0×0 / $n1×1"
 
-# #2026-09-15-5 T3 暖态腿（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数。
-# 本层对 pre-fix 冻结基线**预期绿**（既有语料不含 TU03 形态，T1 E4）；缺陷面的「牙齿」在
+# #2026-09-15-5 T3 暖态路径（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数。
+# 本层对 pre-fix 冻结基线**预期绿**（既有语料不含 TU03 形态，T1 E4）；缺陷面的「有效性用例」在
 # `tools/baseline/warm_run.sh`（入仓语料 tests/probes/warm/）。`WARM_LEG=0` 关闭。
 if [ "${WARM_LEG:-1}" != "0" ]; then
   bash "$SCRIPT_DIR/warm_leg.sh" "$CCBIN" "$OUT/warm" < "$OUT/corpus.tsv" \
-    || { echo "WARM LEG FAILED（暖态腿：冷/暖两态分歧）" >&2; exit 1; }
+    || { echo "WARM LEG FAILED（暖态路径：冷态和暖态分歧）" >&2; exit 1; }
 fi

@@ -6,13 +6,13 @@ Task 3 = 合成层：IR 直线子集 → 4 核事件流（sub/nand/load/store）
 - 降低规则：sub 直通；add → sub 反减（sub(a, sub(0,b))，0 = 常量池）；常量
   IR_CONST → 常量池槽 load 事件（ELF rodata 写入）；store/load 直通事件
 - 超出直线子集的 op（分支/调用/移位/mod/…）→ 编译报错「needs more events」
-- 判据 = 运行正确性（旧路径与表模式同 .ccr 运行 exit 一致且等于手算期望值）
+- 判定依据 = 运行正确性（旧路径与表模式同 .ccr 运行 exit 一致且等于手算期望值）
   —— Task 2 的逐字节对照随合成层失效（const → 常量池 load 与旧 imm 路径
-  字节不同，按计划 Task 3/4 以冒烟运行正确为判据）
+  字节不同，按计划 Task 3/4 以冒烟运行正确为判定依据）
 - --dump-events 调试输出（事件流 dump 断言）
 
 注（评审挂账）：源语言无位与/位或运算符（&&/|| 恒短路分支化，超 M1 直线
-子集）→ and→nand / or→德摩根 规则在 M1 无源码载体，属 IR 层完备性代码。
+子集）→ and→nand / or→德摩根 规则在 M1 无源码文件，属 IR 层完备性代码。
 
 需先重建自举编译器：nice -n 19 python3 build_selfhost_native.py
 """
@@ -33,7 +33,7 @@ SMOKE_ADD = BASE / "tests" / "hit" / "smoke_add.cr"
 SMOKE_MEM = BASE / "tests" / "hit" / "smoke_mem.cr"
 OPT = "1"  # 与 corec build 默认同（corec/main.cr: g_opt_level 默认 1）
 
-# 载体（直线子集：const/store/add/sub/load/return——无 &&/||（短路分支化超 M1））
+# 文件（直线子集：const/store/add/sub/load/return——无 &&/||（短路分支化超 M1））
 SUB_SRC = "fn main() -> int:\n    a := 7\n    b := 5\n    return a - b\n"
 SUB_RC = 2  # 7 - 5
 
@@ -55,7 +55,7 @@ MOD_SRC = "fn main() -> int:\n    a := 7\n    b := 3\n    return a % b\n"
 # v ∈ `\d+` 或 `pool\d+`（池引用）。emit 侧格式见 corearch.cr `dump_ev` 分支。
 _EV_DUMP_RE = re.compile(r"ev (\S+) dst=(\S+) s1=(\S+) s2=(\S+)$")
 
-# 事件 1-4 的 M1 模板（step 全字段 / legacy 字节；判据与突变自证共用）
+# 事件 1-4 的 M1 模板（step 全字段 / legacy 字节；判定依据与突变自证共用）
 _EV14_STEP = {
     1: {"rex_w": 1, "rex_r": 1, "rex_b": 1, "opcode": [0x29],
         "modrm_reg_role": "src2", "modrm_rm_role": "dst", "rm_mode": 0},
@@ -72,7 +72,7 @@ _EV14_BYTES = {1: [0x4D, 0x29], 2: [0x4D, 0x21], 3: [0x4C, 0x8B], 4: [0x4C, 0x89
 def run_bin(binary, args):
     # HIT 表是 raw-word 降层（事件 sub/nand/load/store + 8 字节池）。用户程序默认
     # tagged big-int 表示，池常量与事件结果不会自动 tag/unbox；本套件固定用
-    # `--raw-int` 让旧路径与表路径处于同一表示域，判据只测表映射本身。
+    # `--raw-int` 让旧路径与表路径处于同一表示域，判定依据只测表映射本身。
     cmd = [str(binary)]
     if binary == COREARCH and "--raw-int" not in args:
         cmd.append("--raw-int")
@@ -215,7 +215,7 @@ def test_reject_out_of_subset(tmp: Path) -> bool:
 
 
 def test_smoke_files() -> bool:
-    """tests/hit/smoke_add.cr + smoke_mem.cr 端到端（源文件载体，Task 4 冒烟同源）。"""
+    """tests/hit/smoke_add.cr + smoke_mem.cr 端到端（源文件文件，Task 4 冒烟同源）。"""
     ok = True
     for src_p, rc, tag in ((SMOKE_ADD, 2, "smoke_add"), (SMOKE_MEM, 5, "smoke_mem")):
         if not src_p.exists():
@@ -290,7 +290,7 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
     旧实现存 −1：自持 x86 截断除法写回单字节 0xFF → 读回 255；Python 解释地板
     除四字节全 0xFF → 读回 0xFFFFFFFF——实现分裂，未用字段应恒存 0。
 
-    **B3/#2026-09-16-24 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    **B3/#2026-09-16-24 修复（2026-09-16 判定依据网加固阶段）**：原判定依据 = **4 字面量黑名单**
     `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
     0xFFFFFFFF / 00 都能骗过（黑名单只枚举了两种形态）。现改为**结构化解析
     + 白名单形态断言**：每条 `ev` 行必须整体匹配
@@ -301,9 +301,9 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
 
     **反例自检（audit §0）：什么坏实现能骗过本断言？**——把未用字段写成
     1 / 0xFE / 0xFFFFFFFF / `00` 的实现，旧黑名单全绿；现在因「文本 ≠ "0"」
-    必红。**口径边界（勿夸大）**：用于字段（该事件真的消费 s1/s2 时）取任何
-    `\d+` 值都**不是**哨兵伪影、本判据不主张覆盖（契约只管未用字段 = 0）；
-    本判据新增的第二个维度是**行形态白名单**（多字段/尾随垃圾/缺字段 ⇒ 行不
+    必红。**规则边界（勿夸大）**：用于字段（该事件真的消费 s1/s2 时）取任何
+    `\d+` 值都**不是**哨兵伪影、本判定依据不主张覆盖（契约只管未用字段 = 0）；
+    本判定依据新增的第二个维度是**行形态白名单**（多字段/尾随垃圾/缺字段 ⇒ 行不
     匹配 ⇒ 红，旧黑名单看不到）。
 
     **探针触发自检（audit §0bis）**：非空转由**事件行计数**保证——
@@ -335,7 +335,7 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
 def dump_sentinel_problems(out: str):
     """`--dump-events` 文本 → (问题列表, 事件行数, store 行数, load 行数)。
 
-    **B3/#2026-09-16-24 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    **B3/#2026-09-16-24 修复（2026-09-16 判定依据网加固阶段）**：原判定依据 = **4 字面量黑名单**
     `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
     0xFFFFFFFF / `00` 都骗得过（黑名单只枚举了两种形态）。现改为**结构化解析
     + 白名单形态断言**：每条 `ev` 行必须整体匹配 `ev <name> dst=<v> s1=<v>
@@ -374,7 +374,7 @@ def dump_sentinel_problems(out: str):
             if s2 != "0":    # load 单操作数（inputs=1）⇒ s2 恒 0
                 probs.append(f"load 未用字段 s2={s2!r} 非 \"0\"（哨兵读回伪影）")
     if n_ev == 0 or n_store == 0 or n_load == 0:
-        probs.append(f"判据空转——事件行 {n_ev}（store {n_store} / load {n_load}）；"
+        probs.append(f"判定依据空转——事件行 {n_ev}（store {n_store} / load {n_load}）；"
                      f"未用字段断言未被走到")
     return probs, n_ev, n_store, n_load
 
@@ -426,7 +426,7 @@ def test_hit_lower_sources_check_clean() -> bool:
 
 # ════════════════════════════════════════════════════════════════
 # M2a Task 2：事件流注入测试通道（--hit-events-file）——模板解释器 v2 形态
-# 发射的对照载体。通道 = --dump-events 逆格式文本文件：`ev <name> [dst=N]
+# 发射的对照程序。通道 = --dump-events 逆格式文本文件：`ev <name> [dst=N]
 # [s1=[pool]N] [s2=N]` 每事件一行（操作数缺省 = 从所附着指令取——附着规则见
 # lower_to_core.cr hit_inject_events 注释）+ `pool v0 v1..` 池值行。注入取代
 # 降低（跳过 lower 直接 emit）；只映射到指令的某条事件才走表（未列事件指令 =
@@ -436,8 +436,8 @@ def test_hit_lower_sources_check_clean() -> bool:
 
 # 注（MW 里程碑后）：int add/sub 定值目标 = 规则 A 恒 tagged → mw 门整条落旧
 # 路径——sub/nand 事件在现架构对真 IR 不可达（M2b Task 6/8 快路径走表通道），
-# 逐字节对照载体只用非门面指令：store/load（as 槽载入）/jump/cst。
-# jump 对照载体：if（无 else）体内 store 链 + 尾 jump 指向合并标签 = if 后首个
+# 逐字节对照程序只用非门面指令：store/load（as 槽载入）/jump/cst。
+# jump 对照程序：if（无 else）体内 store 链 + 尾 jump 指向合并标签 = if 后首个
 # 事件指令（d 的 load——事件序 4）。跳转目标 = 事件序（jump 事件 s1 域）。
 JUMP_SRC = """fn main() -> int:
     a : ., mut = 10
@@ -451,7 +451,7 @@ JUMP_SRC = """fn main() -> int:
 JUMP_EVENTS = ["ev load", "ev store", "ev store", "ev jump s1=4", "ev load", "ev store"]
 JUMP_RC = 10  # 10>3 真 → c=10、a=10 → d=10
 
-# disp 对照载体：let 初始化 store ×2 + as 槽 load/store 链 + 变量移动 store
+# disp 对照程序：let 初始化 store ×2 + as 槽 load/store 链 + 变量移动 store
 #（事件全部 auto disp8——旧路径 e2_ld/e2_st 同规则；固定 disp32 旧发射会红）
 DISP_SRC = """fn main() -> int:
     a : ., mut = 10
@@ -467,7 +467,7 @@ DISP_EVENTS = ["ev store", "ev store", "ev load", "ev store", "ev store",
                "ev load", "ev store", "ev load", "ev store", "ev store"]
 DISP_RC = 3  # a ← d ← b = 3
 
-# disp32 对照载体：20 槽变量（a16+ 槽偏移 < -128 → disp32；a15 = -128 边界 disp8）
+# disp32 对照程序：20 槽变量（a16+ 槽偏移 < -128 → disp32；a15 = -128 边界 disp8）
 BIG_EVENTS = ["ev store"] * 20 + ["ev store"]
 BIG_RC = 18  # a19 = a18
 
@@ -481,7 +481,7 @@ def big_src() -> str:
     return "\n".join(lines) + "\n"
 
 
-# imm 对照载体：cst 事件（fixture 表事件 11 = C7 /0 [rbp+disp] imm32——与旧路径
+# imm 对照程序：cst 事件（fixture 表事件 11 = C7 /0 [rbp+disp] imm32——与旧路径
 # const e2_li 同字节）。夹具 = 真实表 + 追加 cst 事件（events 9 → 10）。
 CST_FIX = TABLE.read_text().replace("events = 9", "events = 10", 1) + (
     "\n[[event]]\nid = 11\nname = \"cst\"\ninputs = 2\noutputs = 1\n"
@@ -493,7 +493,7 @@ IMM_SRC = "fn main() -> int:\n    a := 63\n    return a\n"
 IMM_EVENTS = ["ev cst"]
 IMM_RC = 63
 
-# 池对照载体：const → 池 load（M1 语义——字节与旧路径 e2_li 有意不同，判据 = 运行）
+# 池对照程序：const → 池 load（M1 语义——字节与旧路径 e2_li 有意不同，判定依据 = 运行）
 POOL_SRC = "fn main() -> int:\n    a := 7\n    b := 5\n    return a - b\n"
 POOL_LINES = ["pool 7 5"]
 POOL_EVENTS = ["ev load s1=pool0", "ev store", "ev load s1=pool1", "ev store"]
@@ -836,7 +836,7 @@ outputs = 1
 side_effect = "effect"
 
 [[event.proj]]        # 形态 A：rm_mode 2 SIB 族 + rex 全位 + 3 字节 opcode（域解析
-isa = "x86-64"        #   载体——movbe r64,m64 真实字节；绑定 = 数据化批 3 E 族索引寻址）
+isa = "x86-64"        #   文件——movbe r64,m64 真实字节；绑定 = 数据化阶段 3 E 族索引寻址）
 rex_w = 1
 rex_r = 1
 rex_x = 1
@@ -852,7 +852,7 @@ disp_size = 4
 disp_src = "addr"
 
 [[event.proj]]        # 形态 B：/digit + imm 字面量（C7 /0 mov r/m64, imm32 域——
-isa = "x86-64"        #   绑定 = 数据化批 1 B1 imm32→槽；imm_lit = 63 字面量）
+isa = "x86-64"        #   绑定 = 数据化阶段 1 B1 imm32→槽；imm_lit = 63 字面量）
 rex_w = 1
 opcode = [0xC7]
 modrm_reg_digit = 0
@@ -862,7 +862,7 @@ imm_size = 4
 imm_role = "lit"
 imm_lit = 63
 
-[[event.proj]]        # 形态 C：前缀 + rel8 + cond（前缀域解析载体：66 90 = 2 字节
+[[event.proj]]        # 形态 C：前缀 + rel8 + cond（前缀域解析文件：66 90 = 2 字节
 isa = "x86-64"        #   nop 真实字节——消费面 = SSE/串行系 Task 12/13 预留）
 prefix = [0x66]
 opcode = [0x90]
@@ -1271,23 +1271,23 @@ def v2_walk(text: str) -> list:
 
 
 def ev14_template_problems(events) -> list:
-    """事件 1-4 的 **M1 全字段模板 + legacy 字节全等**判据 → 问题字符串列表。
+    """事件 1-4 的 **M1 全字段模板 + legacy 字节全等**判定依据 → 问题字符串列表。
 
-    **B2/#2026-09-16-22 修复（2026-09-16 判据网加固批）**：原判据 `chk(stream[:2] == want)`
-    只比**前 2 字节**——modrm 角色 / rm_mode / opcode 尾追加字节全无判据
+    **B2/#2026-09-16-22 修复（2026-09-16 判定依据网加固阶段）**：原判定依据 `chk(stream[:2] == want)`
+    只比**前 2 字节**——modrm 角色 / rm_mode / opcode 尾追加字节全无判定依据
     （改 TOML 的 `modrm_reg_role "dst"→"src1"`、`rm_mode 0→1`、或
     `opcode = [0x29, 0x90]` 都骗得过）。现改为：
       ① 该 step 的字段集与取值必须**逐键相等**（opcode 全字节 + 全部 rex 位 +
          modrm 两角色 + rm_mode）——多键/少键也红；
       ② 重建的 legacy 字节流必须与 M1 模板**全等**（不是前缀）。
     **反例自检（audit §0）：什么坏实现能骗过本断言？**——上述三类 TOML 改动在
-    旧判据下全绿（前 2B 未变）；本断言下分别落在「键值不等」（角色/rm_mode）与
+    旧判定依据下全绿（前 2B 未变）；本断言下分别落在「键值不等」（角色/rm_mode）与
     「全等失败」（opcode 多一字节）上 ⇒ 必红。突变自证见
     tests/harness/test_criteria_mutations.py（驱动本函数）。
     **不可达性披露（B2 兜底 = 无 的根据）**：事件 1(sub)/2(nand) 对真 IR 不可达
     （mw 门：int add/sub dest 恒 tagged ⇒ 整条落旧路径，见本文件事件注入节注），
     注入逐字节对照与运行闭环都碰不到它们 ⇒ 本表断言是其**唯一**字节证据。
-    该前提此处**显式断言**（防将来有人以为「有行为腿兜底」而放松本判据）。
+    该前提此处**显式断言**（防将来有人以为「有行为路径兜底」而放松本判定依据）。
     """
     probs = []
     inj_names = {ln.split()[1] for ln in
@@ -1295,7 +1295,7 @@ def ev14_template_problems(events) -> list:
     overlap = inj_names & {"sub", "nand"}
     if overlap:
         probs.append(f"注入语料意外覆盖 sub/nand（{sorted(overlap)}）——事件 1-4 "
-                     f"「不可达、只能靠表断言」的前提已变，须重估本判据的兜底面")
+                     f"「不可达、只能靠表断言」的前提已变，须重估本判定依据的兜底面")
     str_keys = {"modrm_reg_role", "modrm_rm_role", "disp_src", "rel_role",
                 "cond_role", "modrm_base_role", "sib_base_role", "sib_index_role"}
     for eid, want in _EV14_BYTES.items():
@@ -1574,7 +1574,7 @@ def main():
             test_run_closure(tmp, "sub", SUB_SRC, SUB_RC, need_lowered=True),
             test_run_closure(tmp, "add", ADD_SRC, ADD_RC, need_lowered=True),
             test_run_closure(tmp, "mem", MEM_SRC, MEM_RC, need_lowered=True),
-            # 载体与 test_run_closure 同源；事件流 dump 断言（sub 事件 + 常量池 3 条目）
+            # 文件与 test_run_closure 同源；事件流 dump 断言（sub 事件 + 常量池 3 条目）
             test_dump_events(tmp, "dump_add", ADD_SRC, expect_sub_ev=True, expect_nand_ev=False, expect_pool=3),
             test_reject_out_of_subset(tmp),
             test_smoke_files(),

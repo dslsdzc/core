@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""doc_protected_surface.py —— 文档编辑的「非散文面」判据（零构建，纯 stdlib）。
+"""doc_protected_surface.py —— 文档编辑的「非散文面」判定依据（零构建，纯 stdlib）。
 
-用途：审/改 .md 的散文表达时，钉死不许变的那一面。
+用途：审/改 .md 的散文表达时，固定不许变的那一面。
 
 抽取的类别（每类一项 = 多重集里的一个条目）：
   FENCE_OPEN      ``` / ~~~ 围栏开标记，含围栏语言标记
@@ -17,7 +17,7 @@
   TROW            表格行（逐字符；只取围栏外的行）
   MARKER          记录标记行（含「原文保留」或「加注」）
 
-判据：改前 / 改后两份多重集逐项相同 ⇒ PASS，否则 RED。
+判定依据：改前 / 改后两份多重集逐项相同 ⇒ PASS，否则 RED。
 
 fail-closed：
   - 源头读不到（jj 失败 / 文件不存在 / 目录里一个 .md 都没有）⇒ 立刻 FAIL，不退化成空集
@@ -26,7 +26,7 @@ fail-closed：
   这三条是为了不重演「空语料 0==0 PASS」。
 
 目录参数会被展开成该目录下全部 *.md（按路径排序）逐个抽取。不倚赖
-`jj file show <dir>` 的拼接形态——那会把整批并成**一个**伪档，每档下限随之失效
+`jj file show <dir>` 的拼接形态——那会把整阶段并成**一个**伪档，每档下限随之失效
 （2026-09-24 实测：`docs/developer/` 目录形 =「2253 items, 1 files」）。
 
 用法：
@@ -35,16 +35,16 @@ fail-closed：
   doc_protected_surface.py compare --floor N --per-file-floor M A.txt B.txt
 
 下限**必填**（`--floor` / `--per-file-floor`，无默认值）：
-  下限是**被审语料**的性质，不是工具的性质。任何写死在文件里的默认数，换一批语料
-  就静默偏了——要么正控自己判红（2026-09-24 实测：默认 3200 > 本批 2253），要么
-  低到放行抽空。故一律由调用方当场给数，让口径落在命令行上。
+  下限是**被审语料**的性质，不是工具的性质。任何写死在文件里的默认数，换一组语料
+  就静默偏了——要么正控自己判红（2026-09-24 实测：默认 3200 > 本次 2253），要么
+  低到放行抽空。故一律由调用方当场给数，让规则落在命令行上。
 
   数法（本仓现行）：
     1. 先对**冻结基线**修订跑一次 extract，读 manifest 头部：
          # items: <总数>          # per-file <路径> <档内条目数>
     2. --floor          = 总数 × 0.9 向下取整
        --per-file-floor = **最小**档内条目数 × 0.9 向下取整
-    3. 两个数连同命令一起写进批次报告；换语料（增/删档）必须重测重给。
+    3. 两个数连同命令一起写进阶段报告；换语料（增/删档）必须重测重给。
 """
 
 import argparse
@@ -56,7 +56,7 @@ from collections import Counter
 
 # ---------------------------------------------------------------- 非空转下限
 # 下限一律由调用方给出（--floor / --per-file-floor 必填，见模块 docstring 的「数法」）。
-# 这里**不设默认值**：写死的默认数换一批语料就静默偏掉（偏高 ⇒ 正控自己判红；
+# 这里**不设默认值**：写死的默认数换一组语料就静默偏掉（偏高 ⇒ 正控自己判红；
 # 偏低 ⇒ 放行抽空），两种都不能接受。
 
 FENCE_RE = re.compile(r'^ {0,3}(`{3,}|~{3,})(.*)$')
@@ -74,7 +74,7 @@ class ExtractError(Exception):
 
 
 def read_file(path, rev):
-    """读一份档。rev 非 None 时走 jj（判据真源 = 修订，不是手边检出）。"""
+    """读一份档。rev 非 None 时走 jj（判定依据真源 = 修订，不是手边检出）。"""
     if rev is None:
         try:
             with open(path, 'r', encoding='utf-8') as fh:
@@ -266,12 +266,12 @@ def cmd_compare(args):
 
 def main(argv):
     ap = argparse.ArgumentParser(
-        description='文档非散文面抽取 / 对拍判据（fail-closed）')
+        description='文档非散文面抽取 / 对拍判定依据（fail-closed）')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     e = sub.add_parser('extract', help='抽一份或多份 .md 的非散文面')
     e.add_argument('paths', nargs='+')
-    e.add_argument('--rev', help='jj 修订（判据真源）；不给则必须给 --worktree')
+    e.add_argument('--rev', help='jj 修订（判定依据真源）；不给则必须给 --worktree')
     e.add_argument('--worktree', action='store_true', help='读工作副本')
     e.add_argument('--out', help='写 manifest 到这个文件')
     e.set_defaults(func=cmd_extract)

@@ -1,7 +1,7 @@
 # tests/kernel：McTT 到 Core 内核差分测试语料
 
 本目录为 McTT 到 Core 内核移植 M1（见 `docs/superpowers/specs/2026-08-15-mctt-core-kernel-design.md`）
-提供差分测试语料：同一批查询文件驱动 OCaml 参考 harness（`tools/mctt_ref/`）与 Core 侧内核
+提供差分测试语料：同一组查询文件驱动 OCaml 参考 harness（`tools/mctt_ref/`）与 Core 侧内核
 （`src/kernel/`，Task 6），输出逐位比对。本目录只含查询，不含期望值；期望值由参考
 harness 在 Task 7 生成并固化到 `tests/kernel/expected/*.expected`。
 

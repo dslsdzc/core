@@ -18,7 +18,7 @@ OFF_FI_PARAM_TYPES 16 → 16+16×8 = 144 = OFF_FI_RETURN_TYPE），而 parser �
 并覆盖 ≥22 = 6 寄存器参 + 16 栈参的 >127B 栈清理形）+ 读写访问器护栏 +
 超限签名硬错 P020（rc=1，绝不 rc=0）。
 
-判据：N ∈ {17,18,22,64} 逐形参值全对；N=65 编译拒绝（rc=1 + error[P20]，
+判定依据：N ∈ {17,18,22,64} 逐形参值全对；N=65 编译拒绝（rc=1 + error[P20]，
 且不产出二进制）。
 """
 
@@ -127,7 +127,7 @@ def main():
         case_run("n17_args_pass", sum_src(17), 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10 + 11 + 12 + 13 + 14 + 15 + 16 + 17),
         # 修复前 N=18 = 静默误编译（TF01 误归 + rc=0 + SIGSEGV 139）
         case_run("n18_args_pass_issue8", sum_src(18), sum(range(1, 19))),
-        # 22 = 6 寄存器参 + 16 栈参（128B 栈清理，>127B 形；波 1 Task 5 Minor 4 收口条件）
+        # 22 = 6 寄存器参 + 16 栈参（128B 栈清理，>127B 形；波 1 Task 5 Minor 4 处理条件）
         case_run("n22_stack_arg_form", per_arg_src(22), 0),
         # 上界内最大值（MAX_FN_PARAMS）
         case_run("n64_upper_bound", per_arg_src(64), 0),

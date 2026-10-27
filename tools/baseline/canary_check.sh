@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 判据载体化批（criteria-carrier）T1：**ELF canary + `.ccr` 四条 = 机器闸门**
+# 判定依据文件化阶段（criteria-carrier）T1：**ELF canary + `.ccr` 四条 = 机器检查**
 #
 # 缘起：canary sha 与 `.ccr` 四条锁定值在全国仓 `*.py/*.sh/*.cr/*.toml/*.yml` 里
-# **命中数为 0**——只活在 docs/ 与 .superpowers/ 的文字里，每个批次的提交信息都在引用
-# 它们，但那是**人工/代理手跑**的结果，不是机器闸门。同类事故本仓已发生过一次
+# **命中数为 0**——只活在 docs/ 与 .superpowers/ 的文字里，每个阶段的提交信息都在引用
+# 它们，但那是**人工/代理手跑**的结果，不是机器检查。同类事故本仓已发生过一次
 # （`test_backend_bootstrap.py` 自称已挂 CI 而 run.sh 零命中 ⇒ `error[N06]` 跨 5 任务
 # 33 次静默漏检，见 src/ci/run.sh:72-73 与 tests/harness/test_ci_hook_coverage.py）。
 #
@@ -13,32 +13,32 @@
 #       rc=0 全绿 · rc=1 任一不符/缺件 · rc=2 用法错
 #   bash tools/baseline/canary_check.sh --verify-only [<采集目录>]
 #       只校验既有产物（不编译）——供 tests/harness/test_canary_carrier.py 的
-#       「篡改产物 ⇒ 必红」牙用
+#       「篡改产物就失败」自证用
 #   bash tools/baseline/canary_check.sh --selftest
-#       合成夹具自证（S1–S6；无编译器、毫秒级）：证明**闸门本身能变红**
+#       合成夹具自证（S1–S6；无编译器、毫秒级）：证明**检查本身能变红**
 # 环境:
-#   CANARY_VALUES=<tsv>   值表路径（默认 tools/baseline/canary_values.tsv）——仅自证/牙用；
+#   CANARY_VALUES=<tsv>   值表路径（默认 tools/baseline/canary_values.tsv）——仅自证用；
 #                         生效时会打印显式告警行（不得在 CI 静默改指向）
-#   CANARY_NO_NICE=1      免 nice（默认 nice -n 19，遵 CLAUDE.md 铁律 6）
+#   CANARY_NO_NICE=1      免 nice（默认 nice -n 19，遵 CLAUDE.md 硬性规则 6）
 #
-# 配方（口径 = **冷态**；出处逐条实读）:
+# 配方（规则 = **冷态**；出处逐条实读）:
 #   ELF canary : clean-cache → build tests/suite/ptr_arith.cr --static -o <D>/pa
 #                （/tmp/capt1/t1b_criteria.sh:34-38；值 = 95084e7b…d475 · **28822B = ELF 文件大小**，
 #                  `stat -c %s` 于 `\177ELF` 魔数的可执行产物上，本实例实核）
 #   .ccr 四条  : 每条 clean-cache 前置 ——「ccr F -o O」与「build F -o O --static」（取 O.ccr）
 #                （/tmp/capt1/t1b_criteria.sh:41-53 + .superpowers/sdd/cap-task1-report.md:82）
 #                语料 A = tests/suite/ptr_arith.cr · 语料 B = tests/suite/generics_test.cr
-#                两口径差恒 **143B**，根因 = `--static` 前置 rt.cr（main.cr:433-437）⇒ 4 全局 + 1 串入段。
+#                两规则差恒 **143B**，根因 = `--static` 前置 rt.cr（main.cr:433-437）⇒ 4 全局 + 1 串入段。
 #   环境       : **HOME 归一化**到采集目录内的空 home/（+ `CORE_SAFE=1`）——见下方「环境归一化」
 #                注。**不做归一化**时 gt 两条会随开发机 `~/.core/lib/io/index` 漂 ±28B
 #                （CI PR #80 红档的成因）。
-#   **判据契约是两级的**（勿写成「永远不该变」，也勿写成「随便变」）：
+#   **判定依据契约是两级的**（勿写成「永远不该变」，也勿写成「随便变」）：
 #     canary ELF = 发射面零泄漏检测器（变 = 越界 ⇒ 停下上报）；
-#     .ccr 四条  = 格式+内容形状检测器（**值变 ≠ 必然回归**，但**必须显式归因 + 同批重锁 + 旧值留痕**；
-#                  无归因的变化 = 红）。**本闸门禁止的不是变化，是无声变化。**
+#     .ccr 四条  = 格式+内容形状检测器（**值变 ≠ 必然回归**，但**必须显式归因 + 同阶段重锁 + 旧值留痕**；
+#                  无归因的变化 = 红）。**本闸前提止的不是变化，是无声变化。**
 #   **只锁冷态**（不得「补全」成冷暖双锁）——三条理由（记录值即冷态 / 非可选程序冷≠热是
-#     P4 已豁免的预存面 / 暖态在本两档零区分力且另有专属闸门）。
-#   **D1 确定性闸门（2026-09-19 新增）**：canary ELF **两次构建逐字节对拍**（`cmp`；不新增 job、
+#     P4 已豁免的预存面 / 暖态在本两档零区分力且另有专属检查）。
+#   **D1 确定性检查（2026-09-19 新增）**：canary ELF **两次构建逐字节对拍**（`cmp`；不新增 job、
 #     挂在采集步内，成本 = +1 次 clean-cache + 1 次构建）。**与 F3 是两件事**：
 #       F3 = 「与表内**旧值**相同」（防无声变化）；D1 = 「与自己**再构建一次**相同」（防非确定性）。
 #     **⚠ 重锁前置（硬要求）**：维护者**重新锁定前必须先看到 D1 绿**——否则只比旧值的流程会在
@@ -47,7 +47,7 @@
 #     **覆盖面**：**5 个条目全做**（`canary_elf` + `.ccr` 四条）——`.ccr` 是**序列化/顺序面**
 #     （段序 · intern 序 · 侧表顺序），非确定性最可能在那里现形；只保 ELF 等于漏 4/5（team-lead 2026-09-19 裁）。
 #     **诊断点名条目**（`D1 <spec 名>: …`）。**边界**：只对 canary 两档语料的这 5 个条目，**不做全语料**。
-#   以上两条的完整论证 + 两套历史值的关系（旧 v8 四值 `fb4a3b59…` 等 = 同口径不同时代，
+#   以上两条的完整论证 + 两套历史值的关系（旧 v8 四值 `fb4a3b59…` 等 = 同规则不同时代，
 #   非漂移）逐条见 tools/baseline/canary_values.tsv 头注与
 #   docs/superpowers/plans/2026-09-16-criteria-carrier.md §1/§6。
 #
@@ -61,7 +61,7 @@
 # 零足迹：本脚本**不自建**编译器（前置 = build/corec 存在，且 build 路径按
 #   src/compiler/main.cr:713-721 用 get_arg(0) 目录拼 corearch ⇒ 要求 corearch 同目录）；
 #   只写采集目录（默认 build/canary_artifacts/，build/ 不入库）+ 逐条 clean-cache
-#   （相对 cwd 的 .core/cache/cir/，src/compiler/main.cr:408-414）⇒ 不写源树、不写判据面。
+#   （相对 cwd 的 .core/cache/cir/，src/compiler/main.cr:408-414）⇒ 不写源树、不写判定依据面。
 
 set -uo pipefail
 
@@ -70,19 +70,19 @@ SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 REPO_ROOT="${COREC_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 cd "$REPO_ROOT" || exit 2
 
-D_CUR=""   # 采集目录（clean_cache/step_compile 的日志落点；只在采集路径赋值）
+D_CUR=""   # 采集目录（clean_cache/step_compile 的日志位置；只在采集路径赋值）
 
-# ── 环境归一化（本闸门**必须**与开发机家目录解耦）──────────────────────────────
+# ── 环境归一化（本检查**必须**与开发机家目录解耦）──────────────────────────────
 # 机理（2026-09-16 CI 红档实锤，PR #80）：编译器解析 `import` 时会读
 # `$HOME/.core/lib/<模块名>/index`（扩展 .so 元数据索引，module.cr:523-530 实读），
 # 命中则 `reg_so_funcs` 把其中声明的函数名驻留进 `.ccr` 串表 ⇒ **同一提交、同一编译器，
 # 换台机器产物就变**（本机 `~/.core/lib/io/index` 160B ⇒ `generics_test` +2 串
 # `print_int`/`println_int` = +28B）。
-#   · 归一化 = `HOME` 钉到**采集目录内的空 home/**，且在输出里打印实际 HOME（可审计）；
+#   · 归一化 = `HOME` 固定到**采集目录内的空 home/**，且在输出里打印实际 HOME（可审计）；
 #   · **不得 unset/置空 HOME**——`module.cr:526` 有一条硬编码兜底
 #     `if str_len(home_dir) == 0 { home_dir = "/home/DslsDZC"; }`，置空反而会去读
 #     **原开发者**的家目录（该缺陷已独立登记，见 TODO）。
-#   · `CORE_SAFE` 同法钉成文档默认值 `1`（`ext_mgr.cr:41`：仅在显式 `=0` 时关安全面）
+#   · `CORE_SAFE` 同法固定成文档默认值 `1`（`ext_mgr.cr:41`：仅在显式 `=0` 时关安全面）
 #     —— 防环境里一个 `CORE_SAFE=0` 造成假红。
 CANARY_HOME=""
 ENV_PIN=(env "CORE_SAFE=1")   # HOME 在采集时追加（见 collect_into）
@@ -227,7 +227,7 @@ step_compile() {
   return 0
 }
 
-# D1 确定性闸门：两个产物**逐字节相同** ⇒ 绿；不同 ⇒ 红 + 打印两侧 sha/尺寸（红必须可诊断）。
+# D1 确定性检查：两个产物**逐字节相同** ⇒ 绿；不同 ⇒ 红 + 打印两侧 sha/尺寸（红必须可诊断）。
 # 与 F3（比锁定值）**互补**：F3 管「与旧值相同」，D1 管「自己与自己相同」（两次构建）。
 determinism_gate() {
   local a="$1" b="$2" label="$3" f
@@ -252,7 +252,7 @@ collect_into() {
   D_CUR="$d"
   rm -rf "$d"; mkdir -p "$d"
   # 受控 HOME（采集目录内的空目录）——**非 unset**（防 module.cr:526 硬编码兜底）；
-  # 打印实际值以便审计（本行即「闸门与开发机 $HOME 内容解耦」的证据面）。
+  # 打印实际值以便审计（本行即「检查与开发机 $HOME 内容解耦」的证据面）。
   CANARY_HOME="$d/home"
   mkdir -p "$CANARY_HOME"
   echo "[canary] 环境归一化：HOME=$CANARY_HOME（空目录，已建）· CORE_SAFE=1 · corec=$COREC_BIN"
@@ -261,9 +261,9 @@ collect_into() {
   step_compile pa_static_ccr  pa_st.log  build tests/suite/ptr_arith.cr   --static -o "$d/pa_st.bin" || return 1
   step_compile gt_ccr         gt_ccr.log ccr   tests/suite/generics_test.cr -o "$d/gt.ccr"       || return 1
   step_compile gt_static_ccr  gt_st.log  build tests/suite/generics_test.cr --static -o "$d/gt_st.bin" || return 1
-  # ── D1 确定性闸门（2026-09-19 新增；**覆盖全部 5 个条目**）──────────────────────────
+  # ── D1 确定性检查（2026-09-19 新增；**覆盖全部 5 个条目**）──────────────────────────
   # 为什么必须有它（与 F3 的「比锁定值」是**两件事**）：F3 只能证明「与表内旧值相同」；
-  # 若某批**合法地**改了码（须重锁）而同时**引入非确定性**，只比旧值 ⇒ 操作者采**一次**样
+  # 若某阶段**合法地**改了码（须重锁）而同时**引入非确定性**，只比旧值 ⇒ 操作者采**一次**样
   # 就把非确定值锁进表，此后 canary 全绿而产物其实**每次都不一样**。
   # **两次构建对拍**才区分「确定但变了」与「不确定」——**重锁前必须先看到本条绿**（见值表头注）。
   # 覆盖面 = **5 个条目全做**（team-lead 2026-09-19 裁）：`.ccr` 正是**序列化/顺序面**
@@ -291,7 +291,7 @@ selftest() {
   local fails=0 total=0 n
   local FX="$tmp/fx" TB="$tmp/values.tsv" OUT="$tmp/out.txt"
 
-  mk_fixtures() {   # 确定性夹具（与判据值无关；值表由夹具派生）
+  mk_fixtures() {   # 确定性夹具（与判定依据值无关；值表由夹具派生）
     rm -rf "$tmp/fx"; mkdir -p "$tmp/fx"
     for n in "${SPEC_NAMES[@]}"; do
       printf 'canary-selftest-%s\n' "$n" >| "$tmp/fx/$(artifact_of "$n")"
@@ -351,7 +351,7 @@ selftest() {
   mk_fixtures; mk_table "$TB" "0000000000000000000000000000000000000000000000000000000000000000"
   st "S6 假期望值⇒红" 1 "$TB" "$FX" "F3 pa_ccr: sha256 期望(expected)="
 
-  # S7 D1 确定性闸门自证（**两向**，团队约定 #11）：同文件 ⇒ 绿（防恒红）· 异文件 ⇒ 红（防恒绿）
+  # S7 D1 确定性检查自证（**两向**，团队约定 #11）：同文件 ⇒ 绿（防恒红）· 异文件 ⇒ 红（防恒绿）
   printf 'det-a\n' >| "$FX/det_a"; cp "$FX/det_a" "$FX/det_b"
   total=$((total + 1))
   if determinism_gate "$FX/det_a" "$FX/det_b" "S7-fixture" >| "$OUT" 2>&1; then
@@ -440,7 +440,7 @@ case "$MODE" in
     verify_dir "$VALUES" "$DEFAULT_DIR"
     rc=$?
     if [ "$rc" -ne 0 ]; then
-      echo "[canary] 判据不符 ⇒ **停下上报**（是回归就修回归，是越界就取裁；**勿改值表**——"
+      echo "[canary] 判定依据不符 ⇒ **停下上报**（是回归就修回归，是越界就取裁；**勿改值表**——"
       echo "         换代纪律见 docs/superpowers/plans/2026-09-16-criteria-carrier.md §6）"
     fi
     exit $rc

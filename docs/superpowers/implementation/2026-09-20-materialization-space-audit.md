@@ -12,7 +12,7 @@
 > 本文件是格层本体的层定义，说明格层回答的四问、`Semantic Entry -> Materialization` 对象模型、
 > 七字段、归类表、不变量改写、划界。规则 1–7 的内容仍以 `docs/academic/cache-semantics.md` 为权威
 > （本次修订只改它们的外层表述，不改规则内容）；本节不复制规则正文，避免第二权威。
-> 同批就地改动的文档清单见第 6.0 节。
+> 同阶段就地改动的文档清单见第 6.0 节。
 
 三态标注约定（全文生效，默认 = `[提案]`）：
 
@@ -322,7 +322,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 新式子舍弃了什么（必须明确说明）：旧式子对 `recipe=recomputable` 的对象给出的是
 无条件的、可机械判定的许可（walk 方法链即得）；
 新式子多出一个 `PreserveRequiredState` 析取支，它是义务而非事实，
-义务可以仅凭声明成立。这是新式子的新增失败模式，必须在同一批里配 fail-closed 规则（第 4.4 节）。
+义务可以仅凭声明成立。这是新式子的新增失败模式，必须在同一组里配 fail-closed 规则（第 4.4 节）。
 
 ### 4.3 怎么测（检查形状）
 
@@ -332,7 +332,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
  驱逐其 materialization、重新物化，断言两态可观测等价。
  形状：同基 pre/post 对拍（产物逐字节 / 观测读数相同）。
  > [已实现] 该形状的既有资产：自举链 `corec2 == corec3` 逐字节对拍、
- > ELF canary 固定 sha(`docs/maintainer/design/` 各批检查），可直接复用为对拍框架。
+ > ELF canary 固定 sha(`docs/maintainer/design/` 各阶段检查），可直接复用为对拍框架。
 2. 反向断言（PreserveRequiredState 侧），构造 `recipe=unrecomputable` 的 Entry,
  驱逐其 materialization 且不做状态转移，断言必须拒绝（rc≠0 或硬错），
  绝不允许不报错地通过。
@@ -354,7 +354,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 ```
 
 理由：`PreserveRequiredState` 是义务，义务的未满足与未被检查在观测上不可区分
-这正是本仓库多批修复反复针对的「不报错」类缺陷的形式(`docs/maintainer/design/` 各批的
+这正是本仓库多阶段修复反复针对的「不报错」类缺陷的形式(`docs/maintainer/design/` 各阶段的
 「不报错问题处理」）。所以检查必须是：归属判定返回「未知」时，判为不可驱逐，
 而不是判为可驱逐。
 
@@ -382,11 +382,11 @@ recipe = unrecomputable  => Evictable 只能走 PreserveRequiredState 支
 > 那是不报错地语义破坏，不是性能优化。
 
 它恰好是本次修订要消除的那一类（观测上完全不可区分：丢弃材料与从未打算保留）。
-因此该约束已同批落到 `regalloc-cache-mapping.md` 第 3.1 节与第 4 节规则 3。
+因此该约束已同阶段落到 `regalloc-cache-mapping.md` 第 3.1 节与第 4 节规则 3。
 
 > 实现状态 [已实现-反证]：该分档目前没有实现，`ENT.flags` bit0 恒 0
 > （第 7.1 节），即当前没有任何条目被标记为无方法，判定无从分档。这不构成现存缺陷
-> (边界/执行标注尚未进入 `.ccr`），但生产者实现时必须与本节同批，
+> (边界/执行标注尚未进入 `.ccr`），但生产者实现时必须与本节同阶段，
 > 否则该形态一旦进入 IR 就会在不报错的情况下被丢弃。
 
 ---
@@ -440,7 +440,7 @@ recipe = unrecomputable  => Evictable 只能走 PreserveRequiredState 支
 处置办法：逐处判类别，不做机械替换，「宣布权威」类必改；「引用规则 N」类
 指针仍然有效（规则 1–7 内容未变），只改外层框定词；plans/specs/archive 不动（作为历史保留）。
 
-同批就地改动（12 个既有文件 + 1 新增 ADR）：
+同阶段就地改动（12 个既有文件 + 1 新增 ADR）：
 
 | 文件 | 改动 |
 |---|---|
@@ -519,7 +519,7 @@ ADR 处理(遵 `adr/README.md` 规则：不修改已 accepted 的历史记录）
 | `docs/academic/cache-semantics.md:4` 已实核 | `本文件是 Core 存储语义本体的唯一权威` | 改为「缓存映射这一类实例的规则来源」；且新层定义的权威须另有归属（第 9 节 A） | 就地改 |
 | `docs/academic/cache-semantics.md:12` 已实核 | `Core 的存储语义本体是缓存，范式无关的存储抽象` | 层本体 = 存在格；缓存 = 其中一类。本句改为「缓存映射 = 存在格的一类实例」 | 就地改 |
 | `docs/academic/cache-semantics.md:6` 已实核 | `分层位置:三层映射链(图 -> 格 -> 编码)的「格」层语义本体` | 同上，「格层语义本体」= 存在格；缓存是其子类 | 就地改 |
-| `docs/academic/cache-semantics.md:43` | `驱逐不变量是"缓存语义"的定义性质:任何存储都可以被丢弃,只要方法还在。` | 「定义性质」不成立（第 4.2 节 R2/R3）；且「任何…只要方法还在」是旧式子的充分形态 | 就地改（与第 4 节同批） |
+| `docs/academic/cache-semantics.md:43` | `驱逐不变量是"缓存语义"的定义性质:任何存储都可以被丢弃,只要方法还在。` | 「定义性质」不成立（第 4.2 节 R2/R3）；且「任何…只要方法还在」是旧式子的充分形态 | 就地改（与第 4 节同阶段） |
 | `docs/maintainer/design/memory-model.md:1` 已实核 | `# 存储语义总览:缓存 -> 存在结构 -> 经典映射` | 首段链应改为「存在格，存在结构，经典映射」 | 就地改 |
 | `docs/maintainer/design/memory-model.md:22` | `规则 1-7:缓存语义`（三层图） | 该格 = 存在格；（现状注：此图第二层唯一的框内内容就是缓存语义） | 就地改 |
 | `docs/maintainer/design/memory-model.md:37` | `\| 语义存储 \| 缓存(范式无关本体)，条目、方法、驱逐、再生 \|` | 「范式无关本体」改为「存在格」 | 就地改 |
@@ -530,7 +530,7 @@ ADR 处理(遵 `adr/README.md` 规则：不修改已 accepted 的历史记录）
 | `docs/README.md:37` 已实核 | `[cache-semantics.md]— 缓存语义七条(存储语义本体,权威)` | 「存储语义本体」，「缓存映射规则」 | 就地改 |
 | `docs/maintainer/adr/README.md:34` 已实核 | `\| ADR-0006 \| 缓存语义 = 存储语义本体(2026-08-15 纠偏) \| accepted \|` | ADR 标题是历史决策的记录 | 加注（见下） |
 | `docs/maintainer/adr/adr-0006-cache-semantics.md:1,11` 已实核 | `# ADR-0006: 缓存语义 = 存储语义本体(2026-08-15 纠偏)` / `语义本体 = 缓存语义七条` | 不改正文，ADR 是决策记录，改写它是篡改历史 | 加修订注 / 新 ADR 标 `superseded-by` |
-| `docs/maintainer/adr/adr-0005-memory-model-layers-v4.md:13` 已实核 | `规则封闭、对象开放:层规则 = 缓存语义七条,永不新建` | 层规则应从「缓存七条」改为「存在格的字段与不变量」；这是层定义规则，须与第 2 节同批 | 加修订注 / 新 ADR |
+| `docs/maintainer/adr/adr-0005-memory-model-layers-v4.md:13` 已实核 | `规则封闭、对象开放:层规则 = 缓存语义七条,永不新建` | 层规则应从「缓存七条」改为「存在格的字段与不变量」；这是层定义规则，须与第 2 节同阶段 | 加修订注 / 新 ADR |
 | `docs/academic/lattice-theory.md:48` 已实核 | `- 规则(封闭,永不新建):缓存语义七条 + 最弱理论(关系层面)。新范式出现时层本体一字不改` | 「层本体一字不改」在本修订下恰好被满足，改的是缓存在层内的位置，不是加新规则 | 加注 |
 | `docs/maintainer/design/regalloc-cache-mapping.md:29` | `格(存在) 条目存在:版本、共存、驱逐(cache-semantics 本体;v6 ENT 编码)` | 「cache-semantics 本体」，「存在格本体」 | 就地改 |
 | `docs/maintainer/design/existence-structure.md:4` 已实核 | `七条缓存语义规则(权威 = docs/academic/cache-semantics.md)如何在 .ccr 中落成 IR 一等结构` | 实现方式不变；规则的地位变了（从层本体，一类映射的规则） | 加注 |
@@ -554,10 +554,10 @@ ADR 处理(遵 `adr/README.md` 规则：不修改已 accepted 的历史记录）
 | `docs/glossary.md:23,38,42-48,52` | `## 四、缓存语义(核心七条 + 边界)` | B 类；:20 归第 1 类 |
 | `docs/maintainer/design/existence-structure.md:16,57,126` | `格层 vs 编码层:ENT/NOD/REG 的语义…属格层,范式无关` | A 类（层定义，只需换称） |
 | `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md:54,60,77,98,153` | `驱逐不变量 / 再生等价 / 版本化(规则 1/2/3/5)成为可在实现方式上陈述的性质` / `home = 实例映射注记` | B/D 类；:60/:83「home = 实例注记、格本体最小集不含 home 的决策权」与新定义完全一致，正面样本 |
-| `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md:16,30,31,44` | `公理 = 缓存语义七条` / `驱逐不变量 = 语义保持定理` | B 类（规则 2 措辞须与第 4 节同批） |
-| `docs/superpowers/specs/2026-09-17-concurrency-model-design.md:359,497,560,564` | `「无方法条目(不可重算,必须有 home,永不重建材料)」,语义不完全相同…` | B 类；:564 是新定义第 3.3 节（1） 的使用义务轴所在，须与第 3 节同批读 |
+| `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md:16,30,31,44` | `公理 = 缓存语义七条` / `驱逐不变量 = 语义保持定理` | B 类（规则 2 措辞须与第 4 节同阶段） |
+| `docs/superpowers/specs/2026-09-17-concurrency-model-design.md:359,497,560,564` | `「无方法条目(不可重算,必须有 home,永不重建材料)」,语义不完全相同…` | B 类；:564 是新定义第 3.3 节（1） 的使用义务轴所在，须与第 3 节同阶段读 |
 | `docs/superpowers/specs/2026-09-04-message-copy-elision-design.md:12,37,51,55,57` | `标签 ∈ {COPY, MOVE, SHARE}` / `COPY = 双 home:双方各执材料,方法同源(再生等价)` | B/D 类；MOVE/SHARE/COPY 与新定义第 2 节字段的对应关系见第 3.3 节 |
-| `src/arch/x86_64/regalloc.cr:336,371` | `// 语义:寄存器文件 = 缓存层、栈槽 = home 的映射实例(缓存语义规则 7)。` | 源码注释，D 类不受影响；但若合入，注释措辞可同批顺修 |
+| `src/arch/x86_64/regalloc.cr:336,371` | `// 语义:寄存器文件 = 缓存层、栈槽 = home 的映射实例(缓存语义规则 7)。` | 源码注释，D 类不受影响；但若合入，注释措辞可同阶段顺修 |
 | `TODO.md:2137,2152,2159,2161,2162,2168` | `无方法标记 = ENT flags bit0 字段就位` | B 类；:2159 `ENT flags 无方法完整语义(规则 4b)` 是第 7.1 节的关键依据 |
 
 ### 6.4 第 3 类：明确不动
@@ -779,7 +779,7 @@ Core 是版本化赋值模型(规则 5:`X = X + 1` ≙ `x₁ 创建、x₀ 失�
 > 注意：来源标注：`MAP` 一条 = 经 lead 转达的复核结论，未经本次复核，
 > 基线声明：在核验基线 `38e6c992` 的 `docs/` 上，该 pattern 零命中。
 > 注意：此断言必须带基线，本行自己就含该 pattern，不带基线写入即会否定自身
-> （本仓纪律：断言要写清基线）。且该对象现已有表示：据 lead 转达，同批 mapdoc 的
+> （本仓纪律：断言要写清基线）。且该对象现已有表示：据 lead 转达，同阶段 mapdoc 的
 > `execution-mapping-design.md` 同 pattern 16 命中，含专节第 3.10 节「MAP 段条目」,
 > 另见该档第 9.2 节与 C-3，该文件不在本工作区，此三处指针未经本次复核。
 > ENT/REG 槽位表（上两表）与 `location` 不可打包两条已由本次逐处读源码/文档实核。
@@ -790,7 +790,7 @@ Core 是版本化赋值模型(规则 5:`X = X + 1` ≙ `x₁ 创建、x₀ 失�
 - 本次修订只动文档、不动 `.ccr`，表示方案与 `CCR_VERSION` 一并单独立项（第 9 节 F）；
 - 真实施工时的已知必经点：`location` 另寻表示 · ENT 无空槽 · REG 全满（若涉 MAP） ·
  `CCR_VERSION` 现 `= 9`(`src/compiler/ccr_io.cr:135`,load 严格等值、旧版整类拒收，D10) ·
- 同批须更新基准值 `.ccr`/ELF 检查集合。
+ 同阶段须更新基准值 `.ccr`/ELF 检查集合。
 
 ---
 
@@ -819,7 +819,7 @@ Core 是版本化赋值模型(规则 5:`X = X + 1` ≙ `x₁ 创建、x₀ 失�
  故只能说「在这两个目录内零命中」，不能说「全仓零命中」。
 7. `MAP` 的段归属：经 lead 转达，未经本次复核，在核验基线 `38e6c992` 的
  `docs/` 上该 pattern 零命中（ⓘ 该断言带基线：本行自己含 pattern，不带基线即会否定自身）；
- 该对象现由同批 mapdoc 的 `execution-mapping-design.md` 表示(第 3.10 节「MAP 段条目」/ 第 9.2 节 / C-3,
+ 该对象现由同阶段 mapdoc 的 `execution-mapping-design.md` 表示(第 3.10 节「MAP 段条目」/ 第 9.2 节 / C-3,
  据转达 16 命中），该文件不在本工作区，指针未经本次复核。
  第 7.4 节第 3 条(「MAP 归 REG 段，因此加 MAP 要动 REG 布局，因此要 bump `CCR_VERSION`」)
  整条依赖这一转达；ENT/REG 槽位表与 `location` 不可打包两条已由本次实核，不依赖它。
@@ -844,13 +844,13 @@ Core 是版本化赋值模型(规则 5:`X = X + 1` ≙ `x₁ 创建、x₀ 失�
 
 | # | 事项 | 状态 |
 |---|---|---|
-| A | 合入方式与权威归属 | 已裁：同批就地改（维护者 2026-09-20 裁定）；权威归属见第零节，层定义 = 本文件，规则 1–7 = cache-semantics.md,ADR 走 supersede |
+| A | 合入方式与权威归属 | 已裁：同阶段就地改（维护者 2026-09-20 裁定）；权威归属见第零节，层定义 = 本文件，规则 1–7 = cache-semantics.md,ADR 走 supersede |
 | B | 修订账三条分组（必改/加注/不动） | 已执行：第 6.0 节为实际记录 |
 | C | `location` 字段是否入格层：现行实现故意把 `home` 恒 -1（放置决策 = mapper）；新定义若要求格层陈述 `location`，则与现行划界冲突 |  待裁。倾向不入：`location` 属 mapper 注记，格层只承认「存在多份 materialization」这一事实。若照原文列为字段，须重新划界 |
-| D | `replicability` 与两份活跃 spec 的对应：`{COPY,MOVE,SHARE}`（2026-09-04）与 `{MOVE,LOAN,SPLIT,FILL,COPY}`（2026-09-17）未收敛；`replicability` 字段是否取代它们？|  待裁。倾向不取代：字段是格层陈述，标签是跨边界决策；须出对齐表（该批已自行记录） |
+| D | `replicability` 与两份活跃 spec 的对应：`{COPY,MOVE,SHARE}`（2026-09-04）与 `{MOVE,LOAN,SPLIT,FILL,COPY}`（2026-09-17）未收敛；`replicability` 字段是否取代它们？|  待裁。倾向不取代：字段是格层陈述，标签是跨边界决策；须出对齐表（该阶段已自行记录） |
 | E | `version` 是存储字段还是派生字段：现实现为写入时派生（内存表无此字段） |  待裁。倾向派生：由图坐标唯一决定，因此依第 5.2 节修正检查属格层，但不必占存储 |
 | F | 格式施工面：七个字段的 `.ccr` 表示方案未定(第 7.4 节已重写，`location` 不可打包 / ENT 无空槽 / REG 全满）；真实施工要动 `CCR_VERSION`（现 9）+ 更新基准值 `.ccr`/ELF 检查集合 |  待裁。建议单独立项。注意：原写「本修订不需要加段」已撤（该结论经独立复核不成立，见第 7.4 节撤稿说明）。另注（lead 转来，未经本次复核）：`.ccr` 段位 tag 9+ 已有两个具名主张者（驱逐标注段 / 证书段），且 `MAP` 归 REG 段而 REG 全满，加段/改布局前须先与之对齐，不得各加各的 |
-| G | `recipe` 的施工：第 7.1 节已证「位就位、语义未实现」；是否本批一并实现生产者与消费者？|  待裁。倾向分开：文档修订与语义实现是两个批次，混批会让「文档变了但行为没变」不可判别。实现时必须与第 4.5 节同批 |
+| G | `recipe` 的施工：第 7.1 节已证「位就位、语义未实现」；是否本次一并实现生产者与消费者？|  待裁。倾向分开：文档修订与语义实现是两个阶段，混阶段会让「文档变了但行为没变」不可判别。实现时必须与第 4.5 节同阶段 |
 | H | 术语冲突：`物化` 一词已被 `so_materialize`（模块系统符号物化）占用 |  待裁：须择一改名或加限定语 |
 | I | `adr-0005:13`「层规则 = 缓存语义七条，永不新建」的框定词 | 已裁 = 出路 1：维护者裁定再起一份 ADR 记录收窄，因此 ADR-0022（2026-09-20）表示；`adr-0005` 正文不动，状态行注「部分框定被 ADR-0021 收窄」，索引表补行 |
 | K | `TODO.md:2137`「v4 定稿：…层规则零签名 = 缓存七条…」 | 已裁 = 不动 + 登记指针。它是历史 v4 定稿的引用，不是权威宣告，因此按检查（纯描述/历史引用，因此不动）不改原文；已在 ADR-0022 第 关联 立一条登记（指针在、原文不动），读者据该条即知现在的读法 |

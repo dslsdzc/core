@@ -2,7 +2,7 @@
 
 > 对应设计：[coi-optimization-knowledge-sidecar.md](../../maintainer/design/coi-optimization-knowledge-sidecar.md)
 
-本文保存 `.coi` 设计的原始 22 节展开、`g_opt_meta` 现状实核、口径表、12 条不变量的检查细节、13 条开放问题结论、12 项待裁和 11 项未核实。设计正文只保留当前格式和规则。
+本文保存 `.coi` 设计的原始 22 节展开、`g_opt_meta` 现状实核、规则表、12 条不变量的检查细节、13 条开放问题结论、12 项待裁和 11 项未核实。设计正文只保留当前格式和规则。
 
 # Core Optimization Information（`.coi`），优化知识附属格式（正式规格）
 
@@ -20,7 +20,7 @@
 > 读本文须区分三类文本：
 > 1 原文（维护者原话，带引号或标「原文 第 n 节」）；
 > 2 本文展开（撰写者的形式化、推导与建议，标「本文展开」）；
-> 3 现状实核（带 `file:line` 或实测口径）。
+> 3 现状实核（带 `file:line` 或实测规则）。
 > 三者不得混读，尤其不得把 2 读成 1，不得把 2 读成现状。
 >
 > 关联：
@@ -63,7 +63,7 @@
 
 - `.ccr` 的 SYM 段第 6 子节表示 `g_opt_meta`（`src/compiler/ccr_io.cr:749` 写 / `:1269` 读），
  键表在 `src/compiler/ast.cr:659-663`，声明在 `src/compiler/globals.cr:378`。
-- 产物实测：1872 个 `ver=9` 的 `.ccr` 产物（口径：glob `build/**/*.ccr` + `/tmp/**/*.ccr`，按头 `magic==827474755 && version==9` 筛选，脚本自行走 SYM 子节序；mtime 2026-09-15…09-22）
+- 产物实测：1872 个 `ver=9` 的 `.ccr` 产物（规则：glob `build/**/*.ccr` + `/tmp/**/*.ccr`，按头 `magic==827474755 && version==9` 筛选，脚本自行走 SYM 子节序；mtime 2026-09-15…09-22）
  `opt_count` 全部为 0，且 SYM 段走查 `tail` 全 0（1872/1872，解析自洽）。
 - 两条独立证据：
  1. 写侧清单，唯一写入者是 `src/arch/x86_64/regalloc.cr`，而它在 `backend_support_files`（`build_selfhost_native.py:65`）、
@@ -278,11 +278,11 @@ Forbidden direction:   .ccr -> required .coi
 - 内存态步长 = `OPT_META_STRIDE = 64`B（头 8B = `{key u32, len u32}` + 数据 ≤56B，因此每块 ≤5 个寄存器对）
 - 读侧上界检查 `[已实现]`：`ccr_io.cr:1278` `if md_len > OPT_META_STRIDE - 8 || !ccr_has_bytes(...) { return -1; }`
 
-谁写 / 谁读 `[已实现]`（实测口径，见下）：
+谁写 / 谁读 `[已实现]`（实测规则，见下）：
 
 | 角色 | 位置 | 说明 |
 |---|---|---|
-| 写（唯一） | `src/arch/x86_64/regalloc.cr` | 26 行（口径：匹配式 `w32\(g_opt_meta\|w64\(g_opt_meta\|store8\(g_opt_meta` · 单位 = 行 · 范围 = 后端三轴；`instr.cr`/`corearch.cr` 均为 0，因此二者纯读）。`alloc_registers()` 阶段 5 终分配（`regalloc.cr:768-824`）+ 注入钩子（`:199-215`） |
+| 写（唯一） | `src/arch/x86_64/regalloc.cr` | 26 行（规则：匹配式 `w32\(g_opt_meta\|w64\(g_opt_meta\|store8\(g_opt_meta` · 单位 = 行 · 范围 = 后端三轴；`instr.cr`/`corearch.cr` 均为 0，因此二者纯读）。`alloc_registers()` 阶段 5 终分配（`regalloc.cr:768-824`）+ 注入钩子（`:199-215`） |
 | 写（装载侧） | `src/compiler/ccr_io.cr` | load 时从 `.ccr` 重建（`:1269-1292`） |
 | 读 | `src/arch/x86_64/instr.cr:34` `fn get_reg_for_var` | 发射面消费（`g2_slot` 路径） |
 | 读 | `src/compiler/corearch.cr:186-201`（`--dump-regassign`）· `:210`（`--check-regalloc` 看门狗） | 诊断/测试通道 |
@@ -303,7 +303,7 @@ Forbidden direction:   .ccr -> required .coi
 > 因此结论：SYM 段第 6 子节今天是一个版本化了的空实现方式，它占了格式位置、参与了校验、
 > 但在 corec，corearch 的传输上不携带任何信息。
 >
-> ####注意：口径表（每个数都要带「怎么数的」，本仓纪律）
+> ####注意：规则表（每个数都要带「怎么数的」，本仓纪律）
 >
 > `g_opt_meta` 的枚举计数随细看只会变多。下表把数法与数并列，脱离数法的计数不得引用。
 
@@ -325,8 +325,8 @@ Forbidden direction:   .ccr -> required .coi
 > 2 其中 `ent_kernel.cr` 的 10 行全部是注释（实测：该档读侧/写侧表达式均为 0）
 > 因此这 10 行不构成任何读点。
 > 因此结论：71 = 「三档行数和」（一个真实、可复现的量），但它的名字不该叫「读侧表达式」。
-> 两处都不改数、只改数法，上表即最终口径。
-> 因此本文此后一律用上表的数法引用，不再写「N 处直读」这类无口径的说法。
+> 两处都不改数、只改数法，上表即最终规则。
+> 因此本文此后一律用上表的数法引用，不再写「N 处直读」这类无规则的说法。
 >
 > ####  由此定下的两条纪律（引用任何计数前先过这两条）
 >
@@ -400,7 +400,7 @@ Forbidden direction:   .ccr -> required .coi
 
 搬迁的字节面代价（必读）：`opt_meta` 子节是 SYM 段的最后一个子节，盘上恒为 `[0u32]` = 4B。
 把它从 `.ccr` 移出，因此 SYM 段长 −4B，因此 `.ccr` 字节变，因此触发
-（a）canary ELF 检查链条（本仓「ELF 变须维护者声明 + 同批更新基准值」），
+（a）canary ELF 检查链条（本仓「ELF 变须维护者声明 + 同阶段更新基准值」），
 （b）逐字节对拍的 pre/post 定位点。本文不裁决搬迁时机，列入第 24 节待裁 A。
 
 ### 3.4 附属格式先例：`.cir` 快照缓存 / `.core/cache/` / `CIR_CACHE_VER`
@@ -420,7 +420,7 @@ Forbidden direction:   .ccr -> required .coi
 
 > `func_fingerprint`（实际位置 `ir_gen.cr:4001-4035`，注意：见下）不覆盖函数体内容，只取源文件字节哈希 + 4 个函数级字段
 > （kind/名/形参数/body 节点 kind），注释自称 `"Walk the body AST"`（`ir_gen.cr:4022`）但代码是 stub；`sig_fingerprint`（`:4037`）同理。
-> 因此关闭复活通道的是身份检查、不是指纹；同批登记 TODO #2026-09-17-17。
+> 因此关闭复活通道的是身份检查、不是指纹；同阶段登记 TODO #2026-09-17-17。
 >
 > 注意：附带发现（本文实核）：`cir_cache.cr` 头注把它标为 `ir_gen.cr:3964-3996`，
 > 该引用在 `develop@origin` 上已陈旧（实际 `:4001`，偏 ~37 行）。这本身是「文档行号 ≠ 修订」
@@ -552,7 +552,7 @@ Forbidden direction:   .ccr -> required .coi
  - schema 检查：记录字段表与上述八项零同名。
  - 确定性检查：同一 （source_ref, kind） 在两次独立编译中产生的记录逐字节相同。
 注意：这条与 #11 的确定性检查同源但不同因：过程历史会带上顺序/时间/指针，因此立刻不等。
-因此一条检查同时钉两条不变量，是本格式性价比最高的一条检查。
+因此一条检查同时固定两条不变量，是本格式性价比最高的一条检查。
 
 不变量计数：原文第 19 节 = 12 条，本文逐条检查化 = 12 条（无增删）。
 注意：按本仓枚举计数纪律，读作「至少 12 条」，实现时若发现某条可拆（如 #3/#4 各自的两条检查），计数只增不减。
@@ -1036,7 +1036,7 @@ cost {
 | `profile` | 测量面 | 注意：同上 |
 
 注意：待裁 J（第 24 节）：`band` 字段是否必须贯穿进 `.coi` 的代价记录（S-D 把 `band` 定为必填，
-而原文第 10 节的概念式只有 `confidence`）。本文建议：两者都留（`confidence` = 原文口径，`band` = S-D 口径），
+而原文第 10 节的概念式只有 `confidence`）。本文建议：两者都留（`confidence` = 原文规则，`band` = S-D 规则），
 但这会让同一信息有两个实现方式，因此需维护者裁。
 
 ---
@@ -1200,7 +1200,7 @@ It MUST NOT cause:
 | verifier bypass | #9（验证路径不被 `.coi` 影响） |
 
 因此检查形状 = #4（a） 的敌意载荷对拍（随机载荷，因此产物与无 `.coi` 态逐字节相同）+ #9 的行为检查（非法变换，因此必拒）。
-本文建议把这两条检查作为 `.coi` 实现批的必备验收项（第 22 节的验收检查 1/3 已含其雏形）。
+本文建议把这两条检查作为 `.coi` 实现阶段的必备验收项（第 22 节的验收检查 1/3 已含其雏形）。
 
 解析器复杂度（Q11，原文第 20 节的「maximum parser complexity」），本文结论：
 
@@ -1349,7 +1349,7 @@ For future unknown hardware:
 > 但改写成验收检查（见第 22.2 节），不是「只证明这些就够了」。
 >
 > 原文第 21 节的 V1 字段清单（header / generic records / target descriptors / target records / index）
-> 本文视为「首批字段形状」的建议，不再称为 V1 边界。
+> 本文视为「首阶段字段形状」的建议，不再称为 V1 边界。
 
 ### 22.1 实现顺序（按返工范围排，不是按重要性排）
 
@@ -1359,7 +1359,7 @@ For future unknown hardware:
 | 序 | 做什么 | 若后置的返工范围（= 为什么要先做） |
 |---|---|---|
 | 1 | 身份与失效方案（第 9 节：数值坐标主定位点 + 双检查） | 记录格式的一切字段都依赖它。若后置，全部已写记录的 schema 都要重做 |
-| 2 | 容器框架 + 未知段/未知 kind 的跳过能力（第 15.2 节、#8） | 跳过能力若后置，第一批记录会固定为「必须全懂」的语义，之后每加一个 kind 都要 bump 格式 |
+| 2 | 容器框架 + 未知段/未知 kind 的跳过能力（第 15.2 节、#8） | 跳过能力若后置，第一组记录会固定为「必须全懂」的语义，之后每加一个 kind 都要 bump 格式 |
 | 3 | 物理分节（generic 段 / target 段 / 每目标组）（第 18 节） | 分节若后置，第 18 节剥离、第 19 节分节替换、第 20 节合并三处全部返工（它们都要求「不改 `.ccr` 就能改 `.coi`」） |
 | 4 | 单条泛型记录的端到端只读通道（能读、能忽略、暂不参与优化） | 此时即可实证 #3 与 #4（可选性 / 非权威），在没有任何优化收益之前就能把它们确定下来 |
 | 5 | 目标谓词 + 目标记录 + 候选集合并（第 11 节、第 12 节、第 20 节） | 此时可实证 #5 / #6 / #10（共存 / 兼容声明 / 词汇检查） |
@@ -1403,7 +1403,7 @@ For future unknown hardware:
 | 1 | final binary container layout | 定长头 + 段表 + 段体（与 `.ccr` 同构）；magic 与版本检查独立；段号可扩展（未知段跳过） | 第 15.2 节；`.ccr` 段表 `[已实现]` 的检查可复用 | 结论（子项待裁 A1：是否共享 `ccr_io.cr` 的段表辅助函数） |
 | 2 | compression strategy | v1 不压缩。若将来要：仅整段压缩（不做流式），且压缩段必须可跳过（不知压缩格式时，跳过该段得到空内容） | 第 17 节的解析复杂度纪律（压缩器 = 攻击面 + 复杂度）；#8 的跳过纪律 | 结论（子项待裁 A2：是否留 per-section 压缩标志位） |
 | 3 | stable entity/reference identity scheme | 不新建身份：直接引用 `.ccr` 的空间坐标（NOD 文件序 / ENT id / REG 行 id / SYM 函数行号 / TYPE 项索引）作主定位点；字符串名只作诊断（`debug_name`，不参与失效判定） | 第 9.3 节（NOD id = 文件序，另立身份 = 第二真源）；第 9.4 节（STR 陷阱） | 结论（子项待裁 A3：是否需要跨重编稳定的 id） |
-| 4 | fingerprint algorithm and granularity | 双检查：结构指纹（覆盖记录自己声明的引用区间）+ 生产者内容身份。禁止只靠自造指纹 | 第 9.2 节；`cir_cache.cr:104-116` 的 stub 负面前例 + `:179` 身份检查 `[已实现]` | 结论（子项待裁 A4：指纹算法与确定性口径） |
+| 4 | fingerprint algorithm and granularity | 双检查：结构指纹（覆盖记录自己声明的引用区间）+ 生产者内容身份。禁止只靠自造指纹 | 第 9.2 节；`cir_cache.cr:104-116` 的 stub 负面前例 + `:179` 身份检查 `[已实现]` | 结论（子项待裁 A4：指纹算法与确定性规则） |
 | 5 | record namespace/versioning rules | 两层：文件级 `format_version`（容器，不匹配，因此整档不用）+ 记录级 `kind`（点分命名空间，可追加）+ `record_version`。未知 kind，因此跳过 | 第 10.2 节；#8；原文第 11 节「非固定枚举」 | 结论（无待裁） |
 | 6 | target predicate language | 不新造语言：谓词 = 「能力名 × 区间」的 DNF（`&`/`\|`/`>=`/`<=`/`==`/`!=`）；`feature_exclusions` 用 `!=` 表达；`family`/`revision` 统一为「名 + 区间」 | 第 11.2 节；#10（词汇表不归 `.coi`） | 结论（子项待裁 A5：词汇表真源 = HIT 还是 `CapabilityDomain`） |
 | 7 | whether generic and target-specific data use one file or separable sections | 一个文件 + 物理分节（generic 段 / target 段 / 每目标组可分） | 第 18 节（「一个文件含多目标」+「剥离而不改 `.ccr`」两条同时成立，因此剥离必须是段级操作） | 结论（无待裁） |
@@ -1429,13 +1429,13 @@ For future unknown hardware:
 | A1 | 是否共享 `ccr_io.cr` 的段表辅助函数 | （a） 共享（少写代码，但 `.coi` 实现进 `corearch` 清单，因此与 `.ccr` 强耦合）（b） 独立实现（代码重复，但两格式版本节奏解耦） | (b），第 3.4 节实测两格式版本节奏已解耦（`.cir` 22 vs `.ccr` 9） | `.coi` 实现进哪个构建清单 |
 | A2 | 是否留 per-section 压缩标志位 | （a） 不留（v1 完全不压缩）（b） 留位但恒 0（将来不用 bump 格式） | (b），留位成本 = 1 bit，改格式成本 = 全量重生成 | 容器头布局（改后不可逆） |
 | A3 | 是否需要跨重编稳定的实体 id | （a） 不需要（用 `.ccr` 文件序坐标，重编即失效）（b） 需要（引入稳定 id 层） | (a），（b） 会引入新身份层 = 第二真源（第 9.3 节） | 失效率（（a） 下任何上游改动整档失效） |
-| A4 | 结构指纹的算法与确定性口径 | （a） 复用本仓既有哈希族（如 `tt_hash5` 风格）（b） 新定一套 | 无倾向（需实测确定性） | 指纹实现与检查 |
-| A5 | 能力谓词的词汇表真源 | （a） HIT 表文件（`core-x86.toml`，`[已实现]`，已有「值域校验错误全部拒绝加载」纪律）（b） `execution-mapping-design.md` 第 3.7 节 `CapabilityDomain`（`[已设计未实现]`）（c） 两者合一，HIT 为实例、CapabilityDomain 为维度 | （a） 为首批，长程向 （c） 收敛 | #10 的词汇检查对应位置；与第 0.2 节的划界 |
+| A4 | 结构指纹的算法与确定性规则 | （a） 复用本仓既有哈希族（如 `tt_hash5` 风格）（b） 新定一套 | 无倾向（需实测确定性） | 指纹实现与检查 |
+| A5 | 能力谓词的词汇表真源 | （a） HIT 表文件（`core-x86.toml`，`[已实现]`，已有「值域校验错误全部拒绝加载」纪律）（b） `execution-mapping-design.md` 第 3.7 节 `CapabilityDomain`（`[已设计未实现]`）（c） 两者合一，HIT 为实例、CapabilityDomain 为维度 | （a） 为首阶段，长程向 （c） 收敛 | #10 的词汇检查对应位置；与第 0.2 节的划界 |
 | A6 | 同 `(source_ref, kind)` payload 不同时：保留两条还是取一 | （a） 保留全部（原文第 17 节支持）（b） 取 validity 高者 | （a） + 上界纪律，（a） 会让候选集无界，须配一条上界 | 候选集大小 / 优化器评估成本 |
 | A7 | 是否加「来源声明」字段（非签名，仅溯源） | （a） 加（如 `producer_name`，纯诊断）（b） 不加 | (a），与 A2 同理：留位便宜、改格式贵 | 记录头布局 |
-| A8 | 代价记录里 `band`（S-D 必填）与 `confidence`（原文第 10 节口径）是否并存 | （a） 并存（两口径都有）（b） 只用 `band`（向 S-D 处理完成）（c） 只用 `confidence`（保持原文） | (a），但两实现方式 = 同一信息两个来源，须确定优先级 | 第 13 节的代价记录 schema |
-| A9 | 注意：`g_opt_meta` 搬迁的时机 | （a） 与 V8 实现同批搬 （b） 与 `.coi` 实现批搬 （c） 先只标记（在两处都注明归属），后搬 | 无倾向（须维护者裁） | 注意：`.ccr` 字节变（SYM 段 −4B），因此 canary ELF 检查链 + 逐字节对拍定位点（第 3.3 节） |
-| A10 | 注意：`OPT_KEY_STACK_SHARE` / `OPT_KEY_CSE` 的处置 | （a） 废弃（实测零写点）（b） 迁入 `.coi` 首批 kind （c） 保留在 `.ccr` | （a） 或 (b），实测零写点（第 3.1 节）；留在 `.ccr` 只会维持「空实现方式」状态 | 键表 + 文档面 |
+| A8 | 代价记录里 `band`（S-D 必填）与 `confidence`（原文第 10 节规则）是否并存 | （a） 并存（两规则都有）（b） 只用 `band`（向 S-D 处理完成）（c） 只用 `confidence`（保持原文） | (a），但两实现方式 = 同一信息两个来源，须确定优先级 | 第 13 节的代价记录 schema |
+| A9 | 注意：`g_opt_meta` 搬迁的时机 | （a） 与 V8 实现同阶段搬 （b） 与 `.coi` 实现阶段搬 （c） 先只标记（在两处都注明归属），后搬 | 无倾向（须维护者裁） | 注意：`.ccr` 字节变（SYM 段 −4B），因此 canary ELF 检查链 + 逐字节对拍定位点（第 3.3 节） |
+| A10 | 注意：`OPT_KEY_STACK_SHARE` / `OPT_KEY_CSE` 的处置 | （a） 废弃（实测零写点）（b） 迁入 `.coi` 首阶段 kind （c） 保留在 `.ccr` | （a） 或 (b），实测零写点（第 3.1 节）；留在 `.ccr` 只会维持「空实现方式」状态 | 键表 + 文档面 |
 | A11 | 注意：`.coi` 的默认发现路径 / 命名约定 | （a） 默认 `<program>.coi`（与 `<program>.ccr` 同名同目录）（b） 无默认，必须显式列出（支持第 17 节的多源 `vendor-gpu.coi` 等）（c） 默认 + 可追加 | （a） + （c）（默认同名，另可显式追加多源） | 打包/分发工具链；与第 18 节三个包配置的对应 |
 | A12 | 注意：`.cir` 是否入分发包（第 2.2 节的读法确认） | （a） 不入（本文读法，与原文第 15 节逐字一致）（b） 入 | (a），但未经维护者确认（列入第 25 节） | 分发格式面 |
 
@@ -1452,7 +1452,7 @@ For future unknown hardware:
 |---|---|---|---|
 | U1 | 「后端 71 处直读 `g_opt_meta`」这一计数，已解决（2026-09-23） | 已澄清：71 可复现 = `regalloc.cr` 54 + `instr.cr` 7 + `ent_kernel.cr` 10 的行数和；
 注意：但该数法名（「读侧表达式」）对不上，按行数读侧表达式 = 18、按出现次数 = 19；且 `ent_kernel.cr` 那 10 行全是注释（该档读/写表达式均 = 0）。
- 本文先前报的「全仓 93 行」经查是本文的加法错误（自打印逐档数之和 = 97）。因此正确值 = 97（全仓）/ 67（后端三轴），见第 3.1 节口径表 | 两处都不改数、只写清数法；已实现为第 3.1 节的口径表（匹配式 · 单位 · 文件范围三列齐全） |
+ 本文先前报的「全仓 93 行」经查是本文的加法错误（自打印逐档数之和 = 97）。因此正确值 = 97（全仓）/ 67（后端三轴），见第 3.1 节规则表 | 两处都不改数、只写清数法；已实现为第 3.1 节的规则表（匹配式 · 单位 · 文件范围三列齐全） |
 | U2 | `g_opt_meta` 在 corec 侧是否真的恒空 | 本文有两级证据（写侧清单：`regalloc.cr` 不在 `corec_files`；产物实测：1872/1872 `opt_count=0`），但未在 corec 上加计数器实测「写 `.ccr` 前 `g_opt_meta_count == 0`」 | 在 `save_ccr` 入口加一条诊断打印（或一次性探针），跑 `corec build` 实读 |
 | U3 | 产物实测样本的编译器代次 | 1872 个 `ver=9` 产物的 mtime ∈ 2026-09-15…2026-09-22，未逐一核对其由哪个编译器修订产生（只核了 `ver=9`） | 用当前 `develop@origin` 重建 `corec` 后新产一个 `.ccr`，重跑本解析器 |
 | U4 | 能力谓词词汇表的真源（A5） | `core-x86.toml` 的键是否足以表达第 11.1 节的七个维度（尤其 `implementation family` / `min|max revision` / `backend ABI`）未逐键核对 | 逐键对拍 `core-x86.toml` 与原文第 8 节的七维度 |
@@ -1493,9 +1493,9 @@ For future unknown hardware:
 
 | 标记 | 计数 | 说明 |
 |---|---|---|
-| `[已实现]` | 33 | 口径：`grep -o '\[已实现\]' <this file> \| wc -l`（按出现次数）。本文全部 `[已实现]` 均带 `develop@origin` @ `0eb1efd3` 的 `file:line` 或实测口径 |
-| `[已设计未实现]` | 8 | 口径同上行（按出现次数）；逐项见下 |
-| `[提案]` | 2（显式标记） | 口径同上行（按出现次数）。注意：本档是默认档：未被标记的设计陈述一律按 `[提案]` 读，因此实际覆盖 = 本文主体；依据 = 全仓 `grep -i '\.coi\b'` = 0 行 |
+| `[已实现]` | 33 | 规则：`grep -o '\[已实现\]' <this file> \| wc -l`（按出现次数）。本文全部 `[已实现]` 均带 `develop@origin` @ `0eb1efd3` 的 `file:line` 或实测规则 |
+| `[已设计未实现]` | 8 | 规则同上行（按出现次数）；逐项见下 |
+| `[提案]` | 2（显式标记） | 规则同上行（按出现次数）。注意：本档是默认档：未被标记的设计陈述一律按 `[提案]` 读，因此实际覆盖 = 本文主体；依据 = 全仓 `grep -i '\.coi\b'` = 0 行 |
 
 `[已实现]` 逐项（本文引用的全部现状依据）：
 
@@ -1505,7 +1505,7 @@ For future unknown hardware:
 | opt_meta 键表 | `src/compiler/ast.cr:659-663` |
 | opt_meta 分配器 | `src/compiler/dyn_arr.cr:1090` |
 | opt_meta 写 / 读 / 上界检查 | `src/compiler/ccr_io.cr:749` · `:1269` · `:1278` |
-| opt_meta 唯一写侧 | `src/arch/x86_64/regalloc.cr`（写点 26 行；口径见第 3.1 节口径表；终分配 `:768-824`；注入 `:199-215`） |
+| opt_meta 唯一写侧 | `src/arch/x86_64/regalloc.cr`（写点 26 行；规则见第 3.1 节规则表；终分配 `:768-824`；注入 `:199-215`） |
 | opt_meta 读侧 | `src/arch/x86_64/instr.cr:34` · `src/compiler/corearch.cr:186-201` · `:210` |
 | 单元归属 | `build_selfhost_native.py:65` · `:311-374` · `:388-390` |
 | `.ccr` 常量与段表 | `src/compiler/ccr_io.cr:134-140` · `:32-36`（头注布局） |
@@ -1517,7 +1517,7 @@ For future unknown hardware:
 | `.cir` 指纹 stub 负面前例 | `src/compiler/cir_cache.cr:104-116`（注），实际 `ir_gen.cr:4001-4035` / `:4037`（注内标 `:3964-3996` 已陈旧） |
 | HIT 表 / 引擎 | `src/arch/x86_64/core-x86.toml` · `src/arch/hit/hit.cr` |
 | 越界守卫先例 | `src/arch/x86_64/regalloc.cr:17-23`（注） |
-| 产物实测 | 1872 个 `ver=9` `.ccr`，`opt_count` 全 0 / SYM `tail` 全 0（口径见第 3.1 节口径表） |
+| 产物实测 | 1872 个 `ver=9` `.ccr`，`opt_count` 全 0 / SYM `tail` 全 0（规则见第 3.1 节规则表） |
 
 `[已设计未实现]` 逐项：V8 Entity/Relation/metadata（`ccr-v8-open-relational-lattice.md`）·
 `CapabilityDomain` / `PerformanceProfile` / `RuntimeState` / `Cost Model`（`execution-mapping-design.md` 第 3.7 节/第 3.8 节/第 3.9 节/第 5.2 节）·

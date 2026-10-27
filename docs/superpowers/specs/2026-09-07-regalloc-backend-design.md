@@ -41,7 +41,7 @@ tagged 识别在 corearch（`instr.cr` mw_setup_tags）。分配移入后与 tag
 1. R1 = R1a：按层拆分，语义优化留 corec（AST 折叠 + CSE），编码决策（数据面/共存/判定/注入/分配）迁到 `src/arch/linux/ld/regalloc.cr`（corearch 闭包）
 2. R2 = D-1=Y：opt_meta 子节恒 0 加 ENT 段恒空（first/last_ent/param_ents 恒 -1），格式结构保留，loader 空表语义已支持，零 version bump；home 字段随落盘消亡（内存表保留，corearch 自算）
 3. R3：verify 触发点 = corearch O2（load 后 alloc 加 verify，emit 前，违反即编译错误）；corec 判定触发与 `cir` 通道移除（注入通道随迁同名 flag）
-4. R4（注）：编译时间分布，分配和数据面计算移到 corearch 进程；compile-time-linearity 的 corec 侧减负面按实测另行记录（未列入本批）
+4. R4（注）：编译时间分布，分配和数据面计算移到 corearch 进程；compile-time-linearity 的 corec 侧减负面按实测另行记录（未列入本次）
 5. R5 = 拍板：corec `-O` 门语义，O1 = CSE（corec 进程内，实证对 `.ccr` 产物零效果，NOD 在 O0/O1/O2 逐字节相同）；O2 分配在 corearch（corec build 透传 `--opt-level`；直接调 corearch 未传 -O = O0 全栈）。CLI 帮助文案已更新（corec/corearch）
 6. D-3（附加拍板）：pass_stack_share 停用摘除（产物死路径实证：g_stack_map 不落盘、corearch 恒空；恢复时在 corearch 内实现 alloc 同一 seam，挂账）
 

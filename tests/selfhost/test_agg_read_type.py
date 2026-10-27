@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""✅ **已修（#2026-09-16-16 批 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
+"""✅ **已修（#2026-09-16-16 阶段 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
 
 被测缺陷 = **聚合读丢型**：四个读点把结果槽**硬定 `TI_INT`**，而聚合槽的规范存储形式是
-**精确（scaled）**（apx 批不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
+**精确（scaled）**（apx 阶段不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
 在**经聚合读入的值**上全部失明（`dex_store_adjust` / `dex_scale_int` / 二元分流 / extern 边界 /
 LET 继承 / 泛型键名串）。
 
@@ -10,12 +10,12 @@ LET 继承 / 泛型键名串）。
   · 结构体字段读 `ir_gen.cr:2590`（`new_ir_var("field", TI_INT)`）+ 发射 `:2597`
   · 数组/切片元素读 `:2655` + 发射 `:2660` / `:2668`
   · match 臂载荷绑定 `:2393` + 发射 `:2395` / `:2412`
-  · match 结果槽 `:2299`（**裁-AGG-2 = 登记不纳入本批**）
+  · match 结果槽 `:2299`（**裁-AGG-2 = 登记不纳入本次**）
 
-**判据网（三条腿）**
-  · **腿 A（语义值）** = R1–R5：`build --static` 产物的**运行值**（期望 7）。改前实测：
+**判定依据网（三条路径）**
+  · **路径 A（语义值）** = R1–R5：`build --static` 产物的**运行值**（期望 7）。改前实测：
     全部 **1**（静默错值；`check` 0 error）。
-  · **腿 B（界面见证，裁-AGG-1 的验收形状：槽型正确 **且** 无重复转换）** —— 用**门控忠实**的
+  · **路径 B（界面见证，裁-AGG-1 的验收形状：槽型正确 **且** 无重复转换）** —— 用**门控忠实**的
     IR 见证（`.cir` 文本转储），两个方向都要：
       - **反方向（读槽 ≠ `TI_INT`）**：`dex_scale_int`（`ir_gen.cr:1033-1040`）的**唯一产物**是
         `const _dsc = 1000000` + `binary _dxt = <v> * _dsc`，其门 = `irv_type(var) == TI_INT`
@@ -25,23 +25,23 @@ LET 继承 / 泛型键名串）。
         ⇒ **`_dxdiv` 必须出现**（R5 写回 apx 槽）。
       - **无重复转换**：`_dxt` 计数必须 **0**（不能「槽型对但仍多转一次」）、`_dxdiv` 计数必须 **1**
         （不能漏转、也不能转两遍）。
-  · **腿 C（非回归钉子）** = R7（Core 调用实参，**改前已正确**——Core 形参物化 scaled ↔ 读值 scaled
-    同形）+ N1（apx 批已转正的「raw 锚定 / 比较点」形）。
+  · **路径 C（非回归固定用例）** = R7（Core 调用实参，**改前已正确**——Core 形参物化 scaled ↔ 读值 scaled
+    同形）+ N1（apx 阶段已转正的「raw 锚定 / 比较点」形）。
 
-**两条钉子为何是钉子而不是 RED**（T1 实测修正）：读码 + 实测双证；R7 今日 rc=7。
+**两条固定用例为何是固定用例而不是 RED**（T1 实测修正）：读码 + 实测双证；R7 今日 rc=7。
 **R6（extern 实参）不在此文件**：其运行路径被 `corearch --link` 静态链**既有崩溃**阻塞
 （`tests/suite/ffi_test.cr:8-11` 头注明载）⇒ 按先例 `test_dex_arith.py::test_extern_dex_arg_cir`
 用 **IR 断言**判定（本文件 `leg_b` 的 B4 即该断言的最小形态）。
 
-**挂点（照 #2026-09-16-31 批三件套，T3 已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件 +
-`ci_hook_allowlist.txt` 条目**已删** + 本头注已转正（判据 = `test_ci_hook_coverage.py` PASS）。
+**挂点（照 #2026-09-16-31 阶段三件套，T3 已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件 +
+`ci_hook_allowlist.txt` 条目**已删** + 本头注已转正（判定依据 = `test_ci_hook_coverage.py` PASS）。
 
-**修后实测（T3）**：R1/R2/R3/R5 **elf=7 全绿**（改前全 1）· 腿 B 四条见证**全绿** · 腿 C 钉子在位。
+**修后实测（T3）**：R1/R2/R3/R5 **elf=7 全绿**（改前全 1）· 路径 B 四条见证**全绿** · 路径 C 固定用例在位。
 **R4（元组）已转正**：checker 现在把元组元素类型行写入 `ast_c`，ir_gen 的数字下标
 读取对 dex 元素返回 `TI_DEX_S`（旧 read form 恒为 `TI_INT`，tagged-int 路径把缩放
 整数右移一位）。原 `KNOWN_GAP` 观测点已移进 `CASES`。
 
-**探针纪律**（照 apx 批 §0bis/§0ter）：涉全局必须 `mut`；apx 探针**一律显式形**
+**探针纪律**（照 apx 阶段 §0bis/§0ter）：涉全局必须 `mut`；apx 探针**一律显式形**
 （`d : dex, apx = 7.0`——类型位写 `.` 会让 apx 槽压根不建立 ⇒ 假绿）。
 """
 
@@ -111,7 +111,7 @@ fn main() -> int:
     return 7
 """
 
-# R6：extern 实参——**仅作 cir 断言载体**（运行路径既有崩溃，见头注）
+# R6：extern 实参——**仅作 cir 断言文件**（运行路径既有崩溃，见头注）
 R6 = """
 struct S:
     f: dex
@@ -123,7 +123,7 @@ fn main() -> int:
     return r
 """
 
-# ── 腿 C：非回归钉子（改前即绿，修后必须仍绿）──
+# ── 路径 C：非回归固定用例（改前即绿，修后必须仍绿）──
 R7 = """
 struct S:
     f: dex
@@ -152,8 +152,8 @@ fn main() -> int:
 """
 
 # (name, expect_rc, src, kind)
-#   kind: "red"  = 本批目标（改前必红）
-#         "nail" = 非回归钉子（改前应绿、修后仍绿）
+#   kind: "red"  = 本次目标（改前必红）
+#         "nail" = 非回归固定用例（改前应绿、修后仍绿）
 CASES = [
     ("R1_let_relay", 7, R1, "red"),
     ("R2_match_payload", 7, R2, "red"),
@@ -165,7 +165,7 @@ CASES = [
 ]
 
 # 原已知未覆盖面（元组数字下标）已修复并移入 CASES；保留空表是因为下面的
-# 观测循环仍按「gap 只观测、不计判据」的形态存在，后续新增 gap 直接登记即可。
+# 观测循环仍按「gap 只观测、不计判定依据」的形态存在，后续新增 gap 直接登记即可。
 KNOWN_GAP = []
 
 
@@ -178,7 +178,7 @@ def _workdir(src):
 
 
 def run_corec(args, src):
-    """跑 corec（**cwd = 仓库根**——否则 `cannot locate src/runtime/rt.cr`，判据假红）。"""
+    """跑 corec（**cwd = 仓库根**——否则 `cannot locate src/runtime/rt.cr`，判定依据假红）。"""
     d, p = _workdir(src)
     r = subprocess.run(
         [str(COREC)] + args, cwd=str(BASE),
@@ -259,7 +259,7 @@ def main():
     report = "--report" in sys.argv
     fails = []
     print("=" * 78)
-    print("聚合读丢型（TODO #2026-09-16-16）—— RED 语料（批 2 T2；修复后应转绿）")
+    print("聚合读丢型（TODO #2026-09-16-16）—— RED 语料（阶段 2 T2；修复后应转绿）")
     print("=" * 78)
     for name, expect, src, kind in CASES:
         chk, codes, bld, elf = compile_and_run(src, name)
@@ -274,20 +274,20 @@ def main():
         chk, codes, bld, elf = compile_and_run(src, name)
         print(f"[GAP ] {name:<26} kind=gap  观测: check={chk} codes={codes} "
               f"build={bld} elf={elf}  | 期望（修复后）elf={expect} "
-              f"【裁-AGG-3 登记未覆盖：元组无声明面 ⇒ 本批不改；不计入判据】")
+              f"【裁-AGG-3 登记未覆盖：元组无声明面 ⇒ 本次不改；不计入判定依据】")
     print()
     bfails = leg_b_interface()
     fails.extend(bfails)
     print()
     if report:
-        print("（--report：只观测不改判据）")
+        print("（--report：只观测不改判定依据）")
         return 0
     if fails:
-        print(f"[FAIL] 未达判据 {len(fails)} 项：")
+        print(f"[FAIL] 未达判定依据 {len(fails)} 项：")
         for f in fails:
             print("   ", f)
         return 1
-    print(f"[PASS] 聚合读丢型套件全绿（{len(CASES)} 例 + 腿 B）")
+    print(f"[PASS] 聚合读丢型套件全绿（{len(CASES)} 例 + 路径 B）")
     return 0
 
 

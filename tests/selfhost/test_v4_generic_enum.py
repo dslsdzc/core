@@ -1,6 +1,6 @@
 """V4 泛型 enum：payload 用 `.` 推断，构造点绑定类型。
 
-判据：
+判定依据：
   * `enum Opt: N, S(.)` + `c := S(5)` + match 得 5。
   * 同一 enum 的 int/string 两个实例可共存。
 """

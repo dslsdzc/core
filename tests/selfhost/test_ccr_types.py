@@ -39,7 +39,7 @@ R2 P4 Task 4（DFNode.TK 迁升）+ R2 P5 Task 2（单槽化）见文件末同�
 内存 DF 记录 72B = 9 槽；P5 T2 起两槽语义对调并分离——`OFF_DF_TK`(40) = **类型项引用**
 （类型面唯一真源）、`OFF_DF_AUX`(64) = **辅码**（旗标/宽度/不可逆行的原码）。
 `.ccr` NOD **40B**（R2 P6 Task 3：32B 语义区 + 8B 邻接；+28 = 项索引 i32——TYPE 段
-文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（**P4 当时**未 bump；**本仓版本位此后由 TODO #2026-09-16-16 批 2 从 17 → 18**——旧值 17 / 新值 18 / 归因 = 聚合读结果槽型 `TI_INT` → 声明面形式、旧快照与新语义不等价 / 出处 = `docs/superpowers/plans/2026-09-16-agg-read-type.md` §12.4 · §13；盘面只承载
+文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（**P4 当时**未 bump；**本仓版本位此后由 TODO #2026-09-16-16 阶段 2 从 17 → 18**——旧值 17 / 新值 18 / 归因 = 聚合读结果槽型 `TI_INT` → 声明面形式、旧快照与新语义不等价 / 出处 = `docs/superpowers/plans/2026-09-16-agg-read-type.md` §12.4 · §13；盘面只承载
 **派生码**——两槽都是 (opcode, 码) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，
 实测见 cir_cache.cr 头注）。派生码逐节点 ≡ 单槽化前的混用码（D22-①）。
 
@@ -413,7 +413,7 @@ def test_p4t1_cold_warm_shell_stability():
     """⑥ 冷/热两态：TYPE/IFACE 段体逐字节同。语料 = add/main（ir_gen 不新增
     类型行 ⇒ 行表缓存不变量——分语料拆解见 T2 用例 ⑮）。
     命中证据 = 暖运行不重写缓存文件（mtime 不变）；同时复核既有五段（2..6）
-    冷/热逐字节同（继承 test_ccr_v7 口径），STR 差异不入本判据。"""
+    冷/热逐字节同（继承 test_ccr_v7 规则），STR 差异不入本判定依据。"""
     cache_dir = os.path.join(BASE, '.core', 'cache')
     cir_dir = os.path.join(cache_dir, 'cir')
     src_path, ccr_path = _shell_fixture('cw')
@@ -559,7 +559,7 @@ def _resize_type_tail(data: bytes, delta: int) -> bytes:
 
 
 def sym_type_refs(data: bytes):
-    """SYM 段里全部类型行引用（globals type + func var_decls type）——检查载体
+    """SYM 段里全部类型行引用（globals type + func var_decls type）——检查文件
     自洽（引用域必须 < TYPE 段行数；T2 用例 ⑮ 的根因量化用）。"""
     c = CcrFile(data)
     off, size = c.segs[4]
@@ -647,7 +647,7 @@ def test_p4t2_corearch_readback_parity():
 
 def test_p4t2_dag_dedup_topology():
     """⑩ DAG 语义（ptr_arith 语料——含 &arr[i]/&x 的指针行）：
-    ① 项表无同 (tag,a..d) 重行（tt_term 去重的不变量，重建路径的牙）；
+    ① 项表无同 (tag,a..d) 重行（tt_term 去重的不变量，重建路径的有效性用例）；
     ② rowterm 映射：重复构造的指针行全部命中**同一项**（dedup 实证）且 `[int;5]`
        与 `*int` 命中不同项；③ 引用槽 < 自身行号 + 引用值在项表域内。"""
     src = os.path.join(BASE, 'tests/suite/ptr_arith.cr')
@@ -1438,9 +1438,9 @@ fn main() -> int:
     return add1(p)
 """
 
-# #2026-09-15-5 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重钉用
+# #2026-09-15-5 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重固定用
 # （复合行的可达性见 ㊲ 注：复合 mint 行的唯一来源 = ir_gen 分配行 ⇒ 见证下不落盘）。
-PLAIN_FIXTURE = """// R2 P5 Task 2 disk-code probe (T2 重钉：可缓存形态)
+PLAIN_FIXTURE = """// R2 P5 Task 2 disk-code probe (T2 重固定：可缓存形态)
 fn add(a: int, b: int) -> int:
     return a + b
 fn main() -> int:
@@ -1564,7 +1564,7 @@ def cir_entry_nodes(path: str):
 
 
 def test_p4t4_tk_slot_rule_per_node():
-    """㉖（P5 T2 重钉：双槽 → 单槽化；v10 Task 5：前端去布局）逐节点规则（探针夹具）：
+    """㉖（P5 T2 重固定：双槽 → 单槽化；v10 Task 5：前端去布局）逐节点规则（探针夹具）：
       · 类型行面（MINT_OPS）∧ 原子行 ⇒ term ≥ 0 ∧ aux == 0 ∧ 项 = ATOM(b == 行号)；
       · 类型行面 ∧ 复合行/越界/无类型 ⇒ term == -1 ∧ aux == 原码（码保真）；
       · 辅码面 ⇒ term == -1 ∧ aux == 原码——**含数值陷阱**：BOUNDS_CHECK 的旗标 1
@@ -1659,7 +1659,7 @@ def test_deref_store_width_code_is_aux_face():
     上必须归**辅码面**（term = -1），不得因数值 8 恰是 TI_DEX_S 行而被当成类型。
 
     前端已不再发射宽度（见 test_p4t4_tk_slot_rule_per_node 的「每个节点 tk == 0」）；
-    本用例钉住分类规则本身，防止未来重引入宽度码时被静默当作类型行。
+    本用例固定分类规则本身，防止未来重引入宽度码时被静默当作类型行。
     `corec selftest-types` 的 t4 反例即该规则的执行面。
     """
     r = subprocess.run([COREC, 'selftest-types'], capture_output=True, text=True,
@@ -1750,15 +1750,15 @@ def test_p4t4_ccr_nod_tk_equals_graph_tk():
 
 
 def test_p4t4_cold_warm_term_slot_symmetry():
-    """㉙ 快照对称（核心判据，P5 T2 判据重定）：冷（emit 填槽）/ 暖（快照恢复 + 装载侧
+    """㉙ 快照对称（核心判定依据，P5 T2 判定依据重定）：冷（emit 填槽）/ 暖（快照恢复 + 装载侧
     重派生）两态的**派生码面**（node, op, tk, aux）逐行相同 + 项**内容**（tag/a/b/c）
     逐行相同 + bad_term=0 + face_fail=0 + 命中证据（暖运行不重写 .cir 条目）。
 
-    判据重定（相对 P4 原版「header 全等 + 行全等」）：项**索引**（term 列）与两个表
+    判定依据重定（相对 P4 原版「header 全等 + 行全等」）：项**索引**（term 列）与两个表
     长度（terms/rows）是**进程内表偏移**，暖进程可更小——缓存命中跳过该函数的 IR 生成，
     而 ir_gen 自身会 `alloc_type` 新行（见 ty_shadow.cr 的 sh_tk_split_load 注）。
     P4 的窄清单（仅 CONST/BINARY，行皆由 checker 建）掩盖了该差异；P5 T2 扩面后暴露。
-    故本用例改用**内容等价**（语义面）而非索引等价（进程内偏移）——两者中前者才是判据，
+    故本用例改用**内容等价**（语义面）而非索引等价（进程内偏移）——两者中前者才是判定依据，
     后者允许漂移；缺失项只允许出现在「行越出暖表」处。"""
     cache_dir = os.path.join(BASE, '.core', 'cache')
     cir_dir = os.path.join(cache_dir, 'cir')
@@ -1805,9 +1805,9 @@ def test_p4t4_cold_warm_term_slot_symmetry():
 
 
 def dump_strip_face_problems(out_flag: str, out_plain: str):
-    """`--dump-tk-terms` 剔除面判据 → (问题列表, stats dict)（B5/#2026-09-16-26 修复）。
+    """`--dump-tk-terms` 剔除面判定依据 → (问题列表, stats dict)（B5/#2026-09-16-26 修复）。
 
-    原判据「剔除 dump 节后比对」**未断言被剔面是什么**——多打印一行 `123\\t…`
+    原判定依据「剔除 dump 节后比对」**未断言被剔面是什么**——多打印一行 `123\\t…`
     形态数据行会被静默吃掉（黑盒逐行过滤 ⇒ 绿）。现把剔除面显式化为
     **白名单 + 计数 + 序数断言**：
       ① 被剔行必须是**连续一段**，且以 `[df-tk-terms]` 头行起始、头行唯一；
@@ -1816,12 +1816,12 @@ def dump_strip_face_problems(out_flag: str, out_plain: str):
       ③ 每条数据行必须是 9 个十进制字段（parse_tk_dump 的结构契约），且
          **首字段 == 该行在 dump 节内的序数 0..nodes-1**（重复/乱序/插入 ⇒ 红）；
       ④ 非空转：nodes ≥ 1。
-    **口径修正（本批实测驱动，2026-09-16）**：头行 `rows=` 是**类型表行数**
-    （`g_type_count`，dump.cr:388-389），**不是**数据行数——本判据初版误把
+    **规则修正（本次实测驱动，2026-09-16）**：头行 `rows=` 是**类型表行数**
+    （`g_type_count`，dump.cr:388-389），**不是**数据行数——本判定依据初版误把
     `rows` 当数据行数 ⇒ 真跑当场红（`剔除行数 1355 != 1 + rows=16`）。修正为
     `nodes=` 并加序数断言（比原设想更强：序数面能抓「同数量但换了行」）。
-    反例自检（audit §0）：什么坏实现能骗过本断言？——「多打一行数据行」旧判据
-    吃掉即绿；现在 ②③ 必红。「把非 dump 内容混进剔除面」旧判据也吃掉；现在
+    反例自检（audit §0）：什么坏实现能骗过本断言？——「多打一行数据行」旧判定依据
+    吃掉即绿；现在 ②③ 必红。「把非 dump 内容混进剔除面」旧判定依据也吃掉；现在
     ① 连续段 + ③ 行形态把它限制成「9 字段数据行且紧邻 dump 节」⇒ 不再静默。
     突变自证见 tests/harness/test_criteria_mutations.py（驱动本函数）。
     """
@@ -1832,7 +1832,7 @@ def dump_strip_face_problems(out_flag: str, out_plain: str):
                for l in lines_flag]
     removed = [i for i, v in enumerate(is_dump) if v]
     if not removed:
-        probs.append("dump flag emitted no dump section (判据空转)")
+        probs.append("dump flag emitted no dump section (判定依据空转)")
         return probs, {"removed": 0}
     if removed != list(range(removed[0], removed[0] + len(removed))):
         probs.append(f"剔除面不连续（被剔行位置 {removed}）——非 dump 行混进剔除面")
@@ -1848,9 +1848,9 @@ def dump_strip_face_problems(out_flag: str, out_plain: str):
         return probs, {"removed": len(removed)}
     if len(removed) != 1 + hdr_f['nodes']:
         probs.append(f"剔除行数 {len(removed)} != 1 + 头行自报 nodes={hdr_f['nodes']}"
-                     f"——被剔面有未计数的行（判据不得静默吃掉输出）")
+                     f"——被剔面有未计数的行（判定依据不得静默吃掉输出）")
     if hdr_f['nodes'] < 1:
-        probs.append(f"头行 nodes={hdr_f['nodes']} < 1（判据空转）")
+        probs.append(f"头行 nodes={hdr_f['nodes']} < 1（判定依据空转）")
     for i, row in enumerate(rows_f):
         if len(row) != 9:
             probs.append(f"数据行 {i} 字段数 {len(row)} != 9")
@@ -1872,7 +1872,7 @@ def test_p4t4_dump_flag_zero_artifact_effect():
     dump 节）逐字节同（新增通道不泄入产物/输出面）。两轮之间清缓存 = 避开既有的
     冷/热渲染差异（TODO #2026-09-10-1 末条，非本任务面）。
 
-    B5/#2026-09-16-26 修复（2026-09-16 判据网加固批）：剔除面从**黑盒逐行过滤**改为
+    B5/#2026-09-16-26 修复（2026-09-16 判定依据网加固阶段）：剔除面从**黑盒逐行过滤**改为
     **白名单（唯一头行 + 9 字段数据行，连续一段）+ 计数断言**（剔除行数 ==
     1 + 头行自报 rows）——被剔面不再能吞下未计数的输出行。"""
     src = tk_fixture('flag')
@@ -1887,14 +1887,14 @@ def test_p4t4_dump_flag_zero_artifact_effect():
         dot_plain = open(dot, 'rb').read()
         assert dot_flag == dot_plain, "dump flag changed the .cir artifact"
         probs, stats = dump_strip_face_problems(out_flag, out_plain)
-        assert not probs, "剔除面判据失败: " + " | ".join(probs)
+        assert not probs, "剔除面判定依据失败: " + " | ".join(probs)
     finally:
         _cleanup(src, dot)
         shutil.rmtree(cache_root, ignore_errors=True)
 
 
 def test_p4t4_cir_snapshot_layout_unbumped():
-    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #2026-09-16-16 批 2 换代**，
+    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #2026-09-16-16 阶段 2 换代**，
     后续 v23/v24 因语义/布局换代——v24 在指令段后新增 MATCH CASE 小节——旧值 17 / 新值 24 / 归因 = 聚合读结果槽型改声明面形式（旧快照与新语义不等价）/ 出处 = 计划 §12.4·§13）：
     条目版本位 == 当前版本；
     节点小节 = 8B 计数 + n×64B（8 字段）——即「项槽不落盘、装载侧重派生」的格式
@@ -1910,7 +1910,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 25, f"{f}: CIR_CACHE_VER {ver} != 25（2026-10-24 v10 MATCH CASE 语义模型持久化：CASE 小节存 target label 而非派生 wire target；前代 24 = MATCH CASE 持久化、23 = 2026-10-23 **BigInt IR 批**；22 = 插值展开批、21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 25, f"{f}: CIR_CACHE_VER {ver} != 25（2026-10-24 v10 MATCH CASE 语义模型持久化：CASE 小节存 target label 而非派生 wire target；前代 24 = MATCH CASE 持久化、23 = 2026-10-23 **BigInt IR 阶段**；22 = 插值展开阶段、21 = 串域阶段、20 = 缓存膨胀阶段、19 = 阶段 5（opt-dex）、18 = TODO #2026-09-16-16 阶段 2）"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -1981,7 +1981,7 @@ def test_p5t2_cold_warm_composite_symmetry():
     """㉟ 复合行语料的冷/暖两态：**派生码面**（op, tk, aux）逐行相同（≤ 这是发射面
     与盘面的唯一真值面）；项槽允许**单方向**缺失——暖进程类型表更小时（缓存命中跳过
     该函数的 IR 生成，而 ir_gen 自身 `alloc_type` 新行）冷态存在的行在暖进程不存在
-    ⇒ 项不可重建（term -1）。本用例把该**预存缓存面局限**钉成精确形态：任一冷/暖
+    ⇒ 项不可重建（term -1）。本用例把该**预存缓存面局限**固定成精确形态：任一冷/暖
     项槽差异都必须满足「暖 = -1 ∧ 码 ≥ 暖行数」，其余面逐行严格相等。"""
     cache_dir = os.path.join(BASE, '.core', 'cache')
     src = tk_fixture('cwc', COMPOSITE_FIXTURE)
@@ -2014,8 +2014,8 @@ def test_p5t2_cold_warm_composite_symmetry():
                 seen_missing += 1
             else:
                 assert rw_[3] == rc_[3], f"warm-only item: {rc_} vs {rw_}"
-        # #2026-09-15-5 T2 收口：上述「暖态丢项」局限的**成因**（命中跳过 ir_gen 而该函数 alloc_type
-        # 新行）已由见证规则消除（分配行的函数不再有条目 ⇒ 必重放）。本夹具实测 0 —— 钉死，
+        # #2026-09-15-5 T2 处理：上述「暖态丢项」局限的**成因**（命中跳过 ir_gen 而该函数 alloc_type
+        # 新行）已由见证规则消除（分配行的函数不再有条目 ⇒ 必重放）。本夹具实测 0 —— 固定，
         # 防回退（若再出现，说明见证被绕过或行表分叉，属 T2 面回归）。
         assert seen_missing == 0, \
             f"warm run lost {seen_missing} term(s): 行表分叉（#2026-09-15-5 T2 见证规则应已闭合）"
@@ -2055,14 +2055,14 @@ def test_p5t2_snapshot_disk_code_preserved():
     """㊲ `.cir` 快照盘面承载**派生码**（不是项引用、不是辅码）：盘上 mint 行的 (op, tk)
     必须全部落在活体 dump 的派生码集内（若盘上落的是 -1 项槽或 0，这里必红）。
 
-    **#2026-09-15-5 T2 重钉（死亡证据 = 本批能力变更，非放宽判据）**：原判据对象 = **复合行**
+    **#2026-09-15-5 T2 重固定（死亡证据 = 本次能力变更，非放宽判定依据）**：原判定依据对象 = **复合行**
     （mint ∧ aux>0）。实核（101 档全语料扫描 + 夹具矩阵）：复合 mint 行的唯一来源 =
     ir_gen 期分配复合类型行的函数（ir_gen.cr:1403/1409/2584/2641/2951）⇒ 依 T2 见证
-    规则（main.cr miss 分支：分配过类型行 ⇒ 不写条目）这类函数**结构上不落盘** ⇒ 原判据
-    在见证下**可达主体为空**（原夹具 COMPOSITE_FIXTURE 实测：comp={(2,13)} 全缺）。重钉
+    规则（main.cr miss 分支：分配过类型行 ⇒ 不写条目）这类函数**结构上不落盘** ⇒ 原判定依据
+    在见证下**可达主体为空**（原夹具 COMPOSITE_FIXTURE 实测：comp={(2,13)} 全缺）。重固定
     为可达形态：夹具改为**可缓存**（PLAIN_FIXTURE），断言对象 = 「带码 mint 行」全集；
-    复合子面待 (c)/(d)（快照承载类型行）恢复可缓存后按原判据复位 —— 见 TODO #2026-09-15-5。
-    抑制面**不在此处静默放宽**：由紧随其后的 ㊳ 单独钉住。"""
+    复合子面待 (c)/(d)（快照承载类型行）恢复可缓存后按原判定依据复位 —— 见 TODO #2026-09-15-5。
+    抑制面**不在此处静默放宽**：由紧随其后的 ㊳ 单独固定。"""
     cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
     src = tk_fixture('snapc', PLAIN_FIXTURE)
     dot = os.path.join(BASE, 'build', 'test_p4t4_snapc.cir')
@@ -2073,7 +2073,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 25 and ok, f"{f}: version/stride drifted（期望 25 = 2026-10-24 v10 MATCH CASE 语义模型持久化（CASE 小节存 target label，节点 stride 仍 64B / 头偏移不变）；前代 24 = MATCH CASE 持久化；23 = BigInt IR 批；22 = 插值展开批；21 = 串域批；20 = 缓存膨胀批；19 = 批 5（opt-dex）；18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 25 and ok, f"{f}: version/stride drifted（期望 25 = 2026-10-24 v10 MATCH CASE 语义模型持久化（CASE 小节存 target label，节点 stride 仍 64B / 头偏移不变）；前代 24 = MATCH CASE 持久化；23 = BigInt IR 阶段；22 = 插值展开阶段；21 = 串域阶段；20 = 缓存膨胀阶段；19 = 阶段 5（opt-dex）；18 = TODO #2026-09-16-16 阶段 2）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)
@@ -2086,14 +2086,14 @@ def test_p5t2_snapshot_disk_code_preserved():
 
 
 def test_p5t2_row_allocating_fn_not_snapshotted():
-    """㊳（#2026-09-15-5 T2 能力变更钉）**见证规则**：ir_gen 期对「快照**不载**的共享面」（类型行表）
+    """㊳（#2026-09-15-5 T2 能力变更固定）**见证规则**：ir_gen 期对「快照**不载**的共享面」（类型行表）
     有副作用的函数 ⇒ **不写快照条目** ⇒ 下跑必 miss ⇒ 重放全部生成期副作用（「宁可 miss
     不可静默」，main.cr miss 分支）。夹具 = 原 ㊲ 的 COMPOSITE_FIXTURE（数组字面量 + 取址：
     ir_gen.cr:2584 / :1403 / :1409 分配复合行 ⇒ main 命中见证）。
       · ① `main` **无**条目（见证生效；修复前有 —— 原 ㊲ 正因它落盘才可达）；
       · ② `add1` **有**条目 ∧ 条目总数 > 1 = 抑制是**选择性**的（非整档放弃缓存）；
       · ③ 冷/暖两态同形：本夹具的逐行派生码/项对称由 ㉟（test_p5t2_cold_warm_composite_
-        symmetry）钉住 —— 本用例只管**条目面**，不重复。"""
+        symmetry）固定 —— 本用例只管**条目面**，不重复。"""
     cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
     src = tk_fixture('snapc_alloc', COMPOSITE_FIXTURE)
     out1 = os.path.join(BASE, 'build', 'test_p4t4_snapc_alloc.ccr')
@@ -2112,7 +2112,7 @@ def test_p5t2_row_allocating_fn_not_snapshotted():
 
 
 # ═══════════ v10 NOD semantic type_id/flags（Task 4）══════════
-# 口径：`type_id` = TYPE 段行索引（-1 = 无类型）；`flags` = 语义特性位
+# 规则：`type_id` = TYPE 段行索引（-1 = 无类型）；`flags` = 语义特性位
 # （CCR_NOD_FLAG_*）。写侧 = corec 的 ccr_types.cr:ccr_nod_type_populate；
 # 读侧 = load_ccr 的 TYPE 段后**type_id 域校验** + corearch `--dump-nod-types`
 # 读回通道。v10 盘面没有 `item`/旧 `tk` 槽。
@@ -2203,7 +2203,7 @@ def test_p6t3_nod_record_40b_field_order():
 def test_p6t3_nod_types_roundtrip():
     """㊵ **type_id/flags 落盘/读回对拍（本任务承重例）**：corearch 的
     `--dump-nod-types` 逐节点输出必须与独立解析的 NOD 段一致。
-    判据 = ① 逐节点 (op/type_id/flags) 相同 · ② `with_type > 0`（非空转）·
+    判定依据 = ① 逐节点 (op/type_id/flags) 相同 · ② `with_type > 0`（非空转）·
     ③ `flags > 0`（至少一条语义特性被分类——否则 flags 分类是死路）。"""
     total_with_type = 0
     total_flagged = 0

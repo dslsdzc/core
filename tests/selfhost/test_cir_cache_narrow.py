@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""缓存膨胀批（`plans/2026-09-17-cir-cache-bloat.md` / `CIR_CACHE_VER 19→20`）判据：
+"""缓存膨胀阶段（`plans/2026-09-17-cir-cache-bloat.md` / `CIR_CACHE_VER 19→20`）判定依据：
 
     P1 结构性（体积 ∝ 本函数规模，不 ∝ 程序规模）
     P2 部分 rebuild 正确性（只改一个函数、其余命中 ⇒ 图仍正确）——**承重件**
@@ -9,7 +9,7 @@
 98.6% 是别的函数的边；全档 97.0% 的缓存字节是边记录）⇒ 全缓存 O(函数数 × 累计图)。修复后只写
 本函数边（24B/条、相对 node_start 的有符号偏移）+ 尾部 16B 基线见证 trailer。
 
-突变控制（**必须真红**，否则判据无效；手工执行，配方如下）：
+突变控制（**必须真红**，否则判定依据无效；手工执行，配方如下）：
     M1a（P1 必红）：把 `save_cir_cache` 的边段写回全图（`own_edge_count` → `g_df_edge_count`，
         `rel` → 绝对 id）⇒ `P1` 的「tiny 条目 ≤ 4096B」必红。
     M1b（P2 必红）：装载侧把相对 id 映射去掉（`df_add_edge_kind(rel_from, rel_to, ...)` 直接当绝对用）
@@ -22,8 +22,8 @@
         （段界检 + trailer var_start + 逐节点见证 + 指纹/身份检仍判 miss）⇒ 该两条属**冗余层**，
         承重层是「拒绝即 miss」语义本身（由 M1c′ 证明）。
     注：**尾随字节容忍是既有契约**（`test_cir_warm_path` D5：补零条目仍须命中）⇒ trailer 定位于
-    **扫描终点**而非 `dlen−16`；P4 只钉「截断（p+16 > dlen）⇒ miss」。
-    ⚠ 每次突变需重建编译器（`nice -n 19 python3 build_selfhost_native.py`）；突变只为自证判据有牙，
+    **扫描终点**而非 `dlen−16`；P4 只固定「截断（p+16 > dlen）⇒ miss」。
+    ⚠ 每次突变需重建编译器（`nice -n 19 python3 build_selfhost_native.py`）；突变只为证明判定依据有效，
     **不得**与修复提交混在一起。
 
 用法：`python3 tests/selfhost/test_cir_cache_narrow.py`（cwd 任意；缓存/import 解析在仓根）。
@@ -106,7 +106,7 @@ def sha(p: pathlib.Path) -> str:
 
 
 def segs(p: pathlib.Path):
-    """解析 .ccr 段表 → {tag: bytes}（口径：段表 = 8 段，tag 1..8；见 test_ccr_v7.py）。"""
+    """解析 .ccr 段表 → {tag: bytes}（规则：段表 = 8 段，tag 1..8；见 test_ccr_v7.py）。"""
     d = p.read_bytes()
     n = struct.unpack_from("<I", d, 8)[0]
     out = {}
@@ -144,7 +144,7 @@ def _partial_vs_cold(name: str, src_v1: str, src_v2: str, tag: str):
     """**同一路径**先写 v1 建缓存，再覆写为 v2 跑（部分命中）⇒ 与 v2 冷跑对拍。
 
     ⚠ 关键：缓存键 = `源路径::函数名` ⇒ v1/v2 **必须同路径**，否则两轮条目互不相干、
-    判据空转（本用例首版即栽在此处：hits=41/misses=0 的假绿）。
+    判定依据空转（本用例首版即栽在此处：hits=41/misses=0 的假绿）。
     """
     path = WORK / name
     path.write_text(src_v1)
@@ -163,10 +163,10 @@ def _partial_vs_cold(name: str, src_v1: str, src_v2: str, tag: str):
     rc3, l3 = run_ccr(path, WORK / f"{tag}_cold.ccr")
     assert rc3 == 0, f"cold rc={rc3}\n{l3[-500:]}"
     sa, sb = segs(WORK / f"{tag}_partial.ccr"), segs(WORK / f"{tag}_cold.ccr")
-    # STR(1)/SYM(2) 段不参与对拍：暖态不重放 ir_gen 期临时串的 intern ⇒ 该两段冷≠暖是**预存**口径
-    # （TODO #2026-09-11-9）。**对照实证（本批）**：同一夹具同一「冷跑 → 截断 → 再跑」场景下，
+    # STR(1)/SYM(2) 段不参与对拍：暖态不重放 ir_gen 期临时串的 intern ⇒ 该两段冷≠暖是**预存**规则
+    # （TODO #2026-09-11-9）。**对照实证（本次）**：同一夹具同一「冷跑 → 截断 → 再跑」场景下，
     # **修复前二进制**给出**逐段相同**的差异签名（STR 2003→1933、SYM 同尺寸异内容；图段全同）
-    # ⇒ 非本批引入。本判据只钉**图面**（NOD/ENT/REG/EDG/TYPE/IFACE）。
+    # ⇒ 非本次引入。本判定依据只固定**图面**（NOD/ENT/REG/EDG/TYPE/IFACE）。
     diff = [t for t in sa if t not in (1, 2) and sa[t] != sb.get(t)]
     return hits, misses, diff
 
@@ -180,7 +180,7 @@ def test_p2a_partial_rebuild_after_node_delta():
     （本夹具 f0：node 152→153 时 var 125→126）⇒ var 基线**同步平移**、被恒校验拦下
     （trailer 实证：f1 的 `var_start_w` 145→146、`node_start_w` 152→153）。
     ⇒ **活跃拦截者 = `var_start` 恒校验**；相对 id 是**纵深防御**（在「var 基线对齐而节点基线平移」
-    的场合仍正确——该形态当前不可构造，故以 P2c 的命中保真判据间接覆盖恢复面）。
+    的场合仍正确——该形态当前不可构造，故以 P2c 的命中保真判定依据间接覆盖恢复面）。
     """
     hits, misses, diff = _partial_vs_cold("p2a.cr", many_fn_src(),
                                           many_fn_src(node_delta=True), "p2a")
@@ -191,7 +191,7 @@ def test_p2a_partial_rebuild_after_node_delta():
 
 def test_p2b_partial_rebuild_after_var_delta():
     """P2b（**承重件**）：改一个函数使其 **var 数变** ⇒ 其后函数 var 基线与写者不同 ⇒
-    **恒校验 fail-closed**（全部 miss，不静默）——判据 = ① 图面仍与冷态逐段同；
+    **恒校验 fail-closed**（全部 miss，不静默）——判定依据 = ① 图面仍与冷态逐段同；
     ② 后续条目**被重写**（确为 miss，而非碰巧同态）。"""
     hits, misses, diff = _partial_vs_cold("p2b.cr", many_fn_src(),
                                           many_fn_src(extra_var=True), "p2b")
@@ -204,7 +204,7 @@ def test_p2c_hit_path_rebuild_fidelity():
     """P2c（**承重件·命中恢复保真**）：v1 冷跑建条目 ⇒ **同源再跑（全命中）**⇒ 恢复出的图必须与冷跑
     **逐段相同**（NOD/ENT/REG/EDG/TYPE/IFACE）。
 
-    这一条直接钉**装载期链重建**（本批新写点）：`first_edge/edge_count` 归零后由 df_add_edge_kind
+    这一条直接固定**装载期链重建**（本次新写点）：`first_edge/edge_count` 归零后由 df_add_edge_kind
     按写者序前插重放，任何**序错/漏边/多边**都会让 EDG/NOD 段与冷跑分叉。"""
     path = WORK / "p2c.cr"
     path.write_text(many_fn_src())
@@ -228,7 +228,7 @@ def test_p2c_hit_path_rebuild_fidelity():
 def test_p4_truncated_entries_fail_closed():
     """P4（**承重件**）：把合法条目 `truncate` 成各种长度（含 < 头长、恰缺 trailer、trailer 半截、
     载荷中途截断、空文件）⇒ 装载侧必须 **miss 并重建**：rc=0、无 139、**图段（NOD/ENT/REG/EDG/
-    TYPE/IFACE）与冷跑逐段同**（STR/SYM 属预存暖态串面口径，不参与本判据）。
+    TYPE/IFACE）与冷跑逐段同**（STR/SYM 属预存暖态串面规则，不参与本判定依据）。
 
     逐轮：先由保存的完好副本重铺条目 → 截断 → 跑 → 断言。修复前/突变 M1c 下 ⇒ 139 或错产物。"""
     src = write_fixture("p4.cr", many_fn_src())
@@ -248,8 +248,8 @@ def test_p4_truncated_entries_fail_closed():
         rc2, log2 = run_ccr(src, WORK / "p4.out.ccr")
         assert rc2 == 0, f"truncate→{L}B: rc={rc2}（不得 139/非零）\n{log2[-400:]}"
         sa, sb = segs(WORK / "p4.out.ccr"), segs(WORK / "p4_cold.ccr")
-        # 图面（NOD/ENT/REG/EDG/TYPE/IFACE）必须逐段同；STR(1)/SYM(2) 属**预存**暖态串面口径
-        # （本轮以修复前二进制对照实测同签名；见 _partial_vs_cold 同注），不参与本判据。
+        # 图面（NOD/ENT/REG/EDG/TYPE/IFACE）必须逐段同；STR(1)/SYM(2) 属**预存**暖态串面规则
+        # （本轮以修复前二进制对照实测同签名；见 _partial_vs_cold 同注），不参与本判定依据。
         gdiff = [t for t in sa if t not in (1, 2) and sa[t] != sb.get(t)]
         assert not gdiff, f"truncate→{L}B: 图段 {gdiff} 与冷态不同（装载吃进半份载荷？）"
         assert ent.stat().st_size == len(good), f"truncate→{L}B: 条目未被重建（未走到 miss？）"

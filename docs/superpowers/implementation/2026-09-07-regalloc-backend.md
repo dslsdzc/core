@@ -39,7 +39,7 @@ a:=7;b:=3;x:=a*b;y:=a*b;return x+y
    - corec 的 `opt.cr` 从 1940 行减到 312 行。迁走段删除，保留 AST 折叠和 `pass_cse`，并摘除 `optimize_all` 未使用代码的引用。`main.cr` 的 O2 段与 `cir` 调试通道摘除。`dataflow` lower 尾部的 compute 摘除。
    - `.ccr` 输出格式按 D-1=Y 和 R2 调整：ENT 段 0 条，SYM func 与 REG first/last_ent 恒为 -1，param_ents 恒为 -1，opt_meta 子节 0 块。格式结构保留。loader 空表语义已支持 `pcnt==0` 对应 -1，零 version bump。
    - 测试联动：`live_ranges` 通道改道 corearch，断言零变化；`mw_task5` 元断言改为 `--dump-regassign`；`ccr_v6` 重写恒空断言。`conversion` 和 `param_ents` 的实现方式消亡，相应测试删除或修改。
-3. Task 5 表述清除，本批执行。Task 6 文档结束，覆盖 spec、plan、TODO，本批执行。
+3. Task 5 表述清除，本次执行。Task 6 文档结束，覆盖 spec、plan、TODO，本次执行。
 
 ### Task 5 表述清除
 

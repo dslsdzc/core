@@ -4110,7 +4110,7 @@ fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: i
     //  索引空间 vs kind 空间：`TI_DYN`(下标常量 = 7) 与 `TYP_GENERIC_PARAM`(kind 码 = 7)
     //   数值相同、空间不同，因此把 `ati == TI_DYN` 写成 `ati == TYP_GENERIC_PARAM`（或把 kind 判定
     //   写成 `get_type_kind(ati) == TI_DYN`）能编过、且可能蒙对一部分用例（两条 skip 在同一屏、
-    //   都让同一批输入不再报），因此判断依据必须能区分空间写错与规则缺一条：见
+    //   都让同一组输入不再报），因此判断依据必须能区分空间写错与规则缺一条：见
     //   `tests/selfhost/test_s1p_sentinel_skips.py` 的逐条突变自证（本刀强制要求）。
     if ati == TI_NEVER:
         skip = 1
@@ -4188,7 +4188,7 @@ fn s1p_enum_ring(name_idx: int, first_arg: int, arg_count: int):
 // · 不改产物：只 println 数值、不新增 intern（`istr_get(fi_name(fi))` 只读既有串，
 //  台账注释见调用点：字符串与 `type_display` 会把新串写进 `.ccr` 的 STR 段）；
 // · 格式继承：`9917|9918 <line> <col> <param_idx> <param_ti> <arg_ti> <call> @@ <片段>`
-//  字段序/数量/前缀一律照旧（参考套件 = `tests/selfhost/test_s1p_liveness.py`；扩字段须同批重锁该套件）。
+//  字段序/数量/前缀一律照旧（参考套件 = `tests/selfhost/test_s1p_liveness.py`；扩字段须同阶段重锁该套件）。
 // 参数：
 // · `fi` = 被调 FuncInfo（参数列表来源）；`is_ext` = extern/C ABI，因此单列前缀 `9918`；
 // · `first_arg`/`arg_count` = EXPR_ARG 列表首项/列表长度，列表中不含接收者（parser 实证：接收者属
@@ -5138,7 +5138,7 @@ fn infer_expr(node: int) -> int:
             check_error(EC_TM_EXHAUST, msg, ast_line(node), ast_col(node))
         if m_dup >= 0:
             check_error(EC_TM_REDUNDANT, "Redundant match arm", ast_line(m_dup), ast_col(m_dup))
-        mc_end(mc_save)   // 容量批 T3：覆盖位图出栈（清零本层位 + 回退长度）
+        mc_end(mc_save)   // 容量阶段 T3：覆盖位图出栈（清零本层位 + 回退长度）
         // Cache the inferred scrutinee type on the MATCH node for IR lowering.
         // +1 keeps 0 as the "absent" sentinel because TI_INT itself is 0.
         ast_set_data(node, match_ti + 1)

@@ -52,7 +52,7 @@ class Parser:
         #          本来就是块的尾值；
         #        · 其余（赋值/调用/二元/一元/字面量/`Ident`/索引…）⇒ 包 `ExprStmt`
         #          （等价 v3 带 `;` 的表达式语句），region 视为无值。
-        #      判据 = **v3 逐形等价**（维护者四格实测），详见 `_is_block_like` 的 docstring。
+        #      判定依据 = **v3 逐形等价**（维护者四格实测），详见 `_is_block_like` 的 docstring。
         #   ② **表达式位** region（声明/赋值右值、return 值、调用实参、括号内、索引、
         #      二元/一元操作数、match 臂 `=> Expr`）⇒ 一律保留 Block.expr；
         #      ⇒ 收尾最终由 **位置标志 ∧ 节点种类** 两个条件共同决定。
@@ -74,7 +74,7 @@ class Parser:
 
         v4 改判（T0 布局规格 §6.2 A4）：终止元由 `;` 改为**行边界** ⇒ 六元组收为五元组。
         ⚠ **漏改即静默错答案**：具名长度会落到 `parse_type` 的 `.get(name, 0)` 兜底
-        （解成 0），既不报错也不可辨。⇒ 判据必须含**正控**（真取到非 0 的值）。
+        （解成 0），既不报错也不可辨。⇒ 判定依据必须含**正控**（真取到非 0 的值）。
         """
         save = self.pos
         while not self.check(TokenType.EOF):
@@ -326,7 +326,7 @@ class Parser:
 
         **语义面 = 接受并跳过**：bootstrap 侧没有 hotpatch 版本表 / FFI 语言槽 / 执行域数据面
         （自源侧的 `@hotpatch` 版本进 `EXPR_FN` 的 iv 槽、`@ffi` 进 `ffi_lang_ni`）⇒ 本侧只保证
-        「能词法化、不报错、不影响产物」，与既有 `_skip_spec_annotations` 同口径。
+        「能词法化、不报错、不影响产物」，与既有 `_skip_spec_annotations` 同规则。
         **不知名名字**与**未闭合括号**一律响亮报错 —— 「放宽 = 吞错」是静默面
         （`@hotpach(ver=1)` 的笔误若不报，注解就被静默丢弃）。
         """
@@ -385,7 +385,7 @@ class Parser:
             # `:1406` `flow encode(input: Frame) -> Packet:` —— **无 `fn`**。
             # 本侧原先**只**认文档形；此处补收旧形 `flow fn name(...)` 为**兼容**
             # （语料 `src/compiler/purity_selftest.cr:231` 用它；文档不写它、不为它新增用例）。
-            # ⇒ 改后与自源**同收两形**（自源原先只认 `flow fn`，同批补齐文档形）。
+            # ⇒ 改后与自源**同收两形**（自源原先只认 `flow fn`，同阶段补齐文档形）。
             self.advance()
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
@@ -414,7 +414,7 @@ class Parser:
                 if not self.check(TokenType.COMMA):
                     break
                 self.advance()
-        # 批 6（裁-S7，bounded）：规约标注链 `#check(...)` / `#ensure(...)`——**接受并跳过**。
+        # 阶段 6（裁-S7，bounded）：规约标注链 `#check(...)` / `#ensure(...)`——**接受并跳过**。
         # 位置与 self-hosted 侧一一对应（签名之后、body 之前）；**零语义**。
         self._skip_spec_annotations()   # inline 形（兼容）：注解后紧跟 `:`，不要求行尾
         if self.check(TokenType.EQ):
@@ -444,7 +444,7 @@ class Parser:
         return FunctionDecl(is_pub, name, generics, params, ret, body)
 
     def _skip_spec_annotations(self, need_eol=False):
-        """批 6（裁-S7，bounded）：消费 `#` IDENT `(` … `)` 标注链并**丢弃**（零语义）。
+        """阶段 6（裁-S7，bounded）：消费 `#` IDENT `(` … `)` 标注链并**丢弃**（零语义）。
 
         边界（维护者裁定）：bootstrap 侧**只**保证「能词法化、不报错、不影响产物」——
         不建 VC、不做三态、不做名字域/类型检查（完整 bootstrap 规约面登记后续）。
@@ -784,9 +784,9 @@ class Parser:
     def parse_primary(self) -> Expr:
         if self.check(TokenType.AT):
             # 三种形态（按下一 token 判，互不吞并）：
-            #   `@name(args)` / `@name`  → 内建（Builtin；2(a) 视图内建批新增）
+            #   `@name(args)` / `@name`  → 内建（Builtin；2(a) 视图内建阶段新增）
             #   `@project file::symbol` → ProjectAccess（原样保留）
-            # 注意：`@name(` 与 `@name name` 的判据是**紧随的 token 类型**，不是名字内容——
+            # 注意：`@name(` 与 `@name name` 的判定依据是**紧随的 token 类型**，不是名字内容——
             # 名字内容留给 type_checker 的 **fail-closed** 白名单（未知名 ⇒ 报错，不静默）。
             self.advance()
             first = self.expect(TokenType.IDENT).lexeme
@@ -841,7 +841,7 @@ class Parser:
                 while not self.check(TokenType.RBRACE):
                     fname = self.expect(TokenType.IDENT).lexeme
                     # §4.2 写死：分隔符必须是 `=`；未选定的 `:` 形**响亮拒绝**（码 P030）。
-                    # 修复前是**盲跳**（`elif check(COLON): advance()`）⇒ 两形同收 = 判据无鉴别力。
+                    # 修复前是**盲跳**（`elif check(COLON): advance()`）⇒ 两形同收 = 判定依据无鉴别力。
                     if not self.check(TokenType.EQ):
                         self.error("struct literal field separator must be '=' [P030]")
                     self.advance()
@@ -934,7 +934,7 @@ class Parser:
 
         尾表达式判定（T0 布局规格 §6.2 A1）：**region 的最后一项 = 该 region 的值**，
         其余各项按语句处理 —— 即原 `parse_block` 的「暂定尾表达式」逻辑原样保留，
-        只是「还有下一项」的判据由「不是 `}`」变成「不是 DEDENT」。
+        只是「还有下一项」的判定依据由「不是 `}`」变成「不是 DEDENT」。
         """
         # 位置语义（§7.4 + §4.1，见 `__init__` 的 `want_value`）：本 region 的尾值去留
         # 由**进入时**的标志决定；体内嵌套 region 一律先复位为语句位，退出时恢复。
@@ -969,9 +969,9 @@ class Parser:
 
     @staticmethod
     def _is_block_like(expr: Expr) -> bool:
-        """语句位 region 的**控制流**尾项 —— 判据 = **v3 逐形等价**（维护者裁定）。
+        """语句位 region 的**控制流**尾项 —— 判定依据 = **v3 逐形等价**（维护者裁定）。
 
-        口径（唯一措辞）：收尾判定 = **位置标志 ∧ 节点种类**两个条件共同决定 ——
+        规则（唯一措辞）：收尾判定 = **位置标志 ∧ 节点种类**两个条件共同决定 ——
         位置为语句位时，**控制流类**尾项（`If`/`Loop`/`For`/`Match`/`Unsafe`）**保留为
         `Block.expr`（尾值）**；其余一律包 `ExprStmt`。表达式位（`want_value=True`）则一切照旧
         保留尾值（`x := if c: a else: b` 的分支尾值必须是值）。
@@ -979,7 +979,7 @@ class Parser:
         依据 = v3 的**实际形态**：v3 里控制流语句本来就不带 `;`（`if`/`loop`/`while`/`for`/
         `match`/`unsafe` 以 `}` 收尾）⇒ 它们在 v3 里**本来就是块的尾值**；真正分叉的只是
         「**带 `;` 的表达式语句**」——那才是 v3 的 `ExprStmt`。`;` 退场后，唯一能复原这层区分
-        的判据就是**节点种类**。T4 是机械形状改写（只有 `{}`→缩进、`;`→换行两类）⇒ 它不该、
+        的判定依据就是**节点种类**。T4 是机械形状改写（只有 `{}`→缩进、`;`→换行两类）⇒ 它不该、
         也无法改变这层区分。
 
         维护者四格实测（v3 前端 @ bb8cb3537584 + v3 文本 / v4 前端 + v4 文本）：
@@ -1002,8 +1002,8 @@ class Parser:
     #   §13.7 `preferredDomain` / `executionDomain`、§13.4 `NoBoundsCheck`、
     #   §13.2 `fast` / `unroll` / `section`。
     # **不收** §13.1 查询族 / §13.3 `addr` / §13.2 `inline`（文档里都在**表达式位**）。
-    # ⚠ **判据 = 「文档释文 + 语料实证」，不是「章号范围」**（维护者 2026-10-11 采纳；
-    #   与自源 `parser.cr::is_stmt_at_annotation` 同口径）。二者冲突时**以后者为准**：
+    # ⚠ **判定依据 = 「文档释文 + 语料实证」，不是「章号范围」**（维护者 2026-10-11 采纳；
+    #   与自源 `parser.cr::is_stmt_at_annotation` 同规则）。二者冲突时**以后者为准**：
     #   `NoBoundsCheck`(§13.4) / `fast`·`unroll`·`section`(§13.2) 章号属 §13.1–13.4，
     #   但释文与语料都在**语句前导位**用它们 ⇒ 收。**禁止**后人按章号再收窄回去。
     _STMT_AT_NAMES = ('preferredDomain', 'executionDomain', 'NoBoundsCheck',
@@ -1011,7 +1011,7 @@ class Parser:
 
     def _skip_stmt_at_annotations(self):
         """消费语句前导位的 `@` 注解链（各占一行）。**语义面 = 接受并跳过**
-        （bootstrap 侧无执行域/安全检查数据面，与顶层前导 `@` 同口径）。
+        （bootstrap 侧无执行域/安全检查数据面，与顶层前导 `@` 同规则）。
 
         **未知名不在此列** ⇒ 仍按表达式解析 ⇒ 由既有路径响亮拒绝（不静默）。
         注解**独占一行**：违反即 `self.error`（响亮）。
@@ -1111,7 +1111,7 @@ class Parser:
             #   ① v3 语料的臂**没有** `|`（`tests/suite/apx_conversion_test.cr:89`
             #      逐字 `match e { V(x) => …, None => … }`），而 T4 是**机械改写**
             #      （计划 §六.1：形状只有 `{}`→缩进、`;`→换行两类）⇒ 它**不会**补 `|`
-            #      ⇒ 本批自己的产物必须仍可解析；
+            #      ⇒ 本次自己的产物必须仍可解析；
             #   ② v4 目标形有 `|` ⇒ 不收它就解析不了维护者原话里的 match 例。
             # ⚠ 二者**不是「两形都收」的静默歧义**：改前 `|` 在臂首是**解析错误**，
             #   故本放宽**不改变任何既有可解析程序的含义**（纯增量）。
@@ -1124,8 +1124,8 @@ class Parser:
             # ⇒ `=>` 后**行尾** ⟺ 臂体是一个 layout region；否则单表达式。
             # ⚠ 该 region **没有 `:`**（`=>` 已充当开启符）⇒ 不能走 `_expect_region`。
             # **兼容形 `=>:`**（`=>` 后紧跟 `:`）：文档 §7.3 没有这一形（那里是 `=>` 后直接换行），
-            # 但 T6 语料机械改写成了它 ⇒ 按本批先例（`flow fn` 兼容形）收为兼容，与文档形同判。
-            # 「臂体是 region」的判据必须在**消费 `:` 之前**定下 —— 消费后再问 `_at_line_end()`
+            # 但 T6 语料机械改写成了它 ⇒ 按本次先例（`flow fn` 兼容形）收为兼容，与文档形同判。
+            # 「臂体是 region」的判定依据必须在**消费 `:` 之前**定下 —— 消费后再问 `_at_line_end()`
             # 会因为站在 INDENT 上而误判成「非行边界」（实测踩过）。
             is_region = False
             if self.check(TokenType.COLON_BLOCK):
@@ -1170,7 +1170,7 @@ class Parser:
         # v4 的 `none`（小写，v4 关键字）与既有 canonical 变体名 `None` 指**同一个**变体。
         # ⚠ canonical 名此处仍写 `None`：改它 = 全局重命名，属 **T5** 的 `None`→`none` 语义面
         #   （计划 §2.3 R3 逐字「`none` ↔ `None` … 是语义面，见 T1/T5」），
-        #   与 T4 的机械形状改写不同批。`EnumPattern` 的 path[-1] 会被 desugar 直接当
+        #   与 T4 的机械形状改写不同阶段。`EnumPattern` 的 path[-1] 会被 desugar 直接当
         #   `__variant` 的**标签串**比较（`desugar.py:86-92`）⇒ 必须与枚举声明的变体名一致。
         #   **漏掉本格** ⇒ 小写 `none` 会掉进下方的 IdentPattern（那是**变量绑定**，不是匹配）
         #   ⇒ 语义静默改变（模式永远命中）——正是要防的形态。
@@ -1374,7 +1374,7 @@ class Parser:
             self.expect(TokenType.ARROW)
             ret = self.parse_type()
             # D11（T0 布局规格 §2.2）：接口方法**无 `:`** ⇒ 行边界收尾。
-            # ⚠ 带默认体的接口方法**本批不支持**：它要在 `InterfaceDecl.methods` 的
+            # ⚠ 带默认体的接口方法**本次不支持**：它要在 `InterfaceDecl.methods` 的
             #   三元组里加一个 body 槽 ⇒ 动 `ast.py` ⇒ 违 J-T1-1 冻结。此处**响亮报错**（不静默吞体）。
             self._end_decl()
             methods.append((mname, params, ret))

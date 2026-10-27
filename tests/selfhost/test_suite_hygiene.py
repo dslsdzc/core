@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""`tests/suite` 腿卫生判据（2026-09-18 suite 清障批；自举编译器 build/corec）。
+"""`tests/suite` 路径卫生判定依据（2026-09-18 suite 清障阶段；自举编译器 build/corec）。
 
-背景：`suite` 腿（`src/ci/run.sh::run_suite`）**不在 PR 门内**，且它是 `set -euo pipefail` 下的
-「逐档 build+run，任一档失败即中止整腿」⇒ 它自己的绿/红不进门。本文件把**本批改动的四处期望**
-搬进 `selfhost-tests`（在门内），使「suite 语料的状态」有机械判据，而不是只在派全量层时才可见。
+背景：`suite` 路径（`src/ci/run.sh::run_suite`）**不在 PR 门内**，且它是 `set -euo pipefail` 下的
+「逐档 build+run，任一档失败即中止整路径」⇒ 它自己的绿/红不进门。本文件把**本次改动的四处期望**
+搬进 `selfhost-tests`（在门内），使「suite 语料的状态」有机械判定依据，而不是只在派全量层时才可见。
 
-判据：
-  H1 **两档正例（本批修好）**：`at_test_mini.cr`（`@sizeOf`）与 `at_test_mini9.cr`（`@fields`）
+判定依据：
+  H1 **两档正例（本次修好）**：`at_test_mini.cr`（`@sizeOf`）与 `at_test_mini9.cr`（`@fields`）
      ⇒ build rc=0 **且** run rc=0。（改前：前者 `error[N06]` 缺 `import io`；后者运行 rc=1。）
   H2 **两档负例（语言面拒收）**：`at_test_mini4.cr` / `at_test_mini6.cr`（函数体内嵌套 `fn`）
      ⇒ `check` rc≠0 **且**输出含 `error[P21]` **且** `build` **零产物**（`-o` 目标不生成）。
   H3 **正控（断言有辨别力）**：`at_test.cr` ⇒ build+run rc=0 且**无** P21 字样。
-  H4 **skip 面静态钉**：解析 `run_suite()` 的 `case` 块 ⇒ 跳过模式**必须是全路径锚定**
-     （含 `*/` 前缀；2026-09-18 本批实测坑：写成裸文件名 `at_test_mini4.cr` 不匹配 `tests/suite/…`
-     ⇒ 负例漏进正例循环 ⇒ `set -e` 下整腿中止）；且跳过集合 == {`at_test_mini4.cr`,`at_test_mini6.cr`}。
-  H5 **0 字节档集合钉**：`tests/suite` 里不得出现 0 字节的 `.cr`（`run_suite` 以 `[ ! -s ]` 跳过；
+  H4 **skip 面静态固定**：解析 `run_suite()` 的 `case` 块 ⇒ 跳过模式**必须是全路径锚定**
+     （含 `*/` 前缀；2026-09-18 本次实测坑：写成裸文件名 `at_test_mini4.cr` 不匹配 `tests/suite/…`
+     ⇒ 负例漏进正例循环 ⇒ `set -e` 下整路径中止）；且跳过集合 == {`at_test_mini4.cr`,`at_test_mini6.cr`}。
+  H5 **0 字节档集合固定**：`tests/suite` 里不得出现 0 字节的 `.cr`（`run_suite` 以 `[ ! -s ]` 跳过；
      新增空档 ⇒ 红，防「空文件静默混入正例循环又被跳过」）。2026-10-24 删除原两档空 fixture
      （`test_control_flow.cr`、`test_generics.cr`），见 TODO #2026-09-18-8。
 
@@ -32,7 +32,7 @@ COREC = os.path.join(BASE, "build", "corec")
 SUITE = os.path.join(BASE, "tests", "suite")
 RUN_SH = os.path.join(BASE, "src", "ci", "run.sh")
 
-POS = ("at_test_mini.cr", "at_test_mini9.cr")          # H1：本批修好的正例
+POS = ("at_test_mini.cr", "at_test_mini9.cr")          # H1：本次修好的正例
 NEG = ("at_test_mini4.cr", "at_test_mini6.cr")        # H2：负例（P21）
 CONTROL = "at_test.cr"                                # H3：正控
 EMPTY = set()  # H5：空档必须为空集（2026-10-24 删除原两档）
@@ -46,7 +46,7 @@ def _env():
 
 def clean_cache():
     """逐档清 `.cir` 快照：暖态重放今日实测会给出不同 IR（冷 `@fields`="x,y" / 暖取到别的函数的串）
-    ⇒ 不清缓存则本判据**依赖上一轮缓存状态**、不可复现。缺陷本体见 TODO 当日段对应条目。"""
+    ⇒ 不清缓存则本判定依据**依赖上一轮缓存状态**、不可复现。缺陷本体见 TODO 当日段对应条目。"""
     subprocess.run([COREC, "clean-cache"], capture_output=True, text=True, env=_env())
 
 
@@ -125,7 +125,7 @@ def h4_skip_patterns():
     src = open(RUN_SH, encoding="utf-8").read()
     m = re.search(r"run_suite\(\)\s*\{.*?case \"\$f\" in(.*?)esac", src, re.S)
     if not m:
-        return ["H4 红：未能在 run.sh 里定位 run_suite() 的 case 块（判据需同步更新）"]
+        return ["H4 红：未能在 run.sh 里定位 run_suite() 的 case 块（判定依据需同步更新）"]
     body = m.group(1)
     pats = []
     for ln in body.split("\n"):
@@ -142,7 +142,7 @@ def h4_skip_patterns():
     for p in pats:
         if not p.startswith("*/"):
             bad.append(f"H4 红：跳过模式 `{p}` 未锚定全路径（`$f` 形如 `tests/suite/<name>`；"
-                       f"裸文件名不匹配 ⇒ 负例漏进正例循环 ⇒ set -e 下整腿中止）")
+                       f"裸文件名不匹配 ⇒ 负例漏进正例循环 ⇒ set -e 下整路径中止）")
     return bad
 
 
@@ -151,13 +151,13 @@ def h5_empty_set():
                if n.endswith(".cr") and os.path.getsize(os.path.join(SUITE, n)) == 0}
     if empties != EMPTY:
         return [f"H5 红：0 字节档集合 = {sorted(empties)}（应为空；"
-                f"新增空档须同批处置并更新本判据 + TODO #2026-09-18-8）"]
+                f"新增空档须同阶段处置并更新本判定依据 + TODO #2026-09-18-8）"]
     return []
 
 
 def main():
     if not os.path.exists(COREC):
-        print("[FAIL] 缺 build/corec（本判据需先 build_selfhost；CI 的 selfhost-tests 档已保证）")
+        print("[FAIL] 缺 build/corec（本判定依据需先 build_selfhost；CI 的 selfhost-tests 档已保证）")
         return 1
     bad = []
     with tempfile.TemporaryDirectory() as tmp:

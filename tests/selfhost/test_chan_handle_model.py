@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""并发 handle 的类型模型对齐（批 8 **A₂**；自举编译器 build/corec）——**自门内 e2e 判据**。
+"""并发 handle 的类型模型对齐（阶段 8 **A₂**；自举编译器 build/corec）——**自门内 e2e 判定依据**。
 
 **背景**：`alloc` 的类型模型 = `() -> string`（`checker.cr` 的 `bi_add("alloc", TI_STR)`；
 `type_engine.cr` 明文）。而 `src/stdlib/{chan,goroutine,sched}.cr` 把 handle 的返回型写成 `-> int`
 ⇒ 返回位 `type_compat_strict(string, int) != 1` ⇒ **TF01**（**真类型模型冲突**，非误报；同族先例
-`lits_copy` 已被上一批修）。修法 = **(A) 语料/stdlib 向模型对齐**：3 处返回型（`chan_make` · `g_new` ·
+`lits_copy` 已被上一组修）。修法 = **(A) 语料/stdlib 向模型对齐**：3 处返回型（`chan_make` · `g_new` ·
 透传的 `sched_go`）+ 5 处 handle 形参（`chan_send`/`chan_recv`/`chan_close(ch: string)` ·
 `sched_enqueue`/`g_free(g: string)`）。
 
-**为何必须挂在本套件**：5 档并发语料在 `tests/suite/`，而 **`suite` 腿不在 PR 门内**
-（台账「PR 门覆盖域陷阱」条：`run_suite` 是 `run.sh` 的 glob 腿、属 `suite` job，仅 `merge_group`（休眠）/
-`workflow_dispatch` 可达）⇒ **glob 收编 ≠ 进门**。本套件把「5 档 check 干净 + build + run」编进
+**为何必须挂在本套件**：5 档并发语料在 `tests/suite/`，而 **`suite` 路径不在 PR 门内**
+（台账「PR 门覆盖域陷阱」条：`run_suite` 是 `run.sh` 的 glob 路径、属 `suite` job，仅 `merge_group`（休眠）/
+`workflow_dispatch` 可达）⇒ **glob 纳入 ≠ 进门**。本套件把「5 档 check 干净 + build + run」编进
 `selfhost-tests`（**门内**），使其证据**不悬空**。
 
-**判据**：① 5 档并发语料 `check` rc=0 **且无 `error[TF01]`**（修前 = 各 2 条 TF01、rc=1）；② `build`
+**判定依据**：① 5 档并发语料 `check` rc=0 **且无 `error[TF01]`**（修前 = 各 2 条 TF01、rc=1）；② `build`
 rc=0 且产物生成；③ `run` rc=0（行为不变）；④ 对齐后的可见形态自证（`chan_make` 结果可赋 `string`、
 `chan_send(ch: string)` 可收）。
 
 **撤条对照**：`diag.cr` 的 TF01 build 豁免**已撤**（旧值 9 条 → 8 条）；「撤条 ≠ 放行」由
-`test_diag_gate.py` 的 `neg_type_tf01`（真 TF01 ⇒ rc=1 + 零产物）钉住。
+`test_diag_gate.py` 的 `neg_type_tf01`（真 TF01 ⇒ rc=1 + 零产物）固定。
 """
 
 import os
@@ -63,8 +63,8 @@ def main():
             print(f"[FAIL] check_clean_{name}: rc={r.returncode} TF01={bad}")
     # ── ②③ 5 档语料：build + run（行为不变）──────────────────────────────
     # 调度器/通道是 SYSTEM raw-word 子系统：G/通道结构里指针与整数共用 int 槽，
-    # language-level tagged int 不适用于该 ABI。行为判据固定用 --raw-int 编译
-    # （check 腿仍走普通前端）。
+    # language-level tagged int 不适用于该 ABI。行为判定依据固定用 --raw-int 编译
+    # （check 路径仍走普通前端）。
     corearch = BASE / "build" / "corearch"
     for name in CORPORA:
         rel = f"tests/suite/{name}.cr"

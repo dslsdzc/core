@@ -53,7 +53,7 @@ Core 文档已经有两项约定：按读者划分的目录结构，以及每篇
 
    修改时发现规范不合适，就回头修改规范。
 3. 其余按目录依次修改：根目录和 `docs/developer`，然后 `docs/maintainer`，然后 `docs/academic` 等零散目录，然后 `docs/superpowers`，最后 `docs/pseudocode`。
-4. 每改完一批通读一遍，开 PR 交给维护者审阅。
+4. 每改完一组通读一遍，开 PR 交给维护者审阅。
 
 文档是否像工程文档，需要人读了才能判断，不增加自动检查。只有文档之间的链接需要机器确认，修改后检查链接目标是否还在。
 
@@ -61,7 +61,7 @@ Core 文档已经有两项约定：按读者划分的目录结构，以及每篇
 
 它同时是给 AI 的指令和自动检查的实现方式，与其他文档不同。写法照改，但下面这些内容保持不变：
 
-- 铁律的标题和 #1–#6 编号。`tools/baseline/canary_check.sh:22` 按编号引用“铁律 6”。
+- 硬性规则的标题和 #1–#6 编号。`tools/baseline/canary_check.sh:22` 按编号引用“硬性规则 6”。
 - `TODO #2026-09-10-3` 的引用形式，在 `elf.cr` 未使用文件那一条里。`tests/harness/test_todo_id_migration.py` 的 J4 用例取自这里。
 - `jj` / `git` 禁令的含义。`.claude/hooks/block-git.py` 负责这一项。
 - 各自动检查的命令、路径和计数。

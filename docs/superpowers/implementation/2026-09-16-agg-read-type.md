@@ -1,16 +1,16 @@
-# 聚合读类型丢失第 2 批实施记录
+# 聚合读类型丢失第 2 阶段实施记录
 
 > 对应计划：[plans/2026-09-16-agg-read-type.md](../plans/2026-09-16-agg-read-type.md)
 
 ## 概述
 
-聚合读类型丢失第 2 批修复 TODO #2026-09-16-16。聚合读的结果槽原先硬定为 `TI_INT`，导致按 `dex` 声明读取时发生不报错的错值，并使总检查级连锁无法检测。T1 在 2026-09-16 固定改前基线并完成 8 档探针的改前实测，T2 把探针入仓并记录两条命令层陷阱，T3 在 3 个读点按声明面形式定型并把 `CIR_CACHE_VER` 从 17 改为 18，T5 完成。终态为分支 A 4/5 通过，R4 按裁-AGG-3 登记为 `[GAP]`；分支 B 四条见证通过；分支 C 断言通过；canary 5/5 IDENTICAL；74 档与 29 档探针的 rc 全同；五个 CI job rc=0；自举链恒等；分支 D① 突变通过。
+聚合读类型丢失第 2 阶段修复 TODO #2026-09-16-16。聚合读的结果槽原先硬定为 `TI_INT`，导致按 `dex` 声明读取时发生不报错的错值，并使总检查级连锁无法检测。T1 在 2026-09-16 固定改前基线并完成 8 档探针的改前实测，T2 把探针入仓并记录两条命令层陷阱，T3 在 3 个读点按声明面形式定型并把 `CIR_CACHE_VER` 从 17 改为 18，T5 完成。终态为分支 A 4/5 通过，R4 按裁-AGG-3 登记为 `[GAP]`；分支 B 四条见证通过；分支 C 断言通过；canary 5/5 IDENTICAL；74 档与 29 档探针的 rc 全同；五个 CI job rc=0；自举链恒等；分支 D① 突变通过。
 
 ## 改动
 
 ### T1：前置、固定基线与探针
 
-维护者裁决（2026-09-16）：八门全按推荐。裁-AGG-1 取 ①；裁-AGG-2、裁-AGG-3、裁-AGG-4 登记；裁-AGG-5 不删 hack，退役检查要求分支 D① 连续两批通过；裁-AGG-6 不改 `IR_ALLOC` 的 tk 与 `IR_DYN_PACK` 的 tag；裁-AGG-7 bump `CIR_CACHE_VER` 从 17 到 18，并补齐四要素；裁-AGG-8 固化突变。U4 裁定 extern 边界规范化为 ABI binary64，因此 R6 进入分支 A，期望为转换。
+维护者裁决（2026-09-16）：八门全按推荐。裁-AGG-1 取 ①；裁-AGG-2、裁-AGG-3、裁-AGG-4 登记；裁-AGG-5 不删 hack，退役检查要求分支 D① 连续两阶段通过；裁-AGG-6 不改 `IR_ALLOC` 的 tk 与 `IR_DYN_PACK` 的 tag；裁-AGG-7 bump `CIR_CACHE_VER` 从 17 到 18，并补齐四要素；裁-AGG-8 固化突变。U4 裁定 extern 边界规范化为 ABI binary64，因此 R6 进入分支 A，期望为转换。
 
 起点为 `develop = 99ae6bdd`，分支为 `feature/agg-read-type`，本记录是该链首个提交。固定基线使用现成的 `build/corec` 与 `build/corearch`。同源证明为：`jj diff --from e7243955 --to develop --stat -- src/compiler src/arch src/os src/format build_selfhost_native.py` 返回 0 files changed。该二进制所建的源面与 `develop 99ae6bdd` 逐字节相同，因此可以作为改前基线。备份的 sha256 为：`/tmp/agg-t1/pre/corec` 是 `a689de9a205a2c1f…`，`/tmp/agg-t1/pre/corearch` 是 `8dd89647971f6af3…`。
 
@@ -80,7 +80,7 @@ fn main() -> int:
     r := dex_agg_arg_check(s.f)
     return r
 
-// R7（非回归钉子）· Core 调用实参
+// R7（非回归固定用例）· Core 调用实参
 struct S:
     f: dex
 fn dbl(x: dex) -> dex:
@@ -93,7 +93,7 @@ fn main() -> int:
         return 1
     return 7
 
-// N1（非回归钉子）· apx 批已转正的比较/raw 形
+// N1（非回归固定用例）· apx 阶段已转正的比较/raw 形
 struct S:
     f: dex
 fn main() -> int:
@@ -110,7 +110,7 @@ fn main() -> int:
 
 第二条是 regalloc 面，读码已确证，影响待对比。`regalloc.cr:680-681` 对 `TI_DEX_S` 不建候选。读槽当前为 `TI_INT`，因此有资格进入候选。是否真的命中窗口、是否存在 hazard 位，需要 T3 对比。预期影响是该槽从「可能驻寄存器」变为「恒栈驻留」。
 
-归类修正在 T1 实测后确定。R7 从「RED 候选」改为「非回归断言」。读码与实测双证，当前 rc=7，修后必须仍绿。R6 从「运行值」改为「IR 级断言」。extern dex 调用的静态链运行路径存在既有崩溃：`tests/suite/ffi_test.cr:8-11` 的头注说明运行时 FFI 被 corearch `--link` 静态路径的既有崩溃阻塞，该档只声明不调用。实测 `run_rc = 139`。因此照既有先例 `tests/selfhost/test_dex_arith.py::test_extern_dex_arg_cir` 使用 cir 断言判定。本批断言是「`load_field` 与 `call_extern` 之间必须出现转换序列」，改前为空，所以 RED 正据已取，见验收结果中的 IR 证据表。U4 裁后约定 extern 边界规范化为 ABI binary64，`ir_gen.cr:1900-1907` 只做 `TI_DEX_S` 到 bits。因此 R6 的期望是转换，不是「不变」，也不是「转 scaled」。
+归类修正在 T1 实测后确定。R7 从「RED 候选」改为「非回归断言」。读码与实测双证，当前 rc=7，修后必须仍绿。R6 从「运行值」改为「IR 级断言」。extern dex 调用的静态链运行路径存在既有崩溃：`tests/suite/ffi_test.cr:8-11` 的头注说明运行时 FFI 被 corearch `--link` 静态路径的既有崩溃阻塞，该档只声明不调用。实测 `run_rc = 139`。因此照既有先例 `tests/selfhost/test_dex_arith.py::test_extern_dex_arg_cir` 使用 cir 断言判定。本次断言是「`load_field` 与 `call_extern` 之间必须出现转换序列」，改前为空，所以 RED 正据已取，见验收结果中的 IR 证据表。U4 裁后约定 extern 边界规范化为 ABI binary64，`ir_gen.cr:1900-1907` 只做 `TI_DEX_S` 到 bits。因此 R6 的期望是转换，不是「不变」，也不是「转 scaled」。
 
 T1 未决事项有三条，转 T2 与 T3。T1-1 是 R1 至 R7 的入仓形态，包括 py 套件内联源、允许清单登记和接入点，由 T2 完成。T1-2 是 R6 的 cir 断言精确正则，转换序列在 computed 值下的实际指令形态由 T3 按实际 cir 实现。T1-3 是 `CIR_CACHE_VER` 从 17 改为 18 的注释文本与 `.ccr` 显式结论的记录位置，由 T3 与 T5 完成。
 
@@ -118,11 +118,11 @@ T1 未决事项有三条，转 T2 与 T3。T1-1 是 R1 至 R7 的入仓形态，
 
 维护者 T2 批准（2026-09-16）包含三项。第一，确认 R7 与 R6 的归类修正。第二，两条陷阱必须落入仓级文档，不能只存在于报告中；检查方式是下一个人搜索「noclobber」时能在仓里搜到。第三，T3 检查补「槽型正确」和「无重复转换」两条，两条都要。
 
-新文件为 `tests/selfhost/test_agg_read_type.py`，未接入 CI，允许清单有条目。分支 A 检查语义值，包含 R1 LET 中转、R2 match 载荷、R3 局部数组元素、R4 元组元素、R5 写回 apx 槽，期望 `elf=7`。分支 C 检查非回归断言，包含 R7 Core 调用实参和 N1 apx 批已转正形，改前即绿，修后必须仍绿。分支 B 是界面见证：B1 与 B2 为反方向，要求没有 `_dxt`；B3 为正方向，要求 `_dxdiv` 恰好 1；B4 要求 extern 调用点前有转换。
+新文件为 `tests/selfhost/test_agg_read_type.py`，未接入 CI，允许清单有条目。分支 A 检查语义值，包含 R1 LET 中转、R2 match 载荷、R3 局部数组元素、R4 元组元素、R5 写回 apx 槽，期望 `elf=7`。分支 C 检查非回归断言，包含 R7 Core 调用实参和 N1 apx 阶段已转正形，改前即绿，修后必须仍绿。分支 B 是界面见证：B1 与 B2 为反方向，要求没有 `_dxt`；B3 为正方向，要求 `_dxdiv` 恰好 1；B4 要求 extern 调用点前有转换。
 
-允许清单条目位于 `tests/harness/ci_hook_allowlist.txt`。条目写明「RED 语料，勿接入」，并写明修复批的三件套：删条目、接入 `run.sh`、改头注。
+允许清单条目位于 `tests/harness/ci_hook_allowlist.txt`。条目写明「RED 语料，勿接入」，并写明修复阶段的三件套：删条目、接入 `run.sh`、改头注。
 
-两条陷阱写入 `tools/baseline/REBUILD.md`，新增小节 `### 命令层陷阱（假红）`，位置在「换代纪律」之前，与既有的「适用范围限制」和「已知限制」同区。第一条是 `noclobber`：重定向到已存在的日志时，命令根本没有运行，读到的是上一轮旧日志。第二条是 `corec build` 必须在仓库根运行，否则报 `cannot locate src/runtime/rt.cr`。两条叠加时表现为整批探针全部失败，实例是 #78 的 T1 首轮 8/8 假红。检查方式为 `grep -rn noclobber tools/`，命中该文件，仓级可搜。批报告在 T5 另单列一节。
+两条陷阱写入 `tools/baseline/REBUILD.md`，新增小节 `### 命令层陷阱（假红）`，位置在「换代纪律」之前，与既有的「适用范围限制」和「已知限制」同区。第一条是 `noclobber`：重定向到已存在的日志时，命令根本没有运行，读到的是上一轮旧日志。第二条是 `corec build` 必须在仓库根运行，否则报 `cannot locate src/runtime/rt.cr`。两条叠加时表现为整阶段探针全部失败，实例是 #78 的 T1 首轮 8/8 假红。检查方式为 `grep -rn noclobber tools/`，命中该文件，仓级可搜。阶段报告在 T5 另单列一节。
 
 T3 的验收形状由维护者指定：槽型正确加无重复转换，两条都要。R1 的 IR 证据给出检查形状：修后 `load_field` 的结果槽类型必须是 `TI_DEX_S`，不能是 `TI_INT`；下游不得再出现那次多余的 `× _dsc`。后者检查转换不重复，既不能漏转，也不能转两遍。
 
@@ -134,7 +134,7 @@ T3 的验收形状由维护者指定：槽型正确加无重复转换，两条�
 | `_dxdiv`（`i2f _dxf` 加 `const _dxsc` 加 `binary _dxdiv = _dxf / _dxsc`） | `dex_scaled_to_bits:1016-1029` 的门 `irv_type(var) == TI_DEX_S`，且非字面量 | 出现说明读槽已是 `TI_DEX_S`，属于正方向，因此 R5 要求计数恰好为 1，等于槽型正确且不重复转换。 |
 | `load_field` 到 `call_extern` 之间的序列 | extern 分支门 `irv_type(av) == TI_DEX_S`（`:1902`） | 必须非空。R6 的改前为空，这就是 RED 正据。 |
 
-使用门控见证而不直接读槽型，原因是 `.cir` 文本转储不打印普通 IR 变量的类型。`dump.cr:50-60` 的 `type_kind_name` 只在 `alloc` 与 `const` 行输出，且 `TI_DEX`（1）与 `TI_DEX_S`（8）同名「dex」，不可区分。权威通道是 `.ccr` SYM 的 per-var 型字节（`ccr_io.cr:690`），但需要写二进制解析。因此本批先用门控见证；门恰好是需要断言的类型谓词，所以忠实。`.ccr` SYM 解析列为 T3 的可选加固。
+使用门控见证而不直接读槽型，原因是 `.cir` 文本转储不打印普通 IR 变量的类型。`dump.cr:50-60` 的 `type_kind_name` 只在 `alloc` 与 `const` 行输出，且 `TI_DEX`（1）与 `TI_DEX_S`（8）同名「dex」，不可区分。权威通道是 `.ccr` SYM 的 per-var 型字节（`ccr_io.cr:690`），但需要写二进制解析。因此本次先用门控见证；门恰好是需要断言的类型谓词，所以忠实。`.ccr` SYM 解析列为 T3 的可选加固。
 
 裁-AGG-7 的记录位置如下。`CIR_CACHE_VER` 从 17 改为 18，位置在 `cir_cache.cr:51`，由 T3 实施。注释文案必须写清原因：
 
@@ -144,7 +144,7 @@ T3 的验收形状由维护者指定：槽型正确加无重复转换，两条�
 //     与 TODO #2026-09-10-4（缓存键缺编译器身份）同族：cache miss = 无害重建。
 ```
 
-`.ccr` 不 bump，但报告必须写明「dex 程序的 `.ccr` 内容会变，格式不变，内容变」，防止后来人把「版本没 bump」读成「内容没变」。记录位置是批报告的检查节与 `.ccr` 段。检查结果为 cache miss，因此无害重建，照 TODO #2026-09-10-4 的结束约定。canary 与五条检查不受影响，因为没有 dex，这与停条件①（非 dex 聚合读任何字节变化就停）互为印证。
+`.ccr` 不 bump，但报告必须写明「dex 程序的 `.ccr` 内容会变，格式不变，内容变」，防止后来人把「版本没 bump」读成「内容没变」。记录位置是阶段报告的检查节与 `.ccr` 段。检查结果为 cache miss，因此无害重建，照 TODO #2026-09-10-4 的结束约定。canary 与五条检查不受影响，因为没有 dex，这与停条件①（非 dex 聚合读任何字节变化就停）互为印证。
 
 T2 未决事项有三条，转 T3。T2-1 是 `.ccr` SYM per-var 型解析，属于可选加固。T2-2 是 `run.sh` 接入点与头注转正，属于 T3 修复后三件套的第二步。T2-3 是 R6 的断言在 T3 实施后按实际 cir 形态复核，转换序列可能随实现约定变化。
 
@@ -163,11 +163,11 @@ T2 未决事项有三条，转 T3。T2-1 是 `.ccr` SYM per-var 型解析，属�
 | ⑤ | `cir_cache.cr:51` | `CIR_CACHE_VER` 从 17 改为 18，加注释：旧快照读槽型为 `TI_INT`，与新语义不等价，命中旧条目会恢复坏 IR；与 TODO #2026-09-10-4 同族；cache miss 等于无害重建。历史条目「v18（不 bump，R2 P4 Task 4…）」的标题改为「[曾议 v18 而未 bump]」，避免与本次撞号。 |
 | ⑥ | 接入点三件套 | `run.sh` 的 `selfhost-tests` 增加 1 行；`ci_hook_allowlist.txt` 减少 1 条；套件头注改为「已修」。 |
 
-分支 D① 突变在 13.3 执行。把 `:1342-1343` 的两行 hack 注释化，重建，运行检查。apx 批套件 23 例全部通过，本批 6 例通过，分支 B 全部通过。通用机制独立成立，hack 的覆盖面被声明面机制完全接管，hack 冗余得到确认。退役检查「分支 D① 连续两批通过」的第一步达成。随后恢复源码、重建、复验，全部通过。
+分支 D① 突变在 13.3 执行。把 `:1342-1343` 的两行 hack 注释化，重建，运行检查。apx 阶段套件 23 例全部通过，本次 6 例通过，分支 B 全部通过。通用机制独立成立，hack 的覆盖面被声明面机制完全接管，hack 冗余得到确认。退役检查「分支 D① 连续两阶段通过」的第一步达成。随后恢复源码、重建、复验，全部通过。
 
-R4 与 T3 约定存在冲突，需要维护者裁定。T3 约定写「分支 A 5/5 变为通过（R1 至 R5）」，但裁-AGG-3 已裁「元组没有声明面，登记，不纳入本批」。实测事实是：元组构造（`ir_gen.cr` 的 `EXPR_TUPLE` 分支）给元组 var 定型 `TI_INT`，不携带元素 ti。数字下标读（`t . 0`）因此取不到声明面，本批通道覆盖不到它，R4 修后仍为 1。
+R4 与 T3 约定存在冲突，需要维护者裁定。T3 约定写「分支 A 5/5 变为通过（R1 至 R5）」，但裁-AGG-3 已裁「元组没有声明面，登记，不纳入本次」。实测事实是：元组构造（`ir_gen.cr` 的 `EXPR_TUPLE` 分支）给元组 var 定型 `TI_INT`，不携带元素 ti。数字下标读（`t . 0`）因此取不到声明面，本次通道覆盖不到它，R4 修后仍为 1。
 
-处置按裁-AGG-3 执行。3 个读点不包含元组。套件把 R4 移入 `[GAP]` 组，只观测，不计入检查，打印期望值与实测值，并注明裁决与出处。后续批修复时须把它移回 `CASES`。如果现在就要覆盖元组，最小机制是在元组构造点按「全元素同形」把该形式登记进既有声明侧表，即 `irv_set_decl_ti(tv, TI_DEX_S)`，2 行，零分配；数字下标读再查 `slot_decl_ti(obj_var)`。代价与风险是：`slot_decl_ti(tv)` 变为 `TI_DEX_S` 会波及唯一取址面 `ir_gen.cr:1530`，即 `&tuple` 的 pointee 型行身份从 `TYP_PTR(TI_INT)` 改为 `TYP_PTR(TI_DEX_S)`，需要一条实证；这是新机制，与最小改动约定相抵。建议维持裁-AGG-3，登记。
+处置按裁-AGG-3 执行。3 个读点不包含元组。套件把 R4 移入 `[GAP]` 组，只观测，不计入检查，打印期望值与实测值，并注明裁决与出处。后续阶段修复时须把它移回 `CASES`。如果现在就要覆盖元组，最小机制是在元组构造点按「全元素同形」把该形式登记进既有声明侧表，即 `irv_set_decl_ti(tv, TI_DEX_S)`，2 行，零分配；数字下标读再查 `slot_decl_ti(obj_var)`。代价与风险是：`slot_decl_ti(tv)` 变为 `TI_DEX_S` 会波及唯一取址面 `ir_gen.cr:1530`，即 `&tuple` 的 pointee 型行身份从 `TYP_PTR(TI_INT)` 改为 `TYP_PTR(TI_DEX_S)`，需要一条实证；这是新机制，与最小改动约定相抵。建议维持裁-AGG-3，登记。
 
 基准值更新按裁-AGG-7 的四要素执行：旧值、新值、归因、出处。
 
@@ -176,28 +176,28 @@ R4 与 T3 约定存在冲突，需要维护者裁定。T3 约定写「分支 A 5
 | `cir_cache.cr:51` | `CIR_CACHE_VER` 从 17 改为 18 | 改常量并加注释，归因写清 |
 | `tests/selfhost/test_ccr_types.py` 的 ㉛ 与 ㊲，以及模块头注 | 断言 `ver == 17` 改为 18 | 断言改 18，三处注释写明「旧值 17、新值 18、归因、出处」 |
 | `tests/selfhost/test_cache_identity.py` | `VER_EXPECTED` 从 17 改为 18 | 同上。布局未变，因此 `layout()` 的 v17 分支按 `VER_EXPECTED` 复用，无需新分支 |
-| `src/compiler/dyn_arr.cr:112` 与 `src/compiler/ccr_io.cr:137` | 陈旧注释「CIR_CACHE_VER=17 不 bump」 | 更新注释并指向本批，仅注释，零行为 |
+| `src/compiler/dyn_arr.cr:112` 与 `src/compiler/ccr_io.cr:137` | 陈旧注释「CIR_CACHE_VER=17 不 bump」 | 更新注释并指向本次，仅注释，零行为 |
 | `.ccr`（`CCR_VERSION=9`） | 不 bump | 交付格式没有快照复用语义。报告须写明「dex 程序的 `.ccr` 内容会变」，防止「版本没 bump」被读成「内容没变」 |
 
 基准值更新过程有三次红色。首轮 `selfhost-tests` rc=1，两例因为版本位失败，分别是 `test_p4t4_cir_snapshot_layout_unbumped` 与 `test_p5t2_snapshot_disk_code_preserved`。更新基准值后重跑又红，但那次是环境抖动：同套件在干净缓存下 49/49 通过；改前二进制对照运行为 47/49，恰好是那两例版本断言，属于预期。第三次红是 `test_cache_identity.py` 的 `VER_EXPECTED` 未同步，即上表第三行；一并更新后 rc=0。
 
-本批的未覆盖面登记如下。U7 是 `IR_SLICE` 产物的元素读。切片 var 的 IR 型恒为 `TI_INT`，且 `is_ptr_var:627` 对 `TI_DEX_S` 提前返回 0，因此改切片 var 型会改变指针判断，不能用「给切片 var 定型」的办法。切片元素的声明形式无处寄存，若要覆盖，需要新增侧表或更换寄存面。U1 是 match 结果槽（裁-AGG-2）。U2 与 U4 是元组和泛型（裁-AGG-3 与裁-AGG-4）。这些在第 10 节已登记，本批未动。
+本次的未覆盖面登记如下。U7 是 `IR_SLICE` 产物的元素读。切片 var 的 IR 型恒为 `TI_INT`，且 `is_ptr_var:627` 对 `TI_DEX_S` 提前返回 0，因此改切片 var 型会改变指针判断，不能用「给切片 var 定型」的办法。切片元素的声明形式无处寄存，若要覆盖，需要新增侧表或更换寄存面。U1 是 match 结果槽（裁-AGG-2）。U2 与 U4 是元组和泛型（裁-AGG-3 与裁-AGG-4）。这些在第 10 节已登记，本次未动。
 
-T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属于可选加固；本批用门控见证加 canary 与 parity 覆盖。T3-2 是 R4 的取裁。T3-3 是分支 D①「连续两批通过」的第二次，下批重新运行本套件与 apx 套件且 hack 仍关，达成后可删 hack（TODO #2026-09-16-16 追记）。T3-4 是 `.cn` 与 `.cir` 之外是否有第三处落 per-var 型的产物；本轮扫描到 `ccr_io.cr:631`、`ccr_io.cr:690` 与 `cir_cache.cr:259` 两处，未见第三处。
+T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属于可选加固；本次用门控见证加 canary 与 parity 覆盖。T3-2 是 R4 的取裁。T3-3 是分支 D①「连续两阶段通过」的第二次，下阶段重新运行本套件与 apx 套件且 hack 仍关，达成后可删 hack（TODO #2026-09-16-16 追记）。T3-4 是 `.cn` 与 `.cir` 之外是否有第三处落 per-var 型的产物；本轮扫描到 `ccr_io.cr:631`、`ccr_io.cr:690` 与 `cir_cache.cr:259` 两处，未见第三处。
 
 ### T5：交付与完成
 
-`TODO #2026-09-16-36` 为本批新条目。编号按 develop `66eb9589` 的现状取，等于最大编号 #97 加 1。条目把元组数字下标与 `IR_SLICE` 产物元素读合成一条，内容包括现象、最小机制（元组构造点按「全元素同形」登记 `irv_set_decl_ti`，2 行零分配）、代价与待实证（`&tuple` 的 pointee 型行身份）、切片侧三候选、同族互引（#97 与 #91）、修复时检查和状态登记未修。
+`TODO #2026-09-16-36` 为本次新条目。编号按 develop `66eb9589` 的现状取，等于最大编号 #97 加 1。条目把元组数字下标与 `IR_SLICE` 产物元素读合成一条，内容包括现象、最小机制（元组构造点按「全元素同形」登记 `irv_set_decl_ti`，2 行零分配）、代价与待实证（`&tuple` 的 pointee 型行身份）、切片侧三候选、同族互引（#97 与 #91）、修复时检查和状态登记未修。
 
-`TODO #2026-09-16-16` 的状态改为完成，内容包含修法、检查和未覆盖面指向 #98。批报告位于 `docs/superpowers/implementation/2026-09-16-agg-read-type-batch-report.md`，共 13 节：第 0 节一行结论；第 1 节提交链；第 2 节根因修法；第 3 节检查；第 4 节分支 D① 突变；第 5 节二进制同一性论证；第 6 节镜像教训；第 7 节 GC12 顺序；第 8 节陷阱落仓；第 9 节换代更新基准值；第 10 节 R4 的 `[GAP]` 处置与裁决出处；第 11 节检查可行性经验；第 12 节未覆盖面；第 13 节诚实边界。
+`TODO #2026-09-16-16` 的状态改为完成，内容包含修法、检查和未覆盖面指向 #98。阶段报告位于 `docs/superpowers/implementation/2026-09-16-agg-read-type-batch-report.md`，共 13 节：第 0 节一行结论；第 1 节提交链；第 2 节根因修法；第 3 节检查；第 4 节分支 D① 突变；第 5 节二进制同一性论证；第 6 节镜像教训；第 7 节 GC12 顺序；第 8 节陷阱落仓；第 9 节换代更新基准值；第 10 节 R4 的 `[GAP]` 处置与裁决出处；第 11 节检查可行性经验；第 12 节未覆盖面；第 13 节诚实边界。
 
 提交为 `5a245777`（TODO）、`9de1c4c0`（报告）和本记录。
 
 ### 报告约定
 
-批报告必须写两条。第一条是镜像教训：「`.ccr` 没变 ≠ 生成面没变」（#93 批）与「`.ccr` 没变 ≠ 这个面被覆盖了」（本批）合起来才完整。检查的「绿」只在它的覆盖域内有意义。
+阶段报告必须写两条。第一条是镜像教训：「`.ccr` 没变 ≠ 生成面没变」（#93 阶段）与「`.ccr` 没变 ≠ 这个面被覆盖了」（本次）合起来才完整。检查的「绿」只在它的覆盖域内有意义。
 
-第二条是 GC12 的自修正顺序。先查出 `res_type_node` 对基类型节点是纯查表、零分配，把规则改准，再决定不用它。本批一律不调它。这体现的顺序是「先把规则改准，再决定用不用」。
+第二条是 GC12 的自修正顺序。先查出 `res_type_node` 对基类型节点是纯查表、零分配，把规则改准，再决定不用它。本次一律不调它。这体现的顺序是「先把规则改准，再决定用不用」。
 
 ## 验收结果
 
@@ -212,7 +212,7 @@ T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属�
 | R5 写回 apx 槽 | 7 | 1 | RED |
 | R6 extern 实参 | IR 断言，见下文 | `run_rc = 139`，静态链既有崩溃面 | RED，正据在 IR 面 |
 | R7 Core 实参（断言） | 7 | 7 | 绿，与读码判定一致，归类已修正 |
-| N1 apx 批已转正形（断言） | 7 | 7 | 绿 |
+| N1 apx 阶段已转正形（断言） | 7 | 7 | 绿 |
 
 全部 8 档 `check` 都是 0 error。没有诊断，这正是「不报错地」的实测证据。
 
@@ -244,7 +244,7 @@ T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属�
 
 ### 分支 D① 突变
 
-关掉 apx hack 后，重建并运行检查。apx 批套件 23 例全部通过，本批 6 例通过，分支 B 全部通过。通用机制独立成立，hack 的覆盖面被声明面机制完全接管，hack 冗余确认，「分支 D① 连续两批通过」的第一步达成。恢复源码、重建、复验后全部通过。
+关掉 apx hack 后，重建并运行检查。apx 阶段套件 23 例全部通过，本次 6 例通过，分支 B 全部通过。通用机制独立成立，hack 的覆盖面被声明面机制完全接管，hack 冗余确认，「分支 D① 连续两阶段通过」的第一步达成。恢复源码、重建、复验后全部通过。
 
 ### 五个 CI job 与自举链
 
@@ -252,7 +252,7 @@ T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属�
 |---|---|---|
 | `check` | 0 | corearch 与 corelsp 的 `build log clean (error[ = 0, undefined = 0)`；`check src/compiler` 0 error |
 | `bootstrap-tests` | 0 | bootstrap 套件全部通过 |
-| `selfhost-tests` | 0 | `test_ccr_types.py` 49/49；`interp_parity` 23/23；本批套件在接入点后随 job 运行，全部通过 |
+| `selfhost-tests` | 0 | `test_ccr_types.py` 49/49；`interp_parity` 23/23；本次套件在接入点后随 job 运行，全部通过 |
 | `suite` | 0 | 23 档 ALL PASS，包含 `apx_conversion_test.cr` |
 | `full-bootstrap` | 0 | `cmp /tmp/corec2 /tmp/corec3` 恒等，2904726 B，sha256 为 `b8e4298ad0d7…` |
 
@@ -265,25 +265,25 @@ T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属�
 | canary | PASS 5/5，ELF 与 `.ccr` 四条 IDENTICAL |
 | `check` | rc=0，corearch 与 corelsp 的 `build log clean (error[ = 0, undefined = 0)` |
 | `bootstrap-tests` | rc=0 |
-| `selfhost-tests` | rc=0，包含本批套件接入点，`ccr_types` 49/49，`interp_parity` 23/23 |
+| `selfhost-tests` | rc=0，包含本次套件接入点，`ccr_types` 49/49，`interp_parity` 23/23 |
 | `suite` | rc=0，23 档 ALL PASS |
 | `full-bootstrap` | rc=0，`cmp corec2 corec3` 恒等，2904726 B |
 | 二进制同一性 | T5 重建得到 `64c8a7d6…`，与检查二进制逐字节相同。因此 canary、parity、probes 结论对终态成立 |
 
-### 批终态结论
+### 阶段终态结论
 
 聚合读结果槽原先硬定 `TI_INT`，造成总检查级连锁无法检测。读点定型改为声明面形式，采用零分配的节点判，并把 `CIR_CACHE_VER` 从 17 改为 18。分支 A 4/5 变为通过，R4 按裁-AGG-3 登记 `[GAP]`。分支 B 四条见证通过，分支 C 断言通过，canary 5/5 IDENTICAL，74 档与 29 探针 rc 全同，五个 CI job rc=0，自举链恒等，分支 D① 突变通过，hack 冗余确认。
 
 ## 遗留问题
 
-- R4 元组读按裁-AGG-3 登记为 `[GAP]`，本批只观测，不计入检查。后续批修复时须移回 `CASES`。
+- R4 元组读按裁-AGG-3 登记为 `[GAP]`，本次只观测，不计入检查。后续阶段修复时须移回 `CASES`。
 - TODO #2026-09-16-36 覆盖元组数字下标与 `IR_SLICE` 产物元素读，状态为登记未修。
 - U7 的 `IR_SLICE` 元素读没有覆盖。切片 var 的 IR 型恒为 `TI_INT`，`is_ptr_var:627` 对 `TI_DEX_S` 提前返回 0，因此不能直接给切片 var 定型。切片元素的声明形式需要新增侧表或更换寄存面。
 - U1 的 match 结果槽没有覆盖，依据裁-AGG-2。
 - U2 与 U4 的元组和泛型没有覆盖，依据裁-AGG-3 与裁-AGG-4。
-- `.ccr` SYM per-var 型的直接断言没有实施，属于可选加固。本批使用门控见证，并由 canary 与 parity 覆盖。
-- 分支 D①「连续两批通过」只完成第一次。第二次需要下批重新运行本套件与 apx 套件，且保持 hack 关闭，达成后才能删除 hack（TODO #2026-09-16-16 追记）。
-- R6 的运行值无法测试，原因是 `tests/suite/ffi_test.cr:8-11` 记录的静态链 FFI 既有崩溃。本批改用 IR 级断言。
+- `.ccr` SYM per-var 型的直接断言没有实施，属于可选加固。本次使用门控见证，并由 canary 与 parity 覆盖。
+- 分支 D①「连续两阶段通过」只完成第一次。第二次需要下阶段重新运行本套件与 apx 套件，且保持 hack 关闭，达成后才能删除 hack（TODO #2026-09-16-16 追记）。
+- R6 的运行值无法测试，原因是 `tests/suite/ffi_test.cr:8-11` 记录的静态链 FFI 既有崩溃。本次改用 IR 级断言。
 - `.ccr` 的 `CCR_VERSION=9` 没有 bump，但 dex 程序的 `.ccr` 内容会变，格式不变。报告已写明这一点。
 - `.cn` 与 `.cir` 之外未发现第三处落 per-var 型的产物。本轮扫描到 `ccr_io.cr:631`、`ccr_io.cr:690` 与 `cir_cache.cr:259` 两处。
 
@@ -291,10 +291,10 @@ T3 未决事项有四条。T3-1 是 `.ccr` SYM per-var 型的直接断言，属�
 
 - 不 bump `.ccr` 的 `CCR_VERSION`，保持 9。
 - 不修改 `IR_ALLOC` 的 tk 与 `IR_DYN_PACK` 的 tag（裁-AGG-6）。
-- 不删除 apx hack（裁-AGG-5），退役检查留到下一批。
+- 不删除 apx hack（裁-AGG-5），退役检查留到下一组。
 - 不实现 R4 的元组数字下标读（裁-AGG-3）。
 - 不实现 U7 的切片元素读、U1 的 match 结果槽、U2 与 U4 的元组和泛型。
 - 不做 `.ccr` SYM per-var 型的直接断言。
 - 不做 extern dex 调用的运行值测试，只做 IR 级断言。
 - 不为切片元素新增侧表，也不更换寄存面。
-- 不在本批执行分支 D① 的第二次连续验证。
+- 不在本次执行分支 D① 的第二次连续验证。

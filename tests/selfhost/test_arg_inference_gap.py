@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#2026-09-16-31 批 T3）—— 本套件已挂 CI**（TODO #2026-09-16-31；详见
+"""✅ **已修（#2026-09-16-31 阶段 T3）—— 本套件已挂 CI**（TODO #2026-09-16-31；详见
 `docs/superpowers/specs/2026-09-16-arg-inference-gap.md`）。
 
 被测缺陷 = **「已解析直调的实参推断缺失」**（不是「一个 139」）：
@@ -9,21 +9,21 @@
   **函数尾（`:2833-2839`）** ⇒ 该路径下**实参表达式从不被推断**（该循环只在 `func_ni < 0`
   时可达 ⇒ 对任何**有名**被调都是**死码**）。
 
-两种表现（本套件**两条腿都要**，缺一即「只修了一半」）：
-  · **腿 A（响亮面 = 139）**：实参位的内层调用若是 `EXPR_FIELD` 被调（方法调用 / 模块限定调用），
+两种表现（本套件**两条路径都要**，缺一即「只修了一半」）：
+  · **路径 A（响亮面 = 139）**：实参位的内层调用若是 `EXPR_FIELD` 被调（方法调用 / 模块限定调用），
     其 `ast_data`（被调名索引）**只能由 checker 的模块/方法分支回填**（`checker.cr:2584`/`:2645`）
     —— 该分支从没跑 ⇒ 字段保持 parser 初值 **0** ⇒ `ir_gen` 读出 `istr_get(0)` = 文件**首个
     interned 串**（有 `import` 语句时恰为 `"import"`）⇒ 后端查不到 ⇒ 外部位重定位 ⇒ **SIGSEGV 139**。
-  · **腿 B（静默面 = 零诊断）**：实参里的**未定义函数**（`g(nosuchfn(1))`）**静默通过**、
+  · **路径 B（静默面 = 零诊断）**：实参里的**未定义函数**（`g(nosuchfn(1))`）**静默通过**、
     `check` rc=0 —— 比 139 更危险（响亮失败至少有人看得见）。
 
-**本套件现状（修复后）**：腿 A 各例由 139 → 精确值；腿 B 由「零诊断」→ `error[N06]`；**腿 D（裁-ARG-8 H4）** 实参位泛型得精确键。
-⇒ 本文件 = 「修复的判据」（TDD：先红后绿，2026-09-16 已转绿）。
+**本套件现状（修复后）**：路径 A 各例由 139 → 精确值；路径 B 由「零诊断」→ `error[N06]`；**路径 D（裁-ARG-8 H4）** 实参位泛型得精确键。
+⇒ 本文件 = 「修复的判定依据」（TDD：先红后绿，2026-09-16 已转绿）。
 
 **挂点（裁-ARG-7 三件套已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件；
-`tests/harness/ci_hook_allowlist.txt` 的 RED 条目**已删**（判据 = `test_ci_hook_coverage.py` PASS）。
+`tests/harness/ci_hook_allowlist.txt` 的 RED 条目**已删**（判定依据 = `test_ci_hook_coverage.py` PASS）。
 
-**通用探针纪律**（照 apx 批 §0bis/§0ter）：RED 语料也要写明**覆盖面自证**——本套件的
+**通用探针纪律**（照 apx 阶段 §0bis/§0ter）：RED 语料也要写明**覆盖面自证**——本套件的
 `OBSERVED` 列即覆盖面证据（见 `--report` 输出）。
 """
 
@@ -39,11 +39,11 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
 # kind:
-#   "crash"  = 腿 A：当前 139，修好后应当拿到 expect_rc
-#   "silent" = 腿 B：当前零诊断，修好后 check 应当出 {N06}
+#   "crash"  = 路径 A：当前 139，修好后应当拿到 expect_rc
+#   "silent" = 路径 B：当前零诊断，修好后 check 应当出 {N06}
 #   "green"  = 对照：当前即应绿、修后不得变（防「修法把对的搞坏」）
 CASES = [
-    # ── 腿 A：响亮面（139）──
+    # ── 路径 A：响亮面（139）──
     ("A1_module_call_as_arg", "crash", 0, """
 import fmt
 fn main() -> int:
@@ -119,7 +119,7 @@ fn main() -> int:
         return 3
     return 0
 """),
-    # ── 腿 B：静默面（零诊断）──
+    # ── 路径 B：静默面（零诊断）──
     # 注意：B1 当前**同时**是 check 零诊断（静默面）**且**运行时 139 —— 静默指的正是「无诊断」这一层。
     ("B1_undefined_fn_in_arg_of_resolved_call", "silent", None, """
 fn g(x: int) -> int:
@@ -229,14 +229,14 @@ def observe(src):
 
 
 def test_leg_e_range_go_iter_var():
-    """腿 E（**维护者硬条件 2**：`go` 迭代变量要有**自己的钉子**，不能只靠碰巧覆盖它的
-    两个载体）：`go i a..b f(i)` 的**直接判据**三则 ——
+    """路径 E（**维护者硬条件 2**：`go` 迭代变量要有**自己的固定用例**，不能只靠碰巧覆盖它的
+    两个文件）：`go i a..b f(i)` 的**直接判定依据**三则 ——
       E1 body 引用迭代变量 ⇒ **check rc=0 + 运行值正确**（`square(i)` 的 0+1+4 = 5）；
       E2 迭代变量**不得泄漏到 body 之外** ⇒ 外层引用 `i` **必须** rc=1 + `error[N01]`
          （证明作用域严格限 body，硬条件 1）；
       E3 **单发形** `go square(21)`（`ast_c(node) <= 0`）**完全不受影响** ⇒ check rc=0。
     背景：本条 = **修实参推断顺带暴露的 checker `go` 绑定缺口**（`parser.cr:617` 只记名、
-    `checker.cr:2981-3000` 原先不 bind）—— 这是本批**第二个**顺带修复的既有缺陷。"""
+    `checker.cr:2981-3000` 原先不 bind）—— 这是本次**第二个**顺带修复的既有缺陷。"""
     e1 = """
 fn square(x: int) -> int:
     return x * x
@@ -261,27 +261,27 @@ fn main() -> int:
     bad = 0
     chk, codes, bld, elf = observe(e1)
     if chk == 0 and elf == 5:
-        print("[PASS] 腿 E · E1 range-go body 引用迭代变量: check rc=0 · ELF rc=5（0+1+4）")
+        print("[PASS] 路径 E · E1 range-go body 引用迭代变量: check rc=0 · ELF rc=5（0+1+4）")
     else:
-        print(f"[FAIL] 腿 E · E1: check={chk} codes={sorted(codes)} elf={elf}（期望 check=0 elf=5）")
+        print(f"[FAIL] 路径 E · E1: check={chk} codes={sorted(codes)} elf={elf}（期望 check=0 elf=5）")
         bad += 1
     chk2, codes2, _b2, _e2 = observe(e2)
     if chk2 != 0 and "N01" in codes2:
-        print("[PASS] 腿 E · E2 迭代变量不泄漏（body 外引用 ⇒ rc=1 + N01）")
+        print("[PASS] 路径 E · E2 迭代变量不泄漏（body 外引用 ⇒ rc=1 + N01）")
     else:
-        print(f"[FAIL] 腿 E · E2: check={chk2} codes={sorted(codes2)}（期望 rc=1 且 N01 —— 作用域须严格限 body）")
+        print(f"[FAIL] 路径 E · E2: check={chk2} codes={sorted(codes2)}（期望 rc=1 且 N01 —— 作用域须严格限 body）")
         bad += 1
     chk3, codes3, _b3, _e3 = observe(e3)
     if chk3 == 0:
-        print("[PASS] 腿 E · E3 单发形 go（ast_c<=0）不受影响: check rc=0")
+        print("[PASS] 路径 E · E3 单发形 go（ast_c<=0）不受影响: check rc=0")
     else:
-        print(f"[FAIL] 腿 E · E3: check={chk3} codes={sorted(codes3)}（期望 rc=0）")
+        print(f"[FAIL] 路径 E · E3: check={chk3} codes={sorted(codes3)}（期望 rc=0）")
         bad += 1
     return bad
 
 
 def cir_of(src):
-    """跑 `corec cir <file>` ⇒ 输出文本（腿 D 用）。"""
+    """跑 `corec cir <file>` ⇒ 输出文本（路径 D 用）。"""
     s = f"// arg-inf-gap-{uuid.uuid4()}\n" + src
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
         f.write(s)
@@ -302,10 +302,10 @@ def main():
         chk, codes, bld, elf = observe(src)
         if kind == "crash":
             ok = (elf == want and chk == 0)
-            expect = f"ELF rc={want}（腿 A：当前预期 139）"
+            expect = f"ELF rc={want}（路径 A：当前预期 139）"
         elif kind == "silent":
             ok = (chk != 0 and "N06" in codes)
-            expect = "check rc=1 且 code=error[N06]（腿 B：当前预期零诊断）"
+            expect = "check rc=1 且 code=error[N06]（路径 B：当前预期零诊断）"
         elif kind == "silent_control":
             ok = ("N06" in codes)
             expect = "code=error[N06]（对照：外层能推实参 ⇒ 当前即应报）"
@@ -322,14 +322,14 @@ def main():
         fails.append(f"leg_e_range_go_iter_var x{ne}")
     print()
     if report:
-        print("（--report：只观测不改判据）")
+        print("（--report：只观测不改判定依据）")
         return 0
     if fails:
-        print(f"[FAIL] 未达判据 {len(fails)}/{len(CASES)} 项（+腿 D）：")
+        print(f"[FAIL] 未达判定依据 {len(fails)}/{len(CASES)} 项（+路径 D）：")
         for f in fails:
             print("   ", f)
         return 1
-    print(f"[PASS] 实参推断缺失套件全绿（{len(CASES)} 例 + 腿 E）")
+    print(f"[PASS] 实参推断缺失套件全绿（{len(CASES)} 例 + 路径 E）")
     return 0
 
 
