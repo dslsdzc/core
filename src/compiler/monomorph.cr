@@ -1251,8 +1251,14 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     new_fi := g_func_count
     grow_funcs(new_fi + 1)
 
-    // Use mangled name for unique lookup
+    // Use mangled name for source lookup; the link name is library-qualified
+    // when the template's source name collided across libraries.
     fi_set_name(new_fi, mangled_ni)
+    parent_link := func_link(func_ni)
+    if parent_link != fi_name(func_ni):
+        func_set_link(new_fi, str_intern(istr_get(parent_link) + "[" + type_args + "]"))
+    else:
+        func_set_link(new_fi, mangled_ni)
 
     // Clone params: param type info from FuncInfo
     pc := fi_param_count(func_ni)

@@ -1700,31 +1700,39 @@ fn decl_unique_for(src: int, kind: int, lid: int) -> int:
         i = i + 1
     return cand
 
-fn decl_struct_collides(i: int) -> int:
-    src := si_name(i)
-    lib := lib_of_line(si_decl_line(i))
-    j : ., mut = 0
-    loop:
-        if j >= g_struct_count:
-            return 0
-        if j != i && si_name(j) == src && lib_of_line(si_decl_line(j)) != lib:
-            return 1
-        j = j + 1
-    return 0
-
 // Give same-named structs from different libraries distinct internal names.
 // Source names stay on the symbols and in exports; the unique name is the type
 // identity handed to TYP_NAMED, so stdlib code and user code never share a
-// layout by accident.
+// layout by accident. Collision detection runs on a snapshot of the source
+// names: renaming an earlier record must not hide a later collision.
 fn assign_unique_struct_names():
+    n := g_struct_count
+    srcs := alloc(n * 8)
+    libs := alloc(n * 8)
     i : ., mut = 0
     loop:
-        if i >= g_struct_count:
+        if i >= n:
+            break
+        cell_store(srcs, i * 8, si_name(i))
+        cell_store(libs, i * 8, lib_of_line(si_decl_line(i)))
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
             return
-        src := si_name(i)
-        lib := lib_of_line(si_decl_line(i))
+        src := cell_load(srcs, i * 8)
+        lib := cell_load(libs, i * 8)
+        collides : ., mut = 0
+        j : ., mut = 0
+        loop:
+            if j >= n:
+                break
+            if j != i && cell_load(srcs, j * 8) == src && cell_load(libs, j * 8) != lib:
+                collides = 1
+                break
+            j = j + 1
         unique : ., mut = src
-        if decl_struct_collides(i) != 0:
+        if collides != 0:
             unique = str_intern(istr_get(src) + "@" + lib_name(lib) + "#struct" + int_str(i))
             cell_store(g_structs, i * ESZ_STRUCTINFO + OFF_SI_NAME, unique)
         decl_map_add(src, DECL_STRUCT, lib, unique, -1)
@@ -1753,7 +1761,40 @@ fn find_func_owned(name_idx: int, owner: int) -> int:
         i = i + 1
     return -1
 
+fn func_name_collides(i: int) -> int:
+    src := fi_name(i)
+    owner := func_owner(i)
+    j : ., mut = 0
+    loop:
+        if j >= g_func_count:
+            return 0
+        if j != i && fi_name(j) == src && func_owner(j) != owner:
+            return 1
+        j = j + 1
+    return 0
+
+fn assign_unique_func_links():
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            return
+        if func_name_collides(i) != 0:
+            owner := func_owner(i)
+            func_set_link(i, str_intern(istr_get(fi_name(i)) + "@" + lib_name(owner) + "#fn" + int_str(i)))
+        i = i + 1
+
+fn find_decl_fn_sym(name_idx: int, owner: int) -> int:
+    i : ., mut = g_sym_count - 1
+    loop:
+        if i < 0:
+            return -1
+        if sym_name(i) == name_idx && sym_kind(i) == SYM_FN && sym_owner_field(i) == owner:
+            return i
+        i = i - 1
+    return -1
+
 fn collect_decls():
+    saved_lib := g_cur_lib
     i : ., mut = 0
     assign_unique_struct_names()
     remap_method_type_keys()
@@ -1866,6 +1907,7 @@ fn collect_decls():
         name_idx := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS)
         type_node := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_TYPE)
         alias_line := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_LINE)
+        g_cur_lib = lib_of_line(alias_line)
         ti := res_type_node(type_node)
         def_type_sym(name_idx, ti, alias_line)
         i = i + 1
@@ -1880,6 +1922,7 @@ fn collect_decls():
             break
         name_idx := fi_name(i)
         fn_node := fi_ast_node(i)
+        g_cur_lib = lib_of_node(fn_node)
         hotpatch_ver := (ast_int_val(fn_node) % 65536) / 256
         rt := fi_return_type(i)
         rt_ti : ., mut = TI_UNIT
@@ -1957,11 +2000,9 @@ fn collect_decls():
             def_decl_fn_sym(name_idx, rt_ti, fn_node)
             register_pub_export(name_idx, fn_node)
         else:
-            // Normal function: check for duplicates (allow if existing is @hotpatch).
-            // Cross-library duplicates stay rejected until function link names are
-            // library-qualified; IR_CALL carries the source name, so allowing two
-            // same-named functions would make the call target ambiguous.
-            existing_si := find_gsym(name_idx)
+            // Normal function: duplicates are a same-library error. Cross-library
+            // same-name declarations are distinguished by their link names.
+            existing_si := find_decl_fn_sym(name_idx, lib_of_node(fn_node))
             if existing_si >= 0 && sym_kind(existing_si) == SYM_FN:
                 existing_node := sym_node(existing_si)
                 existing_is_hotpatch : ., mut = 0
@@ -1980,6 +2021,7 @@ fn collect_decls():
         if ei >= g_ast_count:
             break
         if ast_kind(ei) == EXPR_EXTERN:
+            g_cur_lib = lib_of_node(ei)
             name_ni := ast_a(ei)
             first_param := ast_b(ei)
             param_count := ast_c(ei)
@@ -2003,6 +2045,7 @@ fn collect_decls():
             func_idx := g_func_count
             grow_funcs(func_idx + 1)
             fi_set_name(func_idx, name_ni)
+            func_set_link(func_idx, name_ni)
             fi_set_param_count(func_idx, param_count)
             fi_set_return_type(func_idx, ret_type)
             fi_set_ast_node(func_idx, ei)
@@ -2016,6 +2059,7 @@ fn collect_decls():
         if i >= g_global_let_count:
             break
         node := cell_load(g_global_lets, i * 8)
+        g_cur_lib = lib_of_node(node)
         name_idx := ast_a(node)  // EXPR_LET: a = name idx
         type_node := ast_b(node)  // EXPR_LET: b = type node (-1 if none)
         ti : ., mut = TI_UNIT
@@ -2063,6 +2107,7 @@ fn collect_decls():
                     cell_store(g_mod_func_tis, g_mod_func_count * 8, sym_type(fn_si))
                 g_mod_func_count = g_mod_func_count + 1
         fi = fi + 1
+    g_cur_lib = saved_lib
 
 // --- Generic type inference helpers ---
 
@@ -2090,8 +2135,15 @@ fn find_func(name_idx: int) -> int:
     i : ., mut = 0
     loop:
         if i >= g_func_count:
-            return -1
+            break
         if fi_name(i) == name_idx && func_visible(i) != 0:
+            return i
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_func_count:
+            return -1
+        if func_link(i) == name_idx:
             return i
         i = i + 1
     return -1
@@ -3633,7 +3685,7 @@ fn interp_bool_node(node: int, inner: int) -> int:
     ast_set_a(node, callee)
     ast_set_b(node, wrapper)
     ast_set_c(node, 1)
-    ast_set_data(node, 0)
+    ast_set_data(node, -1)
     ast_set_type_val(node, TY_STRING)
     return TI_STR
 
@@ -3927,7 +3979,7 @@ fn infer_expr(node: int) -> int:
             ast_set_a(node, callee)
             ast_set_b(node, wrapper)
             ast_set_c(node, 1)
-            ast_set_data(node, 0)
+            ast_set_data(node, -1)
             ast_set_type_val(node, TY_STRING)
             return TI_STR
         // 不可插值类型（当前 fail-closed）：
@@ -4100,6 +4152,9 @@ fn infer_expr(node: int) -> int:
             obj_ti := infer_expr(obj)
             // --- Dyn method validation ---
             if obj_ti == TI_DYN:
+                // Dynamic dispatch carries the method name, not a resolved
+                // function link; the receiver type is only known at run time.
+                ast_set_data(node, method_ni)
                 if ast_kind(obj) == EXPR_IDENT:
                     obj_ni := ast_int_val(obj)
                     obj_si := find_sym(obj_ni)
@@ -4138,7 +4193,10 @@ fn infer_expr(node: int) -> int:
                                 check_error(EC_N_METHOD, "Undefined method '" + istr_get(method_ni) + "'", ast_line(node), ast_col(node))
                                 break
                         func_ni = cand_ni
-                        ast_set_data(node, func_ni)
+                        if cand_fi >= 0:
+                            ast_set_data(node, func_link(cand_fi))
+                        else:
+                            ast_set_data(node, func_ni)
                         break
                     mi = mi + 1
             // Generic param method call resolution
@@ -4251,6 +4309,9 @@ fn infer_expr(node: int) -> int:
         // Determine function name and return type
         if ast_kind(func_node) == EXPR_IDENT:
             func_ni = ast_int_val(func_node)
+            fi_direct := find_func(func_ni)
+            if fi_direct >= 0:
+                ast_set_data(node, func_link(fi_direct))
         // @builtin(args) — transfer args from EXPR_CALL to EXPR_AT, then delegate
         if ast_kind(func_node) == EXPR_AT:
             ast_set_b(func_node, first_arg)
@@ -4865,10 +4926,11 @@ fn infer_expr(node: int) -> int:
                 // pub function's return value. Field access must not expose its
                 // layout in that case.
                 if g_cur_lib >= 0:
-                    tsi := find_gsym(struct_ni)
-                    if tsi < 0 || sym_kind(tsi) != SYM_TYPE:
-                        check_error(EC_N_FIELD, "Undefined field '" + istr_get(field_ni) + "'", ast_line(node), ast_col(node))
-                        return ti_error()
+                    towner := decl_owner_for_unique(struct_ni)
+                    if towner >= 0 && towner != g_cur_lib:
+                        if lib_can_import(g_cur_lib, towner) == 0 || lib_export_find_kind(towner, decl_src_for_unique(struct_ni), SYM_TYPE) < 0:
+                            check_error(EC_N_FIELD, "Undefined field '" + istr_get(field_ni) + "'", ast_line(node), ast_col(node))
+                            return ti_error()
                 fi : ., mut = 0
                 loop:
                     if fi >= si_field_count(si):
@@ -5028,6 +5090,7 @@ fn infer_expr(node: int) -> int:
         // 值按名字绑定到声明下标，ir_gen 也按名字取字段位。名字缺失时回落位序，不做名字类校验。
         name_ni := ast_a(node)
         si : ., mut = find_struct_by_name(name_ni)
+        ast_set_data(node, si)
         c := ast_c(node)
         w0 := ast_b(node)
         // 名字信息齐备？（parser 恒写；克隆体丢名字 -> 回落位序、不做名字类校验）
@@ -5136,7 +5199,7 @@ fn infer_expr(node: int) -> int:
             if gc > 0:
                 // 结果类型 TYP_GENERIC_APPLY：实参按参数声明序取映射。按字面量字段序写映射
                 // 会在参数序和字段序不同时造成实参错位。
-                base_ti := alloc_named_type(name_ni)
+                base_ti := alloc_named_type(si_name(si))
                 ds := g_gen_apply_data_count
                 grow_gen_apply_data(ds + 1 + gc)
                 g_gen_apply_data_count = ds + 1
@@ -5162,7 +5225,7 @@ fn infer_expr(node: int) -> int:
                 cell_store(g_gen_apply_data, ds * 8, found)
                 g_gen_apply_data_count = ds + 1 + found
                 return alloc_type(TYP_GENERIC_APPLY, base_ti, ds)
-            return alloc_named_type(name_ni)
+            return alloc_named_type(si_name(si))
         // 结构体名未找到：既有行为（不在此报错，返回具名类型）
         return alloc_named_type(name_ni)
 
@@ -5480,6 +5543,7 @@ fn check_all():
 
     // First pass: collect declarations
     collect_decls()
+    assign_unique_func_links()
     check_impl_visibility()
     prelude_builtin_init()
 

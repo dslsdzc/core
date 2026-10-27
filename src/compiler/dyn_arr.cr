@@ -356,6 +356,9 @@ fn grow_funcs(needed: int):
     nb := alloc(nc * ESZ_FUNCINFO)
     cell_copy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb)
     g_funcs = nb
+    nbl := alloc(nc * 8)
+    cell_copy(g_func_link, g_func_cap * 8, nbl)
+    g_func_link = nbl
     g_func_cap = nc
 
 fn grow_func_ret(needed: int):
@@ -730,6 +733,14 @@ fn fi_generic_name(n: int, gi: int) -> int:
     return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
 fn fi_set_name(n: int, v: int):
     cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v)
+fn func_link(n: int) -> int:
+    if n < 0 || n >= g_func_count:
+        return -1
+    return cell_load(g_func_link, n * 8)
+fn func_set_link(n: int, v: int):
+    if n < 0 || n >= g_func_cap:
+        return
+    cell_store(g_func_link, n * 8, v)
 fn fi_set_param_count(n: int, v: int):
     cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v)
 fn fi_set_param_type(n: int, pi: int, v: int):

@@ -432,7 +432,7 @@ fn parse_postfix() -> int:
                         if str_eq(wrapper_name, "inline") != 0:
                             call_func = ast_a(wrapper_arg)
                             call_flags = CALL_FLAG_INLINE
-                node = alloc_node(EXPR_CALL, call_func, af, ac, 0, call_flags, 0, tok_ln(t), tok_cl(t))
+                node = alloc_node(EXPR_CALL, call_func, af, ac, 0, call_flags, -1, tok_ln(t), tok_cl(t))
             continue
         if tok_k(t) == T_DOT:
             advance_tok()
@@ -1724,6 +1724,7 @@ fn add_func(name: string, pc: int, rt: int, an: int) -> int:
         g_func_ret_count = idx + 1
     ni := str_intern(name)
     fi_set_name(idx, ni)
+    func_set_link(idx, ni)
     fi_set_param_count(idx, pc)
     fi_set_return_type(idx, rt)
     fi_set_ast_node(idx, an)
