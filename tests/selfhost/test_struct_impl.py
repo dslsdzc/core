@@ -47,7 +47,7 @@ def build_run(name, source, want_rc):
         return True
 
 
-def rejects(name, source):
+def rejects(name, source, needle=None):
     """The receiver spelling is part of the surface: no `self: T`, no free `self`."""
     with tempfile.TemporaryDirectory(prefix="core_struct_neg_") as tmp:
         root = Path(tmp)
@@ -61,6 +61,12 @@ def rejects(name, source):
         if out.exists():
             print(f"[FAIL] {name}: rejected build left an artifact")
             return False
+        if needle is not None:
+            text = b.stdout + b.stderr
+            if needle not in text:
+                print(f"[FAIL] {name}: message '{needle}' missing")
+                print(text)
+                return False
         print(f"[PASS] {name}: rc={b.returncode}")
         return True
 
@@ -132,6 +138,37 @@ fn main() -> int:
     return p.x
 """,
         9,
+    ))
+
+    ok.append(build_run(
+        "associated_function_inferred_return",
+        """struct Holder:
+    v: .
+
+impl Holder:
+    fn make(n: int):
+        return Holder { v = n }
+
+fn main() -> int:
+    b := Holder.make(9)
+    return b.v
+""",
+        9,
+    ))
+
+    ok.append(rejects(
+        "family_return_type_hint",
+        """struct Holder:
+    v: .
+
+impl Holder:
+    fn make(n: int) -> Holder:
+        return Holder { v = n }
+
+fn main() -> int:
+    return 0
+""",
+        "omit the return type",
     ))
 
     ok.append(build_run(

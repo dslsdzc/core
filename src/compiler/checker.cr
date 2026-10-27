@@ -5192,9 +5192,31 @@ fn infer_expr(node: int) -> int:
             if g_cur_fn_ret_checked != 0 && bool_int_idiom == 0:
                 c := type_compat_strict(vt, g_cur_fn_ret_ti)
                 if c != 1:
-                    diag_type_incompatible(c, EC_TF_RETURN,
-                        "Returned value type does not match the function's declared return type",
-                        ast_line(node), ast_col(node))
+                    // A struct with an inferred (`.`) field is a family, not a
+                    // single type: the body fixes the instantiation. Naming the
+                    // bare struct in `-> T` cannot match it, so point at the
+                    // form that does work.
+                    family_hint : ., mut = 0
+                    if get_type_kind(vt) == TYP_GENERIC_APPLY:
+                        // TYP_GENERIC_APPLY stores the base type row in `data`,
+                        // and the base row is TYP_NAMED, whose `data` is the name.
+                        base_ti := get_type_data(vt)
+                        if get_type_kind(base_ti) == TYP_NAMED && get_type_kind(g_cur_fn_ret_ti) == TYP_NAMED:
+                            if get_type_data(base_ti) == get_type_data(g_cur_fn_ret_ti):
+                                family_hint = 1
+                    else if get_type_kind(vt) == TYP_NAMED && get_type_kind(g_cur_fn_ret_ti) == TYP_NAMED:
+                        if get_type_data(vt) == get_type_data(g_cur_fn_ret_ti):
+                            sfi := find_struct(get_type_data(vt))
+                            if sfi >= 0 && si_generic_count(sfi) > 0:
+                                family_hint = 1
+                    if family_hint != 0:
+                        check_error(EC_TF_RETURN,
+                            "Returned an instantiation of this struct, but the declared return type names the family; omit the return type to infer it from the body",
+                            ast_line(node), ast_col(node))
+                    else:
+                        diag_type_incompatible(c, EC_TF_RETURN,
+                            "Returned value type does not match the function's declared return type (" + type_display(vt) + " vs " + type_display(g_cur_fn_ret_ti) + ")",
+                            ast_line(node), ast_col(node))
         return TI_NEVER
 
     if ast_kind(node) == EXPR_ENUM_CONSTRUCTOR:

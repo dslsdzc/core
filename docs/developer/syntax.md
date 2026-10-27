@@ -875,6 +875,18 @@ struct User:
 
 字段属于结构体 layout region，不使用逗号结束字段。
 
+字段类型写 `.` 时，类型由构造点决定，结构体名只表示一个族。这样的结构体作为返回值时省略返回型，由 `return` 推断：
+
+```core
+struct Event:
+    payload: .
+
+fn wrap(x: int):
+    return Event { payload = x }
+```
+
+写 `-> Event` 会与具体实例不匹配，诊断会提示省略返回型。
+
 ### 9.2 枚举
 
 枚举分支使用 `|`：
