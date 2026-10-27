@@ -53,7 +53,7 @@ def main():
  | Client(int)
 
 impl Mode:
-    fn code(self: Mode) -> int:
+    fn code(self) -> int:
         return match self:
             Server => 1
             Client(v) => v
@@ -74,7 +74,7 @@ enum Mode:
  | B
 
 impl Show for Mode:
-    fn show(self: Mode) -> int:
+    fn show(self) -> int:
         return 7
 
 fn main() -> int:
@@ -90,7 +90,7 @@ fn main() -> int:
  | S(.)
 
 impl Opt:
-    fn get(self: Opt) -> int:
+    fn get(self) -> int:
         return match self:
             N => 0
             S(v) => v
@@ -108,7 +108,7 @@ fn main() -> int:
     B
 
 impl Mode:
-    fn code(self: Mode) -> int:
+    fn code(self) -> int:
         return 2
 
 fn main() -> int:

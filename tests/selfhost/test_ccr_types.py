@@ -1048,7 +1048,7 @@ def iface_seg(data: bytes) -> bytes:
 
 # 夹具源：2 接口（self 接收者 + &self + 带参方法）+ 1 结构 + impl 块
 # （g_impl_for 边 + g_methods 方法表 + 接口方法签名项——五小节全非空）
-_T3_SRC = ("interface Show:\n    fn show(self) -> int\ninterface Pair2:\n    fn first(&self) -> int\n    fn second(self, x: int) -> int\nstruct S:\n    a: int\nimpl Show for S:\n    fn show(self: S) -> int:\n        return 2\nfn main() -> int:\n    s := S { a = 2 }\n    return s.a\n")
+_T3_SRC = ("interface Show:\n    fn show(self) -> int\ninterface Pair2:\n    fn first(&self) -> int\n    fn second(self, x: int) -> int\nstruct S:\n    a: int\nimpl Show for S:\n    fn show(self) -> int:\n        return 2\nfn main() -> int:\n    s := S { a = 2 }\n    return s.a\n")
 
 
 def _t3_fixture(name: str):

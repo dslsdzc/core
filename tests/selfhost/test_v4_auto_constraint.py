@@ -23,7 +23,7 @@ struct S:
     a: int
 
 impl S:
-    fn show(self: S) -> int:
+    fn show(self) -> int:
         return self.a
 """
 
@@ -122,7 +122,7 @@ struct S:
     a: int
 
 impl S:
-    fn show(self: S) -> int:
+    fn show(self) -> int:
         return self.a
 
 fn main() -> int:

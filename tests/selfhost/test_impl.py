@@ -19,7 +19,7 @@ CHECK_CASES = [
 struct Vec:
     x: int, y: int
 impl Vec:
-    fn get_x(self: Vec) -> int:
+    fn get_x(self) -> int:
         return 42
 fn main() -> int:
     v := Vec { x = 10, y = 20 }
@@ -32,7 +32,7 @@ fn main() -> int:
 struct Vec:
     x: int, y: int
 impl Vec:
-    fn get_x(self: Vec) -> int:
+    fn get_x(self) -> int:
         return self.x
 fn main() -> int:
     v := Vec { x = 10, y = 20 }
@@ -55,7 +55,7 @@ fn main() -> int:
 struct Vec:
     x: int, y: int
 impl Vec:
-    fn sum(self: Vec) -> int:
+    fn sum(self) -> int:
         return self.x + self.y
 fn main() -> int:
     v := Vec { x = 10, y = 20 }
@@ -68,7 +68,7 @@ fn main() -> int:
 struct Point:
     x: int, y: int
 impl Point:
-    fn double(self: Point) -> Point:
+    fn double(self) -> Point:
         return Point { x = self.x * 2, y = self.y * 2 }
 fn main() -> Point:
     p := Point { x = 5, y = 7 }

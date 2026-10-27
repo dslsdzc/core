@@ -47,19 +47,37 @@ def build_run(name, source, want_rc):
         return True
 
 
+def rejects(name, source):
+    """The receiver spelling is part of the surface: no `self: T`, no free `self`."""
+    with tempfile.TemporaryDirectory(prefix="core_struct_neg_") as tmp:
+        root = Path(tmp)
+        src = root / "main.cr"
+        src.write_text(source)
+        out = root / "a.out"
+        b = run([COREC, "build", str(src), "-o", str(out), "--static"])
+        if b is None or b.returncode == 0:
+            print(f"[FAIL] {name}: expected rejection")
+            return False
+        if out.exists():
+            print(f"[FAIL] {name}: rejected build left an artifact")
+            return False
+        print(f"[PASS] {name}: rc={b.returncode}")
+        return True
+
+
 def main():
     ok = []
 
     ok.append(build_run(
         "generic_field_via_function",
-        """struct Box:
+        """struct Holder:
     val: .
 
-fn get(b: Box) -> int:
+fn get(b: Holder) -> int:
     return b.val
 
 fn main() -> int:
-    b := Box { val = 7 }
+    b := Holder { val = 7 }
     return get(b)
 """,
         7,
@@ -67,15 +85,15 @@ fn main() -> int:
 
     ok.append(build_run(
         "generic_field_via_method",
-        """struct Box:
+        """struct Holder:
     val: .
 
-impl Box:
-    fn get(self: Box) -> int:
+impl Holder:
+    fn get(self) -> int:
         return self.val
 
 fn main() -> int:
-    b := Box { val = 7 }
+    b := Holder { val = 7 }
     return b.get()
 """,
         7,
@@ -86,15 +104,15 @@ fn main() -> int:
         """interface Show:
     fn show(self) -> int
 
-struct Box:
+struct Holder:
     v: .
 
-impl Show for Box:
-    fn show(self: Box) -> int:
+impl Show for Holder:
+    fn show(self) -> int:
         return self.v
 
 fn main() -> int:
-    b := Box { v = 11 }
+    b := Holder { v = 11 }
     return b.show()
 """,
         11,
@@ -122,7 +140,7 @@ fn main() -> int:
     x: int
 
 impl Point:
-    fn double(self: Point) -> Point:
+    fn double(self) -> Point:
         return Point { x = self.x + self.x }
 
 fn main() -> int:
@@ -134,17 +152,45 @@ fn main() -> int:
     ))
 
     ok.append(build_run(
-        "self_annotation_on_free_function",
+        "receiver_by_value_on_plain_struct",
         """struct P:
     x: int
 
-fn get(self: P) -> int:
-    return self.x
+impl P:
+    fn get(self) -> int:
+        return self.x
 
 fn main() -> int:
-    return get(P { x = 3 })
+    return P { x = 3 }.get()
 """,
         3,
+    ))
+
+    ok.append(rejects(
+        "self_type_annotation_rejected",
+        """struct P:
+    x: int
+
+impl P:
+    fn get(self: P) -> int:
+        return self.x
+
+fn main() -> int:
+    return P { x = 3 }.get()
+""",
+    ))
+
+    ok.append(rejects(
+        "self_outside_impl_rejected",
+        """struct P:
+    x: int
+
+fn get(self) -> int:
+    return 1
+
+fn main() -> int:
+    return 0
+""",
     ))
 
     ok.append(build_run(

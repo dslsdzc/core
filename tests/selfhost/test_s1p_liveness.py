@@ -124,7 +124,7 @@ fn main() -> int:
 METHOD_GAP = """struct S:
     f: int
 impl S:
-    fn m(self: S, x: int) -> int:
+    fn m(self, x: int) -> int:
         return x
 fn main() -> int:
     b := true

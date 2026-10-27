@@ -1,6 +1,6 @@
 # Core 泛型
 
-> 定位：受众 = 维护者/贡献者；状态 = active（已实现）。泛型函数/struct + 跨模块实例化（monomorph.cr）已纳入自举；本设计文档留作机制参考，细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr。
+> 定位：受众 = 维护者/贡献者；状态 = 已退役（V4 删除显式泛型语法）。泛型函数/struct + 跨模块实例化（monomorph.cr）已纳入自举；本设计文档留作机制参考，细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr。
 
 ## 设计原则
 
@@ -10,7 +10,9 @@
 
 ## 语法
 
-### 泛型函数
+V3 使用 `<T>` 和 `Box<T>`。V4 已删除显式泛型参数与泛型应用，改用 `.` 在参数、字段和返回位置由使用点推断，见 `docs/developer/syntax.md` 第 3.6 节。下面的 V3 示例只作机制历史，不是当前语法。
+
+### 泛型函数（V3）
 
 ```core
 fn identity<T>(x: T) -> T {

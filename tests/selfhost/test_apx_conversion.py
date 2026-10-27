@@ -95,7 +95,7 @@ CASES = [
 struct S1:
     v: int
 impl S1:
-    fn m(self: S1, x: dex) -> int:
+    fn m(self, x: dex) -> int:
         return @raw_int(x) / 1000000
 fn main() -> int:
     d : dex, apx = 7.0
@@ -106,7 +106,7 @@ fn main() -> int:
 struct S2:
     v: int
 impl S2:
-    fn m(self: S2, k: int, x: dex) -> int:
+    fn m(self, k: int, x: dex) -> int:
         return @raw_int(x) / 1000000
 fn main() -> int:
     d : dex, apx = 7.0
@@ -130,7 +130,7 @@ fn main() -> int:
 struct S9:
     v: int
 impl S9:
-    fn m(self: S9, a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int:
+    fn m(self, a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int:
         return @raw_int(x) / 1000000
 fn main() -> int:
     s : ., mut = S9 { v = 0 }
@@ -236,7 +236,7 @@ fn main() -> int:
 struct S1:
     v: int
 impl S1:
-    fn m(self: S1, x: dex) -> int:
+    fn m(self, x: dex) -> int:
         return @raw_int(x) / 1000000
 g13 : dex, apx, mut = 7.0
 fn main() -> int:

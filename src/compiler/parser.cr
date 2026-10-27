@@ -1803,7 +1803,7 @@ fn parse_fn_tail_tags() -> int:
         advance_tok()
     return pub_flag
 
-fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int):
+fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int, impl_type_ni: int):
     gnames : string, mut
     gnames_cap : int, mut
     gnames = alloc(64 * 8)
@@ -1824,10 +1824,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 pt := advance_tok()
                 stn : ., mut = -1
                 stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
-                    stn = parse_type()
-                    stv = unpack_type(stn)
+                    parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_ln(pt), tok_cl(pt))
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, stv, stn, tok_ln(pt), tok_cl(pt))
@@ -1842,10 +1848,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 advance_tok()
                 stn : ., mut = -1
                 stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
-                    stn = parse_type()
-                    stv = unpack_type(stn)
+                    parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_ln(pt), tok_cl(pt))
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, stv, stn, tok_ln(pt), tok_cl(pt))
@@ -1859,10 +1871,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 advance_tok()
                 stn : ., mut = -1
                 stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
-                    stn = parse_type()
-                    stv = unpack_type(stn)
+                    parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_ln(pt), tok_cl(pt))
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, stv, stn, tok_ln(pt), tok_cl(pt))
@@ -2258,7 +2276,7 @@ fn parse_declaration():
         nt := advance_tok()
         name := tok_lx(nt)
         ni := str_intern(name)
-        parse_body(name, ni, tok_ln(t), tok_cl(t), hotpatch_ver)
+        parse_body(name, ni, tok_ln(t), tok_cl(t), hotpatch_ver, -1)
 
         // A flow function may contain yield. The checker detects yield and skips
         // the return type check.
@@ -2649,7 +2667,7 @@ fn parse_declaration():
                 method_ni := str_intern(method_name)
                 mangled := type_name + "." + method_name
                 mangled_ni := str_intern(mangled)
-                parse_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft), 0)
+                parse_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft), 0, type_ni)
                 // Register in method lookup table
                 grow_methods(g_method_count + 1)
                 cell_store(g_methods, g_method_count * 24, type_ni)

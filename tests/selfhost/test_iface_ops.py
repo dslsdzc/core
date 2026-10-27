@@ -288,7 +288,7 @@ def main():
     #   改前：`s.m()` 推断 = unit（mangled "S.m" 经同一注册链钳位 :1491）⇒ 误发 TA02；
     #   改后：rc=0（守卫含 `fi_generic_count(fi_m) == 0` + `sym_type == unit` + 裸码 never）。
     ok.append(case_ok("t4a_method_never_call",
-                      "struct S:\n    a: int\nimpl S:\n    fn m(self: S) -> never:\n        loop:\nfn main() -> int:\n    s := S { a= 1 }\n    x : int = s.m()\n    return 0\n"))
+                      "struct S:\n    a: int\nimpl S:\n    fn m(self) -> never:\n        loop:\nfn main() -> int:\n    s := S { a= 1 }\n    x : int = s.m()\n    return 0\n"))
     #      S4（`check_func` 形参链，域缺 NEVER）：形参符号类型 = unit（@raw_int 只收 dex/int/never）
     # 诊断打点 = `@raw_int(b)` 调用行（第 2 行），不是函数声明行。
     ok.append(case_diag_lines("t6_S4_param_never_unit",

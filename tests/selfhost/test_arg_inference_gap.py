@@ -62,7 +62,7 @@ fn main() -> int:
 struct S:
     f: int
 impl S:
-    fn m(self: S, x: int) -> int:
+    fn m(self, x: int) -> int:
         return x + 1
 fn m_eq(a: int, b: int) -> int:
     if a == b:
@@ -87,7 +87,7 @@ fn main() -> int:
 struct P:
     v: int
 impl P:
-    fn get(self: P) -> int:
+    fn get(self) -> int:
         return self.v
 fn show(x: int) -> int:
     return x
@@ -179,7 +179,7 @@ fn main() -> int:
 struct S:
     f: int
 impl S:
-    fn m2(self: S, x: int) -> int:
+    fn m2(self, x: int) -> int:
         return x
 fn main() -> int:
     s : ., mut = S { f = 0 }

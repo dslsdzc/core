@@ -189,7 +189,7 @@ test('Method Call', '''
 struct Vec:
     x: int, y: int
 impl Vec:
-    fn norm(self: Vec) -> int:
+    fn norm(self) -> int:
         return self.x + self.y
 fn main() -> int:
     v := Vec { x = 1, y = 2 }

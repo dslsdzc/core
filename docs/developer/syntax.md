@@ -336,7 +336,17 @@ fn identity(x: .):
 
 编译器可以从该实现得到参数与返回值的同型关系并自动泛化。
 
-结构体字段使用 `.` 时，裸结构体名出现在参数注解中（`fn get(b: Box)`）会为该字段位绑定函数级类型变量；调用点从实参实例化。
+结构体字段使用 `.` 时，该字段的类型由构造点确定：
+
+```core
+struct Event:
+    payload: .
+
+fn show(e: Event):
+    return e.payload
+```
+
+参数注解写裸结构体名 `Event` 会为该字段绑定函数级类型变量，调用点从实参实例化。
 
 ### 3.7 结构语义与物理布局分离
 
@@ -348,7 +358,7 @@ struct Node:
     next: Node?
 ```
 
-普通类型语法不要求 `Box`、`Rc`、`Arc`、`Owned`、`Heap` 等存储或所有权包装。
+普通类型语法不要求 `Rc`、`Arc`、`Owned`、`Heap` 等存储或所有权包装。
 
 ### 3.8 标签
 
@@ -827,7 +837,28 @@ impl Point:
         self.y += dy
 ```
 
-接收者形式：`self` / `&self` / `&mut self`。
+接收者形式只有 `self`、`&self`、`&mut self`，语义分别是按值接收、只读引用、可写引用。
+
+接收者不写类型。类型由外层的 `impl Type:` 绑定：
+
+```core
+struct Point:
+    x: int
+    y: int
+
+impl Point:
+    fn sum(self) -> int:
+        return self.x + self.y
+
+    fn reset(&mut self):
+        self.x = 0
+        self.y = 0
+
+    fn scaled(&self, k: int) -> int:
+        return (self.x + self.y) * k
+```
+
+`self: Point` 这种写法不接受，`self` 也不能出现在 impl 之外。接口里只写签名，实现的方法必须使用与接口相同的接收者形式：接口写 `&self`，实现也必须写 `&self`。
 
 ---
 

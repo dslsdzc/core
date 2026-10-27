@@ -16,7 +16,7 @@ struct S3:
     f: dex
 
 impl S3:
-    fn m(self: S3, x: dex) -> int:
+    fn m(self, x: dex) -> int:
         return @raw_int(x) / 1000000
 
 fn scaled7() -> dex:
