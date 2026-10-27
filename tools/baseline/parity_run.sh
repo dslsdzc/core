@@ -29,11 +29,13 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT/logs"
 CC="nice -n 19 $CCBIN"
 
-CORPUS_TOTAL=85   # = t1 **34** + t2 2 + t3 **26** + t4 19 + t5 4（**2026-10-25 实测逐层枚举**，
+CORPUS_TOTAL=89   # = t1 **34** + t2 2 + t3 **26** + t4 **23** + t5 4（**2026-10-27 实测逐层枚举**，
                   #   非沿用旧账：2026-09-24 记 76 = t1 36 + t2 2 + t3 15 + t4 19 + t5 4；
                   #   v4 迁移后 t1 删除 2 档空 fixture（`test_control_flow`/`test_generics`）⇒ 34；
                   #   t3 从 15 增至 26 = ccr_io 1 + format/elf 3 + os/linux 5 + arch/x86_64 12 +
-                  #   lattice 1 + targets/x86_64/linux/elf 4。**档数变化必须同批改本行与本注释**，
+                  #   lattice 1 + targets/x86_64/linux/elf 4；
+                  #   t4 从 19 增至 23：7eb9669d 之后新增 `bits.cr` / `hash.cr` / `hashmap.cr` /
+                  #   `rawbuf.cr`（stdlib 公开面批）。**档数变化必须同批改本行与本注释**，
                   #   否则 runner 硬失败。与 `ls` 逐层计数一致。）
 
 run_one() {   # $1 tier tag, $2 file

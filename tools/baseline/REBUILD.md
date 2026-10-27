@@ -3,11 +3,12 @@
 ## 定义
 
 固定基线是判定面回归检查分支 1（固定基线同源对拍）使用的 pre-批编译器二进制。
-用它编译当前源，与用当前二进制编译当前源的结果逐档比较（85 档 `check` 的 rc 和日志；档数按实际枚举读取：
-`tests/suite/*.cr` 34 + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 26 + `src/stdlib/*.cr` 19 +
-`examples/*.cr` 4 = 85，与 `parity_run.sh` 的 `CORPUS_TOTAL=85` 硬性断言一致。
+用它编译当前源，与用当前二进制编译当前源的结果逐档比较（89 档 `check` 的 rc 和日志；档数按实际枚举读取：
+`tests/suite/*.cr` 34 + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 26 + `src/stdlib/*.cr` 23 +
+`examples/*.cr` 4 = 89，与 `parity_run.sh` 的 `CORPUS_TOTAL=89` 硬性断言一致。
 2026-09-24 的口径为 76 档（t1=36、t3=15）。v4 迁移删除了 2 档空 fixture，并把架构轴、OS 轴、
-target 轴的文件纳入 t3，所以 2026-10-25 起改为 85 档；本行与 runner 同批同步。）
+target 轴的文件纳入 t3，所以 2026-10-25 起改为 85 档。2026-10-27 起改为 89 档：stdlib 公开面批
+新增 `bits.cr` / `hash.cr` / `hashmap.cr` / `rawbuf.cr`（t4 19 → 23）；本行与 runner 同批同步。）
 差异即该批对判定面的行为变更（预期内为收紧或放宽，须逐条列入清单；预期外为回归）。
 
 二进制不入库（维护者裁定，2026-09-13）。入库的是方法和 sha 允许清单：

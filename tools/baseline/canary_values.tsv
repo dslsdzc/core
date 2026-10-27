@@ -207,7 +207,7 @@
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
 canary_elf	pa	4e79ced2f997998974cd6c6ac4ea3921b2111545091a8e5854abda97ffab2b58	49334
 pa_ccr	pa.ccr	271d0c1b4491e9a39d9635503ed36c4220964a650b003602fe434f5c9d35be1d	97509
-pa_static_ccr	pa_st.bin.ccr	7e2055bda89381e6663fcee0b419b4351b5c34a71200b4c2b379ee45bd57a391	97731
+pa_static_ccr	pa_st.bin.ccr	80c5c1219f6eaa0937a7faa6da1dfe83e19fad2496b11d40bbf26b45c3d24a28	97731
 # ── 【本批重锁 2026-10-26】if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -228,7 +228,7 @@ pa_static_ccr	pa_st.bin.ccr	7e2055bda89381e6663fcee0b419b4351b5c34a71200b4c2b379
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
 gt_ccr	gt.ccr	96cc9e755456f538f71adbe66080308d12b054092bb43f3984260a51dc56167a	131023
-gt_static_ccr	gt_st.bin.ccr	3e5047f04060871c9a0cd705aee3e30a9920fce8b324fef2f257219d43609d46	131285
+gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e71db3f4a0ddc	131245
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -490,3 +490,19 @@ gt_static_ccr	gt_st.bin.ccr	3e5047f04060871c9a0cd705aee3e30a9920fce8b324fef2f257
 #   pa_static_ccr ae5d5fa25933ab03c37ddcaeed62f73023f874094e4ff591aa71318ee4ebc675 97745
 #   gt_ccr        acf233916287ee3e1abf1db8db779dbc908753c481e08a36f99fb8446805545f 131109
 #   gt_static_ccr f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e60348088069d668 131299
+
+# ── 【本批重锁 2026-10-27】`--static` prelude 改为独立 SourceManager 文件 ──
+# **性质 = 静态路径的行坐标与类型去重变化，发射面零足迹**。D1 5/5 PASS。
+# 变化面恰两条，均为 `--static`：
+#   pa_static_ccr sha 变、**尺寸不变**（97731）⇒ 行坐标/表格内容位移，非体量变化。
+#   gt_static_ccr 131285 → **131245（−40B）**，sha 变。
+# canary ELF、pa_ccr、gt_ccr **逐字节不变**（4e79ced2… / 271d0c1b… / 96cc9e75…）。
+# 归因：`--static` 过去把 `src/runtime/rt.cr` 拼进主源（行号整体偏移）；本批让 prelude
+#   走独立 SourceManager 文件（无 fileid），主源行号不再被 prelude 顶开。行坐标因此
+#   位移 ⇒ pa_static 尺寸不变而 sha 变。gt_static 的 −40B 与 2026-10-25 import graph
+#   批同机制：TYPE 段少一条被去重的原子项（该批实测 40B/条），函数数与指令数不变。
+# 对照构建（归因取证，非推断）：单独构建 `nlutppxw`（无枚举 `|` 提交）跑同一闸门，
+#   两条静态值与本表**逐字节相同** ⇒ 枚举 `|` 提交对 canary 零贡献。
+# 旧值留痕（自本批起作废）：
+#   pa_static_ccr 7e2055bda89381e6663fcee0b419b4351b5c34a71200b4c2b379ee45bd57a391 97731
+#   gt_static_ccr 3e5047f04060871c9a0cd705aee3e30a9920fce8b324fef2f257219d43609d46 131285
