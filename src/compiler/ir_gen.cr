@@ -428,7 +428,7 @@ fn global_decl_optional(name_ni: int) -> int:
             gi = gi + 1
     return 0
 
-// 被调方返回类型是否可选。判据走返回类型节点（`EXPR_FN.type_val`）而非
+// 被调方返回类型是否可选。判断依据是返回类型节点（`EXPR_FN.type_val`），不是
 // `fi_return_type`：后者是 parser 存的裸类型码，而 `T?` 的类型节点 `type_val` = 0
 // -> is read as an int row and the test is always false. A bare return that does not write the return channel, plus a call site that does not read it,
 // 回落装箱假定 -> `fn g() -> int? { return 5; }` 的调用点解包仍崩）。
@@ -882,7 +882,7 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
 // 操作数是否确定可选，保守触发范围，纯节点/表读、零 alloc_type
 // (same pattern as `rep_enc_of_expr` / `elem_ti_of_node`）：
 //   1 var 带表示位（可选槽/形参/调用结果）；2 `Some`/`None` 构造子；3 可选声明信息（局部槽型 / 全局）。
-// 非可选一律 0 -> 比较走原路径（产物零变化 = 条目 2 判据 5）。
+// 非可选一律 0 -> 比较走原路径（产物零变化 = 条目 2 的第 5 条判断）。
 fn opt_cmp_optish(node: int, var: int) -> int:
     if var >= 0 && irv_rep(var) >= 0:
         return 1
@@ -1972,7 +1972,7 @@ fn dex_scaled_to_bits(var: int, node: int) -> int:
     emit(IR_BINARY, d, f, c, OP_DIV, TI_DEX)
     return d
 
-// int 操作数 -> 定点缩放（×S）：精确路径的 int 隐式对齐（与 apx 路径的 I2F 同位）
+// int 操作数 -> 定点缩放（×S）：精确路径的 int 隐式缩放（与 apx 路径的 I2F 处于同一位置）
 fn dex_scale_int(var: int) -> int:
     if irv_type(var) != TI_INT:
         return var
@@ -2054,7 +2054,7 @@ fn dex_opt_slot_ti(ti: int) -> int:
 // parameterized cfi, idempotence, and the second pass after redirection.
 // 锁步契约：`arg_vars`/`arg_nodes` 与参数列表同索引取用，直调（无接收者）1:1；方法调用接收者占
 // `arg_vars[0]`，而 `self` 在方法参数列表中亦占第 0 位（parser 物化 EXPR_PARAM，parser.cr `self` 分支）
-// -> 同对齐。幂等：转换只对 `irv_type(av) == TI_DEX` 生效 -> 已转换（TI_DEX_S）者不会被二次转换
+// -> 同样处理。幂等：转换只对 `irv_type(av) == TI_DEX` 生效 -> 已转换（TI_DEX_S）者不会被二次转换
 // （这是重定向前后各跑一遍安全的前提）。本函数不得重分配 arg_vars（只写元素；句柄按值传入）。
 fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, arg_nodes_cap: int):
     cfn := fi_ast_node(cfi)
@@ -2078,7 +2078,7 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
         // dex? parameters are included. The test accepts a TI_DEX node or a
         // dex-optional declaration node. The extern side is not extended because
         // C ABI has no optional representation; that face is uncovered.
-        // 泛型声明的 `T?`（inner = 泛型参数）判据为假 -> 调用点在重定向后
+        // 泛型声明的 `T?`（inner = 泛型参数）条件为假 -> 调用点在重定向后
         // 用实例参数列表（inner = 具体 dex）再跑一遍本环。
         if ast_type_val(cpn) == TI_DEX || (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0):
             av : ., mut = cell_load(arg_vars, cpi * 8)
@@ -3197,7 +3197,7 @@ fn gen_expr(node: int) -> int:
         //   有 TI_DEX_S（定点形式）操作数 -> 精确路径（缩放整数指令序列）
         if lt == TI_DEX || rt == TI_DEX:
             fti = TI_DEX
-            // apx 路径操作数对齐：字面量 -> 重发射 bits 常量；定点（TI_DEX_S）->
+            // apx 路径操作数处理：字面量 -> 重发射 bits 常量；定点（TI_DEX_S）->
             // I2F/S 转 bits（按精确值参与，apx 授权的近似）；int -> I2F（隐式转换）
             if lt == TI_DEX_S:
                 left_var = dex_scaled_to_bits(left_var, left)
@@ -3216,7 +3216,7 @@ fn gen_expr(node: int) -> int:
             return v
         if lt == TI_DEX_S || rt == TI_DEX_S:
             fti = TI_DEX_S
-            // 精确路径操作数对齐：int -> ×S（隐式缩放）；定点（TI_DEX_S）直接参与
+            // 精确路径操作数处理：int -> ×S（隐式缩放）；定点（TI_DEX_S）直接参与
             if lt == TI_INT:
                 left_var = dex_scale_int(left_var)
             if rt == TI_INT:
@@ -3736,9 +3736,9 @@ fn gen_expr(node: int) -> int:
             //    为什么不沿用本项目 `@raw_int` 的新建变量 + IR_STORE写法：
             //      `@raw_int` 换来换去的是 dex↔int（XMM/精确路径 vs GP 两条真正不同的机器路径），
             //      所以必须把值搬进一个定型 int的变量，否则下游按 dex 分派。
-            //      而 `int ↔ string` 在两条运行期腿上都是同一个 GP 字（原生：string = 指针；
+            //      而 `int ↔ string` 在两条运行期路径上都是同一个 GP 字（原生：string = 指针；
             //      解释器：string = intern 索引），搬运不改变任何东西，只会多出一条 IR_STORE，
-            //      从而违反视图可完全擦除这条判据（见 test_view_builtins.py 2：往返写法与
+            //      从而违反视图可完全擦除这条规则（见 test_view_builtins.py 2：往返写法与
             //      直写产物的 ELF 必须逐字节一致.
             //    类型在哪换：checker 侧（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
             //      即表达式的类型而不是变量的类型；调用边界按被调函数形参类型编组，
@@ -3839,14 +3839,14 @@ fn gen_expr(node: int) -> int:
             cell_store(arg_nodes, ac * 8, ast_a(an))
             ac = ac + 1
             an = ast_b(an)
-        // dex 边界规则：dex 参数在调用点按被调方形式对齐，
+        // dex 边界规则：dex 参数在调用点按被调方形式处理，
         //   Core 函数：一律精确形式（scaled），apx 位模式参数转 scaled（F2I(bits×S)）；
         //   extern 函数：C ABI 契约（module.cr：dex 编码 3 = binary64 跨 C 边界），
         //     精确形式（scaled）实参转 binary64 bits（I2F/S，字面量重发射位模式常量）
         // 覆盖范围（apx 批 T3；维护者硬条件 1逐形态收窄）：环从仅直调放宽到
         // 可解析到 Core/extern 函数的调用形态，直调（EXPR_IDENT）/ 方法调用
         // （EXPR_FIELD 且非模块调用）/ 模块限定调用（EXPR_FIELD 且 is_module_call）。
-        //   · 三者共用同一环：实参表与参数列表天然对齐（方法调用的接收者占
+        //   · 三者共用同一环：实参表与参数列表天然对应（方法调用的接收者占
         //     arg_vars[0]，而 `self` 在方法参数列表中亦占第 0 位，parser.cr:1378-1405
         //     把 self 物化为 EXPR_PARAM）；`arg_nodes` 游标同步走 EXPR_ARG 列表。
         //   · 不是凡调用都进环：EXPR_AT 内建在 `:1600` 已提前返回（独立路径）；
@@ -3942,8 +3942,8 @@ fn gen_expr(node: int) -> int:
                     spec_ni = gen_find_or_create(gen_fi, type_args)
                 if spec_ni >= 0:
                     func_ni = func_link(spec_ni)
-                    // 泛型声明的形参是 `T?`（inner = 泛型参数 -> 判据假）-> 上面的环
-                    // 对泛型实参无效果；重定向后用实例参数列表（inner = 具体 dex -> 判据真）再跑一遍。
+                    // 泛型声明的形参是 `T?`（inner = 泛型参数 -> 条件为假）-> 上面的环
+                    // 对泛型实参无效果；重定向后用实例参数列表（inner = 具体 dex -> 条件为真）再跑一遍。
                     // 幂等性见 `dex_align_call_args` 头注（已转换者 IR 型 = TI_DEX_S -> 不重转）。
                     cfi_i := find_func(func_ni)
                     if cfi_i >= 0:
@@ -4985,7 +4985,7 @@ fn gen_expr(node: int) -> int:
             body_val = force_if_thunk(body_val)
             if body_val >= 0:
                 emit(IR_STORE, -1, result_var, body_val, 0, 0)
-                // 容量批 T2：结果槽表示位置位（同 LET/赋值的写点口径，解包点据此分派）
+                // 容量批 T2：结果槽表示位置位（同 LET/赋值的写入规则，解包点据此分派）
                 if mrep_var >= 0:
                     emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val))
             pop_ir_scope()
@@ -5162,7 +5162,7 @@ fn gen_expr(node: int) -> int:
             // dex 边界规则：函数返回一律精确形式（缩放整数），
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
             // `-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
-            // -> 追加返回类型节点判据（`g_cur_ret_dex_opt`，由 ir_gen_func 设置），
+            // -> 追加返回类型节点条件（`g_cur_ret_dex_opt`，由 ir_gen_func 设置），
             // 否则 apx 源经 `-> dex?` 返回时不转换(both ELF and interpreter paths fail)。
             if (g_cur_ret_ti == TI_DEX || g_cur_ret_dex_opt != 0) && irv_type(val_var) == TI_DEX:
                 val_var = dex_bits_to_scaled(val_var)
@@ -5675,7 +5675,7 @@ fn ir_gen_func(fi: int):
         pvar := new_ir_var(pname, param_type)
         // Bind param name
         bind_local(pname_idx, pvar)
-        // (乙) A1 判据通道（`--dump-params`，隐藏）：槽型直读 = 参数判据的仪器
+        // (乙) A1 判断通道（`--dump-params`，隐藏）：槽型直读 = 参数判断的观测手段
         // （现 CLI 无 IR 变量槽型直读：`cir` 文本 dump 只有逐指令、`--dump-tk-terms` 是
         // DFNode.TK 派生信息、`alloc d : unit` 那行是 decl 信息）。纯表读
         // （`irv_type`/`ast_type_val`/`istr_get` + `int_str`）-> 零 alloc 副作用、
@@ -5758,7 +5758,7 @@ fn ir_gen_func(fi: int):
     if rtn_d >= 0 && dex_opt_type_node(rtn_d) != 0:
         g_cur_ret_dex_opt = 1
     // 可选表示：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
-    // 判据走返回类型节点（ast_type_val(fn_node) = 返回类型节点下标，见上方 ret_ti
+    // 判断依据是返回类型节点（ast_type_val(fn_node) = 返回类型节点下标，见上方 ret_ti
     // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 -> 恒判否）。
     g_cur_ret_opt = 0
     if g_optrep_on != 0 && g_optrep_ret_cell >= 0:
@@ -5863,7 +5863,7 @@ fn agg_elem_count_of(tn: int) -> int:
     return -1
 
 // 文件级 let 是否需要运行期初始化。
-// 判据（与 global_init_val 互补，它只认编译期标量常量，其余归 0 且不报错）：
+// 判断依据（与 global_init_val 互补，它只认编译期标量常量，其余归 0 且不报错）：
 //   1 声明类型是聚合（`[T; N]`/`[T]`，含类型别名一层解析）-> 必须运行期分配存储；
 //   2 初值存在且不是 int/bool/dex 字面量（含负号字面量）-> 必须运行期求值。
 fn global_needs_runtime_init(name_idx: int) -> int:
@@ -6191,7 +6191,7 @@ fn optrep_addr_prescan():
 
 // 表示方式启用扫描（零足迹检查）：AST 含任一 `T?` 类型节点（EXPR_OPTIONAL）或任一
 // `Some`/`None` 构造（关键字名分派，与 checker 同规约：用户变体同名时上方 SYM_FN 优先，
-// 但扫描宽于实际使用只会多启用一层空机器、不会漏启用，判据为启用 -> 表示方式完整）。
+// 但扫描宽于实际使用只会多启用一层空机器、不会漏启用，条件为启用 -> 表示方式完整）。
 fn optrep_prescan():
     g_optrep_on = 0
     i : ., mut = 0

@@ -130,7 +130,7 @@ g_cir_rec_ids     : string, mut // 本窗口新 intern 的 id 序列（8B/条；
 g_cir_rec_count   : int, mut
 g_cir_rec_cap     : int, mut
 g_cir_rec_base    : int, mut   // g_str_count at window start; stored as the baseline witness
-g_cir_skip_journal : int, mut  // 隐藏 debug（仅判据用）：1 = 装载期跳过重放（突变自证）
+g_cir_skip_journal : int, mut  // 隐藏 debug（仅调试判断用）：1 = 装载期跳过重放（突变自证）
 
 // Optional runtime representation.
 // Some(1) and None use IR_MAKE_ENUM objects ([tag][payload...]), while a bare value

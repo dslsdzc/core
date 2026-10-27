@@ -615,7 +615,7 @@ fn loop_body_has_break(node: int) -> int:
     if k == EXPR_ARRAY || k == EXPR_TUPLE || k == EXPR_TUPLEPAT:
         return seg_has_break(ast_a(node), ast_b(node))
     if k == EXPR_NONE:
-        // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判据
+        // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判断依据
         if ast_a(node) >= 0 && ast_a(node) != node:
             return loop_body_has_break(ast_a(node))
         return 0
@@ -907,7 +907,7 @@ fn find_so_fn(name_idx: int) -> int:
 // 故在 `EXPR_RETURN` 处额外取一次当前函数的声明返回型做比对（诊断，不参与节点类型）。
 // 承载：save/restore 两个全局（与 `g_unsafe_depth` 同款的显式上下文约定；嵌套函数声明已被
 // 已拒绝，因此无需真栈）。`g_cur_fn_ret_checked == 0`，因此不判（flow 函数 / 声明返回型是
-// 泛型形参，与既有 TF01 体检查的检查同口径）。
+// 泛型形参，与既有 TF01 体检查使用同一规则）。
 g_cur_fn_ret_ti : int, mut
 g_cur_fn_ret_checked : int, mut
 
@@ -1384,7 +1384,7 @@ fn check_iface(type_ni: int, iface_ii: int) -> bool:
 // 实例化检查使用 ty_sub(实参, 约束)，失败时给出非空反例 tt_witness。
 //
 // 本质轴（约束项是原生或已声明类型名）由 gen_constr_satisfied 走引擎判定。
-// 用户轴（I 是 interface 名）由 iface_satisfies 判定。两个站点的口径不同：
+// 用户轴（I 是 interface 名）由 iface_satisfies 判定。两个站点的规则不同：
 //  函数调用点 gen_constr_satisfied 只接受 1；0 和 -1 走既有 check_iface 名拼接路径，
 //  诊断措辞、去重和返回码保持不变。
 //  结构/枚举实例化点 gen_inst_constr_satisfied 直接取 iface_satisfies 的布尔结果，0 报 TG02。
@@ -1443,7 +1443,7 @@ fn gen_constr_satisfied(c_ni: int, arg_ti: int) -> int:
     return s                                      // 1/0/-1 直传
 
 // 结构/枚举实例化点的约束判定：用户轴直接取 iface_satisfies 的布尔结果，不回落。函数调用点
-// 的消息和去重口径与本函数无关。1/0/-1 原样返回：1 满足，0 违反，-1 不判，调用方在 -1 时不动。
+// 的消息和去重规则与本函数无关。1/0/-1 原样返回：1 满足，0 违反，-1 不判，调用方在 -1 时不动。
 fn gen_inst_constr_satisfied(c_ni: int, arg_ti: int) -> int:
     if c_ni < 0 || arg_ti < 0:
         return -1
@@ -3757,7 +3757,7 @@ fn check_func(fi: int):
         g_cur_fn_ret_ti = saved_ret_ti
         g_cur_fn_ret_checked = saved_ret_ok
         compat := type_compat_strict(body_ti, ret_ti)
-        // 落空分析（TF01 收口，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
+        // 落空分析（TF01 统一处理，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
         // 无 break 的 loop 收尾），因此块类型 = 末语句类型推出的 unit 不是缺返回值的证据，
         // 等价于 never 格（与下行既有 TI_NEVER 豁免同路）。
         if compat != 1 && body_ti != TI_NEVER && stmt_cannot_fall_through(body) == 0:
@@ -4110,7 +4110,7 @@ fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: i
     //  索引空间 vs kind 空间：`TI_DYN`(下标常量 = 7) 与 `TYP_GENERIC_PARAM`(kind 码 = 7)
     //   数值相同、空间不同，因此把 `ati == TI_DYN` 写成 `ati == TYP_GENERIC_PARAM`（或把 kind 判定
     //   写成 `get_type_kind(ati) == TI_DYN`）能编过、且可能蒙对一部分用例（两条 skip 在同一屏、
-    //   都让同一批输入不再报），因此判据必须能区分空间写错与规则缺一条：见
+    //   都让同一批输入不再报），因此判断依据必须能区分空间写错与规则缺一条：见
     //   `tests/selfhost/test_s1p_sentinel_skips.py` 的逐条突变自证（本刀强制要求）。
     if ati == TI_NEVER:
         skip = 1
@@ -4184,7 +4184,7 @@ fn s1p_enum_ring(name_idx: int, first_arg: int, arg_count: int):
 // ─── S1P 台账环，四调用形态共用一份，结构参照 dex_align_call_args ───
 // 契约：
 // · 只在 `CORE_S1P=1` 路径被调用：检查 `g_s1p_on != 0` 在环内，因此默认位一步不执行（零足迹，
-//  判据见 `tests/selfhost/test_s1p_liveness.py` 的对偶腿 + 本刀的逐字节对拍）；
+//  判断依据见 `tests/selfhost/test_s1p_liveness.py` 的对偶用例 + 本刀的逐字节对拍）；
 // · 不改产物：只 println 数值、不新增 intern（`istr_get(fi_name(fi))` 只读既有串，
 //  台账注释见调用点：字符串与 `type_display` 会把新串写进 `.ccr` 的 STR 段）；
 // · 格式继承：`9917|9918 <line> <col> <param_idx> <param_ti> <arg_ti> <call> @@ <片段>`
@@ -4193,8 +4193,8 @@ fn s1p_enum_ring(name_idx: int, first_arg: int, arg_count: int):
 // · `fi` = 被调 FuncInfo（参数列表来源）；`is_ext` = extern/C ABI，因此单列前缀 `9918`；
 // · `first_arg`/`arg_count` = EXPR_ARG 列表首项/列表长度，列表中不含接收者（parser 实证：接收者属
 //  `EXPR_FIELD` 的被调对象位），因此`param_skip` 指明参数列表首需跳过的接收者位数：
-//  直调/extern/模块限定 = 0（参数列表无 self）· 方法 = 1（参数列表含 self，与实参列表对齐时跳过）。
-// 元数口径：arg_count + param_skip 不等于 fi_param_count(fi) 时跳过且不报错，不打点，
+//  直调/extern/模块限定 = 0（参数列表无 self）· 方法 = 1（参数列表含 self，与实参列表对应时跳过）。
+// 元数规则：arg_count + param_skip 不等于 fi_param_count(fi) 时跳过且不报错，不打点，
 // 也不据此判定。
 fn s1p_arg_ring(fi: int, first_arg: int, arg_count: int, param_skip: int, is_ext: int):
     if fi < 0:
@@ -4647,7 +4647,7 @@ fn infer_expr(node: int) -> int:
                     // a（E-11，姊妹站点）：与直调站点检查同形，
                     //  `func_ni` = parser impl 分支写入的 mangled ni（"S.m"，
                     //  parser.cr:1887-1894），因此与直调同一张 g_funcs/符号表，
-                    //  `fi_return_type`/`sym_type` 语义逐位同。差异一处（显式对齐）：
+                    //  `fi_return_type`/`sym_type` 语义逐位同。差异一处（显式对应）：
                     //  本尾无泛型早退（直调走 `infer_gen_call`），因此补
                     //  `fi_generic_count == 0` 检查，使泛型两站点一致不动
                     //  （参数化方法的返回型依实例化）。本范围恒无 extern（impl 分支
@@ -4657,7 +4657,7 @@ fn infer_expr(node: int) -> int:
                     fi_m := find_func(func_ni)
                     // 方法调用接入 S1P 台账。本分支在 S1P 块之前早退，方法实参位原本是盲区。
                     // param_skip = 1：实参列表不含接收者，参数列表含 self；跳过 self 后形参与实参
-                    // 一一对应，元数口径为 arg_count + 1 == pc。
+                    // 一一对应，元数规则为 arg_count + 1 == pc。
                     s1p_arg_ring(fi_m, first_arg, arg_count, 1, 0)
                     if fi_m >= 0:
                         if fi_generic_count(fi_m) > 0:
@@ -4858,7 +4858,7 @@ fn infer_expr(node: int) -> int:
             // 参序归一：合并结果类型 = then_ti（下方 return then_ti），因此源 = else 侧，
             // 目标 = then 侧（长度约束更弱者放前面会被这里拦住 = 与结果类型一致；反之亦然）
             compat := type_compat_strict(else_ti, then_ti)
-            // TC02 收口：if 的值类型定义为 then_ti（下方 return then_ti），因此当 else 支
+            // TC02 统一处理：if 的值类型定义为 then_ti（下方 return then_ti），因此当 else 支
             // 确定发散（`return` 族收尾、不产出值）时，else 侧的类型是幻影（EXPR_RETURN 推断
             // = 所返回值类型），因此相容判定无对象，因此不报。
             // 不对称是有意的：then 支发散时 then_ti 本身即幻影（模型，另案），因此该形态继续报
@@ -4985,11 +4985,11 @@ fn infer_expr(node: int) -> int:
         an : ., mut = first_arm
         // 穷穷尽性判定（补集空性 + 具体变体反例）。收集与臂体推断同趟：
         // 模式类别/归属 -> 模式项 CONS 列表（m_pats）+ 覆盖位（m_cover）+ 不可映射标记
-        // （m_unmappable）；臂体推断后统一判（判据本体与消费点封装见 ty_shadow.cr 末段）。
+        // （m_unmappable）；臂体推断后统一判（判断逻辑本体与消费点封装见 ty_shadow.cr 末段）。
         m_pats : ., mut = tt_nil()
         mc_save := mc_begin()     // 覆盖位图入栈，容量无界
         m_unmappable : ., mut = 0
-        m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
+        m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判断用；非穷尽性判断本体）
         m_literal : ., mut = 0   // 任一 int/bool/string/char 字面量臂已见（无限域 -> 需 irrefutable 臂）
         m_order_rep : ., mut = 0 // 通配/绑定后仍有臂（TM05 只报一次）
         m_dup : ., mut = -1      // 首个冗余臂模式节点（-1 = 无）
@@ -5753,7 +5753,7 @@ fn infer_expr(node: int) -> int:
         // 元素类型分两趟记录。先逐个推断；元素推断可能向 g_gen_apply_data 追加数据，
         // 例如嵌套元组、泛型应用和泛型结构字面量的 g_gen_map 段。推断完再一次性连续落盘。
         // 在循环前取 data_start 边推边写会让前面的元素追加的数据顶开后续元素的位置，
-        // extra 和实际落点错位。例如 ((2,3),1) 的元素表会被读成内层元组的字段。
+        // extra 和实际位置错位。例如 ((2,3),1) 的元素表会被读成内层元组的字段。
         tis : string, mut = alloc(ec * 8)
         e : ., mut = 0
         loop:
@@ -5923,9 +5923,9 @@ fn infer_expr(node: int) -> int:
         // ── 2(a) 视图内建：同一个 64 位字的两种看法（零转换、零拷贝、零运行期动作）──
         //  `@ptr_of(s: string) -> int` · `@str_of(p: int) -> string`
         //  语义：不改那个字，只改它在本语言里的看法（原生 ELF 路径下 string 值 = 指针；
-        //  解释器路径下 string 值 = intern 索引，因此视图对两条腿都是恒等， 见 2(a) 计划 第 2.2 节bis/第 2.2 节ter）。
+        //  解释器路径下 string 值 = intern 索引，因此视图对两条路径都是恒等， 见 2(a) 计划 第 2.2 节bis/第 2.2 节ter）。
         //  安全（team-lead 裁 (ii)）：必须出现在 `unsafe` 块内；块外，因此报错并终止编译（不做软约束，
-        //  没有机械判据的约定会腐烂）。`g_unsafe_depth` 由 EXPR_UNSAFE 分支压栈维护。
+        //  没有自动检查的约定会失效）。`g_unsafe_depth` 由 EXPR_UNSAFE 分支压栈维护。
         //  未知名仍走文件末尾的 fail-closed（EC_N_UNDEFINED），不得忽略。
         if str_eq(name, "ptr_of") != 0 || str_eq(name, "str_of") != 0:
             if g_unsafe_depth == 0:
