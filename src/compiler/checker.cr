@@ -1051,6 +1051,31 @@ fn borrow_var_name(node: int) -> int:
 
 // --- Type resolution utilities ---
 
+// Resolve `Self` from the function currently being checked. A method's name is
+// "Type.method", so the prefix names the impl type. Returns -1 outside a method.
+fn self_type_of_current_fn() -> int:
+    fi := g_checker_current_fi
+    if fi < 0 || fi >= g_func_count:
+        return -1
+    fn_name := istr_get(fi_name(fi))
+    fn_len := str_len(fn_name)
+    dot_pos : ., mut = -1
+    di : ., mut = 0
+    loop:
+        if di >= fn_len:
+            break
+        if cell_load_byte(fn_name, di) == 46:
+            dot_pos = di
+            break
+        di = di + 1
+    if dot_pos <= 0:
+        return -1
+    struct_ni := str_intern(str_sub(fn_name, 0, dot_pos))
+    si := find_gsym(struct_ni)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        return -1
+    return sym_type(si)
+
 fn res_type_node(node: int) -> int:
     if node < 0:
         return TI_UNIT
@@ -1067,6 +1092,14 @@ fn res_type_node(node: int) -> int:
     if ast_kind(node) == EXPR_IDENT:
         // Named type: int_val = name string index
         name_idx := ast_int_val(node)
+        if str_eq(istr_get(name_idx), "Self") != 0:
+            // `Self` is the enclosing impl type. It is derived from the current
+            // method's mangled name "Type.method"; there is no separate table.
+            self_ti := self_type_of_current_fn()
+            if self_ti >= 0:
+                return self_ti
+            check_error(EC_N_UNDEFINED, "Self is only available inside an impl method", ast_line(node), ast_col(node))
+            return ti_error()
         si := find_gsym(name_idx)
         if si >= 0 && sym_kind(si) == SYM_TYPE:
             return sym_type(si)

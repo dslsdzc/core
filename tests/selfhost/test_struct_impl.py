@@ -194,6 +194,55 @@ fn main() -> int:
     ))
 
     ok.append(build_run(
+        "self_type_in_return",
+        """struct P:
+    x: int
+
+impl P:
+    fn clone(self) -> Self:
+        return P { x = self.x }
+
+fn main() -> int:
+    p := P { x = 7 }
+    q := p.clone()
+    return q.x
+""",
+        7,
+    ))
+
+    ok.append(build_run(
+        "self_type_in_parameter",
+        """struct P:
+    x: int
+
+impl P:
+    fn same(self, other: Self) -> bool:
+        return self.x == other.x
+
+fn main() -> int:
+    a := P { x = 1 }
+    b := P { x = 1 }
+    if a.same(b):
+        return 42
+    return 0
+""",
+        42,
+    ))
+
+    ok.append(rejects(
+        "self_type_outside_impl_rejected",
+        """struct P:
+    x: int
+
+fn make() -> Self:
+    return P { x = 1 }
+
+fn main() -> int:
+    return 0
+""",
+    ))
+
+    ok.append(build_run(
         "mut_self_receiver",
         """struct C:
     n: int

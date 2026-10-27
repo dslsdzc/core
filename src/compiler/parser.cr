@@ -1803,6 +1803,21 @@ fn parse_fn_tail_tags() -> int:
         advance_tok()
     return pub_flag
 
+// Replace `Self` type nodes with the enclosing impl type. Runs during parsing so
+// declaration collection never sees an unresolved `Self`. Wrapper type nodes
+// (`*Self`, `Self?`, `[Self]`, tuples) are followed.
+fn rewrite_self_type(node: int, impl_ni: int):
+    if node < 0 || impl_ni < 0:
+        return
+    k := ast_kind(node)
+    if k == EXPR_IDENT:
+        if str_eq(istr_get(ast_int_val(node)), "Self") != 0:
+            ast_set_int_val(node, impl_ni)
+        return
+    if k == EXPR_REFTYPE || k == EXPR_PTRTYPE || k == EXPR_OPTIONAL || k == EXPR_ARRAY:
+        rewrite_self_type(ast_a(node), impl_ni)
+        return
+
 fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int, impl_type_ni: int):
     gnames : string, mut
     gnames_cap : int, mut
@@ -1913,6 +1928,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     advance_tok()
                 else:
                     pty = parse_type()
+                    rewrite_self_type(pty, impl_type_ni)
             // V4: an omitted type or `.`/auto makes the parameter an implicit
             // type variable. The existing monomorph engine consumes it because
             // it is registered in the function's generic list before add_func.
@@ -1943,6 +1959,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     if check(T_ARROW):
         advance_tok() // ->
         rt = parse_type()
+        rewrite_self_type(rt, impl_type_ni)
         rtv = unpack_type(rt)
     else:
         // Defer return inference until the body is parsed. Only a function with
@@ -2444,6 +2461,13 @@ fn parse_declaration():
                     loop:
                         if check(T_RPAREN):
                             break
+                        // Payload fields are positional. `Circle(r: int)` used to be
+                        // read as a payload of type `r`, which surfaced as an
+                        // unrelated "undefined type" error.
+                        if tok_k(cur_tok()) == T_IDENT && tok_k(cur_tok()+1) == T_COLON_DECL:
+                            nm := advance_tok()
+                            check_error(EC_P_EXPECTED, "named enum payload fields are not supported; write the payload type positionally", tok_ln(nm), tok_cl(nm))
+                            advance_tok()  // ':'
                         fty : ., mut = -1
                         if check(T_DOT) || check(T_AUTO):
                             advance_tok()

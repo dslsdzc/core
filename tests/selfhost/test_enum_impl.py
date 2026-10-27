@@ -44,6 +44,28 @@ def build_run(name, source, want_rc):
         return True
 
 
+def rejects(name, source):
+    """Named payload fields are not part of the surface; the error must say so."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory(prefix="core_enum_neg_") as tmp:
+        root = Path(tmp)
+        src = root / "main.cr"
+        src.write_text(source)
+        out = root / "a.out"
+        b = run([COREC, "build", str(src), "-o", str(out), "--static"], timeout=120)
+        text = "" if b is None else b.stdout + b.stderr
+        if b is None or b.returncode == 0:
+            print(f"[FAIL] {name}: expected rejection")
+            return False
+        if "named enum payload fields are not supported" not in text:
+            print(f"[FAIL] {name}: message missing")
+            print(text)
+            return False
+        print(f"[PASS] {name}: rc={b.returncode}")
+        return True
+
+
 def main():
     ok = []
     ok.append(build_run(
@@ -115,6 +137,15 @@ fn main() -> int:
     return A.code()
 """,
         2,
+    ))
+    ok.append(rejects(
+        "named_payload_rejected",
+        """enum Shape:
+ | Circle(r: int)
+
+fn main() -> int:
+    return 0
+""",
     ))
     passed = sum(1 for x in ok if x)
     print(f"{passed}/{len(ok)} passed")
