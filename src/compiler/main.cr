@@ -500,7 +500,6 @@ fn corec_main() -> int:
     // variable ordering.
     optrep_begin()
     ir_gen_globals()
-
     // Incremental cache: ensure cache directory exists
     make_cir_cache_dir()
 

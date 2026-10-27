@@ -106,6 +106,26 @@ fn main() -> int:
     return 42
 """
 
+SHADOW_TYPE_SOURCE = """import hashmap
+
+struct IntMap:
+    z: int
+
+fn main() -> int:
+    u := IntMap { z = 5 }
+    m := intMap()
+    m.put(1, 2)
+    return u.z + m.get(1) + 35
+"""
+
+SHADOW_GLOBAL_SOURCE = """import bits
+
+BITS32_BITS : int = 1
+
+fn main() -> int:
+    return BITS32_BITS + 41
+"""
+
 USER_TYPE_SOURCE = """struct Argv4:
     x: int
 
@@ -204,6 +224,15 @@ def test_public_types_methods_and_globals():
         assert built.returncode == 0, built.stdout + built.stderr
         run = _run([str(elf)])
         assert run.returncode == 42, run.stdout + run.stderr
+
+        # A user declaration with the same source name as a loaded library
+        # declaration keeps a distinct identity. The library's own code continues
+        # to bind its declaration; the user code binds its own.
+        for name, source in (("shadow_type", SHADOW_TYPE_SOURCE), ("shadow_global", SHADOW_GLOBAL_SOURCE)):
+            built, elf = _build(tmp, name, source)
+            assert built.returncode == 0, (name, built.stdout + built.stderr)
+            run = _run([str(elf)])
+            assert run.returncode == 42, (name, run.stdout + run.stderr)
 
         built, _ = _build(tmp, "user_type", USER_TYPE_SOURCE)
         assert built.returncode == 0, built.stdout + built.stderr

@@ -785,6 +785,12 @@ fn sym_visible(si: int) -> int:
         return 0
     return sym_pub_field(si)
 
+fn func_owner(fi: int) -> int:
+    node := fi_ast_node(fi)
+    if node < 0:
+        return -1
+    return lib_of_node(node)
+
 fn func_visible(fi: int) -> int:
     if g_cur_lib < 0:
         return 1
@@ -816,7 +822,25 @@ fn register_pub_export(name_ni: int, node: int):
         lib_export_add(lid, name_ni, SYM_FN, node)
 
 fn find_sym(name_idx: int) -> int:
+    // Lexical names always win. Top-level declarations then prefer the current
+    // library's own declaration over an imported pub declaration of the same
+    // name, independent of registration order.
     i : ., mut = g_sym_count - 1
+    loop:
+        if i < 0:
+            break
+        if sym_name(i) == name_idx && (sym_kind(i) == SYM_LOCAL || sym_kind(i) == SYM_PARAM) && sym_visible(i) != 0:
+            return i
+        i = i - 1
+    if g_cur_lib >= 0:
+        i = g_sym_count - 1
+        loop:
+            if i < 0:
+                break
+            if sym_name(i) == name_idx && sym_kind(i) != SYM_LOCAL && sym_kind(i) != SYM_PARAM && sym_owner_field(i) == g_cur_lib && sym_visible(i) != 0:
+                return i
+            i = i - 1
+    i = g_sym_count - 1
     loop:
         if i < 0:
             return -1
@@ -826,12 +850,23 @@ fn find_sym(name_idx: int) -> int:
     return -1
 
 fn find_gsym(name_idx: int) -> int:
+    // Prefer the current library's declaration. Without this, a user global or
+    // type with the same name as a pub stdlib declaration resolves to the
+    // stdlib one purely because it was registered later.
+    if g_cur_lib >= 0:
+        i : ., mut = g_sym_count - 1
+        loop:
+            if i < 0:
+                break
+            if sym_name(i) == name_idx && sym_kind(i) != SYM_LOCAL && sym_kind(i) != SYM_PARAM && sym_owner_field(i) == g_cur_lib && sym_visible(i) != 0:
+                return i
+            i = i - 1
     i : ., mut = g_sym_count - 1
     loop:
         if i < 0:
             break
         // 主表未命中，因此落到下方侧表回退
-        if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_SO_FN && sym_visible(i) != 0:
+        if sym_name(i) == name_idx && sym_kind(i) != SYM_LOCAL && sym_kind(i) != SYM_PARAM && sym_visible(i) != 0:
             return i
         i = i - 1
     // 侧表回退：只有名字被引用且主表没有同名条目时才物化，未引用条目零产物足迹。
@@ -1558,12 +1593,14 @@ fn bind_bare_generic_type(node: int, fi: int) -> int:
     return ga
 
 fn bind_bare_generic_params():
+    saved_lib := g_cur_lib
     fi : ., mut = 0
     loop:
         if fi >= g_func_count:
             break
         fn_node := fi_ast_node(fi)
         if fn_node >= 0 && ast_kind(fn_node) == EXPR_FN:
+            g_cur_lib = lib_of_node(fn_node)
             pc := ast_c(fn_node)
             pn : ., mut = ast_b(fn_node)
             pi : ., mut = 0
@@ -1585,17 +1622,150 @@ fn bind_bare_generic_params():
                         break
                     pn = pn + 1
         fi = fi + 1
+    g_cur_lib = saved_lib
 
+
+// Declaration kinds for the library declaration map.
+DECL_STRUCT : int = 0
+
+fn decl_map_add(src: int, kind: int, lib: int, unique: int, ti: int):
+    grow_decl_map(g_decl_map_count + 1)
+    off := g_decl_map_count * 40
+    cell_store(g_decl_map, off, src)
+    cell_store(g_decl_map, off + 8, kind)
+    cell_store(g_decl_map, off + 16, lib)
+    cell_store(g_decl_map, off + 24, unique)
+    cell_store(g_decl_map, off + 32, ti)
+    g_decl_map_count = g_decl_map_count + 1
+
+fn decl_map_find(src: int, kind: int, lib: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_decl_map_count:
+            return -1
+        off := i * 40
+        if cell_load(g_decl_map, off) == src && cell_load(g_decl_map, off + 8) == kind && cell_load(g_decl_map, off + 16) == lib:
+            return i
+        i = i + 1
+    return -1
+
+fn decl_map_find_unique(unique: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_decl_map_count:
+            return -1
+        if cell_load(g_decl_map, i * 40 + 24) == unique:
+            return i
+        i = i + 1
+    return -1
+
+fn decl_src_for_unique(unique: int) -> int:
+    rec := decl_map_find_unique(unique)
+    if rec < 0:
+        return unique
+    return cell_load(g_decl_map, rec * 40)
+
+fn decl_owner_for_unique(unique: int) -> int:
+    rec := decl_map_find_unique(unique)
+    if rec < 0:
+        return -1
+    return cell_load(g_decl_map, rec * 40 + 16)
+
+fn decl_set_type_ti(src: int, kind: int, lib: int, ti: int):
+    rec := decl_map_find(src, kind, lib)
+    if rec >= 0:
+        cell_store(g_decl_map, rec * 40 + 32, ti)
+
+// Resolve a source-level declaration name to its internal unique name for the
+// given library. The exact (source, kind, lib) row wins; otherwise a single
+// importable pub declaration is used. -1 = absent or ambiguous.
+fn decl_unique_for(src: int, kind: int, lid: int) -> int:
+    rec := decl_map_find(src, kind, lid)
+    if rec >= 0:
+        return cell_load(g_decl_map, rec * 40 + 24)
+    if lid < 0:
+        return -1
+    cand : ., mut = -1
+    i : ., mut = 0
+    loop:
+        if i >= g_decl_map_count:
+            break
+        off := i * 40
+        if cell_load(g_decl_map, off) == src && cell_load(g_decl_map, off + 8) == kind:
+            olib := cell_load(g_decl_map, off + 16)
+            if olib != lid && lib_can_import(lid, olib) != 0 && lib_export_find_kind(olib, src, SYM_TYPE) >= 0:
+                if cand >= 0:
+                    return -1
+                cand = cell_load(g_decl_map, off + 24)
+        i = i + 1
+    return cand
+
+fn decl_struct_collides(i: int) -> int:
+    src := si_name(i)
+    lib := lib_of_line(si_decl_line(i))
+    j : ., mut = 0
+    loop:
+        if j >= g_struct_count:
+            return 0
+        if j != i && si_name(j) == src && lib_of_line(si_decl_line(j)) != lib:
+            return 1
+        j = j + 1
+    return 0
+
+// Give same-named structs from different libraries distinct internal names.
+// Source names stay on the symbols and in exports; the unique name is the type
+// identity handed to TYP_NAMED, so stdlib code and user code never share a
+// layout by accident.
+fn assign_unique_struct_names():
+    i : ., mut = 0
+    loop:
+        if i >= g_struct_count:
+            return
+        src := si_name(i)
+        lib := lib_of_line(si_decl_line(i))
+        unique : ., mut = src
+        if decl_struct_collides(i) != 0:
+            unique = str_intern(istr_get(src) + "@" + lib_name(lib) + "#struct" + int_str(i))
+            cell_store(g_structs, i * ESZ_STRUCTINFO + OFF_SI_NAME, unique)
+        decl_map_add(src, DECL_STRUCT, lib, unique, -1)
+        i = i + 1
+
+fn remap_method_type_keys():
+    mi : ., mut = 0
+    loop:
+        if mi >= g_method_count:
+            return
+        type_ni := cell_load(g_methods, mi * 24)
+        owner := cell_load(g_method_lib, mi * 8)
+        if owner >= 0:
+            unique := decl_unique_for(type_ni, DECL_STRUCT, owner)
+            if unique >= 0:
+                cell_store(g_methods, mi * 24, unique)
+        mi = mi + 1
+
+fn find_func_owned(name_idx: int, owner: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            return -1
+        if fi_name(i) == name_idx && func_owner(i) == owner:
+            return i
+        i = i + 1
+    return -1
 
 fn collect_decls():
     i : ., mut = 0
+    assign_unique_struct_names()
+    remap_method_type_keys()
     // First: register all struct types
     loop:
         if i >= g_struct_count:
             break
-        name_idx := si_name(i)
-        type_idx := alloc_named_type(name_idx)
-        def_type_sym(name_idx, type_idx, si_decl_line(i))
+        unique_name := si_name(i)
+        src_name := decl_src_for_unique(unique_name)
+        type_idx := alloc_named_type(unique_name)
+        def_type_sym(src_name, type_idx, si_decl_line(i))
+        decl_set_type_ti(src_name, DECL_STRUCT, lib_of_line(si_decl_line(i)), type_idx)
         i = i + 1
     // Resolve struct field types now that all struct names are registered
     i = 0
@@ -1787,7 +1957,10 @@ fn collect_decls():
             def_decl_fn_sym(name_idx, rt_ti, fn_node)
             register_pub_export(name_idx, fn_node)
         else:
-            // Normal function: check for duplicates (allow if existing is @hotpatch)
+            // Normal function: check for duplicates (allow if existing is @hotpatch).
+            // Cross-library duplicates stay rejected until function link names are
+            // library-qualified; IR_CALL carries the source name, so allowing two
+            // same-named functions would make the call target ambiguous.
             existing_si := find_gsym(name_idx)
             if existing_si >= 0 && sym_kind(existing_si) == SYM_FN:
                 existing_node := sym_node(existing_si)
@@ -1906,6 +2079,14 @@ fn is_func_generic(fi: int, name_idx: int) -> bool:
     return false
 
 fn find_func(name_idx: int) -> int:
+    if g_cur_lib >= 0:
+        i : ., mut = 0
+        loop:
+            if i >= g_func_count:
+                break
+            if fi_name(i) == name_idx && func_visible(i) != 0 && func_owner(i) == g_cur_lib:
+                return i
+            i = i + 1
     i : ., mut = 0
     loop:
         if i >= g_func_count:
@@ -2635,7 +2816,7 @@ fn type_display(ti: int) -> string:
     if k == TYP_REF:
         return "&" + type_display(get_type_data(ti))
     if k == TYP_GENERIC_PARAM:
-        return istr_get(get_type_data(ti))
+        return istr_get(decl_src_for_unique(get_type_data(ti)))
     if k == TYP_DYN:
         return "dyn"
     // `T?` 显示为 `T?`、null 单点类型显示为 "null"（诊断措辞；未识别仍 "?"）
@@ -2658,13 +2839,12 @@ fn is_struct_generic(si: int, name_idx: int) -> bool:
     return false
 
 fn find_struct_by_name(name_idx: int) -> int:
-    i : ., mut = 0
-    loop:
-        if i >= g_struct_count:
-            return -1
-        if si_name(i) == name_idx:
-            return i
-        i = i + 1
+    si := find_gsym(name_idx)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        return -1
+    ti := sym_type(si)
+    if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_NAMED:
+        return find_struct(get_type_data(ti))
     return -1
 
 fn res_call_type(node: int, func_fi: int) -> int:
@@ -3950,7 +4130,7 @@ fn infer_expr(node: int) -> int:
                         break
                     if cell_load(g_methods, mi * 24) == struct_ni && cell_load(g_methods, mi * 24 + 8) == method_ni:
                         cand_ni := cell_load(g_methods, mi * 24 + 16)
-                        cand_fi := find_func_raw(cand_ni)
+                        cand_fi := find_func_owned(cand_ni, decl_owner_for_unique(struct_ni))
                         if cand_fi >= 0:
                             cand_node := fi_ast_node(cand_fi)
                             cand_owner := lib_of_node(cand_node)

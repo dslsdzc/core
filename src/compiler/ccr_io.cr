@@ -2022,6 +2022,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         cell_store(g_methods, ifm * 24, mtn)
         cell_store(g_methods, ifm * 24 + 8, mmn)
         cell_store(g_methods, ifm * 24 + 16, mmg)
+        cell_store(g_method_lib, ifm * 8, -1)
         ifm = ifm + 1
     g_method_count = ifc_met
 
@@ -2066,6 +2067,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         cell_store(g_ir_globals, gi * 24, gname_ni)
         cell_store(g_ir_globals, gi * 24 + 8, gvar)
         cell_store(g_ir_globals, gi * 24 + 16, ginit_val)
+        cell_store(g_ir_global_lib, gi * 8, -1)
         g_ir_global_count = gi + 1
         gi = gi + 1
 
