@@ -5722,7 +5722,7 @@ fn infer_expr(node: int) -> int:
         if inner_ti == TI_CHAR && target_ti == TI_INT:
             return TI_INT
         // Pointer family. The cast itself is not the safety boundary: an
-        // external address may be formed anywhere, and the dereference gate
+        // external address may be formed anywhere, and the dereference check
         // (TU03) requires `unsafe`. This keeps the existing pointer model.
         if target_kind == TYP_PTR:
             asp : ., mut = 1

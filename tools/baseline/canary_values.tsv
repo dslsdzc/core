@@ -501,7 +501,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   走独立 SourceManager 文件（无 fileid），主源行号不再被 prelude 顶开。行坐标因此
 #   位移 ⇒ pa_static 尺寸不变而 sha 变。gt_static 的 −40B 与 2026-10-25 import graph
 #   批同机制：TYPE 段少一条被去重的原子项（该批实测 40B/条），函数数与指令数不变。
-# 对照构建（归因取证，非推断）：单独构建 `nlutppxw`（无枚举 `|` 提交）跑同一闸门，
+# 对照构建（归因取证，非推断）：单独构建 `nlutppxw`（无枚举 `|` 提交）运行同一项检查，
 #   两条静态值与本表**逐字节相同** ⇒ 枚举 `|` 提交对 canary 零贡献。
 # 旧值留痕（自本批起作废）：
 #   pa_static_ccr 7e2055bda89381e6663fcee0b419b4351b5c34a71200b4c2b379ee45bd57a391 97731

@@ -152,7 +152,7 @@ def main():
     ))
 
     ok.append(build_run(
-        "pointer_cast_is_not_the_gate",
+        "pointer_cast_is_not_the_safety_check",
         """fn main() -> int:
     p := 4096 cast *int
     q := p cast *int
