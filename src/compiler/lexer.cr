@@ -287,9 +287,15 @@ fn token_start_offset(start_line: int, start_col: int) -> int:
     return sm_line_start(g_source_file, local_line) + start_col - 1
 
 fn write_tok_span(tp: int, lo: int, tlen: int):
+    // Token offsets are global byte offsets: the file's byte_base plus the local
+    // offset. Nothing reads them yet; the AST span migration is the first
+    // consumer. Before this, the offsets were file-local.
+    bb : ., mut = 0
+    if g_source_file >= 0 && g_source_file < g_sm_file_count:
+        bb = cell_load(g_sm_files, g_source_file * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
     cell_store(g_tokens, tp + OFF_TK_FILE, g_source_file)
-    cell_store(g_tokens, tp + OFF_TK_LO, lo)
-    cell_store(g_tokens, tp + OFF_TK_HI, lo + tlen)
+    cell_store(g_tokens, tp + OFF_TK_LO, bb + lo)
+    cell_store(g_tokens, tp + OFF_TK_HI, bb + lo + tlen)
 
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)

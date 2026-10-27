@@ -18,7 +18,8 @@ OFF_SMF_TEXT : int = 8
 OFF_SMF_LEN : int = 16
 OFF_SMF_LINE_BASE : int = 24
 OFF_SMF_LINE_COUNT : int = 32
-ESZ_SM_FILE : int = 40
+OFF_SMF_BYTE_BASE : int = 40
+ESZ_SM_FILE : int = 48
 
 g_sm_file_count : int, mut
 g_sm_file_cap : int, mut
@@ -32,6 +33,7 @@ g_sm_line_starts : string, mut
 g_sm_file_libs : string, mut
 g_sm_file_lib_count : int, mut
 g_sm_file_lib_cap : int, mut
+g_sm_byte_total : int, mut
 
 struct Span:
     file: int
@@ -42,6 +44,7 @@ fn sm_reset():
     g_sm_file_count = 0
     g_sm_line_count = 0
     g_sm_file_lib_count = 0
+    g_sm_byte_total = 0
     g_prelude_sm = -1
 
 fn grow_sm_files(needed: int):
@@ -97,7 +100,10 @@ fn sm_add_file(path: string, text: string) -> int:
             g_sm_line_count = g_sm_line_count + 1
         i = i + 1
 
+    bbase := g_sm_byte_total
+    g_sm_byte_total = g_sm_byte_total + tlen
     off := id * ESZ_SM_FILE
+    cell_store(g_sm_files, off + OFF_SMF_BYTE_BASE, bbase)
     cell_store_str(g_sm_files, off + OFF_SMF_PATH, path)
     cell_store_str(g_sm_files, off + OFF_SMF_TEXT, text)
     cell_store(g_sm_files, off + OFF_SMF_LEN, tlen)
@@ -225,6 +231,40 @@ fn sm_line_text(id: int, line: int) -> string:
 
 fn sm_span(file: int, lo: int, hi: int) -> Span:
     return Span { file = file, lo = lo, hi = hi }
+
+// Byte-offset axis. Files are registered in order and each owns
+// [byte_base, byte_base + len), so a global offset identifies its file by
+// binary search. Line and column are then derived from that file's line table.
+fn sm_span_file(lo: int) -> int:
+    if lo < 0 || g_sm_file_count <= 0:
+        return -1
+    li : ., mut = 0
+    hi_i : ., mut = g_sm_file_count - 1
+    while li <= hi_i:
+        mid := (li + hi_i) / 2
+        b := cell_load(g_sm_files, mid * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+        e := b + cell_load(g_sm_files, mid * ESZ_SM_FILE + OFF_SMF_LEN)
+        if lo < b:
+            hi_i = mid - 1
+        else if lo >= e:
+            li = mid + 1
+        else:
+            return mid
+    return -1
+
+fn sm_span_line(lo: int) -> int:
+    id := sm_span_file(lo)
+    if id < 0:
+        return 1
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_line(id, lo - b)
+
+fn sm_span_col(lo: int) -> int:
+    id := sm_span_file(lo)
+    if id < 0:
+        return 1
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_col(id, lo - b)
 
 fn sm_selftest() -> int:
     sm_reset()
