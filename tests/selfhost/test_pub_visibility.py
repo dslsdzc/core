@@ -399,6 +399,8 @@ def test_cross_library_enum_interface_alias():
                 text = built.stdout + built.stderr
                 assert built.returncode == 1, (name, text)
                 assert want in text, (name, text)
+            built, _ = _build(tmp, "api_warning", "import zz_pub_visibility_fixture\nfn main() -> int:\n    return 0\n")
+            assert "warning: public function 'makeHiddenStruct'" in (built.stdout + built.stderr), built.stdout + built.stderr
             for name, source in (
                 ("hidden_field_read", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    return h.x\n"),
                 ("hidden_field_write", "import zz_pub_visibility_fixture\nfn main() -> int:\n    h := makeHiddenStruct()\n    h.x = 5\n    return 0\n"),
