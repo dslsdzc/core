@@ -479,6 +479,16 @@ fn so_materialize(side_i: int) -> int:
     g_sym_count = si + 1
     return si
 
+fn import_path_seen(path: string) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_mod_count:
+            return 0
+        if str_eq(cell_load_str(g_mods, i * 24 + 16), path) != 0:
+            return 1
+        i = i + 1
+    return 0
+
 fn res_imports():
     lib_export_reset()
     g_file_count = 0
@@ -640,6 +650,16 @@ fn res_imports():
                             if g_silent_stdout == 0:
                                 print("!! import fail: ")
                                 println(import_fileid)
+                if str_len(content) > 0:
+                    // File identity is the canonical path, not the imported
+                    // lexeme or the content hash. Importing the entry file is a
+                    // cycle; importing an already loaded sibling is a diamond and
+                    // is skipped.
+                    if str_len(g_source_name) > 0 && str_eq(path, g_source_name) != 0:
+                        add_error("import cycle: '" + import_fileid + "' resolves to the entry file")
+                        content = ""
+                    else if import_path_seen(path) != 0:
+                        content = ""
                 if str_len(content) > 0:
                     // Dependency direction is a property of the import edge, not
                     // only of symbol lookup: reject the load itself so a library

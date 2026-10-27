@@ -166,6 +166,7 @@ g_addr_taken_count : int, mut
 g_si_f_names : string, mut
 g_si_f_types : string, mut
 g_si_f_nodes : string, mut
+g_si_f_pub : string, mut
 g_si_f_used : int, mut
 g_si_f_cap : int, mut
 // Enum variant side tables, the same shape as struct fields. The OFF_EI_VARIANTS

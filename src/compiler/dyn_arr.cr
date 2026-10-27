@@ -801,6 +801,9 @@ fn grow_si_fields(needed: int):
     ob := alloc(nc * 8)
     cell_copy(g_si_f_nodes, g_si_f_cap * 8, ob)
     g_si_f_nodes = ob
+    pb := alloc(nc * 8)
+    cell_copy(g_si_f_pub, g_si_f_cap * 8, pb)
+    g_si_f_pub = pb
     g_si_f_cap = nc
 fn si_field_base(n: int) -> int:
     return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE)
@@ -842,6 +845,19 @@ fn si_field_type_node(n: int, fi: int) -> int:
     if r < 0:
         return -1
     return cell_load(g_si_f_nodes, r * 8)
+fn si_field_pub(n: int, fi: int) -> int:
+    r := si_field_row(n, fi)
+    if r < 0:
+        return 0
+    return cell_load(g_si_f_pub, r * 8)
+fn si_set_field_pub(n: int, fi: int, v: int):
+    if fi < 0:
+        return
+    b := si_field_base(n)
+    if b < 0:
+        return
+    grow_si_fields(b + fi + 1)
+    cell_store(g_si_f_pub, (b + fi) * 8, v)
 fn si_generic_name(n: int, gi: int) -> int:
     return cell_load(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8)
 

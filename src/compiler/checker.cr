@@ -1155,7 +1155,7 @@ fn find_struct(name_idx: int) -> int:
         i = i + 1
     return -1
 
-fn find_enum(name_idx: int) -> int:
+fn find_enum_by_ni(name_idx: int) -> int:
     i : ., mut = 0
     loop:
         if i >= g_enum_count:
@@ -1163,6 +1163,25 @@ fn find_enum(name_idx: int) -> int:
         if ei_name(i) == name_idx:
             return i
         i = i + 1
+    return -1
+
+fn find_enum(name_idx: int) -> int:
+    if g_cur_lib < 0:
+        return find_enum_by_ni(name_idx)
+    rec := decl_map_find_unique(name_idx)
+    if rec >= 0:
+        if cell_load(g_decl_map, rec * 40 + 8) == DECL_ENUM && cell_load(g_decl_map, rec * 40) != name_idx:
+            return find_enum_by_ni(name_idx)
+    si := find_gsym(name_idx)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        if g_cur_lib < 0:
+            return find_enum_by_ni(name_idx)
+        return -1
+    ti := sym_type(si)
+    if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_NAMED:
+        return find_enum_by_ni(get_type_data(ti))
+    if g_cur_lib < 0:
+        return find_enum_by_ni(name_idx)
     return -1
 
 // Infer the interface constraint for an unconstrained generic parameter from a
@@ -1219,7 +1238,7 @@ fn infer_iface_for_method_ret(method_ni: int, want_ti: int) -> int:
         return found
     return -1
 
-fn find_iface(name_ni: int) -> int:
+fn find_iface_by_ni(name_ni: int) -> int:
     i : ., mut = 0
     loop:
         if i >= g_iface_count:
@@ -1227,6 +1246,25 @@ fn find_iface(name_ni: int) -> int:
         if cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME) == name_ni:
             return i
         i = i + 1
+    return -1
+
+fn find_iface(name_ni: int) -> int:
+    if g_cur_lib < 0:
+        return find_iface_by_ni(name_ni)
+    rec := decl_map_find_unique(name_ni)
+    if rec >= 0:
+        if cell_load(g_decl_map, rec * 40 + 8) == DECL_IFACE && cell_load(g_decl_map, rec * 40) != name_ni:
+            return find_iface_by_ni(name_ni)
+    si := find_gsym(name_ni)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        if g_cur_lib < 0:
+            return find_iface_by_ni(name_ni)
+        return -1
+    ti := sym_type(si)
+    if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_NAMED:
+        return find_iface_by_ni(get_type_data(ti))
+    if g_cur_lib < 0:
+        return find_iface_by_ni(name_ni)
     return -1
 
 // ─── 展开层的行 -> 声明入口（名字解析归 checker；展开层只读声明表）───
@@ -1549,12 +1587,10 @@ fn check_impl_visibility():
         if line > 0:
             trait_ni := cell_load(g_impl_for, i * 16)
             ctx := lib_of_line(line)
-            si := find_sym(trait_ni)
-            if si >= 0 && sym_kind(si) == SYM_TYPE:
-                towner := sym_owner_field(si)
-                if towner >= 0 && towner != ctx:
-                    if lib_can_import(ctx, towner) == 0 || sym_pub_field(si) == 0:
-                        check_error(EC_N_UNDEFINED, "Undefined type '" + istr_get(trait_ni) + "'", line, 1)
+            towner := decl_owner_for_unique(trait_ni)
+            if towner >= 0 && towner != ctx:
+                if lib_can_import(ctx, towner) == 0 || lib_export_find_kind(towner, decl_src_for_unique(trait_ni), SYM_TYPE) < 0:
+                    check_error(EC_N_UNDEFINED, "Undefined type '" + istr_get(decl_src_for_unique(trait_ni)) + "'", line, 1)
         i = i + 1
 
 // A bare generic struct type in a parameter position (`fn f(b: Box)` where
@@ -1626,7 +1662,6 @@ fn bind_bare_generic_params():
 
 
 // Declaration kinds for the library declaration map.
-DECL_STRUCT : int = 0
 
 fn decl_map_add(src: int, kind: int, lib: int, unique: int, ti: int):
     grow_decl_map(g_decl_map_count + 1)
@@ -1700,11 +1735,32 @@ fn decl_unique_for(src: int, kind: int, lid: int) -> int:
         i = i + 1
     return cand
 
-// Give same-named structs from different libraries distinct internal names.
-// Source names stay on the symbols and in exports; the unique name is the type
-// identity handed to TYP_NAMED, so stdlib code and user code never share a
-// layout by accident. Collision detection runs on a snapshot of the source
-// names: renaming an earlier record must not hide a later collision.
+// Give same-named type declarations from different libraries distinct internal
+// names. Source names stay on the symbols and in exports; the unique name is the
+// type identity handed to TYP_NAMED, so library code and user code never share a
+// layout or an interface row by accident. Collision detection runs on snapshots
+// of the source names: renaming an earlier record must not hide a later
+// collision.
+DECL_STRUCT : int = 0
+DECL_ENUM : int = 1
+DECL_IFACE : int = 2
+DECL_ALIAS : int = 3
+
+fn decl_collides(srcs: string, libs: string, n: int, i: int) -> int:
+    src := cell_load(srcs, i * 8)
+    lib := cell_load(libs, i * 8)
+    j : ., mut = 0
+    loop:
+        if j >= n:
+            return 0
+        if j != i && cell_load(srcs, j * 8) == src && cell_load(libs, j * 8) != lib:
+            return 1
+        j = j + 1
+    return 0
+
+fn unique_type_name(src: int, lib: int, suffix: string, i: int) -> int:
+    return str_intern(istr_get(src) + "@" + lib_name(lib) + "#" + suffix + int_str(i))
+
 fn assign_unique_struct_names():
     n := g_struct_count
     srcs := alloc(n * 8)
@@ -1719,23 +1775,86 @@ fn assign_unique_struct_names():
     i = 0
     loop:
         if i >= n:
+            break
+        src := cell_load(srcs, i * 8)
+        lib := cell_load(libs, i * 8)
+        unique : ., mut = src
+        if decl_collides(srcs, libs, n, i) != 0:
+            unique = unique_type_name(src, lib, "struct", i)
+            cell_store(g_structs, i * ESZ_STRUCTINFO + OFF_SI_NAME, unique)
+        decl_map_add(src, DECL_STRUCT, lib, unique, -1)
+        i = i + 1
+
+fn assign_unique_enum_names():
+    n := g_enum_count
+    srcs := alloc(n * 8)
+    libs := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(srcs, i * 8, ei_name(i))
+        cell_store(libs, i * 8, lib_of_line(ei_decl_line(i)))
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
             return
         src := cell_load(srcs, i * 8)
         lib := cell_load(libs, i * 8)
-        collides : ., mut = 0
-        j : ., mut = 0
-        loop:
-            if j >= n:
-                break
-            if j != i && cell_load(srcs, j * 8) == src && cell_load(libs, j * 8) != lib:
-                collides = 1
-                break
-            j = j + 1
         unique : ., mut = src
-        if collides != 0:
-            unique = str_intern(istr_get(src) + "@" + lib_name(lib) + "#struct" + int_str(i))
-            cell_store(g_structs, i * ESZ_STRUCTINFO + OFF_SI_NAME, unique)
-        decl_map_add(src, DECL_STRUCT, lib, unique, -1)
+        if decl_collides(srcs, libs, n, i) != 0:
+            unique = unique_type_name(src, lib, "enum", i)
+            cell_store(g_enums, i * ESZ_ENUMINFO + OFF_EI_NAME, unique)
+        decl_map_add(src, DECL_ENUM, lib, unique, -1)
+        i = i + 1
+
+fn assign_unique_iface_names():
+    n := g_iface_count
+    srcs := alloc(n * 8)
+    libs := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(srcs, i * 8, cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME))
+        cell_store(libs, i * 8, lib_of_line(cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_DECL_LINE)))
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
+            return
+        src := cell_load(srcs, i * 8)
+        lib := cell_load(libs, i * 8)
+        unique : ., mut = src
+        if decl_collides(srcs, libs, n, i) != 0:
+            unique = unique_type_name(src, lib, "iface", i)
+            cell_store(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME, unique)
+        decl_map_add(src, DECL_IFACE, lib, unique, -1)
+        i = i + 1
+
+fn assign_unique_alias_names():
+    n := g_type_alias_count
+    srcs := alloc(n * 8)
+    libs := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(srcs, i * 8, cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_NAME))
+        cell_store(libs, i * 8, lib_of_line(cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_LINE)))
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
+            return
+        src := cell_load(srcs, i * 8)
+        lib := cell_load(libs, i * 8)
+        unique : ., mut = src
+        if decl_collides(srcs, libs, n, i) != 0:
+            unique = unique_type_name(src, lib, "alias", i)
+            cell_store(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_NAME, unique)
+        decl_map_add(src, DECL_ALIAS, lib, unique, -1)
         i = i + 1
 
 fn remap_method_type_keys():
@@ -1750,6 +1869,28 @@ fn remap_method_type_keys():
             if unique >= 0:
                 cell_store(g_methods, mi * 24, unique)
         mi = mi + 1
+
+fn remap_impl_pairs():
+    i : ., mut = 0
+    loop:
+        if i >= g_impl_for_count:
+            return
+        line := cell_load(g_impl_for_line, i * 8)
+        if line > 0:
+            lid := lib_of_line(line)
+            tr := cell_load(g_impl_for, i * 16)
+            ty := cell_load(g_impl_for, i * 16 + 8)
+            utr : ., mut = decl_unique_for(tr, DECL_IFACE, lid)
+            if utr < 0:
+                utr = decl_unique_for(tr, DECL_STRUCT, lid)
+            uty : ., mut = decl_unique_for(ty, DECL_STRUCT, lid)
+            if uty < 0:
+                uty = decl_unique_for(ty, DECL_ENUM, lid)
+            if utr >= 0:
+                cell_store(g_impl_for, i * 16, utr)
+            if uty >= 0:
+                cell_store(g_impl_for, i * 16 + 8, uty)
+        i = i + 1
 
 fn find_func_owned(name_idx: int, owner: int) -> int:
     i : ., mut = 0
@@ -1797,6 +1938,9 @@ fn collect_decls():
     saved_lib := g_cur_lib
     i : ., mut = 0
     assign_unique_struct_names()
+    assign_unique_enum_names()
+    assign_unique_iface_names()
+    assign_unique_alias_names()
     remap_method_type_keys()
     // First: register all struct types
     loop:
@@ -1847,10 +1991,12 @@ fn collect_decls():
     loop:
         if i >= g_iface_count:
             break
-        name_idx := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME)
-        type_idx := alloc_named_type(name_idx)
+        unique_name := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME)
+        src_name := decl_src_for_unique(unique_name)
+        type_idx := alloc_named_type(unique_name)
         iface_line := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_DECL_LINE)
-        def_type_sym(name_idx, type_idx, iface_line)
+        def_type_sym(src_name, type_idx, iface_line)
+        decl_set_type_ti(src_name, DECL_IFACE, lib_of_line(iface_line), type_idx)
         i = i + 1
     // Built-in Option registration is not present. No named type called Option is
     // registered automatically. T? is parsed as EXPR_OPTIONAL, which maps to
@@ -1865,16 +2011,18 @@ fn collect_decls():
     loop:
         if i >= g_enum_count:
             break
-        name_idx := ei_name(i)
-        type_idx := alloc_named_type(name_idx)
-        def_type_sym(name_idx, type_idx, ei_decl_line(i))
+        unique_name := ei_name(i)
+        src_name := decl_src_for_unique(unique_name)
+        type_idx := alloc_named_type(unique_name)
+        def_type_sym(src_name, type_idx, ei_decl_line(i))
+        decl_set_type_ti(src_name, DECL_ENUM, lib_of_line(ei_decl_line(i)), type_idx)
         // Register each variant as a function returning the enum type
         vi : ., mut = 0
         loop:
             if vi >= ei_variant_count(i):
                 break
             vname_idx := ei_variant_name(i, vi)
-            def_decl_variant_sym(vname_idx, type_idx, name_idx, ei_decl_line(i))
+            def_decl_variant_sym(vname_idx, type_idx, src_name, ei_decl_line(i))
             vi = vi + 1
         i = i + 1
 
@@ -1904,12 +2052,14 @@ fn collect_decls():
     loop:
         if i >= g_type_alias_count:
             break
-        name_idx := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS)
+        unique_name := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS)
+        src_name := decl_src_for_unique(unique_name)
         type_node := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_TYPE)
         alias_line := cell_load(g_type_aliases, i * ESZ_TYPE_ALIAS + OFF_TA_LINE)
         g_cur_lib = lib_of_line(alias_line)
         ti := res_type_node(type_node)
-        def_type_sym(name_idx, ti, alias_line)
+        def_type_sym(src_name, ti, alias_line)
+        decl_set_type_ti(src_name, DECL_ALIAS, g_cur_lib, ti)
         i = i + 1
 
     bind_bare_generic_params()
@@ -2891,12 +3041,22 @@ fn is_struct_generic(si: int, name_idx: int) -> bool:
     return false
 
 fn find_struct_by_name(name_idx: int) -> int:
+    if g_cur_lib < 0:
+        return find_struct(name_idx)
+    rec := decl_map_find_unique(name_idx)
+    if rec >= 0:
+        if cell_load(g_decl_map, rec * 40 + 8) == DECL_STRUCT && cell_load(g_decl_map, rec * 40) != name_idx:
+            return find_struct(name_idx)
     si := find_gsym(name_idx)
     if si < 0 || sym_kind(si) != SYM_TYPE:
+        if g_cur_lib < 0:
+            return find_struct(name_idx)
         return -1
     ti := sym_type(si)
     if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_NAMED:
         return find_struct(get_type_data(ti))
+    if g_cur_lib < 0:
+        return find_struct(name_idx)
     return -1
 
 fn res_call_type(node: int, func_fi: int) -> int:
@@ -4936,6 +5096,11 @@ fn infer_expr(node: int) -> int:
                     if fi >= si_field_count(si):
                         break
                     if si_field_name(si, fi) == field_ni:
+                        if g_cur_lib >= 0:
+                            fowner := decl_owner_for_unique(struct_ni)
+                            if fowner >= 0 && fowner != g_cur_lib && si_field_pub(si, fi) == 0:
+                                check_error(EC_N_FIELD, "Undefined field '" + istr_get(field_ni) + "'", ast_line(node), ast_col(node))
+                                return ti_error()
                         ast_set_data(node, fi)  // store field index for ir_gen
                         ast_set_c(node, struct_ni)  // store struct name for ELF backend
                         // Resolve field type, substituting generic params if needed
@@ -5091,6 +5256,8 @@ fn infer_expr(node: int) -> int:
         name_ni := ast_a(node)
         si : ., mut = find_struct_by_name(name_ni)
         ast_set_data(node, si)
+        if si < 0:
+            check_error(EC_N_UNDEFINED, "Undefined type '" + istr_get(name_ni) + "'", ast_line(node), ast_col(node))
         c := ast_c(node)
         w0 := ast_b(node)
         // 名字信息齐备？（parser 恒写；克隆体丢名字 -> 回落位序、不做名字类校验）
@@ -5129,7 +5296,13 @@ fn infer_expr(node: int) -> int:
                     if i >= c:
                         break
                     nn := ast_b(w0 + i)
-                    jdi := struct_field_index_by_name(si, nn)
+                    jdi : ., mut = struct_field_index_by_name(si, nn)
+                    if jdi >= 0 && g_cur_lib >= 0:
+                        sowner := decl_owner_for_unique(si_name(si))
+                        if sowner >= 0 && sowner != g_cur_lib && si_field_pub(si, jdi) == 0:
+                            check_error(EC_TS_UNKNOWN_FIELD, "Unknown field '" + istr_get(nn) + "' in struct literal " + istr_get(name_ni), ast_line(w0 + i), ast_col(w0 + i))
+                            cell_store(used, jdi * 8, 1)
+                            jdi = -1
                     if jdi < 0:
                         check_error(EC_TS_UNKNOWN_FIELD, "Unknown field '" + istr_get(nn) + "' in struct literal " + istr_get(name_ni), ast_line(w0 + i), ast_col(w0 + i))
                     else:
@@ -5544,6 +5717,7 @@ fn check_all():
     // First pass: collect declarations
     collect_decls()
     assign_unique_func_links()
+    remap_impl_pairs()
     check_impl_visibility()
     prelude_builtin_init()
 

@@ -352,7 +352,7 @@ struct Node:
 
 ### 3.8 标签
 
-变量可带 `mut`、`pub`、`apx` 等标签。`pub` 是声明导出标签，不是类型，也不进入类型身份、布局或 ABI。结构体字段不单独导出；字段可见性随结构体声明：`struct S, pub:` 导出类型及其布局，`struct S:` 仅库内可见。
+变量与字段可带 `mut`、`pub`、`apx` 等标签。`pub` 是声明导出标签，不是类型，也不进入类型身份、布局或 ABI。结构体字段默认库内私有；`pub` 结构体的字段需要 `, pub` 才能跨库读写：`x: int, pub`。非 `pub` 结构体的字段始终不可跨库访问。
 
 ```core
 count   : int, mut = 0
@@ -564,6 +564,7 @@ fn parse(text: string) -> Config:
 - `return Err error` 是错误状态。
 - `Err` 不要求统一错误类型。
 - 顶层声明默认属于当前库内部，外部不可见。需要跨库导出时使用尾部 `, pub` 标签：`fn f(...), pub:`、`struct S, pub:`、`enum E, pub:`、`interface I, pub:`、`type X = int, pub`、全局 `g : int, pub = 0`。前缀 `pub struct` / `pub enum` 仅保留为旧源兼容，不用于新代码。
+- 不同库可以声明同名类型/函数/方法/全局；解析先本库，再唯一可见的 `pub` 导入。函数与方法的 IR/链接名按库限定；结构体/枚举/接口/类型别名的类型身份按声明限定。
 - 库依赖方向是显式的：`@core` 与 `@user` 可以读取 `@std`，反向读取 `@core` 被拒绝（即使目标符号标了 `pub`）。库依赖图必须无环，自环与回边被拒绝。
 
 ### 6.2 `catch` 后置子句

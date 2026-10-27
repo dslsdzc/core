@@ -1908,6 +1908,8 @@ fn ts_t2_neg_run() -> int:
     return fails
 
 fn type_selftest_run() -> int:
+    saved_lib := g_cur_lib
+    g_cur_lib = -1
     fails : ., mut = 0
     total : ., mut = 0
 
@@ -4116,6 +4118,7 @@ fn type_selftest_run() -> int:
     total = total + 8
     fails = fails + ts_ccr2_run()
 
+    g_cur_lib = saved_lib
     print(int_str(total - fails))
     print("/")
     print(int_str(total))
