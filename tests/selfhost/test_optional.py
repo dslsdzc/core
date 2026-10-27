@@ -93,7 +93,7 @@ def run_interp(source: str):
 def case_dual(name, source, expect_rc):
     """**双路径**（ELF 产物 + 解释器）同值断言——本任务主判定依据形。
 
-    ⚠️ 附加 `check` rc=0 断言（**必要**，实测教训）：本仓库多数类型诊断（TF01/TA01…）是
+    警告：附加 `check` rc=0 断言（**必要**，实测教训）：本仓库多数类型诊断（TF01/TA01…）是
     **软诊断**——`build` 路径 rc=0 + 产物照出，仅 `check` 因「有诊断即 rc=1」暴露。只断
     「build+run rc」会让「判定面整体失效」的突变**照样全绿**（M1 实测：注入失效后
     plain_value_into_optional 仍 PASS）。故正例 = 三路同证：check rc=0 ∧ build/run rc=N ∧ interp rc=N。

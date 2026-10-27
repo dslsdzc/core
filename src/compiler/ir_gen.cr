@@ -3460,7 +3460,7 @@ fn gen_expr(node: int) -> int:
             // Logical not yields a bool, independent of the operand type.
             vt = TI_BOOL
         else if op == UOP_NEG:
-            // 一元负保持数值操作数类型：dex 精确（TI_DEX_S）-> 缩放整数取负 ✓；
+            // 一元负保持数值操作数类型：dex 精确（TI_DEX_S）-> 缩放整数取负 通过；
             // dex apx（TI_DEX）-> 整型取负（binary64 符号位翻转未实现，既有 apx
             // 限制，dex 定点文档；apx 负值请用 0 - x 表达）
             ot := irv_type(op_var)

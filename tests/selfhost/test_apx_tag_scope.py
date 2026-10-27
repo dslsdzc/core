@@ -8,7 +8,7 @@
 **裁定（lead 2026-09-18 = (B) 白名单）**：合法 = **显式 `dex`**（表示路径）+ **显式 `int`**
 （既有契约的**纯注解**：`tests/selfhost/test_apx_tag.py` 固定「语法合法 + 语义不变 + `.cir` 携 `approx`」，
 `tests/bootstrap/test_apx_tag.py` 同向 ApproxInstr ⇒ **两前端对齐**）；**其余一律硬错**（`error[P26]`，
-`EC_P_APX_TAG = 1026`）。⛔ 裁 (A)（连 `int, apx` 一并拒）**已否**：那会**改契约**（须重定 test_apx_tag +
+`EC_P_APX_TAG = 1026`）。禁止：裁 (A)（连 `int, apx` 一并拒）**已否**：那会**改契约**（须重定 test_apx_tag +
 登记两前端接受集分歧），而 `int, apx` 不是静默面。判定依据原则 =「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
 
 **判定依据要件**：① 非白名单形 ⇒ `check` rc=1 + `error[P26]` + 定位 + **`build` rc=1 且零产物**；

@@ -46,7 +46,7 @@ VIEW_ROUNDTRIP = """fn main() -> int:
 
 # 零代码生成（擦除）：两侧**除函数体首行外逐字相同**，函数名/签名也相同
 # ⇒ 视图若真被擦除，ELF 应逐字节一致。
-# ⚠ 对照必须**同处 `unsafe` 包络内**：实测 `unsafe { return p; }` 与 `return p;` 的 ELF **不同**
+# 警告：对照必须**同处 `unsafe` 包络内**：实测 `unsafe { return p; }` 与 `return p;` 的 ELF **不同**
 #   （`.ccr` 差 +158B = SG_UNSAFE 区域元数据；那是区域面既有效应，与视图无关）⇒
 #   跨包络对照测的是 `unsafe` 而不是视图。字符串侧同理用「往返三跳」对照「单跳」。
 ERASE_INT_VIEW = """fn f(p: int) -> int:
@@ -152,7 +152,7 @@ def bootstrap_run_value(src: str):
     为什么用 bootstrap 解释器而不是汇编链接成 ELF：`rt.s` 的 `runtime.o` 引用一堆支持符号
     （`hp_load_config`/`sched_*`/`chan_*`/`g_free`…），探针要独立链接必须把整套 stdlib 一起编 ——
     那是「探针环境」问题，不是**编译器两面**的差异。解释器路径同样走 bootstrap 的 ir_gen ⇒
-    「同一探针在两面得到同一个值」这条判定依据 ✓ 成立（自托管面另有解释器 + 原生两条路径）。
+    「同一探针在两面得到同一个值」这条判定依据 通过 成立（自托管面另有解释器 + 原生两条路径）。
     """
     if str(BOOTSTRAP) not in sys.path:
         sys.path.insert(0, str(BOOTSTRAP))

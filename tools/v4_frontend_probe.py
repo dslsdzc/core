@@ -719,7 +719,7 @@ import pub go await unsafe flow yield interface type mod as auto fileid self in 
 def selfhost_keywords(text):
     """自源 `src/compiler/lexer.cr` 的 `lookup_keyword` 表（抽法沿用施工计划 §十二 的脚本）。
 
-    ⚠ T4 后该档已是 **v4 形**：函数体以 DEDENT 收尾、**没有列 0 的 `}`**。故块边界
+    警告：T4 后该档已是 **v4 形**：函数体以 DEDENT 收尾、**没有列 0 的 `}`**。故块边界
     改判「下一个列 0 的顶层 `fn `」——原 `blk.index('\\n}\\n')` 在 v4 文本上找不到，
     会当场 ValueError（T4 落地时实测撞上）。
     """
@@ -795,7 +795,7 @@ POSITION_V3_REV = 'bb8cb3537584'
 
 # 夹具：(名, v3 源, v4 源, 期望块清单)。**两侧源必须表达同一程序** ⇒ 块清单须逐行相同。
 # 期望块清单 = 逐个 `Block` 一行 `路径 | 语句种类表 | 尾值种类`（`-` = 无尾值/空语句表）。
-# ⚠ 期望值是**按规则手写的判定依据**，不是「跑出来是什么就记什么」——若实现与之不符，那是
+# 警告：期望值是**按规则手写的判定依据**，不是「跑出来是什么就记什么」——若实现与之不符，那是
 #   要上报的发现，不许改判定依据去附和实现。
 POSITION_FIXTURES = [
     # ── ① 语句位 · 块状尾项 ⇒ 保尾值 ──
@@ -969,7 +969,7 @@ def position_lines(unit, block_cls):
 
     通用 dataclass 遍历（不写死字段名）；v3/v4 两份 `ast.py` 的类名与字段名逐字相同
     （实测：Block/If/Loop/For/Unsafe/Flow/ExprStmt/FunctionDecl/CompilationUnit 全同），
-    故同一份函数两侧通用。⚠ **本函数经 `inspect.getsource` 注入 v3 侧 runner 脚本**
+    故同一份函数两侧通用。警告：**本函数经 `inspect.getsource` 注入 v3 侧 runner 脚本**
     ⇒ 必须自包含（只依赖入参 + `dataclasses`），不许引用本档其它符号。
     """
     lines = []
@@ -1169,7 +1169,7 @@ def cmd_positions():
           '抽取哨兵：已知块路径 `f.body` 出现在清单里', repr(probe_sig))
 
     # ── 反向对照（必须能检出问题）──
-    # ⚠ `_is_block_like` 是 staticmethod ⇒ 必须取**描述符**再还原，否则还原成普通函数后
+    # 警告：`_is_block_like` 是 staticmethod ⇒ 必须取**描述符**再还原，否则还原成普通函数后
     #   会被当实例方法调用（`takes 1 positional argument but 2 were given`，本档实测撞过）。
     real_block_like = Parser.__dict__['_is_block_like']
     real_want = Parser._want_value_expr

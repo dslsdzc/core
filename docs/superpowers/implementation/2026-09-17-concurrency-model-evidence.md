@@ -358,7 +358,7 @@
 | 术语 | 定义 | 来源 |
 |---|---|---|
 | **执行体（execution body）** | 拥有独立 region/arena、可与其他执行体并行的执行单位。今日实现 = goroutine（G） | 原文 + `src/stdlib/goroutine.cr` |
-| **region** | ⚠ **两义，须先判语境**：(a) 控制流嵌套（SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE，`g_sgs`）；(b) 内存字节域（区域/Arena）。既有文档已显式登记此歧义 | 仓内既有：`docs/maintainer/design/region-model.md:60-62` |
+| **region** | 警告：**两义，须先判语境**：(a) 控制流嵌套（SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE，`g_sgs`）；(b) 内存字节域（区域/Arena）。既有文档已显式登记此歧义 | 仓内既有：`docs/maintainer/design/region-model.md:60-62` |
 | **subregion** | 原文字面："R → R1 + R2 + … + Rn"（SPLIT）、"最小 subregion"（COPY）、"CopySet 精确到 subregion"（§11 步 1）。**粒度/边界判定依据/表示仍为设计细节**；**G3 裁定 = 分析表示先升级**（pts 动态化，不选「接受退化」——理由：G1 取含时间立场 ⇒ 预算可证明性依赖分析精度） | 原文 + G3 裁定（`TODO #2026-09-17-19`） |
 | **Live_sender** | CopySet 第一项（发送侧仍存在的部分） | 定义待设计；分析地基由 G3 裁定固定（pts 表示升级） |
 | **Needed_receiver** | CopySet 第二项（接收侧真正需要的部分） | 同上 |
@@ -532,7 +532,7 @@
 
 ### G4 实验 shared mapping 的「语义等价证明」由谁做、什么形态
 
-**裁定（team-lead 2026-09-17）**：**静态证明 + 证书；禁运行时见证顶替** ✓（= 代理推荐）。证明主体 = 编译期 prove（Transfer/Copy planner 产义务，判定走 S-A 四档）；形态 = 证书条目（§13.0.2）；测量只作报告证据。
+**裁定（team-lead 2026-09-17）**：**静态证明 + 证书；禁运行时见证顶替** 通过（= 代理推荐）。证明主体 = 编译期 prove（Transfer/Copy planner 产义务，判定走 S-A 四档）；形态 = 证书条目（§13.0.2）；测量只作报告证据。
 
 - **问题**：§6 只写「若能证明…则允许」——主体、形态、失败出口均未定。
 - **事实**：S-A 四档义务已就位（设计态）；S-E **L8 明确确定性族无 enforce 档**（事后检测太晚，不得用「插运行时检查」充数）；证书先例 = `existence-structure.md:111`（判定产物独立于 `.ccr`）。
@@ -541,7 +541,7 @@
 
 ### G5 deadlock 证书与 `explain` / `--dump-vcs` 合流
 
-**裁定（team-lead 2026-09-17）**：**不新开通道、等 S-D** ✓——deadlock 证书 = decision record 之一种（`qclass = concurrency.deadlock`），随 S-D 的 L8（记录随缓存条目存取）实施；在 S-D 实施前**不落任何新 dump 旗标**。
+**裁定（team-lead 2026-09-17）**：**不新开通道、等 S-D** 通过——deadlock 证书 = decision record 之一种（`qclass = concurrency.deadlock`），随 S-D 的 L8（记录随缓存条目存取）实施；在 S-D 实施前**不落任何新 dump 旗标**。
 
 - **问题**：证书实现方式与报告通道未定。
 - **事实**：`--dump-vcs` **不在 develop**（仅 plan + 在飞分支 T4）；决策记录**仅设计**（S-D L1/L2/L8）；explain spec §1 明确反对「再造一个无定位点点 dump 旗标」。
@@ -550,7 +550,7 @@
 
 ### G6 与既有 `.ccr` / canary 判定面的关系
 
-**裁定（team-lead 2026-09-17）**：**`.ccr` 三分法** ✓——① 语义标注可入（须 bump 版本）；② **transfer/sync 决策与证书不进**；③ copy scheduler 输出纯后端。判定依据面随之重定：`.ccr` 逐字节不变 = **语义层未被 mapping 污染**（强判定依据）；ELF canary 在 mapping 阶段实施时**按既定流程重冻**（不是「必须不变」）。**并入**：§13.0.2 的预算证书同受 ② 约束（落决策记录旁路）。
+**裁定（team-lead 2026-09-17）**：**`.ccr` 三分法** 通过——① 语义标注可入（须 bump 版本）；② **transfer/sync 决策与证书不进**；③ copy scheduler 输出纯后端。判定依据面随之重定：`.ccr` 逐字节不变 = **语义层未被 mapping 污染**（强判定依据）；ELF canary 在 mapping 阶段实施时**按既定流程重冻**（不是「必须不变」）。**并入**：§13.0.2 的预算证书同受 ② 约束（落决策记录旁路）。
 
 - **问题**：transfer/sync 都在 mapping 面 ⇒ 是否应完全不进 `.ccr`？
 - **事实**：`.ccr` EDG 只许 kind∈{0,1}，`CCR_VERSION=9`，load 严格等值；S-E L1 说 determinism **标注**「与 R2 P4 同波进 `.ccr` 段」；`existence-structure.md:111` 说**证书**不落 `.ccr`；判定依据网 = `.ccr` 逐字节 + ELF canary（冻结 sha）。
@@ -563,7 +563,7 @@
 
 ### G7 新模型与 2026-09-04 边界标签 spec 的对齐（SHARE 消失）
 
-**裁定（team-lead 2026-09-17）**：**SHARE 降级为 mapping 优化、不扩 primitive** ✓——实施前须出**对齐表**（标签 ↔ primitive + 义务逐条对照 + 「无配方条目/身份重指」归入 NonTransferable 还是独立面）；`2026-09-04` spec 状态行随实施阶段标「被本文修订」。
+**裁定（team-lead 2026-09-17）**：**SHARE 降级为 mapping 优化、不扩 primitive** 通过——实施前须出**对齐表**（标签 ↔ primitive + 义务逐条对照 + 「无配方条目/身份重指」归入 NonTransferable 还是独立面）；`2026-09-04` spec 状态行随实施阶段标「被本文修订」。
 
 - **问题**：两份活跃 spec 的 primitive/标签集不一致。
 - **事实**：2026-09-04 spec 的标签集 = {COPY, MOVE, SHARE}（SHARE = 双侧只读共享、永久冻结、引用计数）；新模型 = {MOVE, LOAN, SPLIT, FILL, COPY}——**SHARE 无对应物**；两边的 MOVE 定义一致（永久转移、0 copy）。
@@ -590,7 +590,7 @@
 
 ### G10 Copy Scheduler 的两个前置
 
-**裁定（team-lead 2026-09-17）**：**两前置照立** ✓——G10-a 取「chunk 序列**复用现有通道语义**」（与 §4 原文一致 ⇒ 不需新运行时原语）；G10-b 定「**模型量 vs 实测**」界限，`model_ver` 随**预算证书**（§13.0.2）与 S-D 记录 schema 的既有字段位。
+**裁定（team-lead 2026-09-17）**：**两前置照立** 通过——G10-a 取「chunk 序列**复用现有通道语义**」（与 §4 原文一致 ⇒ 不需新运行时原语）；G10-b 定「**模型量 vs 实测**」界限，`model_ver` 随**预算证书**（§13.0.2）与 S-D 记录 schema 的既有字段位。
 
 - **G10-a（chunk handoff 的表示）**：§3.3 要求「copy R7 → start receiver → 继续 copy」，需要「部分就绪的接收」。**推荐**：先按 §4 原文 lowering 成 `chunk0..n` 的 MOVE/FILL 序列**复用现有通道语义**（则 Copy Scheduler 无需新运行时原语，只是 lowering 策略）。若裁「需要新原语」⇒ 得先做 15.1#2 缺的「消息」概念。
 - **G10-b（三目标量可测吗）**：CopiedBytes / VisibleCopyLatency / BandwidthPressure 今日**无度量面**（解释器/ELF 无计时、无带宽模型）。**推荐**：先定「模型量（modeled）」与「实测」的界限（§10 原文的 "modeled 3.1 us" 已暗示模型量），并把 `model_ver` 纳入 S-D 记录 schema 的既有字段位；**不得**把模型量当实测输出（否则 I1/I5 的报告面会撒谎）。
@@ -606,7 +606,7 @@
 
 ### G12 §5 确定性与 S-E 的归属
 
-**裁定（team-lead 2026-09-17）**：**S-E 为唯一执法点** ✓——本文只声明「并发关系产生 determinism 义务」这一**来源**；判定 / 执法 / 报告全走 S-A / S-E / S-D 既有机制（§5 判定依据表保留为 S-E 判定序在「transition 对」上的实例化文本）。
+**裁定（team-lead 2026-09-17）**：**S-E 为唯一执法点** 通过——本文只声明「并发关系产生 determinism 义务」这一**来源**；判定 / 执法 / 报告全走 S-A / S-E / S-D 既有机制（§5 判定依据表保留为 S-E 判定序在「transition 对」上的实例化文本）。
 
 - **问题**：本文 §5（并行 transition 的交换性/reject）与 S-E（汇合点四形态 + 「未证明未标注 ⇒ reject」）是**同一判定依据的两个投影**，谁定义、谁消费未定。
 - **事实**：S-E L2「未证明且未标注 → reject（唯一执法点——并发面）」；S-E L7「自动并发只搬运已证明的 `merge_deterministic`」；本文 §5 判定依据面 = 「两个并行 transition」。
@@ -615,7 +615,7 @@
 
 ### G13 其它待定（较小，一并列出）
 
-**裁定（team-lead 2026-09-17）**：**五小项全部登记** ✓——(a) FILL reserve 与 arena 生命周期、(b) LOAN 与 borrow checker 关系、(c) `explain concurrency` 冷热两态一致（前置 = 记录随缓存条目存取，S-D L8 / `cir_cache.cr` 键今日不含记录）、(d) `[concurrency]` 配置面（`project.cr` 无段解析）、(e) 存量 6 个 go/chan 测试更新基准值（待 G2 的通道 FIFO 语义定义实施后统一处理）。
+**裁定（team-lead 2026-09-17）**：**五小项全部登记** 通过——(a) FILL reserve 与 arena 生命周期、(b) LOAN 与 borrow checker 关系、(c) `explain concurrency` 冷热两态一致（前置 = 记录随缓存条目存取，S-D L8 / `cir_cache.cr` 键今日不含记录）、(d) `[concurrency]` 配置面（`project.cr` 无段解析）、(e) 存量 6 个 go/chan 测试更新基准值（待 G2 的通道 FIFO 语义定义实施后统一处理）。
 
 | # | 项 | 推荐 |
 |---|---|---|

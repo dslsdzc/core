@@ -20,7 +20,7 @@ set -euo pipefail
 # 其 corec **只认 v3 形**；而本脚本第 71 行起的冒烟已改 **v4 形**（T6b）⇒ 换代前该步**必红**（已知窗口态）。
 # 新 rev 的唯一硬要求 = **含本次 v4 工作的提交**（能读 v4 形）。取 `25e70197`（= 迁移阶段 T6 收官，
 # = 本 T7 的起点）承接「下一组以本次收官为 pre-侧」的既有规则。
-# ⚠ **启用条件（换代纪律 3）**：本条生效时其源修订须**在仓内可达**——本次经 develop 合入时**若为
+# 警告：**启用条件（换代纪律 3）**：本条生效时其源修订须**在仓内可达**——本次经 develop 合入时**若为
 # squash**，`25e70197` 这条 jj 提交不进 develop 历史（仅本地 object store 暂存）⇒ 换人/换机重建会失败。
 # 故合入方式若非「保留提交」（merge commit / rebase-merge），须**同阶段把 PINNED_REV 重指到 develop 上
 # 含 v4 工作的提交**并同阶段重锁三 sha（**留痕**：本条即旧值出处）。
@@ -89,7 +89,7 @@ cp "$WS_DIR/build/corec" "$WS_DIR/build/corearch" "$WS_DIR/build/corelsp" "$OUTD
 set +e
 # v4 迁移 T6b：内联 Core 冒烟改 v4 形（`:` + layout 缩进 + 换行分隔）。旧形
 # `fn main()->int{return 42;}` 在 v4 前端下是 `error[P03]`（`{` 只作结构体字面量定界符）。
-# ⚠ 与 `PINNED_REV` 的**换代耦合**：白名单里的三 sha 出自 `97f4394f`（2026-09-14，
+# 警告：与 `PINNED_REV` 的**换代耦合**：白名单里的三 sha 出自 `97f4394f`（2026-09-14，
 # **v4 之前**）⇒ 那枚 corec 只认 v3 形。本行改 v4 后，**必须**由 T7 把 `PINNED_REV`
 # 一并换到 v4 可读的修订（计划 §九 J-T7-2/J-T7-3 的重锁对象 #4），否则重建的冒烟步会红。
 nice -n 19 "$OUTDIR/corec" run 'fn main() -> int:

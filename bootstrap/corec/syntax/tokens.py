@@ -86,7 +86,7 @@ class TokenType(Enum):
     # **互斥且穷尽** ⇒ parser 侧零前瞻。
     #   `:` 之后到该物理行行尾**无任何 token**（空白与注释不计，§2.3）⇒ COLON_BLOCK（region 开启）
     #   否则 ⇒ COLON_DECL（类型标注 / import 别名 / 字段 / 形参分隔符）
-    # ⚠ 行尾类型标注**不是合法文本**：lexer 必发 COLON_BLOCK，而该位置不是合法 region 头
+    # 警告：行尾类型标注**不是合法文本**：lexer 必发 COLON_BLOCK，而该位置不是合法 region 头
     #   ⇒ parser 必须响亮拒绝（§2.2），不得静默改判成声明。
     COLON_DECL = auto()
     COLON_BLOCK = auto()
@@ -121,7 +121,7 @@ class TokenType(Enum):
 # 出处 = 计划 §一.5 的三表机械差集（脚本算，非目测），逐条：
 #   去（bootstrap − v4，7）：`None` `Self` `Some` `ensures` `move` `requires` `result`
 #   加（v4 − bootstrap，6）：`catch` `dyn` `fail` `never` `none` `spec`
-# ⚠ 本表必须与自源 `src/compiler/lexer.cr` 的 `lookup_keyword` **逐元素相同**
+# 警告：本表必须与自源 `src/compiler/lexer.cr` 的 `lookup_keyword` **逐元素相同**
 #   （判定依据 J-T1-2）。2026-10-24 实测两侧均为 39，差集为空；
 #   实报走 `python3 tools/v4_frontend_probe.py keywords`。
 # 计数：40 − 7 + 6 = 39。

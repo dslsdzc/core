@@ -18,12 +18,12 @@
         （截断文件读出垃圾/越界 ⇒ 139 或错产物）。
     M1c′（P4 必红·**实测有效**）：把「结构性失败 ⇒ `return -1`（miss）」改成「**静默接受**（`return 0`）」
         ⇒ P4 在 `truncate→56B` 即红（图段 [3,4,5,6] 与冷态不同）。
-    ⚠ 实测登记：**弱化**那两条守卫（`dlen<64`→`<8`、`p+16!=dlen`→`>dlen+64`）**并未**使 P4 红
+    警告：实测登记：**弱化**那两条守卫（`dlen<64`→`<8`、`p+16!=dlen`→`>dlen+64`）**并未**使 P4 红
         （段界检 + trailer var_start + 逐节点见证 + 指纹/身份检仍判 miss）⇒ 该两条属**冗余层**，
         承重层是「拒绝即 miss」语义本身（由 M1c′ 证明）。
     注：**尾随字节容忍是既有契约**（`test_cir_warm_path` D5：补零条目仍须命中）⇒ trailer 定位于
     **扫描终点**而非 `dlen−16`；P4 只固定「截断（p+16 > dlen）⇒ miss」。
-    ⚠ 每次突变需重建编译器（`nice -n 19 python3 build_selfhost_native.py`）；突变只为证明判定依据有效，
+    警告：每次突变需重建编译器（`nice -n 19 python3 build_selfhost_native.py`）；突变只为证明判定依据有效，
     **不得**与修复提交混在一起。
 
 用法：`python3 tests/selfhost/test_cir_cache_narrow.py`（cwd 任意；缓存/import 解析在仓根）。
@@ -143,7 +143,7 @@ def test_p1_tiny_entry_bounded():
 def _partial_vs_cold(name: str, src_v1: str, src_v2: str, tag: str):
     """**同一路径**先写 v1 建缓存，再覆写为 v2 跑（部分命中）⇒ 与 v2 冷跑对拍。
 
-    ⚠ 关键：缓存键 = `源路径::函数名` ⇒ v1/v2 **必须同路径**，否则两轮条目互不相干、
+    警告：关键：缓存键 = `源路径::函数名` ⇒ v1/v2 **必须同路径**，否则两轮条目互不相干、
     判定依据空转（本用例首版即栽在此处：hits=41/misses=0 的假绿）。
     """
     path = WORK / name

@@ -127,12 +127,12 @@
 
 | # | 模式 | 版本形态 | 判定依据结果 |
 |---|---|---|---|
-| P1 | `h = open(p); v = verify(h, P); op(v)`（身份绑定） | 单一版本 + 同 handle | C1 ✓ 构造性；C3 身份部分**被构造消解**（fd 不可重解析）→ prove |
-| P2 | `v = observe(x); verify(v, P); use(v)`（值绑定：读一次、验缓冲、用缓冲） | 单一版本 | C1 ✓；C3 内容部分需稳定性声明或有界观察窗口 |
-| P3 | `check(p); …; use(p)`（按名字重查） | 两版本（v1 ≠ v2） | C1 ✗ → enforce（版本重校验）/ reject |
-| P4 | `v = verify(h, P); …; mutate(κ); …; op(v)`（同 handle 但窗口内变更） | 版本被推进 | C2 ✗ → enforce / reject |
-| P5 | `check(p); …; use(p)`，窗口内无变更且 κ 独占 | v1 ≠ v2 | C1 ✗（仍分离）；即使可证观察等价 + 稳定性，**本族不默认放行**——重查默认不继承验证 |
-| P6 | `write(h); v = observe(h); verify(v, P); use(v)`（写后重读） | 版本推进**合法** | C1 ✓（新 check 落在新版本上） |
+| P1 | `h = open(p); v = verify(h, P); op(v)`（身份绑定） | 单一版本 + 同 handle | C1 通过 构造性；C3 身份部分**被构造消解**（fd 不可重解析）→ prove |
+| P2 | `v = observe(x); verify(v, P); use(v)`（值绑定：读一次、验缓冲、用缓冲） | 单一版本 | C1 通过；C3 内容部分需稳定性声明或有界观察窗口 |
+| P3 | `check(p); …; use(p)`（按名字重查） | 两版本（v1 ≠ v2） | C1 失败 → enforce（版本重校验）/ reject |
+| P4 | `v = verify(h, P); …; mutate(κ); …; op(v)`（同 handle 但窗口内变更） | 版本被推进 | C2 失败 → enforce / reject |
+| P5 | `check(p); …; use(p)`，窗口内无变更且 κ 独占 | v1 ≠ v2 | C1 失败（仍分离）；即使可证观察等价 + 稳定性，**本族不默认放行**——重查默认不继承验证 |
+| P6 | `write(h); v = observe(h); verify(v, P); use(v)`（写后重读） | 版本推进**合法** | C1 通过（新 check 落在新版本上） |
 
 - **P5 是本族最尖锐的裁决**：宁可 enforce 也不不报错地 prove——依据计划 §1.2 原则 3「义务不不报错地消失」，且"两次读等价"本身需证明（内容可写）。
 - P1/P2/P6 = 正控来源；P3/P4 = 负控来源（§5.4）。
@@ -178,7 +178,7 @@ op(vh, …)    -> …                               // 操作只对 Verified 定
 | ① prove | C1 ∧ C2 ∧ C3 | 零成本通过；绑定构造性的（P1/P6）不问 C3 |
 | ② enforce | C1 成立或可重建，C2/C3 不可证 | 插入**版本重校验**：use 前紧邻一次同身份观察 + 见证比对；不等 = **失败封闭（fail-closed）**。若身份无可观察的版本见证 ⇒ 退化为「观察与使用**原子化**为同一步」（= P1/P2 的唯一化） |
 | ③ proof-required | 需要「κ 独占 / 不可变」而引擎不可判 | 要求用户 / 领域库提供 contract（C3 声明面） |
-| ④ reject | 高安全模式下：C1 ✗ 且无可执行的 enforce 通道（如 P3 且存在外部变更可能） | 拒绝编译 |
+| ④ reject | 高安全模式下：C1 失败 且无可执行的 enforce 通道（如 P3 且存在外部变更可能） | 拒绝编译 |
 
 - **不可证 → 不不报错地通过**（计划 §1.2 原则 3）：每个判定结果必须落到 ①②③④ 之一，无第五种"算了"。
 - **enforce 的语义纪律**：版本重校验**必须紧邻 use 且 fail-closed**——"检查后再用一个可能已变的东西"不是 enforcement，是 TOCTOU 复现。
@@ -209,10 +209,10 @@ op(vh, …)    -> …                               // 操作只对 Verified 定
 
 ### 5.4 正控 / 负控 / 精度控
 
-- **正控 A（同 handle 复用 ✓）**：`h = open(p); v = verify(h, P); op(v)` → **prove**，零 enforcement 插入（P1）。
-- **正控 B（值绑定 ✓）**：`v = observe(x); verify(v, P); use(v)` → **prove**（P2 / P6）。
-- **负控 A（pathname 重查 + 中间 external mutation ✗）**：`check("p"); extern_mutate("p"); use("p")` → **必须非 prove**（enforce 或 reject），且反例指明两个分离版本。
-- **负控 B（同 handle 但窗口内 mutator ✗）**：P4 形态 → C2 失败 → 非 prove。
+- **正控 A（同 handle 复用 通过）**：`h = open(p); v = verify(h, P); op(v)` → **prove**，零 enforcement 插入（P1）。
+- **正控 B（值绑定 通过）**：`v = observe(x); verify(v, P); use(v)` → **prove**（P2 / P6）。
+- **负控 A（pathname 重查 + 中间 external mutation 失败）**：`check("p"); extern_mutate("p"); use("p")` → **必须非 prove**（enforce 或 reject），且反例指明两个分离版本。
+- **负控 B（同 handle 但窗口内 mutator 失败）**：P4 形态 → C2 失败 → 非 prove。
 - **精度控（不误杀）**：`verify(h, P)` 与 `op(h)` 之间夹一个**不同 κ** 的 extern 变更 → 仍 **prove**——证明判定依据不是一刀切拒绝。
 - **交叉负控（2026-09-11 裁决 D23；与 S-E 的执法分界）**：构造「同一汇合点 / 同一身份的两次访问、无序边、无声明」两例——① 变更源 = **图节点**（并发面）、② 变更源 = **边界条目 / 未知 extern**（外部面）→ 断言**恰出一条诊断**：① 归 S-E、② 归本族；**交集场景**（同一 `go` 起的节点）**先本族保守面、S-E 不重复报**。
 

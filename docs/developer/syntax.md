@@ -1359,7 +1359,7 @@ unsafe:
 mmio := alloc_at(0x7fff0000, 4096, align(4096))
 ```
 
-`alloc_at(addr, size, align)` 将地址、大小和对齐作为一个可追踪的分配关系送入图中；之后的 provenance、offset、边界和生命周期继续由普通指针分析处理。它不是显式区域/回收语法。
+`alloc_at(addr, size, align)` 把地址、大小和对齐合并成一条可追踪的分配关系送入图中；之后的 provenance、offset、边界和生命周期继续由普通指针分析处理。它不是显式区域/回收语法。
 
 ---
 

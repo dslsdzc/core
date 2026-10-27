@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#2026-09-16-16 阶段 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
+"""通过：**已修（#2026-09-16-16 阶段 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
 
 被测缺陷 = **聚合读丢型**：四个读点把结果槽**硬定 `TI_INT`**，而聚合槽的规范存储形式是
 **精确（scaled）**（apx 阶段不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
@@ -274,7 +274,7 @@ def main():
         chk, codes, bld, elf = compile_and_run(src, name)
         print(f"[GAP ] {name:<26} kind=gap  观测: check={chk} codes={codes} "
               f"build={bld} elf={elf}  | 期望（修复后）elf={expect} "
-              f"【裁-AGG-3 登记未覆盖：元组无声明面 ⇒ 本次不改；不计入判定依据】")
+              f"「裁-AGG-3 登记未覆盖：元组无声明面 ⇒ 本次不改；不计入判定依据」")
     print()
     bfails = leg_b_interface()
     fails.extend(bfails)

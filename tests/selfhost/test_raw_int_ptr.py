@@ -5,7 +5,7 @@
 白名单由「dex / int」扩到「dex / int / **地址型**」，加入标准 = **该类型的原值有语义**
 （dex 缩放位 · int 原值 · 地址字）。
 
-**【原文保留 · 已被裁定二取代（2026-09-20，S2）】** 原写：
+**「原文保留 · 已被裁定二取代（2026-09-20，S2）」** 原写：
 「白名单由「dex / int」扩到「dex / int / **指针**」，加入标准 = 该类型的原值有语义
 （dex 缩放位 · int 原值 · 指针地址字）。`TYP_REF` / `TYP_SLICE` / `TYP_ARRAY` 等**仍拒绝**——
 聚合无「原值」概念、`TYP_REF` 语义未实测 ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。」
@@ -51,10 +51,10 @@ COREC = BASE / "build" / "corec"
 POS = BASE / "tests" / "suite" / "ptr_ref_first.cr"
 
 # 负控（check 面 rc=1 + TF07）。
-# ⚠ **2026-09-20（S2）重定**：原 `ref_type` 条目**已移出负控**——它的形态是**形参类型位 `&int`**
+# 警告：**2026-09-20（S2）重定**：原 `ref_type` 条目**已移出负控**——它的形态是**形参类型位 `&int`**
 #   （`EXPR_REFTYPE` ⇒ `TYP_REF`），而 S2 的目标**正是让 `TYP_REF` 被接受**（实测：该源 `check` = **rc=0**）
 #   ⇒ 它的前提被**直接推翻**。按「改前提、不删断言」：**同形源码改判为正固定**（见下 `REF_OK`），
-#   **并补一个真该被拒的形态填空**（`optional` = `int?`，实测 `rc=1 TF07×1` ✓；`tuple` 亦实测被拒，取一即可）。
+#   **并补一个真该被拒的形态填空**（`optional` = `int?`，实测 `rc=1 TF07×1` 通过；`tuple` 亦实测被拒，取一即可）。
 NEG = {
     "string": 'fn main() -> int:\n    s := "hi"\n    return @raw_int(s)\n',
     "bool": "fn main() -> int:\n    b := true\n    return @raw_int(b)\n",
@@ -140,7 +140,7 @@ def main():
     expect("pos_value_interp", rc_interp == 0, rc_interp)
 
     # ── B 负控（check 面；build 面因豁免未撤不得当负控） ──
-    # ⚠ **文案断言随 S2 重定（改前提、不删断言）**：
+    # 警告：**文案断言随 S2 重定（改前提、不删断言）**：
     #   旧期望 = `"or pointer" in tf07[0]`（旧文案 `…or pointer expression`）；
     #   S2 把门重写为「只认地址型」⇒ 新文案 = `…or address (pointer/reference) expression`
     #   ⇒ 断言改固定**新文案的单点串** `"or address"`（该码全仓仍仅 1 处，单点性质不变）。

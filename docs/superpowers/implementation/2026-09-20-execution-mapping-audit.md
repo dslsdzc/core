@@ -1234,7 +1234,7 @@ S-C 第 2.2 节表（`[已设计未实现]`）：
 
 - 形式陈述
   ```
-  ¬∃ 双射 f : ExecutionDomain -> MemoryDomain 使得 f 保持全部映射语义
+  ¬∃ 双射 f : ExecutionDomain -> MemoryDomain 使 f 保持全部映射语义
   更强的可观测形式（存在性证明，反证合并）：
     (i)  ∃ d₁ ≠ d₂, ∃ m :  d₁ attach m  ∧  d₂ attach m          （多执行域共一内存域）
     (ii) ∃ d, ∃ m₁ ≠ m₂ :  d attach m₁  ∧  d attach m₂          （一执行域多内存域）

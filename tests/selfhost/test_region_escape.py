@@ -129,7 +129,7 @@ def test_p2_loop_alloc_deref_after_intervening_stmt():
 def test_p3_return_escape_is_b010():
     """P3 返回逃逸：码必须是 B10（EC_B_ESCAPE）。
 
-    ⚠ 形态说明（新基 84a4debe 起）：`&local` 经 #153 改判 `TYP_REF` ⇒
+    警告：形态说明（新基 84a4debe 起）：`&local` 经 #153 改判 `TYP_REF` ⇒
     `fn ... -> *int { ...; return &arr[0]; }` 在本基上是 **TF01（返回型不符）**，
     与逃逸面无关（基线与本次**都是** TF01，已实测）。故本固定写 `-> &int`。
     旧基（38e6c992）读数：同形 `-> *int` 版 = rc=1 但报 **B11**（码位错配）；

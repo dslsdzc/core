@@ -814,7 +814,7 @@ Core 是版本化赋值模型(规则 5:`X = X + 1` ≙ `x₁ 创建、x₀ 失�
  `docs/developer/concepts/memory.md`（仅 1 命中，疑为纯链接）、
  `docs/archive/2026-08-15-cache-semantics-design.md` 之外的推理链
  （如把「缓存」当动词用的段落）。
-6. `authority` / `replicability` 的「零命中」：基于 `grep -rni` 于 `src/` 与
+6. `authority` / `replicability` 的「零命中」：用 `grep -rni` 在 `src/` 与
  `docs/maintainer/design/` 与 `docs/academic/`；未扫全 `docs/superpowers/`。
  故只能说「在这两个目录内零命中」，不能说「全仓零命中」。
 7. `MAP` 的段归属：经 lead 转达，未经本次复核，在核验基线 `38e6c992` 的

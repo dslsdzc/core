@@ -3,7 +3,7 @@
 # 消费者：tools/baseline/canary_check.sh（检查本体）· tests/harness/test_canary_carrier.py（有效性用例）
 # 格式：<name><TAB><artifact><TAB><sha256><TAB><size>
 #   artifact = 相对**采集目录**的产物路径（采集目录默认 build/canary_artifacts/）
-# **⚠ 重锁前置（2026-09-19 起）**：重新锁定本表**之前**，必须先跑 `bash tools/baseline/canary_check.sh`
+# **警告：重锁前置（2026-09-19 起）**：重新锁定本表**之前**，必须先跑 `bash tools/baseline/canary_check.sh`
 #   并确认 **D1 确定性检查绿**（同一 canary ELF **两次构建逐字节相同**）——只比「与旧值相同」的流程
 #   会在**采一次样**时把**非确定值**锁进表（此后全绿而产物每次都不一样）。D1 红 ⇒ **不得重锁**，先查非确定性。
 # 规则（D28 继承）：一律**冷态**——每条编译前 `clean-cache`（= `rm -rf .core/cache/cir/`，
@@ -30,14 +30,14 @@
 #                                            gt 134701B `cafb4278…` / 134844B `ec8413ec…`
 #        出处：docs/superpowers/plans/2026-09-12-r2-p4-carrier.md 附录 D-1 表 · TODO.md:474/:444
 #     G2（P5 T7 2026-09-14 / v8）：pa 不变；gt **+640B** ⇒ 135341B `ddec1ce6…` / 135484B `cd2af565…`
-#        出处：TODO.md:521/:376 —— ⚠ **该代 gt 变化本次未挖到显式重锁声明**（留痕缺口；不影响本文件）
+#        出处：TODO.md:521/:376 —— 警告：**该代 gt 变化本次未挖到显式重锁声明**（留痕缺口；不影响本文件）
 #     G3（P6 T3 起 / v9 / NOD 40B）= **本表**：见下方四条
 #        出处：.superpowers/sdd/p6-task3-report.md:62——逐条带「原 …」括注 + **显式 delta 归因**
 #              （`delta = 4B × 节点数`：pa +5192 = 4×1298；gt +7452 = 4×1863）
 #   ⇒ 审计表 C 引的四值 = **G2**（P5 T7 代），非与本表冲突。G1→G2 缺一条显式重锁声明，
 #     正是本文件 + 两级纪律要消灭的形态（**锁定值单靠文档 ≠ 检查**）。
 #
-# ── 【本次重锁 2026-09-16】gt 两条：142793/142936 → **142765/142908**（−28B）──
+# ── 「本次重锁 2026-09-16」gt 两条：142793/142936 → **142765/142908**（−28B）──
 #   归因（**已闭环**：CI PR #80 红档 + 本机精确复现）：编译器解析 `import` 时会读
 #   `$HOME/.core/lib/<模块名>/index`（src/compiler/module.cr:523-530；命中则 `reg_so_funcs`
 #   把索引里声明的函数名驻留进串表）。本机有 `~/.core/lib/io/index`（164B）⇒ `generics_test`
@@ -52,7 +52,7 @@
 #     gt_ccr        `41e9d84578ce2ca41934373ec0f96a2ec53e04422509147e05324b122e9f77eb` 142793
 #     gt_static_ccr `704316c81aecd6ad9ce7f04417ec9a786243b74df62e8178e8a2bc064132f1cb` 142936
 #
-# ── 【本次重锁 2026-09-18】(乙) 泛型实例形参擦除：gt 两条 **sha 变、size 不变**（142765/142908）──
+# ── 「本次重锁 2026-09-18」(乙) 泛型实例形参擦除：gt 两条 **sha 变、size 不变**（142765/142908）──
 #   归因（**闭环**，本次实测）：A1 让泛型实例形参链**具体化** ⇒ 实例形参槽型从 `TI_INT` 变为代入后的型
 #   （`identity[string]` / `pair` 的 string、`identity[bool]` 的 bool）⇒ `.ccr` 内**仅 3 字节**变
 #   （offset 12274 / 12446 / 12574：`0→3` / `0→3` / `0→2` = TI_STR / TI_STR / TI_BOOL）。
@@ -64,7 +64,7 @@
 #     gt_ccr        `d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95` 142765
 #     gt_static_ccr `a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea` 142908
 #
-#   ⚠ **判定依据效力范围（重要，且超出本次）**：旧的 142793/142936 **从来不是跨机可复现的值**——
+#   警告：**判定依据效力范围（重要，且超出本次）**：旧的 142793/142936 **从来不是跨机可复现的值**——
 #   它们是「本机 `~/.core/lib/io/index` 在场」时测得的。G3（P6 T3）起至本次的**每一次「锁定值
 #   命中」都隐含依赖该文件在场**；在没有该文件的机器（如 CI runner）上，本判定依据必然红。
 #   这不是狡辩空间，是**判定依据的效力范围**。自本次起：`.ccr` 四条锁定「**环境归一化（空 HOME）**下
@@ -88,11 +88,11 @@
 #      `generics_test` 更是**构造性**的——含泛型 ⇒ `main.cr:480-486`（`:484` 置 0）
 #      `cache_enabled = 0` ⇒ 冷≡暖按构造。且暖态面**另有专属机器检查**（tests/selfhost/test_warm_cache_gate.py
 #      已挂 CI + tools/baseline/warm_leg.sh 手工广度路径）⇒ 此处不锁 ≠ 无人守。
-#   ⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录规则）；暖侧分歧归暖态检查抓，不并到这里。
+#   警告：若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录规则）；暖侧分歧归暖态检查抓，不并到这里。
 #
 # 复现性实测：三处独立采集体逐条同值（/tmp/capt1 2026-09-14 · /tmp/fct3 2026-09-15 ·
 #   /tmp/capt6 2026-09-16；输出目录各不相同 ⇒ **与输出路径无关**）。
-#   ⚠ 限定：那三处**都是在本机（`$HOME` 含 `~/.core/lib/io/index`）测得** ⇒ 证明的是「与输出
+#   警告：限定：那三处**都是在本机（`$HOME` 含 `~/.core/lib/io/index`）测得** ⇒ 证明的是「与输出
 #   路径无关」，**不**证明「跨机可复现」；跨机可复现性由本次的 HOME 归一化建立（见上「本次重锁」）。
 #
 # 换代纪律（**不得**因跑出来不符就改本表对齐）：
@@ -101,7 +101,7 @@
 #   ③ 「停下上报」是默认动作。详见 docs/superpowers/plans/2026-09-16-criteria-carrier.md §6。
 
 
-# ── 【本次重锁 2026-09-18】串域阶段（`CIR_CACHE_VER 20→21`，PR #123）——**维护者显式声明发射面变更** ──
+# ── 「本次重锁 2026-09-18」串域阶段（`CIR_CACHE_VER 20→21`，PR #123）——**维护者显式声明发射面变更** ──
 # **声明的措辞（维护者裁定原文）**：
 #   **维护者显式声明**：本次新增 **6 个编译器侧全局**（`g_cir_rec_{on,ids,count,cap,base}` ·
 #   `g_cir_skip_journal`）⇒ `reg_one_global` 把它们登记进**每个被编译程序** ⇒ 启动时即 intern
@@ -110,8 +110,8 @@
 #   **语义零变化，属「新增编译器全局的固有代价」，本次同阶段重锁。**
 # 归因实测（本机冷态 + canary 规则；**跨环境一致**：同源同表下本机与 CI 实际值逐字节相同）：
 #   ELF 差异**仅 5 字节**（4B 对齐读 = +3145728 = 48<<16 与 +48 各若干处 ⇒ 内嵌 id 移位，机码零改动）。
-#   ⚠ **修正先前的误判**：本次初报曾写「gt 两条环境敏感（本机 ≠ CI）」——**错**。真相 = 两次比对所用
-#   **表版本/编译器源码版本不同**（本机基于 `f7f23b83`+本次；CI 基于 merge=develop（含 (乙) 阶段的 gt 重锁））。
+#   警告：**修正先前的误判**：本次初报曾写「gt 两条环境敏感（本机 ≠ CI）」——**错**。真相 = 两次比对所用
+#   **表版本/编译器源码版本不同**（本机使用 `f7f23b83` 加本次改动；CI 使用 merge=develop（含 (乙) 阶段的 gt 重锁））。
 #   **同源同表下 gt 亦逐字节一致**。记录于此以免后人据误判去「修环境」。
 #   **另一条交叉证据**：(乙) 阶段写入的旧 gt 值 `2b364cf1…/cd85fd05…` 在本机（HOME 归一化后）**逐字节复现**
 #   ⇒ 该值**不随环境漂移**；故**不存在**「CI 的 expected 一直被本地值污染」这类预存规则缺陷（已核）。
@@ -119,7 +119,7 @@
 #   前一次 run 35288807115 的 pa/ELF 值与之相同）——**CI 是判定依据的权威环境**，本地采值 = 把某一台机器写进判定依据。
 #   本机复核（同源同表）**5 值逐字节一致（含 gt）**；且 **canary 自本次起已把 HOME 归一化到采集目录内空 `home/`**
 #   ⇒ 该面板**不随开发机 `~/.core/lib/*/index` 漂移**。
-#   ⚠ **触发器（任何重锁都适用）：重锁必须在头注声明「取数环境 + 取数 run/提交」**——否则
+#   警告：**触发器（任何重锁都适用）：重锁必须在头注声明「取数环境 + 取数 run/提交」**——否则
 #   下一个人在本机重锁会写进一个**看起来正常**的错值（跨版本表/跨环境混采是本文件历史上真实出现过的坑）。
 # 旧值留痕（**自本次起作废**；前一组 (乙) 已先重锁过 gt 两条，故 gt 旧值 = (乙) 的值）：
 #   canary_elf    `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475` 28822
@@ -130,7 +130,7 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同阶段重锁 + 旧值留痕**。
 
-# ── 【本次重锁 2026-09-18】插值展开阶段（阶段 8 插队；`CIR_CACHE_VER 21→22`）——**维护者显式声明**（裁定 ①）──
+# ── 「本次重锁 2026-09-18」插值展开阶段（阶段 8 插队；`CIR_CACHE_VER 21→22`）——**维护者显式声明**（裁定 ①）──
 # **性质 = 内容面变化，不是发射面泄漏**（这条区分是本注的重点）：
 #   本次在 `src/stdlib/fmt.cr` 新增 `bool_str(b: bool) -> string`（字符串插值 `bool` 洞的转换；
 #   为什么必须是函数而非合成 `if`：见 TODO #2026-09-18-14）。`fmt.cr` 是**被 import 的 stdlib 模块**
@@ -148,7 +148,7 @@
 # 归因实测：**逐项 Δ 与「fmt.cr 新增一个函数的体量」同量级**（~512–520B（`.ccr`）/ +32B（ELF，含新函数机码）），
 #   且**不含新全局/新段**（与 #123 的「新全局 ⇒ id 顺移」机制不同）⇒ 归因成立。
 
-# ── 【本次重锁 2026-09-18】串域阶段（`CIR_CACHE_VER 20→21`，PR #123）——**维护者显式声明发射面变更** ──
+# ── 「本次重锁 2026-09-18」串域阶段（`CIR_CACHE_VER 20→21`，PR #123）——**维护者显式声明发射面变更** ──
 # **声明的措辞（维护者裁定原文）**：
 #   **维护者显式声明**：本次新增 **6 个编译器侧全局**（`g_cir_rec_{on,ids,count,cap,base}` ·
 #   `g_cir_skip_journal`）⇒ `reg_one_global` 把它们登记进**每个被编译程序** ⇒ 启动时即 intern
@@ -157,8 +157,8 @@
 #   **语义零变化，属「新增编译器全局的固有代价」，本次同阶段重锁。**
 # 归因实测（本机冷态 + canary 规则；**跨环境一致**：同源同表下本机与 CI 实际值逐字节相同）：
 #   ELF 差异**仅 5 字节**（4B 对齐读 = +3145728 = 48<<16 与 +48 各若干处 ⇒ 内嵌 id 移位，机码零改动）。
-#   ⚠ **修正先前的误判**：本次初报曾写「gt 两条环境敏感（本机 ≠ CI）」——**错**。真相 = 两次比对所用
-#   **表版本/编译器源码版本不同**（本机基于 `f7f23b83`+本次；CI 基于 merge=develop（含 (乙) 阶段的 gt 重锁））。
+#   警告：**修正先前的误判**：本次初报曾写「gt 两条环境敏感（本机 ≠ CI）」——**错**。真相 = 两次比对所用
+#   **表版本/编译器源码版本不同**（本机使用 `f7f23b83` 加本次改动；CI 使用 merge=develop（含 (乙) 阶段的 gt 重锁））。
 #   **同源同表下 gt 亦逐字节一致**。记录于此以免后人据误判去「修环境」。
 #   **另一条交叉证据**：(乙) 阶段写入的旧 gt 值 `2b364cf1…/cd85fd05…` 在本机（HOME 归一化后）**逐字节复现**
 #   ⇒ 该值**不随环境漂移**；故**不存在**「CI 的 expected 一直被本地值污染」这类预存规则缺陷（已核）。
@@ -166,7 +166,7 @@
 #   前一次 run 35288807115 的 pa/ELF 值与之相同）——**CI 是判定依据的权威环境**，本地采值 = 把某一台机器写进判定依据。
 #   本机复核（同源同表）**5 值逐字节一致（含 gt）**；且 **canary 自本次起已把 HOME 归一化到采集目录内空 `home/`**
 #   ⇒ 该面板**不随开发机 `~/.core/lib/*/index` 漂移**。
-#   ⚠ **触发器（任何重锁都适用）：重锁必须在头注声明「取数环境 + 取数 run/提交」**——否则
+#   警告：**触发器（任何重锁都适用）：重锁必须在头注声明「取数环境 + 取数 run/提交」**——否则
 #   下一个人在本机重锁会写进一个**看起来正常**的错值（跨版本表/跨环境混采是本文件历史上真实出现过的坑）。
 # 旧值留痕（**自本次起作废**；前一组 (乙) 已先重锁过 gt 两条，故 gt 旧值 = (乙) 的值）：
 #   canary_elf    `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475` 28822
@@ -177,7 +177,7 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同阶段重锁 + 旧值留痕**。
 
-# ── 【本次重锁 2026-10-24】Task 8 review fix：raw ABI 调用成为图级 SYSTEM 边界 ──
+# ── 「本次重锁 2026-10-24」Task 8 review fix：raw ABI 调用成为图级 SYSTEM 边界 ──
 #   四条 `.ccr`：size 全不变，sha 全变；canary ELF 逐字节不变（826d74cf…）。
 #   归因 = `ccr_compute_header_flags` 现在识别 IR_CALL 到保留的 raw ABI 内建
 #   （cell_store/cell_load/load8/store8/load64/w32/load_str_ptr/store_str_ptr/
@@ -191,7 +191,7 @@
 #     gt_ccr        a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff 138672
 #     gt_static_ccr bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c 138815
 
-# ── 【本次重锁 2026-10-25】V4 语法迁移（显式泛型删除 + 推断/字节指针运算）──
+# ── 「本次重锁 2026-10-25」V4 语法迁移（显式泛型删除 + 推断/字节指针运算）──
 #   D1 5/5 PASS（canary_check.sh 实跑：5 条各自再构建一次逐字节相同）。
 #   归因：
 #     · gt 两条 −12082 / −12114B = `tests/suite/generics_test.cr` 从 V3 显式泛型
@@ -208,7 +208,7 @@
 canary_elf	pa	4e79ced2f997998974cd6c6ac4ea3921b2111545091a8e5854abda97ffab2b58	49334
 pa_ccr	pa.ccr	271d0c1b4491e9a39d9635503ed36c4220964a650b003602fe434f5c9d35be1d	97509
 pa_static_ccr	pa_st.bin.ccr	80c5c1219f6eaa0937a7faa6da1dfe83e19fad2496b11d40bbf26b45c3d24a28	97731
-# ── 【本次重锁 2026-10-26】if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
+# ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
 #   test/je 或 test/jne；`if` 作为表达式现在返回分支值。`--legacy-if` 已移除。
@@ -219,7 +219,7 @@ pa_static_ccr	pa_st.bin.ccr	80c5c1219f6eaa0937a7faa6da1dfe83e19fad2496b11d40bbf2
 #     pa_static_ccr 9988279dae1efbe914a8c85c5b1ca90a209a70faee71b7e413d81e37ac21d915 97323
 #     gt_ccr        c7899a773cd3d8647093f23d230b877bf366eddfc182758ddce37615d5906bb0 130670
 #     gt_static_ccr 5d9729e4056b1dba93a1fe898913f56a397a6a62d95010c3feac33d4be70e0b1 130877
-# ── 【本次重锁·续 2026-10-25】OS-axis builtin 返回型 ──
+# ── 「本次重锁·续 2026-10-25」OS-axis builtin 返回型 ──
 #   `ir_call_return_type` 现对无 Core body 的 OS 轴内建咨询
 #   `prelude_builtin_return_ti`（syscall3/syscall4 ⇒ TI_INT）。此前调用结果落
 #   TI_UNIT，tagged 比较把它当裸字（`read_file`/`system` 的 fd 判断失真）。
@@ -229,18 +229,18 @@ pa_static_ccr	pa_st.bin.ccr	80c5c1219f6eaa0937a7faa6da1dfe83e19fad2496b11d40bbf2
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
 gt_ccr	gt.ccr	96cc9e755456f538f71adbe66080308d12b054092bb43f3984260a51dc56167a	131023
 gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e71db3f4a0ddc	131245
-# ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
+# 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
 #      被编译程序的 `.ccr` 串域 id 顺移 ⇒ `pa` 的 ELF 尺寸不变（28854）而 sha 变。
 #   判定依据侧对这两类都只看「是否**预期内**」：语料零 `${` ⇒ `tests/suite`+`tests/fixtures` 37 档
-#   `.ccr`/ELF 逐字节 IDENTICAL（对照 = 展开前二进制）✓ · 非插值程序行为不变 ✓。
+#   `.ccr`/ELF 逐字节 IDENTICAL（对照 = 展开前二进制）通过 · 非插值程序行为不变 通过。
 # **取数环境声明**（2026-09-18 定则：重锁必须写明值源）：上表 5 值 = **本机冷态实测**（cwd = 仓库根、
 #   每条编译前 `clean-cache`、不传 `-O`，与 canary_check.sh 的采集规则逐条一致）；**CI 同值**——
 #   同一提交（head `d84ac055e600`）的 `selfhost-tests` 档在 CI 内跑同一 canary 检查 **5/5 PASS**
 #   ⇒ 本机与 CI 两环境一致，无一处的隐含环境依赖。
 
-# ── 【本次重锁 2026-09-20】裁定二（`&x` → `TYP_REF`）实施阶段（PR #153）——**维护者显式授权** ──
+# ── 「本次重锁 2026-09-20」裁定二（`&x` → `TYP_REF`）实施阶段（PR #153）——**维护者显式授权** ──
 # **性质 = 内容形状演进，非回归、非发射面泄漏**（本表判定依据契约里 `.ccr` 那条正是「格式+内容形状检测器」）。
 # **两阶段分开量、分开归因**（team-lead 要求：重锁必须量分支**最终状态**，不是中间态）：
 #   阶段①（S1+S3，`dff1c93d`）与阶段②（S2+S6，`6045d1e6`）的检查读数**逐字节相同**
@@ -254,7 +254,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   ③ 那一条 = **`TT_CONS` —— `AK_REF` 链相对 `AK_PTR` 链多出的「槽 0 mut 标记格」**：
 #      `ty_shadow.cr` 的 `AK_PTR` 链 = `tt_cons(元素, nil)`（**1** 个 cons）；`AK_REF` 链 =
 #      `tt_cons(mut标记, tt_cons(元素, nil))`（**2** 个）⇒ **REF 多一格**。
-#      **⚠ 措辞纪律**：**不得**写成「多一个 REF 项节点」——若真如此 `tc` 应 **+2**（新原子 + 新链）而非 +1；
+#      **警告：措辞纪律**：**不得**写成「多一个 REF 项节点」——若真如此 `tc` 应 **+2**（新原子 + 新链）而非 +1；
 #      实际 = **原子项一进一出（PTR 原子消失、REF 原子出现）+ 链上多一格 CONS** ⇒ 净 **+1**。
 #      （提交 `b63208e2` 的说明里曾写作「1 个 REF 项节点」，**此处为更正版，以本表为准**。）
 #   ④ 同段另有 **4 条类型行 `PTR→REF`**（行 10/11/13/14，皆 `data=int行 / extra=0`）——**行条数不变**（15→15）
@@ -265,7 +265,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #      （与 #123「新增编译器全局 ⇒ id 顺移」机制不同）。
 #   ⑥ **数量自洽**：两个位点（`&arr[2]` / `&x`）**共享同一条 REF 链**（DAG 去重）⇒ 只 +1 条项
 #      （若每点各建一条应是 +80，与实测不符）。
-# **发射面零足迹 ✓**：`canary_elf` **逐字节不变**（28854B · `f1137275…`）+ 其余七段逐字节不变。
+# **发射面零足迹 通过**：`canary_elf` **逐字节不变**（28854B · `f1137275…`）+ 其余七段逐字节不变。
 # **D1 确定性检查 5/5 PASS**（`pa_ccr` / `pa_static_ccr` 两次构建逐字节相同 ⇒ 重锁前置已绿）。
 # **取数环境声明**：本机冷态实测（cwd = 仓库根、逐档 `clean-cache`、不传 `-O`，与 `canary_check.sh` 规则逐条一致）；
 #   两条独立链（本工作区 ×2 · team-lead 的独立探针工作区 `/tmp/canary-probe`）**读数逐字节相同**。
@@ -274,7 +274,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   pa_static_ccr `76df0adf92d63a7fe986af2f0c6bd3149ec512287ab936a7159e35013a5dd15d` 97088
 # **出处**：PR #153 · 提交 `dff1c93d`（S1+S3，**引起**）· `6045d1e6`（S2+S6，**无增**）· 本表重锁与其同阶段。
 
-# ── 【T7 复验 2026-10-11】v4 语法迁移收尾——**结论 = 本表五值不动（无变化 ⇒ 无重锁）** ──
+# ── 「T7 复验 2026-10-11」v4 语法迁移收尾——**结论 = 本表五值不动（无变化 ⇒ 无重锁）** ──
 # **这不是「跳过重锁」，是一次实测为「零变化」的重锁检查**（本文件两级纪律：**禁止的不是变化，
 # 是无声变化**；没有变化时，正确动作就是**不动值表**，并在此**留痕这次检查**）。
 # **实测环境（固定在 binary sha + 语料 rev 上，勿凭字面量复用）**：
@@ -309,7 +309,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 # ⇒ 「值表与本表不一致时检查必红」成立（本检查非恒绿；此即 J-T7-1 反向对照在本「零变化」
 #    结论下的等价形态——**没有重锁就没有「改回旧值」**，故以「植入旧值即红」代之）。
 
-# ── 【本次重锁 2026-10-23】BigInt v9.1 / 默认 tagged 用户程序 ──
+# ── 「本次重锁 2026-10-23」BigInt v9.1 / 默认 tagged 用户程序 ──
 #   canary_elf: 28854B → 53430B。归因 = 用户程序默认嵌入 raw BigInt 运行时 blob，
 #     且 pa 的 int 运算走 tagged 快路径；程序行为仍 rc=0。
 #   四条 .ccr: size 不变，sha 变。归因 = version 9 → v9.1 (0x00090001)，且编译器
@@ -319,7 +319,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #       gt_ccr        edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22
 #       gt_static_ccr bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97
 
-# ── 【本次重锁 2026-10-23】删除旧 2-limb/tag 路径（任务 9 收尾）──
+# ── 「本次重锁 2026-10-23」删除旧 2-limb/tag 路径（任务 9 收尾）──
 #   canary_elf: `dfae9d84…` → `826d74cf…`，size 不变（53430B）。
 #   归因（**编译器全局位移，非发射面回归**）：删除 `tag2l.cr` 及 18 个
 #   `g_x86_mw_*` 编译期全局（tag_off/cap/count、jo_pos/cap/count/dest/is_sub/resume、
@@ -329,7 +329,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   D1 确定性检查 5/5 PASS（重锁前置已绿）。
 #   旧值留痕（自本次起作废）：canary_elf `dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09` 53430。
 
-# ── 【本次重锁 2026-10-23】前端机器边界清理（三轴 target + builtin/Mapping）──
+# ── 「本次重锁 2026-10-23」前端机器边界清理（三轴 target + builtin/Mapping）──
 #   四条 `.ccr`：size 全不变，sha 全变；canary ELF 不变。
 #   归因 = 编译器侧全局登记顺序改变：`g_rt_builtin_*` 从 checker.cr 移到 prelude.cr，
 #   内建表按 arch/os/runtime 三轴重组；用户程序 .ccr 内嵌的编译器 intern/身份随之位移，
@@ -340,7 +340,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_ccr        21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103 143687
 #     gt_static_ccr 4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271 143830
 
-# ── 【本次重锁 2026-10-23】raw 内建改名 cell_store/cell_load ──
+# ── 「本次重锁 2026-10-23」raw 内建改名 cell_store/cell_load ──
 #   四条 `.ccr` 各 +13B，sha 全变；ELF canary 不变。
 #   归因 = 编译器侧字符串表新增 `cell_store`/`cell_load` 并移除 `w64`/`r64`；
 #   用户程序语义和发射面未变。D1 5/5 PASS。
@@ -350,7 +350,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_ccr        4df02acd1ea343601ae8a016cff093bf56d7a90f7b6b06c2811b1b3a3a2d3e41 143687
 #     gt_static_ccr bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e84b3c864f8a1 143830
 
-# ── 【本次重锁 2026-10-24】ccr v10 cutover（Task 4）──
+# ── 「本次重锁 2026-10-24」ccr v10 cutover（Task 4）──
 #   四条 `.ccr` 全变：header version 589825 → 0x000A0000、seg_count 8 → 9、
 #   段表 112B → 124B、段序改为 STR TYPE IFACE SYM NOD ENT REG EDG CASE、
 #   ENT 28B → 24B（去掉 home）、NOD 40B 的 tk/item 两槽改为 type_id/flags
@@ -363,7 +363,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_ccr        93ed0dc5cb33964df5857ba21738f6880700a5248098c3f043087e1369b26f23 143700
 #     gt_static_ccr a9e5343389de547a0ab9a9dde33b030877c44e5505deee24eb683715b700c88f 143843
 
-# ── 【本次重锁 2026-10-24】Task 4 review fix：header flags 语义更正 ──
+# ── 「本次重锁 2026-10-24」Task 4 review fix：header flags 语义更正 ──
 #   四条 `.ccr` size 不变、sha 全变；canary ELF 逐字节不变（826d74cf…）。
 #   归因 = 头部 flags 从「bit0 = raw-int」改为 spec §3.1 的程序特性：
 #   PORTABLE(1)/SYSTEM(2)/CONCURRENT(4)，raw-int 改为 corec 显式向 corearch
@@ -376,7 +376,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_static_ccr 48d40ccb4f3bfdb7d412e669636ada6fac5a0ea2df95537ccb9749436c59e42b 138815
 
 
-# ── 【本次重锁 2026-10-24】final review fix：ENT 全局/参数存在行 + NOD type_id ──
+# ── 「本次重锁 2026-10-24」final review fix：ENT 全局/参数存在行 + NOD type_id ──
 #   四条 `.ccr` size 增加（pa +672B = 28×24，gt +768B = 32×24）；sha 全变。
 #   归因 = spec §5 的实现补齐：每个全局 var 新增一条前导 ENT 行
 #   （def_nod=-1、flags bit2 GLOBAL），未引用参数新增 def=-1 参数行
@@ -388,13 +388,13 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_ccr         6f449f88f25291599e91b956f6f5951882453886747aa7873ecaf7235d765f65 138672
 #     gt_static_ccr  95001eea331f8c3bad0b26ce33116b21a08b0231066267cbe476e51f4cf00288 138815
 
-# ── 【本次重锁 2026-10-24】bootstrap 全局负初值 + 块值 if 修复 ──
+# ── 「本次重锁 2026-10-24」bootstrap 全局负初值 + 块值 if 修复 ──
 #   canary_elf: 826d74cf… → 393739b4…，size 53430B 不变；四条 `.ccr` 不变。
 #   归因 = bootstrap `gen_let_decl` 保留 `UnaryOp('-', Literal)` 的负号，
 #   以及 `gen_if` 在两支都有值时把分支值写入 merge 临时变量；它们改变
 #   编译器自举产物，不改变 `.ccr`/运行时契约。
 
-# ── 【本次重锁 2026-10-26】库可见性阶段（pub 标签落地 + stdlib 公开 API 标 pub）──
+# ── 「本次重锁 2026-10-26」库可见性阶段（pub 标签落地 + stdlib 公开 API 标 pub）──
 # **性质 = 内容面增量，发射面零足迹**：canary ELF 逐字节不变（bb1eba81… 53430B），
 # D1 5/5 PASS。四条 `.ccr` 一律 **+7B**（97544→97551 · 97755→97762 · 131102→131109 ·
 # 131309→131316），差异全部落在 STR 段：新增 intern 串 `pub`（4B 长度前缀 + 3B 字符 = 7B）。
@@ -409,7 +409,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   gt_ccr        eaa2ee1cdf6a1bb128bf5f4cc0903d8ea688d14f68cd47c75dacdd3cfb03f74b 131102
 #   gt_static_ccr e13b36c3d24e1a8ffe1c1c5d86262e3a1c85132fda4ce87684846b072b8a4273 131309
 
-# ── 【本次重锁 2026-10-27】pub 彻底处理（可见性始终生效 + arena 全局归 stdlib）──
+# ── 「本次重锁 2026-10-27」pub 彻底处理（可见性始终生效 + arena 全局归 stdlib）──
 # **性质 = 语义处理 + 内容面归类，非发射面泄漏**。D1 5/5 PASS。
 #   · 可见性开关 `g_lib_on` 退役：普通用户程序（无 pub）也执行库可见性过滤。
 #     函数/类型/全局/方法跨库只认导出表；非 pub 静默不可见（N01/N06/N08）。
@@ -426,7 +426,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   pa_static_ccr 5d55b8b85999512a23c04ff31c0a690e6c99a43f071dbac30eb43ec793a0aa6e 97762
 #   gt_static_ccr 51cd6f0c7e191fa3967cb6ea63cb85d610ae865be3bb4a3cc7bb5023ea9c979d 131316
 
-# ── 【本次重锁 2026-10-25】import graph：每文件独立 SourceManager 身份 ──
+# ── 「本次重锁 2026-10-25」import graph：每文件独立 SourceManager 身份 ──
 #   （本条在 2026-10-27 合并 develop 后作废待重测；保留归因，值为当时测量。
 #    合并后的实际值由本轮结束后重新采集写入。）
 #   D1 5/5 PASS（canary_check.sh 实跑；5 条各自二次构建逐字节相同）。
@@ -463,7 +463,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #     gt_ccr        6087a2b72c88acc78e2f433c1318970cc353a07966ab40b54ff9d7e0283508a8 127262
 #     gt_static_ccr b082fe1055a84241711d816e73c188ed6934e01810bb265ca075eb4486f036da 127469
 
-# ── 【本次重锁 2026-10-27】import graph 合并进 develop ──
+# ── 「本次重锁 2026-10-27」import graph 合并进 develop ──
 # **性质 = 内容面收缩，发射面零足迹**。D1 5/5 PASS（canary_check.sh 实跑，
 # 5 条各自二次构建逐字节相同）。canary ELF 逐字节不变（`4e79ced2…` 49334B）。
 # 四条 `.ccr` 变化（相对 2026-10-27 pub 阶段的值）：
@@ -491,7 +491,7 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   gt_ccr        acf233916287ee3e1abf1db8db779dbc908753c481e08a36f99fb8446805545f 131109
 #   gt_static_ccr f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e60348088069d668 131299
 
-# ── 【本次重锁 2026-10-27】`--static` prelude 改为独立 SourceManager 文件 ──
+# ── 「本次重锁 2026-10-27」`--static` prelude 改为独立 SourceManager 文件 ──
 # **性质 = 静态路径的行坐标与类型去重变化，发射面零足迹**。D1 5/5 PASS。
 # 变化面恰两条，均为 `--static`：
 #   pa_static_ccr sha 变、**尺寸不变**（97731）⇒ 行坐标/表格内容位移，非体量变化。

@@ -171,7 +171,7 @@ def struct_colon_to_eq(src):
     if toks and toks[-1].type == T.EOF:
         toks[-1].start = len(src)
         toks[-1].end = len(src)
-    # ⚠ **不能直接用 `v4_migrate.classify`**：它的 `decl_brace_pending` 假定「`struct`/`enum`/
+    # 警告：**不能直接用 `v4_migrate.classify`**：它的 `decl_brace_pending` 假定「`struct`/`enum`/
     # `impl`/`interface` 之后的首个 `{` = 声明体」（v3 事实）。v4 的声明体是 `:` + region、
     # **没有** `{` ⇒ 该标志会一直挂到**后面第一个结构体字面量**上，把它误判成 block
     # （实测：`struct P:` … `P{b: 11}` 的 `{` 被判 block ⇒ 分隔符一处也不改）。
@@ -286,7 +286,7 @@ def _strip_sentinels(text):
 # 那不是文档形。⇒ 在调用它之前，把一个**良性占位 token** 插进 `=>` 与 `{` 之间，
 # 让 `{` 的前驱不再是 `=>` ⇒ 回落成 **block** 分支 ⇒ 得 `=>` + `:` + region。
 # 产物里再把占位去掉 ⇒ **`Pat =>:` + region**。
-# ⚠ 只在 `=>` **紧跟** `{` 时插入：那种 `{` 恒是臂体块（结构体字面量须写成 `Foo {`）。
+# 警告：只在 `=>` **紧跟** `{` 时插入：那种 `{` 恒是臂体块（结构体字面量须写成 `Foo {`）。
 _ARM_BLOCK_RE = re.compile(r'=>([ \t]*)\{')
 _ARM_PLACEHOLDER = '(0)'
 
@@ -348,7 +348,7 @@ def migrate_segment(s, label):
             rec['changed'] = s3 != s
             rec['v4_parses'] = True
             return s3, rec
-    # ⚠ 必须用 `table` 策略：`skip` 会**整段跳过 `pre_transform`**，而 T6a 在 `pre_transform`
+    # 警告：必须用 `table` 策略：`skip` 会**整段跳过 `pre_transform`**，而 T6a 在 `pre_transform`
     # 的 `_t6_extra_ops` 里实现的三件改写（E1 struct 字面量 `:`→`=` · E5 `None`→`none` ·
     # E6 `return match` 臂体块去内层 `return`）**都挂在那里**（实测教训：用 `skip` 跑出来的
     # 臂体是 `Pat =>: ` + region —— 两个前端**都不吃**，见 parser.cr `parse_match_expr`：

@@ -11,7 +11,7 @@
 > **定位点**：**符号定位点为主**（函数名 / 唯一子串）；行号只作示例（本仓已多次实测行定位点变化）。
 > **范围**：`src/compiler/checker.cr` 的 `bi_add` 表（22 条）· 其消费者的三处扫描点 · 各条目的实现面（`src/runtime/rt.s` · `src/arch/**` · `src/stdlib/**`）。
 > **性质**：本文件**只出分类与影响面**；裁决已由 team-lead 作出（见 §8）。**本文件是本次侦察唯一新增的文件**，未改任何其它档。
-> **⚠ 证据等级（必读）**：本文所有「真实语义签名」均为 **取证**（读实现/注释/调用点推出），**不是实测**——本次侦察**未跑任何 S1P、未跑探针、零构建**。凡未取证处一律标「待定」（本表**零条**待定）。
+> **警告：证据等级（必读）**：本文所有「真实语义签名」均为 **取证**（读实现/注释/调用点推出），**不是实测**——本次侦察**未跑任何 S1P、未跑探针、零构建**。凡未取证处一律标「待定」（本表**零条**待定）。
 
 ---
 
@@ -41,7 +41,7 @@
 | 3 | `load_str_ptr` | `TI_STR` | `(buf: string, pos: int) -> string` | **有类型** | `rt.s` 头注 `load_str_ptr(buf: string, pos: int) -> string`；调用点 `src/compiler/module.cr` `load_str_ptr(g_open_docs, i * 24)` |
 | 4 | `store_str_ptr` | `TI_INT` | `(buf: string, pos: int, val: string) -> int` | **有类型** | `rt.s` 头注 `store_str_ptr(buf: string, pos: int, val: string) -> int`；调用点 `src/compiler/module.cr`（两处）· `src/compiler/checker.cr` 诊断写入 |
 | 5 | `fiber_switch` | `TI_INT` | `(current_sp_addr, next_sp) -> int` | **裸字边界** | `rt.s` 头注；调用点 `src/stdlib/sched.cr`（两处） |
-| 6 | `fiber_init` | `TI_INT` | `(stack_bottom, entry_fn) -> int` | **裸字边界** | `rt.s` 头注；调用点 `src/stdlib/goroutine.cr`。⚠ **名字碰撞见 §7** |
+| 6 | `fiber_init` | `TI_INT` | `(stack_bottom, entry_fn) -> int` | **裸字边界** | `rt.s` 头注；调用点 `src/stdlib/goroutine.cr`。警告：**名字碰撞见 §7** |
 | 7 | `g_set_curg` | `TI_UNIT` | `(ptr) -> unit` | **裸字边界** | `rt.s` 头注 `g_set_curg(ptr) — set current goroutine pointer`；调用点 `src/stdlib/sched.cr`（三处） |
 | 8 | `g_get_curg` | `TI_INT` | `() -> ptr`（**无参**） | **裸字边界** | `rt.s` 头注 `g_get_curg() — get current goroutine pointer`；调用点 `src/stdlib/sched.cr` |
 | 9 | `m_start_workers` | `TI_UNIT` | `(n: int) -> unit` | **裸字边界** | `rt.s` 头注 `m_start_workers(n: int) — launch N worker threads via clone`；调用点 `src/stdlib/sched.cr` |
@@ -69,7 +69,7 @@
 | 加「参数型」的代价 | 第 3 条同索引平行数组（或改 stride）⇒ 声明 +1 · init +1 · 扩容 +1 · `bi_add` 写入 +1 · 消费点读 +1 | 同上 |
 | **编号/顺序敏感度** | **不敏感（好消息）**：三处消费者**全按名字扫描** ⇒ **加列不动任何编号、不 shift 现有条目** | ① `checker.cr` EXPR_CALL 回退分支（`bi` 循环扫 `g_rt_builtin_names` → 命中即回 `g_rt_builtin_ret_types`）② `checker.cr` 注册分支（同扫描，逐条注册 SYM_FN）③ `src/compiler/ir_gen.cr` 的 `ir_call_return_type`（同扫描） |
 | `.ccr` 段布局 | **不动**：表**不序列化**（全仓 `g_rt_builtin` 仅出现在 `checker.cr` + `ir_gen.cr` + 两处注释，**无 `ccr_*` 引用**） | 同上 |
-| ⚠ **canary 面（否 (甲) 的主因）** | `checker.cr` 的注册分支会为**每个未被用户遮蔽的内建建一行 SYM_FN**（`g_sym_count` 递增，注释明写「必须在 collect_decls 之后」）⇒ **若方案走「给内建合成 FuncInfo / 参数符号」⇒ 符号编号变 ⇒ `.ccr` SYM 段字节面可能变 ⇒ canary 需更新基准值声明**（并按 D1 检查门：红 ⇒ 非确定性不得更新基准值） | `checker.cr` 注册循环（`sym_set_name/sym_set_kind/sym_set_type/sym_set_node` + `g_sym_count = si2 + 1`） |
+| 警告：**canary 面（否 (甲) 的主因）** | `checker.cr` 的注册分支会为**每个未被用户遮蔽的内建建一行 SYM_FN**（`g_sym_count` 递增，注释明写「必须在 collect_decls 之后」）⇒ **若方案走「给内建合成 FuncInfo / 参数符号」⇒ 符号编号变 ⇒ `.ccr` SYM 段字节面可能变 ⇒ canary 需更新基准值声明**（并按 D1 检查门：红 ⇒ 非确定性不得更新基准值） | `checker.cr` 注册循环（`sym_set_name/sym_set_kind/sym_set_type/sym_set_node` + `g_sym_count = si2 + 1`） |
 | 同步点 | **`checker.cr` 与 `ir_gen.cr` 是同一张表的两次独立扫描** ⇒ 任何新列若 ir_gen 也要用，**必须两处同改**（否则又是两面不一致） | 上表 ①③ |
 
 **⇒ 最小改法**（只给 §1 的「有类型」2 条补参数型）**不动编号、不动 `.ccr`**，前提是**不引入参数符号**。
@@ -80,7 +80,7 @@
 
 **被推翻的定性**（team-lead 转述 `b8-e1` 的举例，未核验）：
 
-> ~~「『有类型』那族（`alloc → string`、`sched_go`、`g_get_curg`）**类型是有意义的**，该补参数型」~~ **【已作废】**
+> ~~「『有类型』那族（`alloc → string`、`sched_go`、`g_get_curg`）**类型是有意义的**，该补参数型」~~ **「已作废」**
 
 **实测/取证结论**：
 - `alloc` 的 `string` 是它的**返回型**（`ret_ti = TI_STR`）；它的**实参 `size` 是裸字**（`rt.s` 头注 `alloc(size: int) -> string`）。
@@ -99,7 +99,7 @@
 | `w32` | `src/compiler/dyn_arr.cr` · `src/compiler/elf.cr` | 同上 |
 | `w64` | `src/compiler/dyn_arr.cr` · `src/compiler/elf.cr` | 同上 |
 | `_dyncpy` | `src/compiler/dyn_arr.cr` | 同上 |
-| `fiber_init` | `src/stdlib/scheduler.cr`（**0 参**，见 §7） | ⚠ 签名与内建侧**不同** |
+| `fiber_init` | `src/stdlib/scheduler.cr`（**0 参**，见 §7） | 警告：签名与内建侧**不同** |
 | `sched_go` | `src/stdlib/sched.cr`（`-> string`，即 A₂ 对齐后的形态） | 同上 |
 
 **遮蔽规则出处**：注册分支注释明写「**skip if already defined by user**」⇒ 用户定义优先。
@@ -124,7 +124,7 @@
 
 ## 7 潜伏缺陷（**今天不可达**）：`fiber_init` 名字碰撞
 
-> ⚠ **措辞纪律**：这是**潜伏**缺陷，**当前不可达**，**不得写成「现网缺陷」**。要素如下（供 TODO 落条）。
+> 警告：**措辞纪律**：这是**潜伏**缺陷，**当前不可达**，**不得写成「现网缺陷」**。要素如下（供 TODO 落条）。
 
 | 要素 | 事实 | 定位点 |
 |---|---|---|

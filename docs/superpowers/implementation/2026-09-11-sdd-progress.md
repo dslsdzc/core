@@ -14,7 +14,7 @@ Plan: docs/superpowers/plans/2026-09-06-core-maintainer-docs-reorg.md
 2. 多次 rebase 与并发会话提交互相纠缠，多次 undo/恢复
 3. 4dc16251 冲突(README/editor-setup 文字级)，取 6f817653 原版解决
 4. 分支链多次 rebase 后树不完整(各提交只含自己增量)，用户批准"合树重建":
-   - 基于 develop 建新提交，从 54202d48(Task1-4 完整树)导入 + 6f817653(Task5 文件)+ /tmp 草稿(Task6-8)
+   - 在 develop 上建新提交，从 54202d48(Task1-4 完整树)导入 + 6f817653(Task5 文件)+ /tmp 草稿(Task6-8)
    - 内容验证：project-book 64 行/glossary 85 行/crasm 34 行，链接全解析，行数约束过
 
 ## 任务状态

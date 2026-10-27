@@ -91,12 +91,12 @@ build_ok("tf01_build_clean", "tests/suite/chan_test.cr")
 # (i) 小阶段（2026-09-19）：`@raw_int` 放宽接受**指针** ⇒ **原夹具 ptr_ref_first.cr 不再产 TF07/TB01**。
 # 本正控**换夹具、意图不变**（「build 面豁免码仍放行（rc=0 + 产物）**且仍被报出**」）：改用**仍被拒**的
 # 串实参级联（2×TF07 → 两侧 TI_NEVER → 1×TB01，与旧夹具**同形**）；
-# 原夹具另固定 (i) 的**新语义**——⚠ 拆成**两条**（照上方 tf01 先例，team-lead 2026-09-19 复核退回）：
+# 原夹具另固定 (i) 的**新语义**——警告：拆成**两条**（照上方 tf01 先例，team-lead 2026-09-19 复核退回）：
 #   · **`check` 面**断言**缺席**（`rc=0` 且无 TF07/TB01）——**只有 check 面有意义**：`check` 不在
 #     build-scope 豁免内；**build 面 TF07 被豁免 ⇒ `build_ok`（rc=0 + 产物）无论如何都过**，
 #     两条合起来才是「放宽后指针形态干净通过」这句话；
 #   · **`build` 面**保留 `build_ok`（固定「能过 + 有产物」那一半）。
-# 实测（本次基点）：级联夹具 check rc=1 · TF07×2 · TB01×1；build rc=0 · 产物 ✓ · TF07×2 · TB01×1。
+# 实测（本次基点）：级联夹具 check rc=1 · TF07×2 · TB01×1；build rc=0 · 产物 通过 · TF07×2 · TB01×1。
 build_ok("tf07_tb01", write("tf07_tb01_cascade",
                             'fn main() -> int:\n    s := "a"\n    t := "b"\n    return @raw_int(s) - @raw_int(t)\n'),
          ("TF07", "TB01"))
@@ -113,7 +113,7 @@ build_ok("tf07_tb01_ptr_clean", "tests/suite/ptr_ref_first.cr")
 # 背景：S1 把 `&x` 改判 `TYP_REF` ⇒ 原谓词（只认 `TYP_PTR`）把 `@raw_int(&x)` 判成 TF07
 #   （实测：`ptr_ref_first.cr` 由 rc=0 转 rc=1）⇒ 与「`&x` 与 `&T` 同 kind」的裁定二目标冲突。
 # **三向固定（缺一不算）**：正（`&x` 受）· 反（**四类各一颗**仍拒，断言到码）· 对照（int/dex 受）。
-# ⚠ **面选 `check`**：TF07 在 **build scope 被豁免**（`diag.cr`）⇒ build 面恒 rc=0
+# 警告：**面选 `check`**：TF07 在 **build scope 被豁免**（`diag.cr`）⇒ build 面恒 rc=0
 #   ⇒ 反固定写在 build 面会**恒绿**（本仓「面 × 豁免表」纪律：负控须写 `check` 面 rc=1 + 含码）。
 def neg_check(name, src_path, want_code):
     clean()
@@ -125,7 +125,7 @@ def neg_check(name, src_path, want_code):
 
 
 # 正固定：`@raw_int(&x)`（**传 REF**）必须受 —— 这条是 S1 落地后转红、S2 修好的那一处
-# ⚠ 探针形态：**直接把 `@raw_int(...)` 当返回值**（`int` 函数）。写成 `@raw_int(x) != 0` 会得到
+# 警告：探针形态：**直接把 `@raw_int(...)` 当返回值**（`int` 函数）。写成 `@raw_int(x) != 0` 会得到
 #   `bool` ⇒ 与 `-> int` 冲突 ⇒ **TF01**（我第一版就这么写，三条正/对照固定全红——**是探针错，不是门错**）。
 _s2_addr = write("s2_addr_ok",
                  "fn main() -> int:\n    x : ., mut = 7\n    return @raw_int(&x)\n")

@@ -187,7 +187,7 @@
 | — | `#2026-09-20-1` | 2026-09-20 | 阶段 8 裁定二实施（PR #153）· `b8-e1` 实测 | （2026-09-20 已收尾：1–5 已修并落 15 例检查；6 + 三条设计未实现保留登记：见条目“状态”段） 注：（覆盖为零 · 两条合起来才是完整图画）`region_check` 逃逸面零活覆盖：1 `EC_B_ESCAPE`(B010) 全仓零 raise 点（`grep -rn EC_B_ESCAPE src/` 只命中 `ast.cr:482` 的定义行；本 pass 实际报 `EC_B_LIFETIME`(B011)）⇒ B010 永不可能出现；2 B011 语料零命中（全 `tests/suite/*.cr` 35 档 + 全部 `tests/probes/*.cr` 逐档 `check` ⇒ 零）+ `tests/` 无任何 B011 断言（grep 空）+ 手造两个真逃逸形态（循环体内取址后返回）post 全 `ok`（B011 一次未触发）；3 机制之一 = `rc_return_escape` 对 `SG_FUNC` 直接放行（源码注释原文 `// function-level alloc = ok to return`：函数级 alloc 明确允许返回）；4 同面第二处 = 存储逃逸丢弃返回值：`src/compiler/region_check.cr:108`（S6 阶段加注释前为 `:102`）`rc_pts_has_escaped(val_pts, ni, 0);  // simplified check`：判定调用发生但结果被丢 ⇒ 该点不产生任何诊断，而 `docs/maintainer/design/pointer-model.md` 第五节 第 3 点把它写成已实现的三点之一（“把 alloc 指针存入外部可达位置(store)→ 同样按 SG 区间判定”）⇒ 文档与实现不一致（同一面的两条：传参/返回有 raise 点但零命中，存储点连 raise 点都没有）。为什么重要：S6 把三处安全门的 kind 谓词扩为“`TYP_PTR` ∪ `TYP_REF`”，但今天没有任何检查能证明这三门未修复（改或不改都不会红/绿）⇒ 第5.2节“安全面不得净减”在这一面无法被现有检查度量（净减测不出、净增也测不出）。附带：`tests/selfhost/test_region_cfg.py::test_region_check_pointer_escape` 的旧断言 `'B010' in out or 'error' in out`，第一支从来没有内容，长期靠第二支命中 TF01（`&x` 当时是 PTR、返回型声明 `&int` ⇒ 返回型不符）而绿：是裁定二（`&x` → `TYP_REF`）把它照出来的，不是改判弄坏的；该断言已重定为“只断言真实成立的性质”（见该档注释）。 |
 
 | — | `#2026-09-22-1` | 2026-09-22 | 阶段 8 裁定二 S4 · `b8-e1` 实测 | 注：（不报错错值 · 本次修复）`REF.f` 字段自动解引用误编译（local 形态）：`checker` 对 `TYP_REF` 对象解包后按结构体查字段（`checker.cr:3725`）⇒ 接受 `p.v`；而 `ir_gen` 的 `EXPR_FIELD` 不发解引用 ⇒ `IR_LOAD_FIELD` 把“地址”当聚合读 ⇒ 不报错错值（实测 `p := &s; p.v` 得 8 而非 42；`(*p).v` 得 42 ⇒ 缺陷 = 缺那一条 `IR_DEREF`）。裁定二的作用 = 把“响亮拒绝”换成“不报错错值”：`p := &s; p.v` 由 pre 的 `check=1` 变为 post 的 accept + 不报错 8；本次修回 42（`ir_gen` 镜像 checker 的 REF 解包；只对 REF：实测 `p as *S` 后 `p.v` 仍 check=1）。与 `#2026-09-22-2` 根因不同，不合并（本条 = ir_gen 缺解包；那条 = 形参定型丢 REF）。 |
-| — | `#2026-09-22-2` | 2026-09-22 | 阶段 8 裁定二 S4 · `b8-e1` 实测 | 注：（预存缺陷 · 不报错错值 · 本次修复）`&S` / `&mut S` 形参形态的 `r.v` 误编译：根因 = REF 身份在 IR 形参定型处丢失：`ir_gen.cr:3296` 取 `ast_type_val(pn)`，而 `&S` 节点（`EXPR_REFTYPE`）`type_val = 0` ⇒ 槽型退化成 `TI_INT`（`if param_type < 0` 护栏拦不住 0）⇒ `EXPR_FIELD` 看不到 REF ⇒ 不报错错值（实测 `fn f(r: &S){r.v}` 得 8 而非 42；`--dump-params` 实证 `PARAM f p0 r slot=0 decl=0`，对照 `string` 参数 `slot=3` ✓）。两代皆错（pre/post 均 run=8）⇒ 存在早于裁定二、裁定二未触及形参面。修法有先例：`ir_gen.cr:3305`（阶段 5 `dex?` 同形特判：某形态 `unpack_type` 返 0 ⇒ 槽型退化 ⇒ 按声明面节点另定槽型），注释原文照引。ABI 零影响（实测）：`callseq.cr`/`frame.cr` 全部 9 处分类点皆为 `== TI_DEX ⇒ xmm 类，其余 ⇒ GP 类` 恒等式，而 `TI_DEX = 1`、REF 行下标 ≥ 9 ⇒ REF 天然落 GP ⇒ 改槽型不改 ABI 类。实现取“只查不建”：checker 解析签名时已建过该 REF 行（实测类型表中存在 `kind 3`）⇒ 线性查找即可 ⇒ 零新增类型行（注： `alloc_type` 是裸分配器、不去重，另分配会写进 TYPE 段）。禁止事项：在无 ABI 检查时凭“补一支特判”直接改槽型（会造出 `dex?` 那次的同形失配）。与 `#2026-09-22-1` 互指，根因不同不合并。 |
+| — | `#2026-09-22-2` | 2026-09-22 | 阶段 8 裁定二 S4 · `b8-e1` 实测 | 注：（预存缺陷 · 不报错错值 · 本次修复）`&S` / `&mut S` 形参形态的 `r.v` 误编译：根因 = REF 身份在 IR 形参定型处丢失：`ir_gen.cr:3296` 取 `ast_type_val(pn)`，而 `&S` 节点（`EXPR_REFTYPE`）`type_val = 0` ⇒ 槽型退化成 `TI_INT`（`if param_type < 0` 护栏拦不住 0）⇒ `EXPR_FIELD` 看不到 REF ⇒ 不报错错值（实测 `fn f(r: &S){r.v}` 得 8 而非 42；`--dump-params` 实证 `PARAM f p0 r slot=0 decl=0`，对照 `string` 参数 `slot=3` 通过）。两代皆错（pre/post 均 run=8）⇒ 存在早于裁定二、裁定二未触及形参面。修法有先例：`ir_gen.cr:3305`（阶段 5 `dex?` 同形特判：某形态 `unpack_type` 返 0 ⇒ 槽型退化 ⇒ 按声明面节点另定槽型），注释原文照引。ABI 零影响（实测）：`callseq.cr`/`frame.cr` 全部 9 处分类点皆为 `== TI_DEX ⇒ xmm 类，其余 ⇒ GP 类` 恒等式，而 `TI_DEX = 1`、REF 行下标 ≥ 9 ⇒ REF 天然落 GP ⇒ 改槽型不改 ABI 类。实现取“只查不建”：checker 解析签名时已建过该 REF 行（实测类型表中存在 `kind 3`）⇒ 线性查找即可 ⇒ 零新增类型行（注： `alloc_type` 是裸分配器、不去重，另分配会写进 TYPE 段）。禁止事项：在无 ABI 检查时凭“补一支特判”直接改槽型（会造出 `dex?` 那次的同形失配）。与 `#2026-09-22-1` 互指，根因不同不合并。 |
 | — | `#2026-09-24-1` | 2026-09-24 | v4 迁移差距分析 + 协调者实测 | （声明但不校验 / 有码但不 raise）前端不报错面清单（5 处，均实测）：1 `EC_TF_MISSING_RET`(TF02, `ast.cr:404`) 零 raise 点（全仓 1 命中）⇒ 缺 return 由 TF01“Function return type mismatch”拦住，消息不指真实原因（实测四档：空体 / 以 unit 调用收尾 / `if` 无 `else` / `loop` 里 `break` 出走 ⇒ 全 `check` rc=1 报 TF01，`build` rc=1 + 零产物）：非健全性漏洞，是诊断不精确；2 `pub` 零读点（`parser.cr:840` 声明 + `:875` 赋值，无读取点）⇒ 写了不生效且不报错；3 match 臂的 `=>` 不校验（`parser.cr:1115` 裸 `advance_tok()`）⇒ 分隔符写什么都收；4 struct 字面量字段分隔符盲跳（`parser.cr:552-554`，第二个 `advance_tok()` 返回值丢弃）⇒ `=` 与 `:` 两形都收（已由 v4 迁移 T0 规格覆盖（T5 修），本条目不另立修法）；5 类型位的 `.`/`auto` 全拒且消息错（六档实测：形参 / 字段 / 枚举载荷 / 切片元素 / 返回位皆 rc=1，报 `expected type after '->'`，而那句是返回型的模板，形参位也报）。本条目只登记，未修（4 除外，见上）。 |
 | — | `#2026-10-11-1` | 2026-10-11 | v4 迁移施工期 + 维护者口述 | （设计·未决）v4 规约的战术“策略定义”语法（现形 `#tag`）待重设计：维护者裁定 `#` 族只有使用面（`#simp`/`#induct(x)` 都读作“在这里用一个战术”），而 `#tag` 是唯一一个“用 `#` 声明新东西”的构造 ⇒ 范畴错误，该删而非改名；连带“策略体是竖排序列、而语义是集合”的形状说谎、以及可复用名被关在标签族里（不能 `import`/文档化/单测）。两个候选方向（维护者未拍）：不留 = 第10.8节 整节删、复用只走库（`import std::proof::arithmetic` 后 `#arithmetic`，名字解析走 import 作用域）+ `spec fn`；留 = 必须长成一个非 `#` 的声明形。本条目只登记，未改 `docs/developer/syntax.md` 第10.8节。 |
 | — | `#2026-10-12-7` | 2026-10-12 | v4 迁移 T7 施工期 | （语料面 · 另案）`#check`/`#ensure` 的 inline 过渡形余 15 档未翻文档形（负例本体 + `t3_pos_ensure_*`）：两形都收 ⇒ 不阻塞；翻转会改负例语义，须与 `test_spec_grammar` 期望同阶段 |
@@ -847,7 +847,7 @@
 
 ### 2026-09-15-4. FC 阶段 T3：隐藏通道 `--diag-gate-report`（2026-09-15：report-only 二次核对实现方式；默认关、两态零差异） （原 #61）
 - 形态：`main.cr` 注册 `cli_flag_bool("diag-gate-report", …)`（与 `--verify-*` 家族同址同式）+ 检查内只读报告：`[diag-gate] face=build blocked=N total=M codes=<用户面码,...>`（用 `error_cat_prefix`/`pad_diag_num` 渲染，覆盖 `g_diag_count > 0` 的前端类型面）。
-- 检查（本实例实跑）：默认关两态零差异：72 档 `diff -rq` 零差异 · 探针 29 档零差异（与 T2 基线逐字节同）；开态：rc 与产物 sha 逐字节同（ptr_arith canary 两态同 `95084e7b…`、arena_test/ptr_ref_first 同），日志仅多一行标记 ✓。
+- 检查（本实例实跑）：默认关两态零差异：72 档 `diff -rq` 零差异 · 探针 29 档零差异（与 T2 基线逐字节同）；开态：rc 与产物 sha 逐字节同（ptr_arith canary 两态同 `95084e7b…`、arena_test/ptr_ref_first 同），日志仅多一行标记 通过。
 - 重放对表（vs T1）：101 档（72 语料 + 29 探针）重放 ⇒ 无表外命中：语料面 25 档 blocked（= T1 `would_block.tsv` 34 行 − 7 行 build 面豁免 − 2 行 P21[解析阶段检查，不属本报告面]）逐条对齐；探针面 11 档（TA01/TS03）为 T1 表未覆盖面（形式差，已登记）。
 - 检查全套：五 CI job 5/5 rc=0 · 枚举 60/60 · selftest 415/415 · canary `95084e7b…d475` IDENTICAL · `.ccr` 四条 96015/96158/142793/142936 · dump 3521 · cir 165915B · 链 `24802386a1…` IDENTICAL · `backend_bootstrap` rc=0。
 - 登记：本通道只读（不改 rc/产物）；`blocked` 计数含重复码（逐诊断计数，非去重）：同一码多次命中会重复出现（照原样保留，便于定位）。
@@ -1184,7 +1184,7 @@
   | 实参类型 | LET 位（checker 登记 `g_gen_binds` ⇒ 类型项键） | 实参位（回落路径 ⇒ 按实参 IR 型拼名串） |
   |---|---|---|
   | 原生 `int`（`idf(7)`） | `idf[int]` | `idf[int]`（一致） |
-  | 非原生 `P`（结构体） | `idf[P]` ✓ | `idf[unit]` ✗（退化） |
+  | 非原生 `P`（结构体） | `idf[P]` 通过 | `idf[unit]` 失败（退化） |
 - 根因：ir_gen 的泛型重定向有两条路径（`ir_gen.cr:1931-1984`）：优先走 checker 登记的调用点绑定段（`g_gen_binds` ⇒ `inst_key_of_ti` 精确类型项键，`:1939-1960`）；后备（`bstart < 0`）按实参 IR 变量类型拼名串（非原生 → 后备名，`:1962+`）。而实参位的调用点因“已解析直调的实参不被推断”（TODO #2026-09-16-31）从未获得 `g_gen_binds` ⇒ 永远走后备 ⇒ 非原生实参退化为 `unit`。
 - 后果（未追，明写）：若实例体依赖 `T`（返回/参数类型），实参位的调用可能拿到错误行为。本次探针的 `idf` 返回常量 ⇒ 不可观测 ⇒ 未追（不当断言）。
 - 状态：本次（#2026-09-16-31）附带修复 ： (a) 补实参推断后，实参位调用点获得 `g_gen_binds` ⇒ 自动改走精确键路径 ⇒ 实例名 `idf[unit]` → `idf[P]`。
@@ -1817,7 +1817,7 @@
   `sig_fingerprint:4000-4023` 同理。⇒ 函数体内部形状不在指纹内（改体不改指纹）。
 - 防线现状：真正关闭“旧快照复活旧 IR”通道的是 `cir_cache.cr:549-551` 的身份比对
   （`cid == 0 || entry_cid != cid ⇒ miss`；`cid` = 运行中 ELF 全文件哈希，`:145`）⇒ 任何源码改动都要重建
-  ⇒ 身份必变 ⇒ 旧条目整体拒收 ✓（本次 `CIR_CACHE_VER 21→22` 另叠加语义面换代）。
+  ⇒ 身份必变 ⇒ 旧条目整体拒收 通过（本次 `CIR_CACHE_VER 21→22` 另叠加语义面换代）。
 - 为何必须登记：若将来身份检查被移除/降级，任何体级编辑都会不报错复活旧 IR（rc=0 的不报错类）；
   且“指纹”这个名字会让人误以为它覆盖体（本次计划初稿就这么误信过）。同族 `#2026-09-17-17`（缓存键缺环境/命令形态）。
 - 验收要求（实施时）：体级编辑（改函数体内一行）⇒ 身份必变（实测 hash 差）· 身份检查禁用 ⇒ 必须 cache miss
@@ -2273,7 +2273,7 @@ if g_error_count > 0:     // ← print_parse_errors() 永远走不到
 ```
 ⇒ 不带码的 `add_error` 消息，只要同一次解析里还有任何带码诊断，就永远不打印。
 
-正控（机制自证）：`struct S:` ⏎ `    f int,`（唯一诊断 = 不带码的“expected ':' after struct field name”）⇒ 输出确实打印 `error: expected ':' after struct field name` ✓；而带码诊断一起出现时它就不见了。
+正控（机制自证）：`struct S:` ⏎ `    f int,`（唯一诊断 = 不带码的“expected ':' after struct field name”）⇒ 输出确实打印 `error: expected ':' after struct field name` 通过；而带码诊断一起出现时它就不见了。
 
 当初的触发面：`flow` 分支那句 `add_error("expected 'fn' after flow")` 被记录下来但打印不出来（`grep -c` = 0）：该分支已随 `flow` 文档形实现消失，但同一缺陷面在别处仍在。
 同族：`#2026-10-12-1`（`TA01`）· `t2_neg_inbody`（Region 头实现漏洞，已修）： 母题 = 诊断报了、用户看不见。
@@ -2405,9 +2405,9 @@ error[ICE04]: type judgment indeterminate: never vs named#21 (uncovered face)
 
 | 形态 | pre（`/tmp/f0-base/b1/corec`） | 本次修前 | 本次修后 |
 |---|---|---|---|
-| `p := &s; p.v` | check=1（响亮拒绝） | check=0 · run=8（不报错错值） | run=42 ✓ |
-| `(*p).v` | run=42 ✓ | run=42 ✓ | run=42 ✓（未误伤） |
-| `p as *S` 后 `p.v` | check=1 | check=1 | check=1 ✓（PTR 不解，与 checker 一致） |
+| `p := &s; p.v` | check=1（响亮拒绝） | check=0 · run=8（不报错错值） | run=42 通过 |
+| `(*p).v` | run=42 通过 | run=42 通过 | run=42 通过（未误伤） |
+| `p as *S` 后 `p.v` | check=1 | check=1 | check=1 通过（PTR 不解，与 checker 一致） |
 
 ⇒ 本条的独立价值：裁定二把一条“响亮拒绝”换成了一条“不报错错值”，本次修回。
 ⇒ 与 `#2026-09-22-2` 根因不同（本条 = ir_gen 缺解包；那条 = 形参定型丢 REF）⇒ 不合并。
@@ -2428,8 +2428,8 @@ error[ICE04]: type judgment indeterminate: never vs named#21 (uncovered face)
 2. `&S` 的声明节点（`EXPR_REFTYPE`）`type_val = 0` ⇒ 槽型退化成 `TI_INT`（注： `if < 0` 护栏拦不住 0）
 3. ⇒ IR 形参变量不是 REF ⇒ `EXPR_FIELD` 看不到 REF ⇒ 不报错错值
 
-实证：`--dump-params` ⇒ `PARAM f p0 r slot=0 decl=0`；对照 `PARAM str_len p0 s slot=3 decl=3`（= `TI_STR` ✓）、
-`PARAM get_char p1 idx slot=0`（int ✓）⇒ 槽型确为 `TI_INT`。
+实证：`--dump-params` ⇒ `PARAM f p0 r slot=0 decl=0`；对照 `PARAM str_len p0 s slot=3 decl=3`（= `TI_STR` 通过）、
+`PARAM get_char p1 idx slot=0`（int 通过）⇒ 槽型确为 `TI_INT`。
 
 修法有先例（同形特判，不是从零）：`ir_gen.cr:3305-3306`（阶段 5 `dex?`）：某形态 `unpack_type` 返 0 ⇒ 槽型退化
 ⇒ 按声明面节点另定槽型。注释原文照引：
@@ -2481,7 +2481,7 @@ canary 5/5 值不变 · 全量（自举链 / `full-bootstrap` / 62 档 / `selfte
 - `docs/developer/at-intrinsics.md` — @ 内建原语完整规格
 
 ### 2026-08-09-1. 同步源码修改到伪代码文档（2026-08-09 记） （原 #6）
-- 背景：伪代码（docs/pseudocode/）基于源码快照翻译；以下源码变更后对应文档未同步
+- 背景：伪代码（docs/pseudocode/）按源码快照翻译；以下源码变更后对应文档未同步
 - 待同步清单：
   - `elf.cr` 编码修复（mov [r8],r10d → 45 89 10、BAD rip 检查允许清单 0x48）→ elf-1.md / elf-4.md
   - `parser.cr` local_stmts 动态扩容 + parse_all 防死循环 → parser-1/2/3/4.md

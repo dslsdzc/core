@@ -41,7 +41,7 @@
 #   **D1 确定性检查（2026-09-19 新增）**：canary ELF **两次构建逐字节对拍**（`cmp`；不新增 job、
 #     挂在采集步内，成本 = +1 次 clean-cache + 1 次构建）。**与 F3 是两件事**：
 #       F3 = 「与表内**旧值**相同」（防无声变化）；D1 = 「与自己**再构建一次**相同」（防非确定性）。
-#     **⚠ 重锁前置（硬要求）**：维护者**重新锁定前必须先看到 D1 绿**——否则只比旧值的流程会在
+#     **警告：重锁前置（硬要求）**：维护者**重新锁定前必须先看到 D1 绿**——否则只比旧值的流程会在
 #     采**一次**样就把**非确定值**锁进表（此后 canary 全绿，而产物其实每次都不一样），
 #     D1 正是区分「确定但变了」与「不确定」的那一步。
 #     **覆盖面**：**5 个条目全做**（`canary_elf` + `.ccr` 四条）——`.ccr` 是**序列化/顺序面**
@@ -402,7 +402,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$VALUES" != "$VALUES_DEFAULT" ]; then
-  echo "[canary] ⚠ 值表被 CANARY_VALUES/--values 覆盖：$VALUES（默认 = $VALUES_DEFAULT）"
+  echo "[canary] 警告：值表被 CANARY_VALUES/--values 覆盖：$VALUES（默认 = $VALUES_DEFAULT）"
 fi
 
 case "$MODE" in

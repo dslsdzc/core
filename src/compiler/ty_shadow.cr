@@ -839,7 +839,7 @@ fn sh_variant_term(ti: int, name_ni: int) -> int:
         return -1
     // 身份两名经 sh_name_token 加入序列（当前约定 = 裸 name 索引加入序列，索引用作
     // 序列元素时会被结构比较当术语下标解释，见 sh_name_token 注记）；两构造点（域/模式项）
-    // 仍逐位同一 ✓
+    // 仍逐位同一 通过
     return tt_atom(AK_SUM, ti, tt_cons(sh_name_token(ei_name(ea)), tt_cons(sh_name_token(name_ni), tt_nil())))
 
 // enum 命名行 / 泛型应用行 -> 域 = 各变体项之并（左深 union）。

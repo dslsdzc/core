@@ -9,7 +9,7 @@
 用途：把 v3 写法（`{}` 块 + `;` 分隔）**机械改写成** v4 写法（`:` 结尾 + layout 缩进 + 换行分隔）。
 形状只有两类（计划 §6.1）：`{}` → `:` + 缩进、`;` → 换行。**不做任何语义改动**。
 
-⚠ **本工具是一次性迁移工具，不是常设判定依据。**
+警告：**本工具是一次性迁移工具，不是常设判定依据。**
   迁移收尾后它就该被冻结/删除；不得把它接进 CI，也不得让任何常设门依赖它。
   它自带的三项读数（V1 解析 / V2 token 对拍 / V3 计数 / V4 注释计数）是**当时那一刻**的
   迁移验收读数，不是回归网（回归网见计划 §二 的代 0/代 1/代 2 代表）。
@@ -162,7 +162,7 @@ def classify(toks):
 #                   块内注释**保留**为同位置的独立注释行（V4「注释不得下降」+ 不丢信息）。
 #   'return'     —— 函数体只含注释 ⇒ 保留注释，补一条与**声明返回类型**匹配的显式 return。
 #                   本表里唯一一例的声明无 `-> T` ⇒ unit ⇒ 裸 `return`。
-# ⚠ 表外的空 region ⇒ **fail-closed 中止**（不猜、不静默跳过）。
+# 警告：表外的空 region ⇒ **fail-closed 中止**（不猜、不静默跳过）。
 EMPTY_ACTIONS = {
     # —— 裁定 1 规则 A：无 else + 条件纯局部量比较 ⇒ 删整条 if ——
     ('src/compiler/interp.cr', 337): 'delete-if',   # if op2 == 33 { }        // IR_ARENA_RESET
@@ -273,7 +273,7 @@ def _statement_start(toks, idx):
 #   E3 `@hotpatch(...)` 独立行 ⇒ 并入其后声明行：`parse_declaration`（parser.cr:1860）
 #      要求注解与声明**同行**（`parse_expr()` 之后立刻 `check(T_FN)`），独立行 ⇒ `error[P25]`。
 #
-# ⚠ 三条都**按行形精确匹配**，命中不了就**原样不动**（负例语料里的错位标注因此不被误改），
+# 警告：三条都**按行形精确匹配**，命中不了就**原样不动**（负例语料里的错位标注因此不被误改），
 #   只有「看起来是要改、但形态不在规则内」才进 `unresolved`（fail-closed）。
 _ANNOT_LINE_RE = re.compile(r'^#(check|ensure)\s*\(')
 _HOTPATCH_LINE_RE = re.compile(r'^@hotpatch(\(.*\))?$')
@@ -690,7 +690,7 @@ def transform_text(src, filename='<unknown>', empty_policy='table'):
                 # 变成 `fn f() -> int` / `#check(1 >= 0)` / `:` 三行 ⇒ 自源报 {P02,P25,V02}）。
                 # 修复后：`{` 独占行首 ⇒ `:` 落到**上一个非空输出行**末尾（该行本就是它
                 # 逻辑上的头部行），`{` 那一行随之消失。纯 layout、零 token 变更。
-                # ⚠ 边界：若该行是注释行，追加 `:` 会被注释吞掉 ⇒ 不追加，退化为独立 `:` 行，
+                # 警告：边界：若该行是注释行，追加 `:` 会被注释吞掉 ⇒ 不追加，退化为独立 `:` 行，
                 #    并**响亮登记**（不静默）。
                 if cur.strip():
                     cur = cur.rstrip() + ':'
@@ -711,7 +711,7 @@ def transform_text(src, filename='<unknown>', empty_policy='table'):
                 if idx in empty_braces:
                     # 策略 `unit`：空 region 里补一个 `unit` 表达式（v4 唯一的空值字面量；
                     # **`()` 在 v4 前端不可用**——`parse_primary` 的 LPAREN 分支不容空括号）。
-                    # ⚠ 这是**唯一会新增 token 的改写**，逐处登记在报告的 `unit_filled` 里。
+                    # 警告：这是**唯一会新增 token 的改写**，逐处登记在报告的 `unit_filled` 里。
                     cur = 'unit'
                     split_pending = True
                     report.setdefault('unit_filled', []).append('line %d' % tk.line)

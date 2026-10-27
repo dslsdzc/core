@@ -94,7 +94,7 @@ def mut_self_item2():
     """M7 **真跑路径**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
     ⇒ 六位位码探针须回 **24**（= 修复前读数；2026-09-18 复核重跑实测）；同时**原树正控**同探针须为 **30**。
     成本 ≈ 1 次重建（~1 min）+ 2 次探针编译。用途：把「突变能命中目标」从文档承诺变成**机检**。"""
-    # ⚠ v4 迁移：载荷由 v3 形（`{ … ; }`）改为 v4 形（`:` + layout 缩进 + 无 `;`），
+    # 警告：v4 迁移：载荷由 v3 形（`{ … ; }`）改为 v4 形（`:` + layout 缩进 + 无 `;`），
     #   且可选字面量 `None` → **`none`**（v4 拼音面；`None` 在 v4 是 `error[N01] Undefined name`）。
     #   语义（六位位码）不变：未突变树 = 30、突变树 = 24（本次 v4 形载荷实核 30）。
     probe = ("fn b2i(x: bool) -> int:\n"
@@ -275,7 +275,7 @@ def main() -> int:
         return txt.count(needle)
 
     # M7：条目 2（可选 == 表示透明）——突变 = 分派块失效化 ⇒ 位码回 **24**（2026-09-18 复核重跑实测）
-    # ⚠ v4 迁移（layout 缩进）：锚点由 v3 形 `… != 0 {` / `…left_var);` 改为 v4 形 `… != 0:`
+    # 警告：v4 迁移（layout 缩进）：锚点由 v3 形 `… != 0 {` / `…left_var);` 改为 v4 形 `… != 0:`
     #   / `…left_var)`（**去 `{`、去 `;`**，语义面同一处代码；见 mut_self_item2 同源锚点）。
     n1 = _once("src/compiler/ir_gen.cr", "if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0:")
     n2 = _once("src/compiler/ir_gen.cr", "lo := opt_cmp_optish(left, left_var)")
@@ -288,7 +288,7 @@ def main() -> int:
                    f"锚点×2={n1}/{n2}（各自须 =1）· BITCODE_PRE/POST 24/30={pre}/{post} · run.sh 注 24/30={rs}"))
 
     # M8：条目 3（extern 可选 ⇒ P24）——突变 = 撤 parser 的 extern_opt 检查 ⇒ 4 拒收例回 check=0
-    # ⚠ v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
+    # 警告：v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
     n1 = _once("src/compiler/parser.cr", "extern_opt : ., mut = 0")
     n2 = _once("src/compiler/parser.cr", "if extern_opt != 0:")
     n3 = _once("src/compiler/ast.cr", "EC_P_EXTERN_OPTIONAL : int = 1024")
@@ -299,7 +299,7 @@ def main() -> int:
     # M9：条目 4（顶层兜底 ⇒ P25）——突变 = 兜底退回裸 advance_tok() ⇒ 5 拒收例回 check=0
     # 锚点收紧（2026-09-18）：只用单行 `if tok_k(cur_tok()) != T_EOF {` 会被**无关新代码**撞形
     # （插值展开阶段的 `interp_parse_holes` 曾加过同形行 ⇒ 本判定依据在 CI 假红）。改为**顶层兜底特有的两行合体**。
-    # ⚠ v4 迁移：兜底锚去 `{`（`!= T_EOF:`）、`is_fileid` 锚去 `;`、码锚去 `;`；
+    # 警告：v4 迁移：兜底锚去 `{`（`!= T_EOF:`）、`is_fileid` 锚去 `;`、码锚去 `;`；
     #   「两行合体」的收紧规则**原样保留**（仍靠特有后继行区分同形行）。
     n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF:\n        check_error(EC_P_TOPLEVEL_TOKEN,")
     n2 = _once("src/compiler/parser.cr", "EC_P_TOPLEVEL_TOKEN")
@@ -311,7 +311,7 @@ def main() -> int:
                    f"兜底锚={n1} · 码锚={n2} · import 整句消费锚={n3} · 码 1025={n4} · 套件 error[P25]={'error[P25]' in tlr}"))
 
     # M10：条目 5（apx 白名单 ⇒ P26）——突变 = 撤白名单检查 ⇒ 5 拒收例回 check=0
-    # ⚠ v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
+    # 警告：v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
     n1 = _once("src/compiler/parser.cr", "apx_ok : ., mut = 0")
     n2 = _once("src/compiler/parser.cr", "if apx_ok == 0:")
     n3 = _once("src/compiler/ast.cr", "EC_P_APX_TAG         : int = 1026")

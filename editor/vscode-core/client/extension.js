@@ -11,7 +11,7 @@
 //       * textDocumentSync = 1（全量同步）：didChange 的 contentChanges[0].text
 //         必须为完整新文本，故这里传 document.getText()。
 //   - 服务器按文档打开顺序维护"最后一次成功检查的快照"（单文档全局状态机），
-//     hover/definition/completion/documentSymbol/semanticTokens 均基于快照，
+//     hover/definition/completion/documentSymbol/semanticTokens 均使用快照，
 //     客户端按当前活动文档发起请求即可。
 
 const vscode = require('vscode');
@@ -222,7 +222,7 @@ async function activate(context) {
   // 扩展激活时已打开的 core 文档（onDidOpen 在激活前已派发）
   for (const doc of vscode.workspace.textDocuments) { openDoc(doc); }
 
-  // ── 语义功能（均基于服务器快照；错误 → 空结果，不打扰用户）──
+  // ── 语义功能（均使用服务器快照；错误 → 空结果，不打扰用户）──
   const docParam = (doc) => ({ textDocument: { uri: doc.uri.toString() } });
 
   context.subscriptions.push(

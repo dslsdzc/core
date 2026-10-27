@@ -37,7 +37,7 @@ Core 仍在积极开发中。
 - 原始指针，以及编译期的指针、region、provenance 分析
 - 与程序 region 绑定的 arena 内存管理
 - 协作式 fiber 与 channel
-- 使用 `.cir` 快照进行函数级增量编译
+- 使用 `.cir` 快照做函数级增量编译
 - 面向目标特定操作的硬件接口表（HIT）
 - 泛型、接口、枚举、模式匹配、元组、数组、切片
 - 规约使用 Core 语法；验证后端仍在开发中
@@ -46,7 +46,7 @@ Core 仍在积极开发中。
 
 图表示计算与程序关系；格层表示状态与存储映射；目标编码把这些语义映射到具体执行模型。
 类型、provenance 与规约信息在转换过程中始终保留在语义 IR 里（`.cir` 供验证使用，
-`.ccr` 是格层存在结构的线性表示），因此验证与优化可以在最终目标编码之前进行。
+`.ccr` 是格层存在结构的线性表示），因此验证与优化可以在最终目标编码之前完成。
 
 详见 [Project Book](docs/project-book.md)、
 [Execution Model](docs/maintainer/design/execution-model.md) 与

@@ -34,7 +34,7 @@ corelsp 由 Core 自举编译器的前端子集拼接而成：LSP over stdio，r
 ## 四、同步模型与能力契约
 
 - 同步模式：`textDocumentSync=1`（全量同步，无增量），单文档全局状态机，每次 `didOpen` 重新检查主文档；检查覆盖导入闭包（res_imports/parse_all），闭包内文件有诊断也会发布。
-- 语义查询 = 快照查询：hover/definition 等基于“最后一次成功检查”的结果，请求 uri 与 `g_lsp_snapshot_path` 比对（`lsp_request_matches_snapshot`），文档有语法错误（本次检查失败）时返回空。取舍：不为查询阻塞重建，结果可能滞后一次检查。
+- 语义查询 = 快照查询：hover/definition 等使用“最后一次成功检查”的结果，请求 uri 与 `g_lsp_snapshot_path` 比对（`lsp_request_matches_snapshot`），文档有语法错误（本次检查失败）时返回空。取舍：不为查询阻塞重建，结果可能滞后一次检查。
 - 能力通告（initialize 响应）：诊断（publishDiagnostics）、hover、definition、completion（`triggerCharacters = ["@"]`，关键字 + 符号 + `@` 内建）、documentSymbol、semanticTokens/full（差分编码令牌流；跨行差分重建位置，deltaStartChar 非负）。
 
 ## 五、stdout 通道规则
@@ -47,7 +47,7 @@ corelsp 由 Core 自举编译器的前端子集拼接而成：LSP over stdio，r
 
 - VS Code：[editor/vscode-core/](../../../editor/vscode-core/)（语法高亮 + 客户端；`corelsp.path`/`corelsp.enabled` 设置）
 - Zed：扩展仓库 `dslsdzc/core-plugin-zed`（Rust wasm：`language_server_command` 返回命令路径，纯 TOML 无法指定命令，Zed 机制约束）；[.zed/settings.json](../../../.zed/settings.json) 内置默认配置（仅 LSP，无高亮）
-- Neovim：内置 LSP 直连 stdio；旧 compiler 插件 [editor/nvim/plugin/core.lua](../../../editor/nvim/plugin/core.lua)（基于 corec）功能重叠，启用 LSP 时移除
+- Neovim：内置 LSP 直连 stdio；旧 compiler 插件 [editor/nvim/plugin/core.lua](../../../editor/nvim/plugin/core.lua)（使用 corec）功能重叠，启用 LSP 时移除
 
 ## 七、集成测试
 

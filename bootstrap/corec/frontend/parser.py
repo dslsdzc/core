@@ -73,7 +73,7 @@ class Parser:
         """Pre-scan for 'NAME: TYPE = VALUE' declarations to resolve array sizes.
 
         v4 改判（T0 布局规格 §6.2 A4）：终止元由 `;` 改为**行边界** ⇒ 六元组收为五元组。
-        ⚠ **漏改即静默错答案**：具名长度会落到 `parse_type` 的 `.get(name, 0)` 兜底
+        警告：**漏改即静默错答案**：具名长度会落到 `parse_type` 的 `.get(name, 0)` 兜底
         （解成 0），既不报错也不可辨。⇒ 判定依据必须含**正控**（真取到非 0 的值）。
         """
         save = self.pos
@@ -228,7 +228,7 @@ class Parser:
             self.advance()
             # 标签表终止面（T0 布局规格 §6.2 A8 + A9 的对齐目标）：
             # **行边界** + `EQ`（`x : int, mut, pub = e` 的 `=` 仍保留）。
-            # ⚠ A9：自源 `parser.cr:871` 今天的终止符集 = EQ/SEMI/EOF，
+            # 警告：A9：自源 `parser.cr:871` 今天的终止符集 = EQ/SEMI/EOF，
             #   而本侧曾是 EQ/SEMI/COMMA/COLON/EOF —— **两套前端此处不同形**。
             #   v4 下两侧一律取「行边界 + EQ」⇒ 本步把 COMMA/COLON 从终止符集移除
             #   （COMMA 仍是标签**分隔符**，见下方 advance；收进终止符集是过去的兜底）。
@@ -452,7 +452,7 @@ class Parser:
         一律容忍；形状错（缺 IDENT/缺括号/未闭合）**响亮报错**（fail-loud，不静默）。
         """
         # 循环**末尾**的 `_consume_newlines()` 让注解链跨行成立（文档形 §10.1：每条独占一行）。
-        # ⚠ 只跳「注解之间」，**不跳第一条之前** —— 首条之前若有 NEWLINE（无体声明的收尾），
+        # 警告：只跳「注解之间」，**不跳第一条之前** —— 首条之前若有 NEWLINE（无体声明的收尾），
         #   在循环头吞掉它会让调用点的 `_at_line_end()` 误判「非行边界」（回归面）。
         while self.check(TokenType.HASH):
             self.advance()                      # '#'
@@ -592,7 +592,7 @@ class Parser:
         # `&Self` 会变成 `PathType(['Self'])`，而 type_checker 的 `_is_generic_type`
         # 把「单元素 PathType」当泛型形参 ⇒ 静默错判（不是报错）。
         base_types = {'int','dex','bool','string','char','unit','never','Self'}
-        # ⚠ 基本类型**不早退**（2026-10-11 修；出处 = docs/developer/syntax.md §3.2
+        # 警告：基本类型**不早退**（2026-10-11 修；出处 = docs/developer/syntax.md §3.2
         #   的两行原文 `parent : User? = none` / `value : int? = 5`）。
         #   修前：本格直接 `return BaseType(...)`，而 `?` 的处理在函数**尾部**、只管 `PathType`
         #   ⇒ `int?` 落到「expected end of line, got '?'」（`Foo?` 却正常）——基本类型与路径类型
@@ -810,7 +810,7 @@ class Parser:
             # v4（docs/developer/syntax.md §1.4/§59）：`none` 是 `T?` 的**无值形态**关键字，
             # canonical 变体名 = `None`。归一到 canonical 名（与自源 `parser.cr` 的
             # `T_NONE` → `EXPR_ENUM_CONSTRUCTOR(str_intern("None"))` **同语义**）；零载荷。
-            # ⚠ 拼写面归一必须在此**单点**完成：`None`（旧大写）已退役为普通标识符，两者不同判。
+            # 警告：拼写面归一必须在此**单点**完成：`None`（旧大写）已退役为普通标识符，两者不同判。
             self.advance()
             return EnumConstructor(['None'], [])
         if self.check(TokenType.SELF):
@@ -1002,7 +1002,7 @@ class Parser:
     #   §13.7 `preferredDomain` / `executionDomain`、§13.4 `NoBoundsCheck`、
     #   §13.2 `fast` / `unroll` / `section`。
     # **不收** §13.1 查询族 / §13.3 `addr` / §13.2 `inline`（文档里都在**表达式位**）。
-    # ⚠ **判定依据 = 「文档释文 + 语料实证」，不是「章号范围」**（维护者 2026-10-11 采纳；
+    # 警告：**判定依据 = 「文档释文 + 语料实证」，不是「章号范围」**（维护者 2026-10-11 采纳；
     #   与自源 `parser.cr::is_stmt_at_annotation` 同规则）。二者冲突时**以后者为准**：
     #   `NoBoundsCheck`(§13.4) / `fast`·`unroll`·`section`(§13.2) 章号属 §13.1–13.4，
     #   但释文与语料都在**语句前导位**用它们 ⇒ 收。**禁止**后人按章号再收窄回去。
@@ -1113,7 +1113,7 @@ class Parser:
             #      （计划 §六.1：形状只有 `{}`→缩进、`;`→换行两类）⇒ 它**不会**补 `|`
             #      ⇒ 本次自己的产物必须仍可解析；
             #   ② v4 目标形有 `|` ⇒ 不收它就解析不了维护者原话里的 match 例。
-            # ⚠ 二者**不是「两形都收」的静默歧义**：改前 `|` 在臂首是**解析错误**，
+            # 警告：二者**不是「两形都收」的静默歧义**：改前 `|` 在臂首是**解析错误**，
             #   故本放宽**不改变任何既有可解析程序的含义**（纯增量）。
             #   「`|` 是否**强制**」留待 T5 决定（先例：struct 字面量分隔符守卫，T0 §4.2）。
             if self.check(TokenType.PIPE):
@@ -1122,7 +1122,7 @@ class Parser:
             self.expect(TokenType.FAT_ARROW)   # 使用 =>
             # v4 文档 §7.3（逐字）：「需要多行 arm body 时，`=>` 后换行并进入更深 layout」
             # ⇒ `=>` 后**行尾** ⟺ 臂体是一个 layout region；否则单表达式。
-            # ⚠ 该 region **没有 `:`**（`=>` 已充当开启符）⇒ 不能走 `_expect_region`。
+            # 警告：该 region **没有 `:`**（`=>` 已充当开启符）⇒ 不能走 `_expect_region`。
             # **兼容形 `=>:`**（`=>` 后紧跟 `:`）：文档 §7.3 没有这一形（那里是 `=>` 后直接换行），
             # 但 T6 语料机械改写成了它 ⇒ 按本次先例（`flow fn` 兼容形）收为兼容，与文档形同判。
             # 「臂体是 region」的判定依据必须在**消费 `:` 之前**定下 —— 消费后再问 `_at_line_end()`
@@ -1168,7 +1168,7 @@ class Parser:
             self.expect(TokenType.RPAREN)
             return TuplePattern(pats)
         # v4 的 `none`（小写，v4 关键字）与既有 canonical 变体名 `None` 指**同一个**变体。
-        # ⚠ canonical 名此处仍写 `None`：改它 = 全局重命名，属 **T5** 的 `None`→`none` 语义面
+        # 警告：canonical 名此处仍写 `None`：改它 = 全局重命名，属 **T5** 的 `None`→`none` 语义面
         #   （计划 §2.3 R3 逐字「`none` ↔ `None` … 是语义面，见 T1/T5」），
         #   与 T4 的机械形状改写不同阶段。`EnumPattern` 的 path[-1] 会被 desugar 直接当
         #   `__variant` 的**标签串**比较（`desugar.py:86-92`）⇒ 必须与枚举声明的变体名一致。
@@ -1374,7 +1374,7 @@ class Parser:
             self.expect(TokenType.ARROW)
             ret = self.parse_type()
             # D11（T0 布局规格 §2.2）：接口方法**无 `:`** ⇒ 行边界收尾。
-            # ⚠ 带默认体的接口方法**本次不支持**：它要在 `InterfaceDecl.methods` 的
+            # 警告：带默认体的接口方法**本次不支持**：它要在 `InterfaceDecl.methods` 的
             #   三元组里加一个 body 槽 ⇒ 动 `ast.py` ⇒ 违 J-T1-1 冻结。此处**响亮报错**（不静默吞体）。
             self._end_decl()
             methods.append((mname, params, ret))

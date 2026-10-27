@@ -181,7 +181,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_arg_inference_gap.py # #2026-09-16-31 阶段（实参推断缺失）：**A 组**（9 例，原 139 → 精确值）· **B 组**（`g(nosuchfn(1))` 零诊断 → **error[N06]**，**正据**）· **D 组**（实参位泛型得**精确键** `idf[P]`，非退化键 `idf[unit]`——TODO #2026-09-16-33 的既有缺陷 = 本次附带修复）· 对照 9 例（含外层模块/方法调用的 **oracle 对照**）。**背景**：门 `checker.cr` 的直调分支曾在「被调已解析为 Core fn」时提前 return ⇒ 实参**从不被推断** ⇒ ① 实参位 `EXPR_FIELD` 被调名未回填 ⇒ 伪名 `import` ⇒ SIGSEGV 139 ② 未定义函数静默通过。修法 = `infer_call_args()` 在**四处**「已解析」return 前统一调用（完备性枚举见计划 §3ter）
     python3 tests/selfhost/test_agg_slots.py      # TODO #2026-09-16-2 姊妹条目：struct/struct 模式/数组字面量槽位（同 F5 契约）
     python3 tests/selfhost/test_agg_checks.py     # TODO #2026-09-11-11 聚合字面量「名/型/同质性」三校验（名字绑定 + TS01-04/TK02 硬错误）
-    python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 阶段 T5）：**23 例** = TODO #2026-09-16-17（方法调用实参）/ #2026-09-16-18（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（⚠ 其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #2026-09-16-29）+ **两条自证路径**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用路径）。**判定依据分工**：本套件是 apx 面载荷判定依据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
+    python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 阶段 T5）：**23 例** = TODO #2026-09-16-17（方法调用实参）/ #2026-09-16-18（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（警告：其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #2026-09-16-29）+ **两条自证路径**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用路径）。**判定依据分工**：本套件是 apx 面载荷判定依据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
     python3 tests/selfhost/test_nested_fn.py      # TODO #2026-09-10-12 嵌套 fn 声明段错误 → 定位诊断回归
     # 2026-09-18 suite 清障阶段：**suite 语料卫生检查**（`suite` 路径不在 PR 检查范围内 ⇒ 把本次的四处期望搬进检查范围）——
     # H1 修好的两档正例 build+run rc=0 · H2 两档负例 check rc≠0+P21+**零产物** · H3 正控（断言有辨别力）·
@@ -218,7 +218,7 @@ case "$CI_JOB_NAME" in
     # ─── 阶段 8 A₂（条目 6）：并发 handle 类型模型对齐 —— **检查范围内的端到端用例**（2026-09-18）───
     # **11 例** = 5 档并发语料 × （check 干净且**无 TF01** + build+run rc=0）+ 1 形态自证（`chan_make→string`
     # 赋值 + `chan_send/recv/close(string)`）。
-    # ⚠ **为何必须挂这里**：5 档语料在 `tests/suite/`，而 **`suite` 路径不在 PR 检查范围内**（台账「PR 门覆盖域陷阱」条：
+    # 警告：**为何必须挂这里**：5 档语料在 `tests/suite/`，而 **`suite` 路径不在 PR 检查范围内**（台账「PR 门覆盖域陷阱」条：
     # glob 匹配不等于进入检查范围）⇒ 本套件把该证据编进 `selfhost-tests`（检查范围内），使其**不悬空**。
     # 根因 = `alloc: () -> string` 模型 vs 3 处 handle 返回型 `-> int`（`chan_make`/`g_new`/`sched_go`）+ 5 处
     # handle 形参；修法 = **(A) 语料/stdlib 向模型对齐**（裁定 (A)；(C) handle 兼容明令禁止）。
@@ -298,7 +298,7 @@ case "$CI_JOB_NAME" in
     # 判定依据模型：**以运行退出码为准**（rc 即读数；不依赖 stdout）；两路径同判（ELF 与 interp）。
     # 突变自证（阶段级留痕；**已接机检**：`tests/harness/test_criteria_mutations.py`）：把新增分派块退回
     # 不触发（= 修复前路径）⇒ 位码回 **24**（两路径；2026-09-18 复核重跑：旧值 8 = 旧探针形状，已更正）。
-    # 机理：`==` 通用二元路径逐槽比原始值——裸(rep=0)比载荷 ✓、装箱比指针 ⇒ 恒假；
+    # 机理：`==` 通用二元路径逐槽比原始值——裸(rep=0)比载荷 通过、装箱比指针 ⇒ 恒假；
     # 修复 = 比较点归一 `(absent, payload)` 后按值比（`ir_gen.cr` opt_cmp_* 三函数 + 分派块）。
     python3 tests/selfhost/test_opt_eq.py
     # ─── 阶段 8 条目 3（静默面处理）：extern 声明含可选（`?`）⇒ 硬错 P24（2026-09-17）───
@@ -314,7 +314,7 @@ case "$CI_JOB_NAME" in
     # （import ×2 / **无初值全局**（= 注入运行时源 `rt.cr:4` 同形）/ 有初值全局 / `mod` / `type` / `@` 注解）。
     # 判定依据：拒收 ⇒ check rc=1 + `error[P25]` + 定位 + build rc=1 + **零产物**；合法 ⇒ check/build/run 三面 0；
     # **不挂起**（P6：报错路径仍消费 token；套件内每例限时 60s、超时即红——CI 超时不是红）。
-    # ⚠ 同阶段前置修（本轮实测暴露）：`parse_all` 原只吞 `import` 关键字本身，路径/别名 token 一直靠兜底
+    # 警告：同阶段前置修（本轮实测暴露）：`parse_all` 原只吞 `import` 关键字本身，路径/别名 token 一直靠兜底
     # 静默吞（全语料普遍）⇒ 新硬错会误伤**每一条合法 import**（实测 `import io` 的 `io` 与注入源
     # `import arena_globals`）。修复 = 按 res_imports 形状逐字消费 `[@proj] [a(::b)*] [: alias] [;]`。
     # 全语料对拍（212 档 × `check`；前态二进制 vs 本修复）：差异 **7 档且全部本就 rc=1**（spec 负例 5 ·
@@ -327,7 +327,7 @@ case "$CI_JOB_NAME" in
     # 判定依据：拒收 ⇒ check rc=1 + `error[P26]` + 定位 + build rc=1 + **零产物**；白名单 ⇒ check/build/run 三面 0。
     # 裁定依据（lead 2026-09-18 = (B)）：白名单 = 显式 `dex` + 显式 `int`（**有契约**：`test_apx_tag.py`
     # 固定语法合法/语义不变/`.cir` 携 `approx`，bootstrap 同向 ApproxInstr ⇒ 两前端对齐）；其余（`dex?`/`.`/`auto`/
-    # `string`/`bool`…）**零文档 / 零测试 / 值面无路** = 静默谎。⛔ 裁 (A)（连 `int, apx` 一并拒）已否：
+    # `string`/`bool`…）**零文档 / 零测试 / 值面无路** = 静默谎。禁止：裁 (A)（连 `int, apx` 一并拒）已否：
     # 那会**改契约**（须重定 test_apx_tag + 登记两前端接受集分歧）——判定依据原则「有契约 ⇒ 有意设计；无契约 ⇒ 静默谎」。
     # 白名单两形的产物**逐字节不变**（前态二进制 vs 本链实测 IDENTICAL）· 契约套件 `test_apx_tag.py` 2/2 复跑绿。
     # 突变自证（阶段级留痕）：撤掉该检查 ⇒ 拒收 5 例回 `check=0`。
@@ -343,7 +343,7 @@ case "$CI_JOB_NAME" in
     # ─── 阶段 8 PR-B（F3）S1′ report-only 打点：**活性自证 + 默认零足迹**（2026-09-18）───
     # 20 断言 = ① 必命中探针逐字段（活性：`9917 4 14 0 0 2 f`）· ② 默认位/`CORE_S1P=0` 零行 ·
     # ③ 无失配程序零行（负控）· ④ extern 形走 `9918` 单列 + 默认位零行 · ⑥ 护栏②③⑥ 各配对照路径 ·
-    # ⚠ 方法调用不可达（实测：`s.m(b)` 异型 0 打点 ⇒ ④ 分支在本点死；固定成判定依据，扩覆盖时翻 ≥1）·
+    # 警告：方法调用不可达（实测：`s.m(b)` 异型 0 打点 ⇒ ④ 分支在本点死；固定成判定依据，扩覆盖时翻 ≥1）·
     # ⑤ 全 `tests/suite/*.cr` 默认位零打点（**冷缓存逐档**）。
     # **为什么必须有这一档**：打点扫面两种假信号——假阳（grep 裸标识符命中源码回显：A 阶段「6 档 30 点」实为 0）
     # 与假阴（打点没装/没生效，「0 点」被当「真干净」：本档 2026-09-18 **当场抓出真假阴**——
@@ -355,7 +355,7 @@ case "$CI_JOB_NAME" in
     #   ⇒ 硬错一打开这两类会红。本档固定：A dyn 不记 · B 泛型形参不记 · **C 真异型仍记（非真空锚）**
     #   · D 未定义名不记；并含 **⑤ 空间守卫**（`TI_DYN` 下标 vs `TYP_GENERIC_PARAM` kind **数值同为 7
     #   而空间不同**）+ 其**突变自证**（错空间写法必红、删前缀条必红、剥注释承重、防「一律红」反向固定）。
-    # ⚠ 阳性对照一律用**已定义的 int 变量**——D 落地后「未定义名」类输入已不可见，拿它当正控会真空绿。
+    # 警告：阳性对照一律用**已定义的 int 变量**——D 落地后「未定义名」类输入已不可见，拿它当正控会真空绿。
     python3 tests/selfhost/test_s1p_sentinel_skips.py
     # ─── 字符串插值 `${...}`：词法契约 + **展开语义**（2026-09-18 插队修复 + 裁定 (b) 同阶段）───
     # **本特性此前全域零覆盖**：`tests/` 与 `examples/` 里 `grep '\${'` = **0 命中**，`src/` 唯一命中是

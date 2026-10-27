@@ -20,7 +20,7 @@
 >
 > **基线**：`develop@origin = 6b54107e`（`docs(.ccr V8): 2026-09-23 四条裁定…`，#165）。
 > 本档全部行号在**该修订**上用 `jj file show -r develop@origin <path>` 逐一实核。
-> ⚠ **本仓多工作区，任何检出目录的 `@` 都可能落后**——行号**不得**用就地 `grep` 取。
+> 警告：**本仓多工作区，任何检出目录的 `@` 都可能落后**——行号**不得**用就地 `grep` 取。
 
 ---
 
@@ -97,7 +97,7 @@
 **明确不加**（7 名，逐条理由见 §4.4）：`flow fn(...) -> ...`（**类型位**）· `async fn` · `Future[T]` ·
 `Coroutine[T]` · `GeneratorState` · `Suspend` · `FnAsync`。
 
-> **⚠ 定性（team-lead 2026-09-23 要求在本节保持；防后来人读混）**：
+> **警告：定性（team-lead 2026-09-23 要求在本节保持；防后来人读混）**：
 > 本轮收缩 = **否决一个未来候选**，**不是移除既有能力**——两件事，不得混读。
 > - 「7 名」**从未进入**块二的「最小语法增量」（§2.4 结论 1）⇒ 收缩**不增不减**该增量；
 > - `flow` 的**既有面**（§2.4 义1 region kind `SG_FLOW` · 义2 声明前缀 `FlowDecl` /
@@ -114,7 +114,7 @@ coroutine frame · frame 保存哪些状态 · frame 生命周期/region · 是�
 是否可直接同步执行 · 能否消除 suspend/resume · 调用是否需要 scheduler · continuation 如何形成 ·
 stackful/stackless 或其他 realization。
 
-#### ⚠ 5.1 **必须保留的边界（不可与上条合并）**
+#### 警告：5.1 **必须保留的边界（不可与上条合并）**
 
 > **原文**：**异步 realization 可以自动推导；程序是否要求「产生新的并发执行关系」，是另一回事。**
 > 「`a(); b();` 能不能自动并行，**可由 dependency / state relation 判断并优化**；但如果某种语法
@@ -173,11 +173,11 @@ stackful/stackless 或其他 realization。
 | A19 | **不对称（本档要点）** | 类型项层**已有** `AK_FN` 原子 + 已有函数签名→fn 项构造；但 **AST 类型行层无对应 `TYP_*` kind** ⇒ 「行 → 类」映射（`iface_kind_of`）**没有函数行的入口** | A7 + A17 + A18；`src/compiler/iface_axis.cr:196-210` |
 | A20 | 行→类分派 | `iface_kind_of(ti)` 逐 kind 分派，**末尾 `return -1`（未知 kind）** | `src/compiler/iface_axis.cr:196`，`:209` |
 | A21 | 桥接双构造点 | **两个**行→项构造点必须同改：`sh_term_of_ti`（`:321`，含「未知 kind 保守归入命名类」后备 `:378-382`）与 `sh_sig_term_of_ti`（`:880`）| `src/compiler/ty_shadow.cr:321`、`:880`（「双构造点契约」注在 `:893-895`）|
-| A22 | 纯度/效应表 | `purity_op_effect(op)`：store 族 + `IR_CALL_EXTERN` + `IR_HOTPATCH_ROUTE` + **`IR_DYN_DISPATCH`（间接调用）** + `IR_SPAWN`/`IR_YIELD`/`IR_AWAIT` 入链 | `src/compiler/checker.cr:4533-4546`；消费点 `src/compiler/dataflow.cr:156`（`df_connect_state`；⚠ 多份文档记 `:146`，见 §1.2 D-4）|
+| A22 | 纯度/效应表 | `purity_op_effect(op)`：store 族 + `IR_CALL_EXTERN` + `IR_HOTPATCH_ROUTE` + **`IR_DYN_DISPATCH`（间接调用）** + `IR_SPAWN`/`IR_YIELD`/`IR_AWAIT` 入链 | `src/compiler/checker.cr:4533-4546`；消费点 `src/compiler/dataflow.cr:156`（`df_connect_state`；警告：多份文档记 `:146`，见 §1.2 D-4）|
 | A23 | 诊断族前缀表 | `error_cat_prefix(cat)`：1..17 → `P/N/I/TA/TF/TB/TU/TC/TM/TK/TS/TG/B/R/E/ICE/V`；**落空 `return "E"`** | `src/compiler/diag.cr:86-105`（`:104` = 后备）|
 | A24 | 诊断渲染 | `cat = ec / 1000`、`num = ec % 1000`、`error[<prefix><2 位 num>]` | `src/compiler/diag.cr:123`、`:133-137`（`pad_diag_num` `:107`）|
 | A25 | 诊断 fail-closed 检查门 | `diag_gate_exempt(code, scope)` 豁免表（**默认阻断**，逐条带位点/理由/退出条件）| `src/compiler/diag.cr:172`；自测 = `tests/selfhost/test_diag_gate.py`（挂 `selfhost-tests`，`src/ci/run.sh:176`）|
-| A26 | 错误码常量计数 | **按固定 grep** `^EC_[A-Z_]+ *: *int *=` = **149**（非固定 = 152）。⚠ `docs/developer/errors.md:327` 记「3 … = **137**」= **已过期**（+12）| `src/compiler/ast.cr`（本档实测）· `docs/developer/errors.md:325-329`（三种数法注）|
+| A26 | 错误码常量计数 | **按固定 grep** `^EC_[A-Z_]+ *: *int *=` = **149**（非固定 = 152）。警告：`docs/developer/errors.md:327` 记「3 … = **137**」= **已过期**（+12）| `src/compiler/ast.cr`（本档实测）· `docs/developer/errors.md:325-329`（三种数法注）|
 | A27 | `.ccr` 版本 / 段表 | `CCR_VERSION = 9`；`CCR_SEG_COUNT = 8`（STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)）| `src/compiler/ccr_io.cr:135`、`:138-139` |
 | A28 | `TYPE(7)` 段体结构 | `[row_count u32][row_count × 24B {kind,data,extra}][term_count u32][term_count × 40B {tag,a,b,c,d}]`——**`g_types` 内存行表原样** + 项 DAG | `src/compiler/ccr_types.cr:9-14`；写侧 `src/compiler/ccr_io.cr:601`、`:896`；读侧 `:1534-1584`（逐条硬校验）|
 | A29 | `IFACE(8)` 段原生条目 | 计数 = `IFACE_ENTRY_COUNT = 16`，**`AK_FN` 已占第 15 行** ⇒ 不新增原子则 IFACE 段零变化 | `src/compiler/dyn_arr.cr:215`；`src/compiler/ccr_types.cr:197`、`:211-217` |
@@ -187,7 +187,7 @@ stackful/stackless 或其他 realization。
 | A33 | `sched_go` 签名 | `fn sched_go(fn_ptr: int, arg: int) -> string`（**裸 `int` 函数地址**）| `src/stdlib/sched.cr:171` |
 | A34 | 内建返回型表 | `bi_add("sched_go", TI_INT)`（checker 侧内建模型）| `src/compiler/checker.cr:299` |
 | A35 | 解释器对未支持 op 的政策 | **响亮报错**（非不报错地错值）：`IR_DYN_DISPATCH` / `IR_CALL_EXTERN` 两处均显式 `println("error: interp 不支持…")` | `src/compiler/interp.cr:406-411`、`:736-741` |
-| A36 | 编译期缓存双档 | `.cir` 快照版本常量 **`CIR_CACHE_VER : int = 22`**（⚠ `src/ci/run.sh:162` 的注释写「`CIR_CACHE_VER 19→20`」= **该阶段当时的代**，非当前值）| `src/compiler/cir_cache.cr:135` |
+| A36 | 编译期缓存双档 | `.cir` 快照版本常量 **`CIR_CACHE_VER : int = 22`**（警告：`src/ci/run.sh:162` 的注释写「`CIR_CACHE_VER 19→20`」= **该阶段当时的代**，非当前值）| `src/compiler/cir_cache.cr:135` |
 | A42 | RegionCheck 判定面 | 头注原文：「RegionCheck pass — verifies **DEREF targets are in live subgraphs**」；接线 `main.cr:639 region_check_all()` | `src/compiler/region_check.cr:1-3`；`src/compiler/main.cr:639` |
 | A37 | CI 门 | `src/ci/run.sh` 共 **5 个 job**：`check` / `bootstrap-tests` / `selfhost-tests` / `suite` / `full-bootstrap`；canary 检查挂 `selfhost-tests` 内 | `src/ci/run.sh:70-71`、`:76`、`:114`、`:218`、`:345`、`:350` |
 | A38 | canary 固定值真源 | `tools/baseline/canary_values.tsv`（5 条 = ELF canary + `.ccr` 四条）；检查门 = `tools/baseline/canary_check.sh`；**两级契约** + **D1 确定性检查门** + 更新基准值前置 | `tools/baseline/canary_values.tsv`（头注）· `tools/baseline/canary_check.sh:35-59` |
@@ -214,7 +214,7 @@ stackful/stackless 或其他 realization。
 > ⇒ 引用时写「**至少 N**」+ 带 file:line 的清单，别写裸的「唯一」。
 > 本档因此对同类断言一律附**出处与规则**（§8.2 第 3 条的契约、§八 的段体结构均如此）。
 >
-> ⚠ 这些**不是**那些文档的错误结论，只是**取值时代的读数**。本档一律用当前修订的值；
+> 警告：这些**不是**那些文档的错误结论，只是**取值时代的读数**。本档一律用当前修订的值；
 > 反过来，**引用本档时也应按当时的 `develop@origin` 复核**（本仓既有教训：逐字节相同的两个检出
 > 可能一个已落后，而读数看不出异常）。
 
@@ -292,7 +292,7 @@ Primary += LambdaExpr
 | 义 | 是什么 | 现状（`develop@origin` 实核）| 本次收缩的影响 |
 |---|---|---|---|
 | **1 region 种类** | 数据流图里的 region kind `SG_FLOW` | `src/compiler/dataflow.cr:533`（DOT 名 = `"flow"`）；种类常量族 = `src/compiler/dyn_arr.cr:155-159`（`SG_LOOP=1`/`SG_FOR=2`/**`SG_FLOW=3`**/`SG_UNSAFE=4`/`SG_IF=5`）| **不在收缩范围**（既有、不动）|
-| **2 声明前缀** | `flow` 作**顶层声明**关键字 | 1 文法：`FlowDecl = 'flow' IDENT [GenericParams] '(' [ParamList] ')' '->' Type {Annotation} (FunctionBody \| '=' Expr ';')`（`grammar/core.ebnf:22-24`），且在 `TopLevelDecl`（`:9`）；2 **parser 另接受 `flow fn name()` 拼写**（`src/compiler/parser.cr:1726-1748`，注释原文「F5c：`flow fn name()` 语法」，`is_flow` 置位后由 checker 按 body 内 `yield` 处理——`src/compiler/checker.cr:2310-2313`）；3 关键字 = `T_FLOW : int = 66`（`src/compiler/ast.cr:70`）· `lexer.cr:94` | **不在收缩范围**。⚠ **`flow fn name(...) -> R { … }` 是既有声明，不得读成「被取消」**；被否决的只是**它在类型位**的用法 |
+| **2 声明前缀** | `flow` 作**顶层声明**关键字 | 1 文法：`FlowDecl = 'flow' IDENT [GenericParams] '(' [ParamList] ')' '->' Type {Annotation} (FunctionBody \| '=' Expr ';')`（`grammar/core.ebnf:22-24`），且在 `TopLevelDecl`（`:9`）；2 **parser 另接受 `flow fn name()` 拼写**（`src/compiler/parser.cr:1726-1748`，注释原文「F5c：`flow fn name()` 语法」，`is_flow` 置位后由 checker 按 body 内 `yield` 处理——`src/compiler/checker.cr:2310-2313`）；3 关键字 = `T_FLOW : int = 66`（`src/compiler/ast.cr:70`）· `lexer.cr:94` | **不在收缩范围**。警告：**`flow fn name(...) -> R { … }` 是既有声明，不得读成「被取消」**；被否决的只是**它在类型位**的用法 |
 | **3 函数类型前缀** | 类型位上的 `flow fn(T) -> R` | **今日零实现**：`parse_type()`（`src/compiler/parser.cr:41`）的分支只有 `[` / `(` / `&` / `*` / …，**无 `T_FN` 也无 `T_FLOW` 分支** | **本次收缩 = 否决该候选**（它从未存在过 ⇒ 这条收缩是**对未来候选的否决**，不是移除既有能力）|
 
 **三条结论**：
@@ -300,7 +300,7 @@ Primary += LambdaExpr
 1. **块二的「最小语法增量」不变**——本来只有那三个产生式（`FunctionType`/`FunctionRef`/`LambdaExpr`），
    收缩**不增不减**（不变量 5 的 7 个「不加」项**从未进入**该增量）。
 2. **`flow` 的 12 义与本轮正交**：它们属**声明面/图面**，不是类型面。
-3. ⚠ **`yield` 面的既存事实（须与实现者对齐，见 §十 T-10）**：`yield` 已是关键字（`T_YIELD : int = 67`，
+3. 警告：**`yield` 面的既存事实（须与实现者对齐，见 §十 T-10）**：`yield` 已是关键字（`T_YIELD : int = 67`，
    `ast.cr:71`；`lexer.cr:95`），`IR_YIELD = 28`（`ast.cr:583`，注释「emit value from flow to consumer
    channel」）在 `ir_gen.cr:2878` 发射；但后端与解释器都是**近似/空操作**（`src/arch/x86_64/sizes.cr:77`
    原文「no-op (for now)」⇒ 尺寸 **0**；`interp.cr:385`「eager 值传递近似」）；语料
@@ -311,7 +311,7 @@ Primary += LambdaExpr
 
 ## 三、四段（1 函数类型 2 `fn.name` 3 Lambda + 推导 4 间接调用 + 后端）
 
-> ⚠ **顺序 ≠ 分期**。**原文（附）**：「一份计划，**分四段一次做完**」。
+> 警告：**顺序 ≠ 分期**。**原文（附）**：「一份计划，**分四段一次做完**」。
 > 分段**只为可独立提交评审**——四段的判定依据必须在**同一条自举链**上一起绿，不得把后面段留成"以后再说"。
 
 ### 3.0 四段总表
@@ -337,7 +337,7 @@ Primary += LambdaExpr
     理由、反面先例（`TY_DEX_S`）与判定依据见 **§8.1b**。
 - 桥接（**双构造点，同改**）：`src/compiler/ty_shadow.cr:321 sh_term_of_ti` + `:880 sh_sig_term_of_ti`
   ⇒ `TYP_FN` 分支构造 `tt_atom(AK_FN, -1, [返回项, 参数项…])`，**链序 = 返回在首**（与 A18 的 `sh_func_sig_term` 同形）。
-  - ⚠ **不给分支的后果是不报错地的**：`sh_term_of_ti` 的后备把未知 kind 译作 `tt_atom(AK_NAMED, ti, -1)`（无链）⇒ 引擎判「命名面域外」= `-1`（A21）。**不报错、不崩**，只是判不了。
+  - 警告：**不给分支的后果是不报错地的**：`sh_term_of_ti` 的后备把未知 kind 译作 `tt_atom(AK_NAMED, ti, -1)`（无链）⇒ 引擎判「命名面域外」= `-1`（A21）。**不报错、不崩**，只是判不了。
 - 行→类：`src/compiler/iface_axis.cr:196 iface_kind_of` 新增 `if k == TYP_FN { return AK_FN; }`（在 `:209` 后备之前）。
 - **同阶段必改的判定依据实现方式**：`src/compiler/type_selftest.cr:1635-1646 ts_ccr2_kind_domain_ok` ——
   该用例**按设计**会在本段转红（A30：「有意的检查」）。重定形状：排除面 3 原子 → 2 原子（`AK_NULL`/`AK_SUM`）
@@ -370,7 +370,7 @@ Primary += LambdaExpr
 - checker：新 AST kind（`EXPR_FNREF` 或等价）⇒ 类型 = 段1 的 `TYP_FN` 行；名字解析：函数必须存在，否则 `EC_N_FUNC`（`checker.cr:3297` 同族，`error[N06]`）。
 - ir_gen：callable 值的**取址**原语复用 `IR_FNADDR`（A13）——它给出的正是 `{code, 回填后绝对址}`；
   `env = 0`（不变量4的 CPU realization：「无 capture -> `{code, 0}`」）。
-  - ⚠ **类型必须写 `TYP_FN`，不得写 `TI_INT`**。现状 `@addr` 路径写的是 `TI_INT`（A15/A16）——**照抄它就等于把不变量3做废**。
+  - 警告：**类型必须写 `TYP_FN`，不得写 `TI_INT`**。现状 `@addr` 路径写的是 `TI_INT`（A15/A16）——**照抄它就等于把不变量3做废**。
 
 **做完的判定依据**
 
@@ -407,7 +407,7 @@ Primary += LambdaExpr
 | 绿·块形 | `f := fn(x: int) -> int { y := x * 2; return y + 1; };` rc=0 + 运行值正确 |
 | 绿·自动捕获 | `base := 10; f := fn(x: int) => x + base;` rc=0 + **运行值 = `x + 10`**（这条同时证明 capture 真被读到；若实现把 `base` 丢成 0，运行值会错——**值断言不可省**）|
 | 绿·可变捕获 | `f := fn(y: int) => { x = x + y; return x; };` ⇒ rc=0，且**源码零 `mut` 之外的新标记** |
-| **红·无上下文不猜** | `f := fn(x) => x * 2;` ⇒ `check` rc=1 + **新诊断码**（§七）+ 定位 + 零产物。⚠ 这是块一原文：「**如果参数类型没有任何上下文可推，也应该报无法推导，而不是偷偷猜一个类型**」——**它必须不是类型错**（附确认 #3）|
+| **红·无上下文不猜** | `f := fn(x) => x * 2;` ⇒ `check` rc=1 + **新诊断码**（§七）+ 定位 + 零产物。警告：这是块一原文：「**如果参数类型没有任何上下文可推，也应该报无法推导，而不是偷偷猜一个类型**」——**它必须不是类型错**（附确认 #3）|
 | 红·逃逸报错 | 含捕获 lambda 逃出 region 可判定域（如存进返回位/堆结构）⇒ rc=1 + 定位（§六；**不得**不报错地堆分配、**不得**不报错地通过）|
 | **零新标记判定依据** | 全部 lambda 用例源码中**不出现**：`move` 作 capture 标记 · `capture[...]` · `Fn`/`FnMut`/`FnOnce` · `closure<...>` · `Callable<...>`。判定依据 = 语料 grep 零命中 + 上表全绿 |
 | 与段2互赋 | 原文「无 capture lambda、`fn.name`、有 capture lambda 可以正常互相赋值」⇒ **三三互赋 6 向**全 `check` rc=0 + 至少一对 `run` 值正确（不变量1的直接判定依据）|
@@ -418,7 +418,7 @@ Primary += LambdaExpr
 
 **入口**
 
-- 新 IR opcode（**待裁 T-6**：编号取 `IR_*` 号段的空位 **40** 或 **≥52**；A14；⚠ 号段 `IR_*` 的 40 与 `T_GTEQ = 40`（token 段）、`EXPR_TUPLE = 40`（AST 段）**同名不同段**，勿混读）。
+- 新 IR opcode（**待裁 T-6**：编号取 `IR_*` 号段的空位 **40** 或 **≥52**；A14；警告：号段 `IR_*` 的 40 与 `T_GTEQ = 40`（token 段）、`EXPR_TUPLE = 40`（AST 段）**同名不同段**，勿混读）。
 - 发射：`src/compiler/ir_gen.cr` 的调用点（现 `:2377` 发 `IR_CALL`，`:2358` 发 `IR_CALL_EXTERN`）；被调者不是「已解析函数名」时走新 op。
 - 后端（x86-64）：`src/arch/x86_64/instr.cr`（新 op 的发射体；间接 `call r/m64`）· `src/arch/x86_64/sizes.cr`（**尺寸必须精确**——标签/偏移按它算）· `src/arch/x86_64/regalloc.cr`（若涉及寄存器类/冲突位，照 `IR_DYN_DISPATCH` 的 `:448/:453` 先例）· `src/os/linux/callseq.cr`（SysV 参数分派主机；**若** realization 采「env 作隐藏首参」，必须在**这一层**表达，且不得打乱既有三处同源合流）。
 - 链接期：`code` 字由 `IR_FNADDR` 提供 ⇒ 复用 `src/format/elf/elf.cr:1353` 的回填。
@@ -490,7 +490,7 @@ Primary += LambdaExpr
 | D17 | frame 生命周期 / region | D23 | 调用是否需要 scheduler |
 | D18 | continuation 如何形成 | D24 | stackful / stackless 或其他 realization |
 
-> ⚠ **与不变量 5.1 的边界**：D13–D24 是 **realization 面**；「是否**产生新的并发执行关系**」
+> 警告：**与不变量 5.1 的边界**：D13–D24 是 **realization 面**；「是否**产生新的并发执行关系**」
 > **不在此表内**（它是程序语义 ⇒ 由语法表达、由用户意图决定，见 §〇 5.1）。
 > 也正因如此，`go` 的归属**不得**由本表推出。
 
@@ -498,16 +498,16 @@ Primary += LambdaExpr
 
 | 项目 | 能否自动推导 | 结论 |
 |---|---|---|
-| Currying | ❌ | 是**调用模型选择**，不是从现有代码唯一推出的事实 |
-| Partial application | ❌ | 哪些参数要固定、哪些留空属于**用户意图** |
-| `Fn` / `FnMut` / `FnOnce` | ✅ | 可从 capture 的读取/修改/消耗关系自动推出 |
-| 显式 closure object 类型 | ✅ | closure 环境结构、capture 字段等可由编译器自动生成 |
-| 独立 Callable trait | 基本 ✅ 可消掉 | 「能否调用、签名是什么」已经能由 `fn(...) -> ...` 类型确定 |
-| Higher-kinded function abstraction | ❌ | 是类型系统**额外表达能力**，不是分析结果 |
-| 复杂 capture list | ✅ | capture 集合、方式、生命周期等都可以自动分析 |
-| Operator sections | ❌ | 纯语法糖，用户意图不能从普通表达式自动猜 |
-| 专门函数组合语法 | ❌ | 也是语法糖，不是可推导属性 |
-| **异步/协程 realization** | ✅ | （2026-09-23 追加，原文）**可从调用图 / 状态依赖 / region / scheduler 绑定唯一推出** ⇒ **不进函数类型**（不变量 5）|
+| Currying | 失败：| 是**调用模型选择**，不是从现有代码唯一推出的事实 |
+| Partial application | 失败：| 哪些参数要固定、哪些留空属于**用户意图** |
+| `Fn` / `FnMut` / `FnOnce` | 通过：| 可从 capture 的读取/修改/消耗关系自动推出 |
+| 显式 closure object 类型 | 通过：| closure 环境结构、capture 字段等可由编译器自动生成 |
+| 独立 Callable trait | 基本 通过：可消掉 | 「能否调用、签名是什么」已经能由 `fn(...) -> ...` 类型确定 |
+| Higher-kinded function abstraction | 失败：| 是类型系统**额外表达能力**，不是分析结果 |
+| 复杂 capture list | 通过：| capture 集合、方式、生命周期等都可以自动分析 |
+| Operator sections | 失败：| 纯语法糖，用户意图不能从普通表达式自动猜 |
+| 专门函数组合语法 | 失败：| 也是语法糖，不是可推导属性 |
+| **异步/协程 realization** | 通过：| （2026-09-23 追加，原文）**可从调用图 / 状态依赖 / region / scheduler 绑定唯一推出** ⇒ **不进函数类型**（不变量 5）|
 
 原文的压缩表（**逐字**）：
 
@@ -545,11 +545,11 @@ Primary += LambdaExpr
 
 > **共同理由（原文）**：`fn(...) -> Future<Data>` / `async fn` / `await` 这类东西**很多是在暴露某种实现模型**
 > ——与 Core 的取向相反。**不加入 ≠ 没想到**：7 个名字都是**讨论中被点名否决**的，不是遗漏。
-> ⚠ **边界**：本表的否决**不触及** §2.4 的 `flow` 12义（region kind / 声明前缀）——那是既有的。
+> 警告：**边界**：本表的否决**不触及** §2.4 的 `flow` 12义（region kind / 声明前缀）——那是既有的。
 
 | # | 不加入的名字 | 一句为什么 |
 |---|---|---|
-| N1 | **`flow fn(...) -> ...`**（**类型位**）| 这就是「第二种函数类型」本体：同一个可调用体会有两个类型（`fn(T)->R` 与 `flow fn(T)->R`）⇒ 直接违反不变量 1「一个类型」。⚠ 与 §2.4 义2 的**声明** `flow fn name(...)` 是两件事 |
+| N1 | **`flow fn(...) -> ...`**（**类型位**）| 这就是「第二种函数类型」本体：同一个可调用体会有两个类型（`fn(T)->R` 与 `flow fn(T)->R`）⇒ 直接违反不变量 1「一个类型」。警告：与 §2.4 义2 的**声明** `flow fn name(...)` 是两件事 |
 | N2 | **`async fn`** | 同上（Rust/JS 形）：把「可能挂起」编码进**声明/类型** ⇒ 暴露实现模型；且会连锁要求 `await` 表面 |
 | N3 | **`Future[T]`** | 把「尚未完成的结果」提为**一等类型构造器** ⇒ 结果是用户必须显式 `await`/poll；而「何时 resume」本可由关系推导（D20）|
 | N4 | **`Coroutine[T]`** | 同上，且更重：把 coroutine frame 的**存在**变成类型的一部分；而 frame 是否需要、存什么状态本可自动定（D15/D16）|
@@ -615,7 +615,7 @@ Primary += LambdaExpr
    这不是假设：后备分支**不报错、不告警**。⇒ 新族必须**同阶段**补：`error_cat_prefix` 分支 +
    `ast.cr:311-328` 的类别注释表 + `docs/developer/errors.md` 的族节与统计表（`:302-329`，含「总计 150」
    与三种数法注）——**四处同改**（本仓既有纪律：修/加一类能力要同阶段清点引用面）。
-   ⚠ 这四处**本身就有变化史**（§1.2 的 D-5/D-7：`diag.cr` 的「唯一 raise 点」计数与行号、
+   警告：这四处**本身就有变化史**（§1.2 的 D-5/D-7：`diag.cr` 的「唯一 raise 点」计数与行号、
    `errors.md` 的 `EC_*` 计数均已过期）⇒ 改的时候**现查现用**，别抄旧数。
 3. **fail-closed 检查门面（`[已实现]`）**：新码必须在 `diag_gate_exempt`（`diag.cr:172`）的语义下有确定归属——
    要么有真 raise 点（默认阻断路径自然覆盖），要么按表内格式（位点/理由/退出条件三件）入豁免。
@@ -699,7 +699,7 @@ Primary += LambdaExpr
    - **机制（当前修订实核）**：`src/compiler/module.cr:557-575`——索引读取**以 `HOME` 非空为前提**；
      索引缺席属「可选输入不存在」⇒ **不报错地降级到确定态**（不注册），而真正用到索引独有名字时仍**响亮失败**
      （查不到 ⇒ `-1` ⇒ `N06`）。
-   - ⚠ **陈旧陈述（§1.2 的 D-6）**：`canary_values.tsv` 头注给的**理由**（「`module.cr:526` 有硬编码
+   - 警告：**陈旧陈述（§1.2 的 D-6）**：`canary_values.tsv` 头注给的**理由**（「`module.cr:526` 有硬编码
      `/home/DslsDZC` 后备，置空会去读原开发者家目录」）**已被第 4 阶段 #83 移除**，且该字面今日
      **被判定依据禁止**出现在 `src/` 内（J4）。
    - **纪律不变**：采集侧一律把 `HOME` 固定到采集目录内的**空 `home/`**（`canary_check.sh` 已如此做）。
@@ -714,7 +714,7 @@ Primary += LambdaExpr
   「**零函数值语料 ⇒ 零影响**」成立 ⇒ canary 5 条 **IDENTICAL**，**不需更新基准值**。
 - **若变**：按 8.2 第 3 条的 `.ccr` 契约办（归因 + D1 绿 + 更新基准值 + 旧值留痕），并**逐段定位**差分
   （本仓先例：差异可精确到「仅 STR 段」「仅 3 字节」这种粒度——段级定位是标准动作）。
-- ⚠ **ELF canary 与 `.ccr` 的关系**：TYPE/IFACE 两段是**纯信息面、不参与 ELF 发射**
+- 警告：**ELF canary 与 `.ccr` 的关系**：TYPE/IFACE 两段是**纯信息面、不参与 ELF 发射**
   （`docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md:193` 的原话「发射面零泄漏判定依据 = ELF canary 不变」）
   ⇒ **TYPE 段变而 ELF 不变是可能的**，反之（ELF 变）才是越界信号。
 
@@ -725,7 +725,7 @@ Primary += LambdaExpr
 | # | 既有件 | 关系 | 处置 |
 |---|---|---|---|
 | R1 | `docs/superpowers/specs/2026-08-30-type-system-direction-design.md:29`（第 11 条「函数类型隐式化」：…「函数值 = 子图引用（**`@addr` 机制已有**）」）| **与不变量3冲突**：新裁决明确「两者不能互相等价」，且「不要为了兼容它把新 callable 也定义成裸地址」 | **不得就地改写该件**（本档只新增）。登记为**须修订陈述**；修订措辞建议 = 「`@addr` 保留为 raw machine address（`int` 语义）；typed callable value 另立（`fn(T...)->R`）」——**待维护者裁（T-3）** |
-| R2 | `TODO.md:426`（「…**函数值设计为 YAGNI 挂起** ⇒ 正确结局 = 定位拒绝 `P021`」）| **本档解除了「函数值」的挂起** ⇒ 该括号句成为**陈旧陈述**。⚠ 该句所在的**主结论不受影响**（嵌套 `fn` 声明仍不属语言面：`grammar/core.ebnf` 的 `Statement` 不含 `FunctionDecl`，`P021` 仍是正解）| 同阶段**只改括号句**（「函数值设计为 YAGNI 挂起」→ 指向本档），主结论与判定依据（`tests/selfhost/test_nested_fn.py`）**不动**。属「修了前置能力的阶段必须同阶段清点把该缺口当现状写的陈述」纪律 |
+| R2 | `TODO.md:426`（「…**函数值设计为 YAGNI 挂起** ⇒ 正确结局 = 定位拒绝 `P021`」）| **本档解除了「函数值」的挂起** ⇒ 该括号句成为**陈旧陈述**。警告：该句所在的**主结论不受影响**（嵌套 `fn` 声明仍不属语言面：`grammar/core.ebnf` 的 `Statement` 不含 `FunctionDecl`，`P021` 仍是正解）| 同阶段**只改括号句**（「函数值设计为 YAGNI 挂起」→ 指向本档），主结论与判定依据（`tests/selfhost/test_nested_fn.py`）**不动**。属「修了前置能力的阶段必须同阶段清点把该缺口当现状写的陈述」纪律 |
 | R3 | `docs/superpowers/specs/2026-08-30-…:41`「明确不做：HKTs（高阶泛型）」| **一致**（§4.3 的非目标旁证）| 无需改；本档引用为一致证据 |
 | R4 | `docs/superpowers/plans/2026-09-20-safety-verification-plan.md:88-90`（CFI 前置缺失）| 段4是其**前置实现** | 段4 实施后回头更新该件 §1.3/§4（**另一组**；本档登记义务）|
 | R5 | `docs/superpowers/specs/2026-09-17-concurrency-model-design.md:390`、`:427`（`sched_go` 事实面）| **一致**（不变量4：并发接口自己的演进）| 无需改；其行号已变化（§1.2）|

@@ -16,7 +16,7 @@ parser 串成 `seg + hole + seg` 链（**只连同一字面量的 part**），ch
 `string` 恒等 · `int → int_str` · `bool → bool_str`（**不经 int**——遵「bool 不隐式转 int」裁定）·
 其它（`dex` 两表示 / `char` / 结构体…）⇒ **P028 硬错**；畸形插值（未闭合 / `${}` 空 / 洞内尾随垃圾）⇒ **P027 硬错**。
 
-**⚠ bootstrap 面分歧（已知、已登记）**：bootstrap lexer 仍按「原文逐字进串值」处理 `${...}`（不展开）
+**警告：bootstrap 面分歧（已知、已登记）**：bootstrap lexer 仍按「原文逐字进串值」处理 `${...}`（不展开）
 ⇒ 两前端对含插值源的语义**不同**（本档 D 组把该事实**记为事实**，不是相等判定依据）。
 
 **突变自证（可复跑）**：`COREC_BIN=<展开前二进制> python3 tests/selfhost/test_string_interp.py`
@@ -58,7 +58,7 @@ VALUES = [
 
 
 def build_run(lit, extra_prelude="", extra_body=""):
-    # ⚠ v4 迁移修复：`%s` **前不得有空格**——契约是「`extra_body` 自带缩进」（v3 形即
+    # 警告：v4 迁移修复：`%s` **前不得有空格**——契约是「`extra_body` 自带缩进」（v3 形即
     # `'%s'` 独占一行无缩进）。T6 迁移把它折成单行时误加了 4 空格 ⇒ `extra_body=""`（B 组
     # 主路径）生成 8 空格缩进的 `return 0` ⇒ `error[P02]: unexpected dedent at top level`。
     src = (PRELUDE + extra_prelude +
@@ -127,7 +127,7 @@ def main():
         expect(f"B.{name}.value", val == want, f"得 {val!r}（build_rc={rc}）")
 
     # B' 实参位 / let 初值（位置形态）
-    # ⚠ v4 迁移修复：载荷去 v3 语句分号（v4 语句尾 `;` ⇒ `Unexpected token in expression`）。
+    # 警告：v4 迁移修复：载荷去 v3 语句分号（v4 语句尾 `;` ⇒ `Unexpected token in expression`）。
     rc, val, p21, out = build_run("v=${n}", extra_body='    println(int_str(g(s)))\n')
     last = (val or "").splitlines()[-1] if val else None
     print(f"[B arg_position] 串作实参 g(s) ⇒ 末行={last}（整输出=[{val}]）build_rc={rc}")
