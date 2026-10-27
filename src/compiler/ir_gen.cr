@@ -3774,7 +3774,23 @@ fn gen_expr(node: int) -> int:
         // Module or method call: obj.method(args)
         if ast_kind(func_node) == EXPR_FIELD:
             func_ni = ast_data(node) // function name (set by checker for module calls)
+            // An associated function (no `self` parameter) is called through the
+            // same `Type.fn(...)` syntax but takes no receiver. Passing one would
+            // shift every argument by a slot and drop the last.
+            takes_self : ., mut = 0
             if !is_module_call:
+                takes_self = 1
+                cfi0 := find_func(func_ni)
+                if cfi0 >= 0:
+                    fn_node0 := fi_ast_node(cfi0)
+                    fp0 := ast_b(fn_node0)
+                    if fp0 < 0:
+                        takes_self = 0
+                    else if ast_int_val(fp0) == 0:
+                        takes_self = 0
+                else:
+                    takes_self = 0
+            if takes_self != 0:
                 // Method call: self is first arg
                 obj_node := ast_a(func_node)
                 self_var : ., mut = gen_expr(obj_node)
@@ -3843,9 +3859,10 @@ fn gen_expr(node: int) -> int:
             if cfi >= 0:
                 dex_align_call_args(cfi, ac, arg_vars, arg_nodes, arg_nodes_cap)
         // Generic function: redirect to monomorphized (specialized) version.
-        // Module-qualified calls have no receiver and are safe to specialize the
-        // same way; method calls keep the EXPR_IDENT-only restriction.
-        if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT || is_module_call != 0):
+        // Method calls are included: a method on a generic struct inherits the
+        // struct's parameters, so without specialization the template has no
+        // emitted body and the call would target a missing symbol.
+        if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT || ast_kind(func_node) == EXPR_FIELD || is_module_call != 0):
             gen_fi := find_func(func_ni)
             if gen_fi >= 0 && fi_generic_count(gen_fi) > 0:
                 // ─── 实例键类型项化 ───

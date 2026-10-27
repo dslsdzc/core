@@ -3372,6 +3372,14 @@ fn substitute_return_type(ti: int) -> int:
     return ti
 
 fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> int:
+    return infer_gen_call_recv(fi, call_node, first_arg, arg_count, -1)
+
+// `recv_ti >= 0` means this is a method call: the receiver is bound against the
+// first parameter and the argument list starts at the second one. Direct calls
+// pass -1 and keep the 1:1 mapping. Before this, a method on a generic struct
+// had no binding at all (its argument list excludes the receiver), so the
+// instance fell back to unit.
+fn infer_gen_call_recv(fi: int, call_node: int, first_arg: int, arg_count: int, recv_ti: int) -> int:
     // Infer concrete types for a generic function call
     fn_node := fi_ast_node(fi)
     first_param := ast_b(fn_node)
@@ -3385,6 +3393,22 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
     pi : ., mut = 0
     pn : ., mut = first_param
     an : ., mut = first_arg
+    if recv_ti >= 0 && pn >= 0:
+        orig_recv_node := ast_data(pn)
+        if orig_recv_node >= 0:
+            recv_pattern := res_call_type(orig_recv_node, fi)
+            if !unify_types(recv_pattern, recv_ti):
+                println("[S1-RECV] line=" + int_str(ast_line(call_node)) + " p=" + type_display(recv_pattern)
+                    + " r=" + type_display(recv_ti))
+        pn = pn + 1
+        loop:
+            if pn >= g_ast_count:
+                pn = -1
+                break
+            if ast_kind(pn) == EXPR_PARAM:
+                break
+            pn = pn + 1
+        pi = 1
     loop:
         if pi >= param_count || pi >= arg_count:
             break
@@ -3600,7 +3624,6 @@ fn check_func(fi: int):
                 if ptype_mapped >= 0 && ptype_mapped != TI_NEVER && ptype_mapped != TI_DYN:
                     ti = ptype_mapped
         else:
-            // Self param: derive struct type from mangled function name "Struct.method"
             fn_name := istr_get(fi_name(fi))
             fn_len := str_len(fn_name)
             dot_pos : ., mut = -1
@@ -3618,7 +3641,11 @@ fn check_func(fi: int):
                 struct_ni := str_intern(struct_name)
                 si := find_gsym(struct_ni)
                 if si >= 0 && sym_kind(si) == SYM_TYPE:
-                    struct_ti := sym_type(si)
+                    // Resolve through a type node, not sym_type: a generic struct
+                    // written as a bare name becomes a generic apply there, which
+                    // is what lets `self.field` substitute an inferred field type.
+                    tnode := alloc_node(EXPR_IDENT, 0, 0, 0, struct_ni, 0, 0, 0, 0)
+                    struct_ti := res_type_node(tnode)
                     if self_mode == 1:
                         // self by value
                         ti = struct_ti
@@ -3628,6 +3655,20 @@ fn check_func(fi: int):
                         if self_mode == 3:
                             mut_flag = 1
                         ti = alloc_type(TYP_REF, struct_ti, mut_flag)
+            // A receiver may carry an explicit annotation (`self: Box`). It wins
+            // over the mangled name: a free function has no "Struct.method" name
+            // to derive from, and a method on a generic struct needs the same
+            // generic-apply path a normal parameter takes.
+            ann_node := ast_data(pn)
+            if ann_node >= 0 && ast_kind(ann_node) != 0:
+                base_ti := res_type_node(ann_node)
+                if self_mode == 1:
+                    ti = base_ti
+                else:
+                    ann_mut : ., mut = 0
+                    if self_mode == 3:
+                        ann_mut = 1
+                    ti = alloc_type(TYP_REF, base_ti, ann_mut)
         def_sym(pname_idx, SYM_PARAM, ti, -1)
         pi = pi + 1
         // Params are not contiguous — type nodes are allocated between them
@@ -4587,7 +4628,7 @@ fn infer_expr(node: int) -> int:
                     s1p_arg_ring(fi_m, first_arg, arg_count, 1, 0)
                     if fi_m >= 0:
                         if fi_generic_count(fi_m) > 0:
-                            return infer_gen_call(fi_m, node, first_arg, arg_count)
+                            return infer_gen_call_recv(fi_m, node, first_arg, arg_count, obj_ti)
                         if fi_generic_count(fi_m) == 0:
                             if sym_type(si) == TI_UNIT:
                                 if fi_return_type(fi_m) == TY_NEVER:
@@ -5204,7 +5245,11 @@ fn infer_expr(node: int) -> int:
                 ast_set_type_val(node, 0)
                 ast_set_c(node, -1)
                 return TI_INT
-        // Handle generic apply: unwrap to base named type for struct lookup
+        // Handle generic apply: unwrap to base named type for struct lookup.
+        // `apply_ti` keeps the generic apply row: field substitution needs the
+        // arguments, and a `&self` receiver only becomes an apply after the
+        // auto-deref above.
+        apply_ti : ., mut = actual_ti
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_GENERIC_APPLY:
             actual_ti = get_type_data(actual_ti)
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_NAMED:
@@ -5238,9 +5283,9 @@ fn infer_expr(node: int) -> int:
                             if ast_kind(ft_node) == EXPR_IDENT:
                                 ft_name_idx := ast_int_val(ft_node)
                                 // Check if this field type is a generic param (substitute if we have a generic apply)
-                                if is_struct_generic(si, ft_name_idx) && get_type_kind(obj_ti) == TYP_GENERIC_APPLY:
-                                    base_ti := get_type_data(obj_ti)
-                                    ga_start := get_type_extra(obj_ti)
+                                if is_struct_generic(si, ft_name_idx) && get_type_kind(apply_ti) == TYP_GENERIC_APPLY:
+                                    base_ti := get_type_data(apply_ti)
+                                    ga_start := get_type_extra(apply_ti)
                                     ga_count := cell_load(g_gen_apply_data, ga_start * 8)
                                         // Find which generic param index
                                     gpi : ., mut = 0

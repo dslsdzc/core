@@ -1822,13 +1822,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
             // Handle self/&self/&mut self params
             if tok_k(cur_tok()) == T_SELF:
                 pt := advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
                 if check(T_COLON_DECL):
                     advance_tok()
-                    parse_type()
+                    stn = parse_type()
+                    stv = unpack_type(stn)
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, stv, stn, tok_ln(pt), tok_cl(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1837,13 +1840,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 pt := advance_tok()
                 advance_tok()
                 advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
                 if check(T_COLON_DECL):
                     advance_tok()
-                    parse_type()
+                    stn = parse_type()
+                    stv = unpack_type(stn)
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, stv, stn, tok_ln(pt), tok_cl(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1851,13 +1857,16 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
             if tok_k(cur_tok()) == T_AMPERSAND && tok_k(cur_tok()+1) == T_SELF:
                 pt := advance_tok()
                 advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
                 if check(T_COLON_DECL):
                     advance_tok()
-                    parse_type()
+                    stn = parse_type()
+                    stv = unpack_type(stn)
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, stv, stn, tok_ln(pt), tok_cl(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
