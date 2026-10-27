@@ -2342,9 +2342,26 @@ fn parse_declaration():
                         fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(ft), tok_cl(ft))
                 si_set_field_type(si, fc, unpack_type(fty))
                 si_set_field_type_node(si, fc, fty)
-                fc = fc + 1
-                if check(T_COMMA):
+                field_pub : ., mut = 0
+                loop:
+                    if !check(T_COMMA):
+                        break
+                    nk := tok_k(cur_tok() + 1)
+                    is_tag : ., mut = 0
+                    if nk == T_PUB || nk == T_MUT:
+                        is_tag = 1
+                    else if nk == T_IDENT && str_eq(tok_lx(cur_tok() + 1), "apx") != 0:
+                        is_tag = 1
+                    if is_tag != 0:
+                        advance_tok()
+                        if nk == T_PUB:
+                            field_pub = 1
+                        advance_tok()
+                        continue
                     advance_tok()
+                    break
+                si_set_field_pub(si, fc, field_pub)
+                fc = fc + 1
             cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
             si_commit_fields(si, fc)   // 提交字段区（高水位 = base + fc）
         if has_items != 0:

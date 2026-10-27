@@ -83,6 +83,13 @@ fn main() -> int:
     return m.findKey(1)
 """
 
+PRIVATE_FIELD_SOURCE = """import bits
+
+fn main() -> int:
+    b := bits32(7)
+    return b.value
+"""
+
 HIDDEN_GLOBAL_SOURCE = """import arena
 
 fn main() -> int:
@@ -175,6 +182,25 @@ interface ShownIface, pub:
 type HiddenAlias = int
 type ShownAlias = int, pub
 
+fn makeShownEnum() -> ShownEnum, pub:
+    return SA()
+
+fn makeShownAlias() -> ShownAlias, pub:
+    return 7
+
+struct StdP:
+    n: int
+
+impl ShownIface for StdP:
+    fn shownPing(&self) -> int:
+        return self.n
+
+fn makeStdP() -> StdP, pub:
+    return StdP { n = 2 }
+
+fn callStdPing(p: StdP) -> int, pub:
+    return p.shownPing()
+
 struct HiddenStruct:
     x: int
 
@@ -182,7 +208,7 @@ fn makeHiddenStruct() -> HiddenStruct, pub:
     return HiddenStruct { x = 7 }
 
 struct ShownStruct, pub:
-    y: int
+    y: int, pub
 
 fn makeShownStruct() -> ShownStruct, pub:
     return ShownStruct { y = 7 }
@@ -215,6 +241,45 @@ impl ShownIface for P:
 fn main() -> int:
     p := P { n = 1 }
     return p.shownPing()
+"""
+
+SAME_NAME_TYPES_SOURCE = """import zz_pub_visibility_fixture
+
+enum ShownEnum:
+    UA, UB
+
+type ShownAlias = string
+
+interface ShownIface:
+    fn userPing(&self) -> int
+
+struct U:
+    n: int
+
+impl ShownIface for U:
+    fn userPing(&self) -> int:
+        return self.n + 1
+
+fn main() -> int:
+    ue := UA()
+    ok : ., mut = 0
+    match ue:
+        UA => ok = 1, UB => ok = 2,
+    se := makeShownEnum()
+    match se:
+        SA => ok = ok + 10, SB => ok = 0,
+    x : ShownAlias = "ok"
+    if str_len(x) != 2:
+        return 3
+    if makeShownAlias() != 7:
+        return 4
+    u := U { n = 1 }
+    if u.userPing() != 2:
+        return 5
+    p := makeStdP()
+    if callStdPing(p) != 2:
+        return 6
+    return 42
 """
 
 HIDDEN_ALIAS_SOURCE = """import zz_pub_visibility_fixture
@@ -273,6 +338,7 @@ def test_hidden_types_methods_and_globals():
             ("hidden_type", HIDDEN_TYPE_SOURCE, "error[N01]"),
             ("hidden_method", HIDDEN_METHOD_SOURCE, "error[N08]"),
             ("hidden_global", HIDDEN_GLOBAL_SOURCE, "error[N01]"),
+            ("private_field", PRIVATE_FIELD_SOURCE, "error[N03]"),
         ):
             built, _ = _build(tmp, name, source)
             text = built.stdout + built.stderr
@@ -312,6 +378,7 @@ def test_cross_library_enum_interface_alias():
                 ("shown_impl", SHOWN_IMPL_SOURCE),
                 ("shown_alias", SHOWN_ALIAS_SOURCE),
                 ("shown_field", "import zz_pub_visibility_fixture\nfn main() -> int:\n    s := makeShownStruct()\n    return s.y + 35\n"),
+                ("same_name_types", SAME_NAME_TYPES_SOURCE),
             ):
                 built, elf = _build(tmp, name, source)
                 assert built.returncode == 0, (name, built.stdout + built.stderr)

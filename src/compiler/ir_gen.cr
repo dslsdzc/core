@@ -5812,7 +5812,8 @@ fn agg_elem_count_of(tn: int) -> int:
         loop:
             if ai >= g_type_alias_count:
                 break
-            if cell_load(g_type_aliases, ai * ESZ_TYPE_ALIAS + OFF_TA_NAME) == ni:
+            an := cell_load(g_type_aliases, ai * ESZ_TYPE_ALIAS + OFF_TA_NAME)
+            if decl_src_for_unique(an) == ni && (g_cur_lib < 0 || decl_owner_for_unique(an) == g_cur_lib || decl_owner_for_unique(an) < 0):
                 rt := cell_load(g_type_aliases, ai * ESZ_TYPE_ALIAS + OFF_TA_TYPE)
                 if rt >= 0 && ast_kind(rt) == EXPR_ARRAY:
                     return ast_int_val(rt)
