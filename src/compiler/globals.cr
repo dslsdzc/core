@@ -15,6 +15,10 @@ g_str_hash_cap : int, mut
 g_funcs : string, mut
 g_func_count : int, mut
 g_func_cap : int, mut
+// Link name per function. Source name stays in FuncInfo for lookup/export;
+// this name is what IR_CALL and the .ccr function table carry. It differs from
+// the source name only when two libraries declare the same function/method name.
+g_func_link : string, mut
 g_structs : string, mut
 g_struct_count : int, mut
 g_struct_cap : int, mut

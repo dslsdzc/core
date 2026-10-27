@@ -3723,7 +3723,10 @@ fn gen_expr(node: int) -> int:
             if str_eq(name, "addr") != 0:
                 fn_expr := ast_a(first_arg)
                 if ast_kind(fn_expr) == EXPR_IDENT:
-                    fn_ni := ast_int_val(fn_expr)
+                    fn_ni : ., mut = ast_int_val(fn_expr)
+                    ffi := find_func(fn_ni)
+                    if ffi >= 0:
+                        fn_ni = func_link(ffi)
                     v := new_ir_var("_fnaddr", TI_INT)
                     emit(IR_FNADDR, v, fn_ni, 0, 0, 0)
                     return v
@@ -3793,6 +3796,9 @@ fn gen_expr(node: int) -> int:
                 ac = ac + 1
         else if ast_kind(func_node) == EXPR_IDENT:
             func_ni = ast_int_val(func_node)
+            link_ni := ast_data(node)
+            if link_ni >= 0:
+                func_ni = link_ni
 
         // Generate remaining args (walk EXPR_ARG chain)
         an : ., mut = first_arg
@@ -3918,7 +3924,7 @@ fn gen_expr(node: int) -> int:
                 else:
                     spec_ni = gen_find_or_create(gen_fi, type_args)
                 if spec_ni >= 0:
-                    func_ni = fi_name(spec_ni)
+                    func_ni = func_link(spec_ni)
                     // 泛型声明的形参是 `T?`（inner = 泛型参数 -> 判据假）-> 上面的环
                     // 对泛型实参无效果；重定向后用实例参数列表（inner = 具体 dex -> 判据真）再跑一遍。
                     // 幂等性见 `dex_align_call_args` 头注（已转换者 IR 型 = TI_DEX_S -> 不重转）。
@@ -5348,10 +5354,14 @@ fn gen_expr(node: int) -> int:
         // 回落）。存字段位按名字解出（与 Python bootstrap 的 gen_struct_lit 同语义），
         // Field values bind by name, not by declaration order. Evaluation order
         // stays source order, the same as the bootstrap.
-        name_ni := ast_a(node)
+        name_ni : ., mut = ast_a(node)
+        si : ., mut = ast_data(node)
+        if si < 0:
+            si = find_struct_by_name(name_ni)
+        if si >= 0:
+            name_ni = si_name(si)
         s := new_ir_var("struct", TI_UNIT)
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0)
-        si := find_struct_by_name(name_ni)
         fi : ., mut = 0
         fn2 : ., mut = ast_b(node)
         loop:
@@ -5567,7 +5577,7 @@ fn ir_gen_func(fi: int):
     // Record function metadata
     func_idx := g_ir_func_count
     grow_ir_func_meta(func_idx + 1)
-    cell_store(g_ir_func_name_idx, func_idx * 8, name_idx)
+    cell_store(g_ir_func_name_idx, func_idx * 8, func_link(fi))
     cell_store(g_ir_func_ret_type, func_idx * 8, ret_ti)
     cell_store(g_ir_func_instr_start, func_idx * 8, g_ir_instr_count)
     cell_store(g_ir_func_var_start, func_idx * 8, g_ir_var_count)

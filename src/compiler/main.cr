@@ -573,7 +573,7 @@ fn corec_main() -> int:
             // Cache hit: setup function metadata for restored data
             func_idx := g_ir_func_count
             grow_ir_func_meta(func_idx + 1)
-            cell_store(g_ir_func_name_idx, func_idx * 8, name_ni)
+            cell_store(g_ir_func_name_idx, func_idx * 8, func_link(fi))
             cell_store(g_ir_func_ret_type, func_idx * 8, fi_return_type(fi))
             cell_store(g_ir_func_instr_start, func_idx * 8, instr_start)
             cell_store(g_ir_func_var_start, func_idx * 8, var_start)
