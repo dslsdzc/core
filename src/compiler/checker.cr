@@ -1895,6 +1895,115 @@ fn remap_impl_pairs():
 // Coherence: an impl may be foreign only when at least one side is declared in
 // the implementing library, and a (interface, type) pair may be implemented
 // only once.
+fn type_exposes_hidden(ti: int, owner: int) -> int:
+    k := get_type_kind(ti)
+    if k == TYP_NAMED:
+        unique := get_type_data(ti)
+        if decl_owner_for_unique(unique) == owner:
+            if lib_export_find_kind(owner, decl_src_for_unique(unique), SYM_TYPE) < 0:
+                return 1
+        return 0
+    if k == TYP_GENERIC_APPLY:
+        if type_exposes_hidden(get_type_data(ti), owner) != 0:
+            return 1
+        start := get_type_extra(ti)
+        cnt := cell_load(g_gen_apply_data, start * 8)
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            if type_exposes_hidden(cell_load(g_gen_apply_data, (start + 1 + i) * 8), owner) != 0:
+                return 1
+            i = i + 1
+        return 0
+    if k == TYP_ARRAY || k == TYP_SLICE || k == TYP_REF || k == TYP_PTR || k == TYP_OPTIONAL:
+        return type_exposes_hidden(get_type_data(ti), owner)
+    return 0
+
+fn node_exposes_hidden(node: int, owner: int) -> int:
+    if node < 0:
+        return 0
+    k := ast_kind(node)
+    if k == EXPR_IDENT:
+        si := find_gsym(ast_int_val(node))
+        if si >= 0 && sym_kind(si) == SYM_TYPE:
+            return type_exposes_hidden(sym_type(si), owner)
+        return 0
+    if k == EXPR_GENERIC_APPLY:
+        si := find_gsym(ast_a(node))
+        if si >= 0 && sym_kind(si) == SYM_TYPE:
+            if type_exposes_hidden(sym_type(si), owner) != 0:
+                return 1
+        cnt := ast_c(node)
+        an : ., mut = ast_b(node)
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            if node_exposes_hidden(an, owner) != 0:
+                return 1
+            an = an + 1
+            i = i + 1
+        return 0
+    if k == EXPR_ARRAY || k == EXPR_REFTYPE || k == EXPR_PTRTYPE || k == EXPR_OPTIONAL:
+        return node_exposes_hidden(ast_a(node), owner)
+    return 0
+
+fn check_public_api_exposure():
+    saved_lib := g_cur_lib
+    i : ., mut = 0
+    loop:
+        if i >= g_func_count:
+            break
+        fn_node := fi_ast_node(i)
+        if fn_node >= 0 && fn_node_is_pub(fn_node) != 0:
+            owner := func_owner(i)
+            if owner >= 0:
+                g_cur_lib = owner
+                rtn := ast_type_val(fn_node)
+                if rtn > 0 && ast_kind(rtn) != 0 && node_exposes_hidden(rtn, owner) != 0:
+                    print("warning: public function '")
+                    print(istr_get(fi_name(i)))
+                    println("' exposes a library-private type")
+                pn : ., mut = ast_b(fn_node)
+                pc := ast_c(fn_node)
+                pi : ., mut = 0
+                loop:
+                    if pi >= pc || pn < 0:
+                        break
+                    if ast_kind(pn) == EXPR_PARAM:
+                        tn := ast_data(pn)
+                        if tn >= 0 && ast_kind(tn) != 0 && node_exposes_hidden(tn, owner) != 0:
+                            print("warning: public function '")
+                            print(istr_get(fi_name(i)))
+                            println("' has a parameter exposing a library-private type")
+                        pi = pi + 1
+                    pn = pn + 1
+                    loop:
+                        if pn >= g_ast_count:
+                            break
+                        if ast_kind(pn) == EXPR_PARAM:
+                            break
+                        pn = pn + 1
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_global_let_count:
+            break
+        node := cell_load(g_global_lets, i * 8)
+        owner := lib_of_node(node)
+        if owner >= 0:
+            g_cur_lib = owner
+            si := find_gsym(ast_a(node))
+            if si >= 0 && sym_kind(si) == SYM_GLOBAL && sym_pub_field(si) != 0:
+                tn := ast_b(node)
+                if tn >= 0 && node_exposes_hidden(tn, owner) != 0:
+                    print("warning: public global '")
+                    print(istr_get(ast_a(node)))
+                    println("' exposes a library-private type")
+        i = i + 1
+    g_cur_lib = saved_lib
+
 fn check_impl_coherence():
     i : ., mut = 0
     loop:
@@ -5748,6 +5857,7 @@ fn check_all():
     remap_impl_pairs()
     check_impl_visibility()
     check_impl_coherence()
+    check_public_api_exposure()
     prelude_builtin_init()
 
     // SYM_SO_FN is materialized by the side-table fallback in find_gsym and
