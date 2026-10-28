@@ -30,7 +30,7 @@
 ## 已知缺口
 
 - entry 和 interval 使用文本范围，不使用 CFG liveness。RegionCheck 接入后会收紧该范围。
-- `pass_stack_share` 已停用。原实现产生死输出，corearch 运行时该通道始终为空。恢复它需要在同一位置提供基于 alloc 的实现。
+- `pass_stack_share` 已停用。原实现产生死输出，corearch 运行时该通道始终为空。恢复它需要在同一位置提供使用 alloc 的实现。
 - `param_ents` 为 -1。被重新定义的参数没有 incoming-version entry，因为尾部 pass 只在 `prev[lv] < 0` 时添加 entry。`.ccr` 不再保存 `param_ents`，旧的有针对性测试已随 ENT carrier 删除。如果规则 2 需要，可以恢复 incoming-version entry。
 - `entries_coexist` 现在拒绝越界的上界。检查位于 `entries_coexist`，`--inject-coexist-oob` 探针已移到 corearch。
 

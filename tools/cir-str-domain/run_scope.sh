@@ -1,14 +1,14 @@
 #!/bin/bash
-# 冷/暖对照 runner（串域跨进程 id 缺陷的证据复现 + 判据；见
+# 冷/暖对照 runner（串域跨进程 id 缺陷的证据复现 + 判定依据；见
 # docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md）。
 #
 # 用法：
 #   CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh            # 报告矩阵（默认；恒 rc=0）
-#   CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh --assert   # 判据模式：凡冷≠暖即 rc=1
+#   CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh --assert   # 判定依据模式：凡冷≠暖即 rc=1
 #
 # 纪律：每档**独立目录、先冷后暖**（同一二进制、同一源、不 clean）；
 #       暖态读数的可信度依赖缓存状态，正是本缺陷的由来。
-# 基线既有红：`known-baseline-red.txt` 列出的档在判据模式下**只上报不判红**
+# 基线既有红：`known-baseline-red.txt` 列出的档在判定依据模式下**只上报不判红**
 #       （其红先于本修复存在；证据与触发器见该文件头注）。
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -49,9 +49,9 @@ for probe in "$HERE"/probes/scope_*.cr; do
 done
 
 if [ "$MODE" = "--assert" ]; then
-    # 判据模式 = 修复后行为（冷=暖）。缺陷未修时必然 rc=1——这是**判据**，不是脚本故障。
+    # 判定依据模式 = 修复后行为（冷=暖）。缺陷未修时必然 rc=1——这是**判定依据**，不是脚本故障。
     if [ "$fail" != "0" ]; then echo "ASSERT 失败：存在冷/暖分歧档（缺陷未修时为预期红）"; exit 1; fi
     echo "ASSERT 通过：全部档冷/暖一致"; exit 0
 fi
-echo "（report-only：分歧档见上；判据模式加 --assert）"
+echo "（report-only：分歧档见上；检查模式加 --assert）"
 exit 0

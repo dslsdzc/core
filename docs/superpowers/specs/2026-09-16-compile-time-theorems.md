@@ -28,11 +28,11 @@
 ## 2. 机检侧（次级检查）
 
 - 计数器证书（`--emit-ops-cert`，设计见计划 8.2 节的 T2）在真实编译上逐次验：`(pass, N, ops ≤ C_pass·N)`；
-- 常数表 `C_pass` 入仓（建议 `tools/cert/c_pass.json`），只允许在批内显式改动，改动须给定理依据；
+- 常数表 `C_pass` 入仓（建议 `tools/cert/c_pass.json`），只允许在阶段内显式改动，改动须给定理依据；
 - 判定器建议 `tools/cert/check_cert.py`（任一违例 rc=1）。
 
 ## 3. 关联
 
 - `docs/superpowers/plans/2026-09-04-compile-time-linearity.md`（计划本体；4 节 = 原定理表，8 节 = 任务级细化与审计勘误，9 节 = 决定门）
-- `docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`（同期的另一条性能相关批：可选表示，不含时间上界承诺）
+- `docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`（同期的另一条性能相关阶段：可选表示，不含时间上界承诺）
 - 审计复核来源（2026-09-16 纸面细化轮）：计划 8.1 节勘误表（8 条行漂 / 2 条位置迁移 / 后端目录退役 / 1 条已失效，照原文施工必然出错）

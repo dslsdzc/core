@@ -3,7 +3,7 @@
 # 用法：gh auth refresh 后运行本脚本；或按脚本内 JSON 在网页版手动配置（路径 B）
 # API 事实：restrict-pushes = update 规则 + bypass_actors（不含 Admin 角色=关闭管理员绕过）；
 #           enforcement: evaluate 仅 Enterprise（免费计划不可用，用 active）；
-#           merge_queue 规则在本计划被拒（"Invalid rule"）——已降级为手动合入（审批+CI 门槛保留）；
+#           merge_queue 规则在本计划被拒（"Invalid rule"）——已降级为手动合入（审阶段+CI 门槛保留）；
 #           squash-only 经 pull_request 参数 allowed_merge_methods=["squash"] 强制；
 #           pull_request 参数 5 个必填布尔（含 require_code_owner_review）；required_status_checks 字段名非 checks
 #           required_reviewers 为 pull_request 规则的 beta 参数（Team 型）——个人用户用

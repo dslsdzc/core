@@ -109,7 +109,7 @@ def diagnose(path, check_only=False, ccr_only=False, verbose=False):
         help_msg = ''
         if builtins_found:
             for b in builtins_found:
-                print(f'  {red(f"✗ {b}")} not available in ELF backend')
+                print(f'  {red(f"失败 {b}")} not available in ELF backend')
             print(f'  {yellow("Fix: use __builtin_syscall3 directly, or embed the function")}')
         else:
             print(f'  {red("corearch CRASH (SIGSEGV) — likely a compiler bug")}')

@@ -26,7 +26,7 @@ COREC_FILES = [
     'src/targets/x86_64/linux/elf/frontend_target.cr',
     # R2 P0 类型项引擎（建层）：类型项 DAG 表 + 构造去重 → 判定引擎（桩）→ 自测通道。
     # 置于 checker 之后（计划 Step 9 指定位置）；引擎尚无 checker 侧消费者，
-    # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
+    # 本次为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
     'src/compiler/type_terms.cr',
     'src/compiler/type_engine.cr',
     # R2 P2b Task 1 本质条目表（native interface entries）+ iface_* 查询 API：**静态

@@ -1,10 +1,10 @@
-// apx（dex）形式转换缺口族——**suite 常规腿**（apx 批 T5；run_suite 每档独立 build+run）
+// apx（dex）形式转换缺口族——**suite 常规语料路径**（apx 阶段 T5；run_suite 每档独立 build+run）
 //
-// 与 py 套件 `tests/selfhost/test_apx_conversion.py` 的分工：本档是**常规语料腿**（走
+// 与 py 套件 `tests/selfhost/test_apx_conversion.py` 的分工：本档是**常规语料路径**（走
 // `src/ci/run.sh` 的 suite job），只放**已绿**形态；负例/哨兵/自证在 py 套件里
 // （suite 档跑红会拖挂整个 suite job）。
 //
-// 判据：全部经 **`@raw_int`** 锚定 scaled 整数（唯一显式形式通道）——不直接比 decimal，
+// 判断依据：全部经 **`@raw_int`** 锚定 scaled 整数（唯一显式形式通道）——不直接比 decimal，
 // 否则会踩 TODO #2026-09-16-30（apx 字面量走 lexer 位模式，~2ulp 截断；与聚合槽里的精确 scaled 值
 // 在 binary64 下可不相等）。
 //
@@ -16,7 +16,7 @@ struct S3:
     f: dex
 
 impl S3:
-    fn m(self: S3, x: dex) -> int:
+    fn m(self, x: dex) -> int:
         return @raw_int(x) / 1000000
 
 fn scaled7() -> dex:
@@ -31,9 +31,9 @@ fn main() -> int:
     if s.m(d) != 7:
         return 1
 
-    // 2. 模块限定调用（apx 批 T2 新增活点；与直调同值对拍）
-    //    ⚠ **必须先绑定到变量**：模块限定调用**直接作实参**（`str_eq(m.f(x), "y")`）在
-    //    本批起点即 **SIGSEGV 139**——**既有缺陷，非本批引入**（T3/T5 实测：T3 二进制、
+    // 2. 模块限定调用（apx 阶段 T2 新增活点；与直调同值对拍）
+    //    警告：**必须先绑定到变量**：模块限定调用**直接作实参**（`str_eq(m.f(x), "y")`）在
+    //    本次起点即 **SIGSEGV 139**——**既有缺陷，非本次引入**（T3/T5 实测：T3 二进制、
     //    预变更二进制、**冻结基线 97f4394f** 三者同崩）⇒ 见 TODO #2026-09-16-31；本档走绑定形。
     ma := dex.dex_str(d)
     me := dex_str(d)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R2 P3 Task 3：match 穷尽性真判定（补集空性 + 具体变体反例）行为覆盖集。
 
-判据（正/负/边界/登记；语义见 docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md Task 3）：
+判定依据（正/负/边界/登记；语义见 docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md Task 3）：
 
   正：全覆盖过（**解释器 + ELF 双路径同值**）/ 通配臂吸收 / 绑定臂吸收 / 限定名模式
       / payload 变体 / 泛型枚举实例 / 单变体枚举 / 枚举形参位

@@ -1,6 +1,6 @@
 """V4 自动约束推断：泛型形参的方法调用反推接口约束。
 
-判据：
+判定依据：
   * `fn f(a) -> int: return a.show()` 不写 `[T: Show]`，从方法名推出 Show，
     monomorph 按具体类型解析到 `S.show`。
   * 具体类型未实现该接口 -> `error[TG02]`，构建失败且不产出 ELF。
@@ -23,7 +23,7 @@ struct S:
     a: int
 
 impl S:
-    fn show(self: S) -> int:
+    fn show(self) -> int:
         return self.a
 """
 
@@ -122,7 +122,7 @@ struct S:
     a: int
 
 impl S:
-    fn show(self: S) -> int:
+    fn show(self) -> int:
         return self.a
 
 fn main() -> int:

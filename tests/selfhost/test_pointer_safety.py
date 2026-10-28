@@ -98,48 +98,48 @@ def test_out_of_bounds_store_is_rejected():
 
 def test_deref_width_cannot_cross_allocation_end():
     assert_rejected(
-        "fn main() -> int:\n    arr := [1, 2]\n    p := (&arr[1]) as *[int; 2]\n    wide := *p\n    return 0\n",
+        "fn main() -> int:\n    arr := [1, 2]\n    p := (&arr[1]) cast *[int; 2]\n    wide := *p\n    return 0\n",
         "TK01",
     )
 
 
 def test_in_bounds_type_pun_is_accepted():
     assert_accepted(
-        "fn main() -> int:\n    arr := [1, 2]\n    p := (&arr[0]) as *[int; 2]\n    wide := *p\n    return 0\n"
+        "fn main() -> int:\n    arr := [1, 2]\n    p := (&arr[0]) cast *[int; 2]\n    wide := *p\n    return 0\n"
     )
 
 
 def test_external_pointer_requires_unsafe_for_load():
     assert_rejected(
-        "fn main() -> int:\n    p := 4096 as *int\n    return *p\n",
+        "fn main() -> int:\n    p := 4096 cast *int\n    return *p\n",
         "external pointer dereference requires unsafe",
     )
 
 
 def test_external_pointer_requires_unsafe_for_store():
     assert_rejected(
-        "fn main() -> int:\n    p := 4096 as *int\n    *p = 1\n    return 0\n",
+        "fn main() -> int:\n    p := 4096 cast *int\n    *p = 1\n    return 0\n",
         "external pointer dereference requires unsafe",
     )
 
 
 def test_indirect_external_pointer_requires_unsafe():
     assert_rejected(
-        "fn main() -> int:\n    address := 4096\n    p := address as *int\n    return *p\n",
+        "fn main() -> int:\n    address := 4096\n    p := address cast *int\n    return *p\n",
         "external pointer dereference requires unsafe",
     )
 
 
 def test_external_pointer_arithmetic_preserves_address_space():
     assert_rejected(
-        "fn main() -> int:\n    p := (4096 as *int) + 1\n    return *p\n",
+        "fn main() -> int:\n    p := (4096 cast *int) + 1\n    return *p\n",
         "external pointer dereference requires unsafe",
     )
 
 
 def test_alloc_buffer_cast_remains_tracked():
     assert_accepted(
-        "fn main() -> int:\n    raw := alloc(8)\n    p := raw as *int\n    value := *p\n    return 0\n"
+        "fn main() -> int:\n    raw := alloc(8)\n    p := raw cast *int\n    value := *p\n    return 0\n"
     )
 
 
@@ -152,7 +152,7 @@ def test_deref_loaded_int_is_not_pointer_escape():
 
 def test_external_pointer_is_accepted_inside_unsafe():
     assert_accepted(
-        "fn main() -> int:\n    unsafe:\n        p := 4096 as *int\n        value := *p\n    return 0\n"
+        "fn main() -> int:\n    unsafe:\n        p := 4096 cast *int\n        value := *p\n    return 0\n"
     )
 
 

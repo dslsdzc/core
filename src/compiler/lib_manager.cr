@@ -473,24 +473,31 @@ fn file_path_by_fni(fni: int) -> string:
     loop:
         if i >= g_file_count:
             return ""
-        if cell_load(g_files, i * 16) == fni:
-            if cell_load(g_files, i * 16 + 8) == 0:
+        if cell_load(g_files, i * 24) == fni:
+            if cell_load(g_files, i * 24 + 8) == 0:
                 return ""
-            return cell_load_str(g_files, i * 16 + 8)
+            return cell_load_str(g_files, i * 24 + 8)
         i = i + 1
     return ""
 
 fn lib_of_line(line: int) -> int:
-    if line <= 0 || line > g_line_count:
+    id := sm_for_line(line)
+    if id < 0:
         return -1
-    if (line - 1) * 8 + 8 > str_len(g_line_lib):
-        return -1
-    return cell_load(g_line_lib, (line - 1) * 8)
+    return sm_file_lib(id)
 
 fn lib_of_node(node: int) -> int:
+    // The owning file comes from the byte span. Going through the line first
+    // would add a line-table search to every visibility check.
     if node < 0 || node >= g_ast_count:
         return -1
-    return lib_of_line(ast_line(node))
+    lo := ast_lo(node)
+    if lo <= 0:
+        return -1
+    id := sm_span_file(lo - 1)
+    if id < 0:
+        return -1
+    return sm_file_lib(id)
 
 fn lib_selftest() -> int:
     lib_reset()

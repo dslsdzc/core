@@ -71,7 +71,7 @@ match x { … }
 
 | 条目 | 内容 | 状态 |
 |---|---|---|
-| 1 | 本批缘起：`c3` 分歧 | 已关闭 |
+| 1 | 本次缘起：`c3` 分歧 | 已关闭 |
 | 2 | FFI/extern 边界：`*T?` 跨边界破坏 INV-1。编译期接受，运行期调用明确失败，ELF 139 / interp 2 | 登记，与 FFI 可用性绑定 |
 | 3 | 推断得到的模块级全局数组元素写点 139/139，属于全局类型推断缺陷范围 | 登记 |
 | 4 | `&s.a` 字段取址写入丢失，需要新增 `IR_ADDR_FIELD` | 登记，另一缺陷范围 |
@@ -85,7 +85,7 @@ match x { … }
 |---|---|
 | 代码 | `src/compiler/ir_gen.cr`、`src/compiler/globals.cr`、`src/arch/x86_64/instr.cr` |
 | 测试 | `tests/selfhost/test_optional.py`，80 例 |
-| 文档 | `docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`、本报告、spec 第 9 节 (A) 批行、`tools/baseline/REBUILD.md` 的适用范围限制 |
+| 文档 | `docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`、本报告、spec 第 9 节 (A) 阶段行、`tools/baseline/REBUILD.md` 的适用范围限制 |
 | 提交 | `deab3862`、`a140340d`、`1e11353c`、`c5056b2d`、`5d36af98`、`7b006ef5` |
 | 证据 | `/tmp/capt6/`、`/tmp/capt7/` |
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""批 6（验证内核正式接入）判据套件：**正式规约语法 `#check` / `#ensure`**。
+"""阶段 6（验证内核正式接入）判定依据套件：**正式规约语法 `#check` / `#ensure`**。
 
 覆盖四组（语料入仓 = `tests/spec/*.cr`；本套件**独立可跑**——不依赖预置状态，
 所有产物落 `tempfile` 并清理；`cwd = 仓库根`（`--static` 构建要读 `src/runtime/rt.cr`，
@@ -18,11 +18,11 @@
   D. **`.ccr` 零足迹三段式**（裁-S12）：**ELF 逐字节同** · **除 STR 外 7 段逐字节同** ·
       **STR Δ 恰为公式值** `Δ = Σ(4 + len(m))`（`m` = **注解独有词素**）+ **零 Δ 用例必须绿**
 
-**`Δ` 公式的机制（判据注释，勿删）**：`src/compiler/lexer.cr` 的 `add_tok_str` 对**每个**
-IDENT/关键字词素都调 `str_intern` —— **既有行为、非本批引入**；只出现在注解里的词素
+**`Δ` 公式的机制（判定依据注释，勿删）**：`src/compiler/lexer.cr` 的 `add_tok_str` 对**每个**
+IDENT/关键字词素都调 `str_intern` —— **既有行为、非本次引入**；只出现在注解里的词素
 （如 `#check(...)` 的 `check`）必然进 `.ccr` 的 STR 段。⇒ **逐字节全同不可达**，
 可构造最强形 = 「ELF 同 + 除 STR 外逐段同 + STR Δ 恰好等于可算值（多一字节即红）」。
-（这条判据在 T3 首轮**当场抓到实现自身的 `str_intern("result")` 泄漏**：两用例 Δ 凭空 +10B。）
+（这条判定依据在 T3 首轮**当场抓到实现自身的 `str_intern("result")` 泄漏**：两用例 Δ 凭空 +10B。）
 
 **时长（本机实测，2026-09-17；机器有 swap 抖动 ⇒ 仅供参考）**：见 `main()` 末打印的
 `PASS n/m` 与 `[time]` 行；挂 `selfhost-tests`（run.sh）时以实测值为准。
@@ -66,7 +66,7 @@ def check(name, cond, detail=""):
 
 
 def run_corec(args, timeout=300):
-    """统一入口：cwd=仓库根（既有 cwd 依赖）+ nice -n 19（铁律 6）。"""
+    """统一入口：cwd=仓库根（既有 cwd 依赖）+ nice -n 19（硬性规则 6）。"""
     return subprocess.run(
         ["nice", "-n", "19", str(COREC)] + [str(a) for a in args],
         cwd=BASE, capture_output=True, text=True, timeout=timeout,
@@ -110,7 +110,7 @@ def case(name, src_name, expect_rc, expect_code=None):
         ok = (proc.returncode == expect_rc) and (expect_code is None or got == expect_code)
         if ok and os.path.exists(out):
             ok = False
-            detail = "拒绝却产出二进制（零产物判据失败）"
+            detail = "拒绝却产出二进制（零产物判定依据失败）"
         else:
             detail = f"rc={proc.returncode}（期望 {expect_rc}）code={got}（期望 {expect_code or 'any'}）"
         return check(name, ok, detail)
@@ -264,7 +264,7 @@ def main():
     delta_case("d0 **零 Δ 用例**", "delta_d0_plain.cr", "delta_d0_annot.cr", 0)
 
     el = time.time() - t0
-    print(f"\n=== 批 6 规约语法套件：{_PASS}/{_PASS + _FAIL} passed  [time] {el:.1f}s ===")
+    print(f"\n=== 阶段 6 规约语法套件：{_PASS}/{_PASS + _FAIL} passed  [time] {el:.1f}s ===")
     if _FAILED:
         print("FAILED:", ", ".join(_FAILED))
     return 0 if _FAIL == 0 else 1

@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""顶层兜底「静默吞 token」收口（批 8 条目 4；自举编译器 build/corec）。
+"""顶层兜底「静默吞 token」处理（阶段 8 条目 4；自举编译器 build/corec）。
 
 **现象（修复前实测，计划 §1 条目 4）**：`parse_declaration()` 末尾为**裸 `advance_tok()`** ⇒ 无法识别的
 顶层 token 被无声消费（既无诊断、也无定位）；① 顶层多余 `}` ⇒ check=0 · build=0 · 运行 7；
 ② `stuct S { f: int }`（typo、未使用）⇒ check=0（声明被无声丢弃）；③ 同上但使用 `S` ⇒ TF01 误报 + build=0
 ⇒ 运行期 139（与条目 6 同族）。
 
-**修复（批 8 条目 4，`parser.cr`）**：兜底改 `error[P25]`（`EC_P_TOPLEVEL_TOKEN = 1025`）定位硬错，
+**修复（阶段 8 条目 4，`parser.cr`）**：兜底改 `error[P25]`（`EC_P_TOPLEVEL_TOKEN = 1025`）定位硬错，
 且**仍然消费该 token**（P6：只报错不 `advance` ⇒ `parse_all` 空转 = **挂起**，CI 超时不是红）。
 
-**同批前置修（本轮实测暴露，同一「依赖静默吞」家族）**：`parse_all` 的 import 跳过段只吞 `import`
+**同阶段前置修（本轮实测暴露，同一「依赖静默吞」家族）**：`parse_all` 的 import 跳过段只吞 `import`
 关键字本身，其后的**路径/别名 token** 一直靠兜底静默吞 ⇒ 新硬错会误伤**每一条合法 import**（实测
 `import io` 的 `io`、注入的 `src/runtime/rt.cr` 的 `import arena_globals`）。修复 = 按 `module.cr`
 res_imports 的扫描形状**逐字**消费 `[@proj] [a(::b)*] [: alias] [;]`（不得放宽成「吞到分号」）。
 
-**判据要件（计划 §1 条目 4）**：① 非法顶层 token ⇒ check rc=1 + 定位 + **build rc=1 且零产物**；
+**判定依据要件（计划 §1 条目 4）**：① 非法顶层 token ⇒ check rc=1 + 定位 + **build rc=1 且零产物**；
 ② 合法顶层形态（import / mod / `@` 注解 / 全局声明（含**无初值** `g : int, mut;`）/ type 别名）
-**逐字节不变**（本档以 check+build+run 三面钉子承担；产物面由批级 canary 承担）；
-③ 与条目 6 同批核对（③ 的 TF01 属同族）；④ **不挂起**（超时 = 红）。
+**逐字节不变**（本档以 check+build+run 三面固定用例承担；产物面由阶段级 canary 承担）；
+③ 与条目 6 同阶段核对（③ 的 TF01 属同族）；④ **不挂起**（超时 = 红）。
 
-**突变自证（批级留痕）**：把兜底退回裸 `advance_tok()` ⇒ ① 组回 `check=0` ⇒ 必红。
-**全语料对拍（批级留痕）**：212 档 `.cr` × `check`，前态二进制 vs 本修复 ⇒ 差异仅 7 档，且
+**突变自证（阶段级留痕）**：把兜底退回裸 `advance_tok()` ⇒ ① 组回 `check=0` ⇒ 必红。
+**全语料对拍（阶段级留痕）**：212 档 `.cr` × `check`，前态二进制 vs 本修复 ⇒ 差异仅 7 档，且
 **全部本就 rc=1**（spec 负例 5 + 探针 1 + 旧 fixture 1，期望码 V02/V03 仍在）⇒ 合法语料零差异。
 """
 

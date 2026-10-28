@@ -16,7 +16,7 @@
   值、后统建 wrapper」）/ opt（折叠）。注意类型形 [T; N] / [T] 由 parse_type 产出
   （a=内层类型节点、b=0、int_val=尺寸），不经字面量分支、不受本契约影响。
 
-判据（值判据两向非空：含单槽元素反证边界与泛型实例体克隆路径；类型判据双向：期望拒的必出
+判定依据（值判定依据两向非空：含单槽元素反证边界与泛型实例体克隆路径；类型判定依据双向：期望拒的必出
       对应码，期望收的必 rc=0 且无 error[）：
   值 9 例（build+run，退出码 = main 返回值 & 0xFF）+ 类型 4 例（check）。
 """
@@ -31,10 +31,10 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
-# ---- 值判据：(名称, 源码, main 期望返回值) ----
+# ---- 值判定依据：(名称, 源码, main 期望返回值) ----
 VALUE_CASES = [
     (
-        "struct: compound value in last field (F5 ①主判据)",
+        "struct: compound value in last field (F5 ①主判定依据)",
         """
 struct P:
     a: int, b: int
@@ -47,7 +47,7 @@ fn main() -> int:
         1103,
     ),
     (
-        "struct: both fields compound (F5 ①主判据)",
+        "struct: both fields compound (F5 ①主判定依据)",
         """
 struct P:
     a: int, b: int
@@ -99,7 +99,7 @@ fn main() -> int:
         1122,
     ),
     (
-        "array: compound element in middle (F5 ③主判据)",
+        "array: compound element in middle (F5 ③主判定依据)",
         """
 fn g() -> int:
     return 7
@@ -131,7 +131,7 @@ fn main() -> int:
     ),
 ]
 
-# ---- 类型判据：(名称, 源码, 期望)："ACCEPT" / "TA01" ----
+# ---- 类型判定依据：(名称, 源码, 期望)："ACCEPT" / "TA01" ----
 CHECK_CASES = [
     (
         "soundness: nested vs flat array literal rejected (F5 ③)",

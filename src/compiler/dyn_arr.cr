@@ -7,7 +7,7 @@
 // Element sizes (bytes per element)
 // ============================================================
 ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
-ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
+ESZ_ASTNODE  : int = 64    // kind,a,b,c,int_val,type_val,data,span = 8×8
 ESZ_SYMENTRY : int = 56    // name,kind,type,node,owner,pub,mut = 7×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48    // opcode,dest,src1,src2,src3,type_kind = 6×8
@@ -33,8 +33,8 @@ OFF_AS_C : int = 24
 OFF_AS_INTVAL : int = 32
 OFF_AS_TYPEVAL : int = 40
 OFF_AS_DATA : int = 48
-OFF_AS_LINE : int = 56
-OFF_AS_COL : int = 64
+// Byte span packed into one cell: lo + hi * 2^32. Zero means "no position".
+OFF_AS_SPAN : int = 56
 
 // SymEntry field offsets
 OFF_SY_NAME : int = 0
@@ -564,10 +564,10 @@ fn ast_type_val(n: int) -> int:
     return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL)
 fn ast_data(n: int) -> int:
     return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA)
-fn ast_line(n: int) -> int:
-    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE)
-fn ast_col(n: int) -> int:
-    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_COL)
+fn ast_lo(n: int) -> int:
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_SPAN) % 4294967296
+fn ast_hi(n: int) -> int:
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_SPAN) / 4294967296
 
 fn ast_set_kind(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND, v)
@@ -583,10 +583,7 @@ fn ast_set_type_val(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL, v)
 fn ast_set_data(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA, v)
-fn ast_set_line(n: int, v: int):
-    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE, v)
-fn ast_set_col(n: int, v: int):
-    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_COL, v)
+
 
 fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int:
     idx := g_ast_count
@@ -598,8 +595,13 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_INTVAL, iv)
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_TYPEVAL, tv)
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_DATA, d)
-    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_LINE, line)
-    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_COL, col)
+    slo : ., mut = line
+    if slo < 0:
+        slo = 0
+    shi : ., mut = col
+    if shi < 0:
+        shi = 0
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_SPAN, slo + shi * 4294967296)
     g_ast_count = idx + 1
     return idx
 
@@ -1200,37 +1202,6 @@ fn str_load8(idx: int, ci: int) -> int:
         return 0
     return cell_load_byte(istr_get(idx), ci)
 
-fn grow_line_file(needed: int):
-    if needed < g_line_cap:
-        return
-    nc : ., mut = g_line_cap * 2
-    if nc < 128:
-        nc = 128
-    if nc < needed:
-        nc = needed + 128
-    nb := alloc(nc * 8)
-    cell_copy(g_line_fileid, g_line_cap * 8, nb)
-    g_line_fileid = nb
-    nb2 := alloc(nc * 8)
-    cell_copy(g_line_lib, g_line_cap * 8, nb2)
-    g_line_lib = nb2
-    g_line_cap = nc
-fn grow_segs(needed: int):
-    if needed < g_seg_cap:
-        return
-    nc : ., mut = g_seg_cap * 2
-    if nc < 16:
-        nc = 16
-    if nc < needed:
-        nc = needed + 16
-    sz := nc * 8
-    n1 := alloc(sz)
-    cell_copy(g_seg_starts, g_seg_cap * 8, n1)
-    g_seg_starts = n1
-    n2 := alloc(sz)
-    cell_copy(g_seg_fileids, g_seg_cap * 8, n2)
-    g_seg_fileids = n2
-    g_seg_cap = nc
 fn grow_gen_apply_data(needed: int):
     if needed < g_gen_apply_data_cap:
         return
@@ -1660,7 +1631,7 @@ fn grow_diags(needed: int):
     g_diags = nb
     g_diag_cap = nc
 
-// FileEntry: fileid_ni(8) + path(8) = 16 bytes
+// FileEntry: fileid_ni(8) + path(8) + SourceManager id(8) = 24 bytes
 fn grow_files(needed: int):
     if needed < g_file_cap:
         return
@@ -1669,10 +1640,23 @@ fn grow_files(needed: int):
         nc = 16
     if nc < needed:
         nc = needed + 16
-    nb := alloc(nc * 16)
-    cell_copy(g_files, g_file_cap * 16, nb)
+    nb := alloc(nc * 24)
+    cell_copy(g_files, g_file_cap * 24, nb)
     g_files = nb
     g_file_cap = nc
+
+fn grow_import_sms(needed: int):
+    if needed < g_import_cap:
+        return
+    nc : ., mut = g_import_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * 8)
+    cell_copy(g_import_sm, g_import_cap * 8, nb)
+    g_import_sm = nb
+    g_import_cap = nc
 
 // ModEntry: alias_ni(8) + fileid_ni(8) + path(8) = 24 bytes
 fn grow_mods(needed: int):

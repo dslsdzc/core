@@ -144,8 +144,8 @@ fn is_stmt_node(n: int) -> int:
 // --- Type parsing ---
 fn parse_type() -> int:
     t := cur_tok()
-    line := tok_ln(t)
-    col := tok_cl(t)
+    line := tok_lo(t)
+    col := tok_hi(t)
     res : ., mut = 0
     // `[T; N]` is kept as an inline capacity hint, not a type constructor. Its
     // semantic uses are product types, sequence interfaces with a length
@@ -292,7 +292,7 @@ fn parse_expr() -> int:
     if check(T_DOTDOT):
         t := advance_tok()
         right := parse_expr()
-        return alloc_node(EXPR_RANGE, left, right, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_RANGE, left, right, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     return left
 
 fn parse_binary(mp: int) -> int:
@@ -319,18 +319,18 @@ fn parse_binary(mp: int) -> int:
         op := tok2op(k)
         // Compound assignment: +=, -=, *=, and /= become a = a op b
         if k == T_PLUS_EQ:
-            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)), 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_ADD, 0, 0, 0, tok_lo(t), tok_hi(t)), 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         else if k == T_MINUS_EQ:
-            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_SUB, 0, 0, 0, tok_ln(t), tok_cl(t)), 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_SUB, 0, 0, 0, tok_lo(t), tok_hi(t)), 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         else if k == T_STAR_EQ:
-            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_MUL, 0, 0, 0, tok_ln(t), tok_cl(t)), 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_MUL, 0, 0, 0, tok_lo(t), tok_hi(t)), 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         else if k == T_SLASH_EQ:
-            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_DIV, 0, 0, 0, tok_ln(t), tok_cl(t)), 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_ASSIGN, left, alloc_node(EXPR_BINARY, left, right, OP_DIV, 0, 0, 0, tok_lo(t), tok_hi(t)), 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         // Convert assignment to EXPR_ASSIGN
         else if k == T_EQ:
-            left = alloc_node(EXPR_ASSIGN, left, right, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_ASSIGN, left, right, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         else:
-            left = alloc_node(EXPR_BINARY, left, right, op, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_BINARY, left, right, op, 0, 0, 0, tok_lo(t), tok_hi(t))
     return left
 
 fn parse_unary() -> int:
@@ -338,7 +338,7 @@ fn parse_unary() -> int:
     if tok_k(t) == T_MINUS:
         advance_tok()
         op := parse_unary()
-        return alloc_node(EXPR_UNARY, op, 0, UOP_NEG, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_UNARY, op, 0, UOP_NEG, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_AMPERSAND:
         advance_tok()
         is_mut : ., mut = 0
@@ -346,39 +346,31 @@ fn parse_unary() -> int:
             is_mut = 1
             advance_tok()
         op := parse_unary()
-        return alloc_node(EXPR_UNARY, op, 0, UOP_REF, is_mut, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_UNARY, op, 0, UOP_REF, is_mut, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_BANG:
         advance_tok()
         op := parse_unary()
-        return alloc_node(EXPR_UNARY, op, 0, UOP_NOT, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_UNARY, op, 0, UOP_NOT, 0, 0, 0, tok_lo(t), tok_hi(t))
     // `move` is an ordinary identifier. `move x` fails name resolution. The
     // keyword and its AST node were removed on 2026-10-24.
     if tok_k(t) == T_STAR:
         advance_tok()
         op := parse_unary()
-        return alloc_node(EXPR_UNARY, op, 0, UOP_DEREF, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_UNARY, op, 0, UOP_DEREF, 0, 0, 0, tok_lo(t), tok_hi(t))
     node : ., mut = parse_postfix()
-    // Handle 'as' type cast: expr as Type
-    if check(T_AS):
-        advance_tok()
-        typ := parse_type()
-        return alloc_node(EXPR_AS, node, typ, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    // `expr cast Type`. The V3 `cast<T>(expr)` form was removed: V4 rejects
+    // `<T>` and the two spellings produced the same EXPR_AS node.
+    loop:
+        if check(T_CAST):
+            advance_tok()
+            typ := parse_type()
+            node = alloc_node(EXPR_AS, node, typ, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
+        else:
+            break
     return node
 
 fn parse_postfix() -> int:
     node : ., mut = parse_primary()
-    // Handle cast<T>(expr), which has the same meaning as expr as T
-    if ast_kind(node) == EXPR_IDENT:
-        ni := ast_int_val(node)
-        if str_eq(istr_get(ni), "cast") != 0 && tok_k(cur_tok()) == T_LT:
-            advance_tok()
-            typ : ., mut = parse_type()
-            advance_tok()  // skip T_GT
-            if tok_k(cur_tok()) == T_LPAREN:
-                advance_tok()
-                inner := parse_expr(0)
-                advance_tok()  // skip T_RPAREN
-                return alloc_node(EXPR_AS, inner, typ, 0, 0, 0, 0, tok_ln(node), tok_cl(node))
     loop:
         t := cur_tok()
         if tok_k(t) == T_LPAREN:
@@ -389,7 +381,7 @@ fn parse_postfix() -> int:
                 // Wrap each argument in EXPR_ARG(a=expr, b=next_arg) linked list
                 g_want_value = 1   // 实参 = 表达式位
                 first_expr := parse_expr()
-                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                 ac = 1
                 prev_arg : ., mut = af
                 loop:
@@ -398,7 +390,7 @@ fn parse_postfix() -> int:
                     advance_tok()
                     g_want_value = 1
                     next_expr := parse_expr()
-                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                     ast_set_b(prev_arg, new_arg)
                     prev_arg = new_arg
                     ac = ac + 1
@@ -418,7 +410,7 @@ fn parse_postfix() -> int:
                 if str_cmp(c, "A") >= 0 && str_cmp(c, "Z") <= 0:
                     is_enum_con = 1
             if is_enum_con == 1:
-                node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
+                node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_lo(t), tok_hi(t))
             else:
                 call_func : ., mut = node
                 call_flags : ., mut = 0
@@ -432,7 +424,7 @@ fn parse_postfix() -> int:
                         if str_eq(wrapper_name, "inline") != 0:
                             call_func = ast_a(wrapper_arg)
                             call_flags = CALL_FLAG_INLINE
-                node = alloc_node(EXPR_CALL, call_func, af, ac, 0, call_flags, -1, tok_ln(t), tok_cl(t))
+                node = alloc_node(EXPR_CALL, call_func, af, ac, 0, call_flags, -1, tok_lo(t), tok_hi(t))
             continue
         if tok_k(t) == T_DOT:
             advance_tok()
@@ -442,24 +434,24 @@ fn parse_postfix() -> int:
             tv : ., mut = 0
             if tok_k(f) == T_INT:
                 tv = tok_iv(f) + 1  // +1 so default 0 means struct field
-            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, tv, 0, tok_ln(t), tok_cl(t))
+            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, tv, 0, tok_lo(t), tok_hi(t))
             continue
         if tok_k(t) == T_PATHSEP:
             advance_tok()
             f := advance_tok()
             ni := str_intern(tok_lx(f))
-            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, 0, 1, tok_ln(t), tok_cl(t))
+            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, 0, 1, tok_lo(t), tok_hi(t))
             continue
         if tok_k(t) == T_LBRACKET:
             advance_tok()
             g_want_value = 1   // 下标 = 表达式位
             idx := parse_expr()
             advance_tok()
-            node = alloc_node(EXPR_INDEX, node, idx, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            node = alloc_node(EXPR_INDEX, node, idx, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
             continue
         if tok_k(t) == T_QUESTION:
             advance_tok()
-            node = alloc_node(EXPR_TRY, node, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            node = alloc_node(EXPR_TRY, node, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
             continue
         break
     return node
@@ -496,13 +488,13 @@ fn parse_interp_run() -> int:
                 check_error(EC_P_INTERP_UNCLOSED, "unclosed string interpolation: '\${' has no matching '}'", tok_ln(t), tok_cl(t))
             else if str_len(txt) == 0:
                 check_error(EC_P_INTERP_UNCLOSED, "empty string interpolation: '\${}'", tok_ln(t), tok_cl(t))
-            part = alloc_node(EXPR_INTERP_HOLE, 0, 0, 0, 0, 0, str_intern(txt), tok_ln(t), tok_cl(t))
+            part = alloc_node(EXPR_INTERP_HOLE, 0, 0, 0, 0, 0, str_intern(txt), tok_lo(t), tok_hi(t))
         else:
-            part = alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t))
+            part = alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_lo(t), tok_hi(t))
         if left < 0:
             left = part
         else:
-            left = alloc_node(EXPR_BINARY, left, part, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t))
+            left = alloc_node(EXPR_BINARY, left, part, OP_ADD, 0, 0, 0, tok_lo(t), tok_hi(t))
         advance_tok()
         if (iv % 4) < 2:
             break
@@ -546,11 +538,11 @@ fn parse_primary() -> int:
     t := cur_tok()
     if tok_k(t) == T_INT:
         advance_tok()
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_BIGINT:
         advance_tok()
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
-        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_DEX:
         advance_tok()
         // Node fields: a = binary64 bit pattern, restored from the numeric text in
@@ -560,22 +552,22 @@ fn parse_primary() -> int:
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)   // 词素串下标（-1 = 无）
         if tl >= 0:
             bits = str_to_f64_bits(istr_get(tl))
-        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_TRUE:
         advance_tok()
-        return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_FALSE:
         advance_tok()
-        return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_NONE:
         // `none` is a keyword for the empty optional value. The canonical variant
         // name is still `None`, because desugar, checker, and ty_shadow compare the
         // label `None`, so this maps to that name. `None` with a capital N is an
         // ordinary identifier now; using it as a value reports an undefined name.
         advance_tok()
-        return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     // `Some` is no longer a keyword. `Some(x)` reaches the parse_postfix rule:
     // identifier + `(` + uppercase first letter -> EXPR_ENUM_CONSTRUCTOR, with
     // arguments in an EXPR_ARG list. A bare `Some` is an EXPR_IDENT.
@@ -585,9 +577,9 @@ fn parse_primary() -> int:
             name_ni := str_intern(tok_lx(cur_tok()))
             advance_tok()
             // args_node = -1 means no args; parse_postfix will handle (args) as EXPR_CALL
-            return alloc_node(EXPR_AT, name_ni, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_AT, name_ni, -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         add_error("expected identifier after @")
-        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE:
         advance_tok()
         name := tok_lx(t)
@@ -647,17 +639,17 @@ fn parse_primary() -> int:
                 if fi2 >= fc:
                     break
                 vn := cell_load(vals, fi2 * 8)
-                ln : ., mut = tok_ln(t)
-                cl : ., mut = tok_cl(t)
+                ln : ., mut = tok_lo(t)
+                cl : ., mut = tok_hi(t)
                 if vn >= 0:
-                    ln = ast_line(vn)
-                    cl = ast_col(vn)
+                    ln = ast_lo(vn)
+                    cl = ast_hi(vn)
                 wl := ast_alloc(EXPR_NONE, vn, cell_load(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
                 if fi2 == 0:
                     ff = wl
                 fi2 = fi2 + 1
-            return alloc_node(EXPR_STRUCT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t))
-        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_STRUCT, ni, ff, fc, 0, 0, 0, tok_lo(t), tok_hi(t))
+        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_LPAREN:
         advance_tok()
         g_want_value = 1   // 括号内 = 表达式位
@@ -692,21 +684,21 @@ fn parse_primary() -> int:
                 if ei >= ec:
                     break
                 vn := cell_load(vals, ei * 8)
-                ln : ., mut = tok_ln(t)
-                cl : ., mut = tok_cl(t)
+                ln : ., mut = tok_lo(t)
+                cl : ., mut = tok_hi(t)
                 if vn >= 0:
-                    ln = ast_line(vn)
-                    cl = ast_col(vn)
+                    ln = ast_lo(vn)
+                    cl = ast_hi(vn)
                 wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl)
                 if ei == 0:
                     ef = wl
                 ei = ei + 1
-            return alloc_node(EXPR_TUPLE, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_TUPLE, ef, ec, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         advance_tok()
         return e
     if tok_k(t) == T_CHAR:
         advance_tok()
-        return alloc_node(EXPR_CHAR, 0, 0, 0, str_intern(tok_lx(t)), TY_CHAR, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_CHAR, 0, 0, 0, str_intern(tok_lx(t)), TY_CHAR, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_LBRACE:
         // Braces are only struct literal delimiters. Blocks use ':' plus
         // indentation, so a bare '{' in expression position reports an error rather
@@ -715,7 +707,7 @@ fn parse_primary() -> int:
             "'{' is only valid as a struct literal delimiter in v4 (blocks use ':' + indent)",
             tok_ln(t), tok_cl(t))
         advance_tok()
-        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_IF:
         return parse_if_expr()
     if tok_k(t) == T_WHILE:
@@ -752,23 +744,23 @@ fn parse_primary() -> int:
                         advance_tok()
                     body := parse_expr()
                     // Range go: keep range info in EXPR_GO for IR gen result collection
-                    range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
-                    return alloc_node(EXPR_GO, -1, body, iter_var_ni, 0, 0, range_node, tok_ln(t2), tok_cl(t2))
+                    range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_lo(t2), tok_hi(t2))
+                    return alloc_node(EXPR_GO, -1, body, iter_var_ni, 0, 0, range_node, tok_lo(t2), tok_hi(t2))
             // Not range mode. Backtrack to a regular go expression.
             g_token_pos = saved_pos
         // Single: go expr  (no count-based batch)
         body := parse_expr()
-        return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
+        return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_lo(t2), tok_hi(t2))
     if tok_k(t) == T_AWAIT:
         t2 := advance_tok()
         val : ., mut = parse_expr()
-        return alloc_node(EXPR_AWAIT, val, 0, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
+        return alloc_node(EXPR_AWAIT, val, 0, 0, 0, 0, 0, tok_lo(t2), tok_hi(t2))
     if tok_k(t) == T_MATCH:
         return parse_match_expr()
     if tok_k(t) == T_UNSAFE:
         t2 := advance_tok()
         body := parse_block()
-        return alloc_node(EXPR_UNSAFE, body, 0, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2))
+        return alloc_node(EXPR_UNSAFE, body, 0, 0, 0, 0, 0, tok_lo(t2), tok_hi(t2))
     if tok_k(t) == T_LBRACKET:
         advance_tok()
         // Literal EXPR_ARRAY layout: a = first wrapper, b = element count. Wrappers
@@ -822,16 +814,16 @@ fn parse_primary() -> int:
             if ei2 >= ec:
                 break
             vn := cell_load(vals, ei2 * 8)
-            ln : ., mut = tok_ln(t)
-            cl : ., mut = tok_cl(t)
+            ln : ., mut = tok_lo(t)
+            cl : ., mut = tok_hi(t)
             if vn >= 0:
-                ln = ast_line(vn)
-                cl = ast_col(vn)
+                ln = ast_lo(vn)
+                cl = ast_hi(vn)
             wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl)
             if ei2 == 0:
                 ef = wl
             ei2 = ei2 + 1
-        return alloc_node(EXPR_ARRAY, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_ARRAY, ef, ec, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     add_error("Unexpected token in expression")
     advance_tok()  // consume the unexpected token to avoid infinite loop
     return 0
@@ -861,7 +853,7 @@ fn parse_block() -> int:
     if expect_region_head() == 0:
         // Empty region: no items and no DEDENT. Do not call parse_block_items,
         // because its close_region requires a DEDENT.
-        return alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_ln(head), tok_cl(head))
+        return alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_lo(head), tok_hi(head))
     return parse_block_items(head)
 
 // Region body. The head has already been consumed. This is a separate function
@@ -898,21 +890,21 @@ fn parse_block_items(head: int) -> int:
                 // Statement item: a preceding bare expression is not the tail, so wrap it
             // in EXPR_STMT.
             if have_expr >= 0:
-                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t)))
                 have_expr = -1
             block_push(st)
         else:
             // Bare expression: tentatively the region tail. If another item follows,
             // it is wrapped in EXPR_STMT later.
             if have_expr >= 0:
-                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t)))
             have_expr = st
     close_region()
     g_want_value = want
     if want == 0 && have_expr >= 0 && is_block_like(have_expr) == 0:
         // Statement-position region whose tail is an ordinary bare expression:
         // wrap it in EXPR_STMT and treat the region as having no value.
-        block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+        block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t)))
         have_expr = -1
     if have_expr >= 0:
         block_push(have_expr)
@@ -926,7 +918,7 @@ fn parse_block_items(head: int) -> int:
         cell_store(g_block_stmts, g_block_stmt_count * 8, cell_load(g_pb_stmts, i * 8))
         g_block_stmt_count = g_block_stmt_count + 1
         i = i + 1
-    return alloc_node(EXPR_BLOCK, si, g_pb_count, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_BLOCK, si, g_pb_count, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 fn is_new_var_decl() -> bool:
     p := cur_tok()
@@ -1085,7 +1077,7 @@ fn parse_new_var_decl(top_level: int) -> int:
                 check_error(EC_P_APX_TAG,
                     "'apx' tag is only allowed on an explicit 'dex' or 'int' declaration",
                     tok_ln(t), tok_cl(t))
-        node := alloc_node(EXPR_LET, ni, typ, nv, is_apx, 0, is_mut, tok_ln(t), tok_cl(t))
+        node := alloc_node(EXPR_LET, ni, typ, nv, is_apx, 0, is_mut, tok_lo(t), tok_hi(t))
         if top_level != 0 && is_pub != 0:
             lib_export_add(lib_of_line(tok_ln(t)), ni, SYM_GLOBAL, tok_ln(t))
         if i == 0:
@@ -1245,7 +1237,7 @@ fn parse_stmt() -> int:
             g_want_value = 1   // return 的值 = 表达式位
             val = parse_expr()
         skip_newlines()
-        return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_YIELD:
         advance_tok()
         val : ., mut = -1
@@ -1253,15 +1245,15 @@ fn parse_stmt() -> int:
             g_want_value = 1
             val = parse_expr()
         skip_newlines()
-        return alloc_node(EXPR_YIELD, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_YIELD, val, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_BREAK:
         advance_tok()
         skip_newlines()   // B5：语句末可选 `;` 退场
-        return alloc_node(EXPR_BREAK, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BREAK, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_CONTINUE:
         advance_tok()
         skip_newlines()
-        return alloc_node(EXPR_CONTINUE, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_CONTINUE, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     // A bare expression is tentatively the region tail. The block loop wraps it in
     // EXPR_STMT if another item follows.
     return parse_expr()
@@ -1282,7 +1274,7 @@ fn parse_if_expr() -> int:
         else:
             eb = parse_block()
     g_want_value = want
-    return alloc_node(EXPR_IF, cond, tb, eb, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_IF, cond, tb, eb, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 fn parse_loop_expr() -> int:
     // A loop body is always a statement-position region, so its type is unit.
@@ -1291,7 +1283,7 @@ fn parse_loop_expr() -> int:
     g_want_value = 0
     body := parse_block()
     g_want_value = want
-    return alloc_node(EXPR_LOOP, body, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_LOOP, body, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 fn parse_while_expr() -> int:
     // 条件恒为表达式位；体恒为语句位 region。
@@ -1302,7 +1294,7 @@ fn parse_while_expr() -> int:
     g_want_value = 0
     body := parse_block()
     g_want_value = want
-    return alloc_node(EXPR_WHILE, cond, body, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_WHILE, cond, body, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 fn parse_for_expr() -> int:
     // for var in iter: <region>。被迭代表达式恒为表达式位；体恒为语句位 region。
@@ -1317,7 +1309,7 @@ fn parse_for_expr() -> int:
     g_want_value = 0
     body : ., mut = parse_block()
     g_want_value = want
-    return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 fn parse_match_expr() -> int:
     // 被匹配的值恒为表达式位；臂体 `=> Expr` 恒为表达式位（单行，不是 region）。
@@ -1370,13 +1362,13 @@ fn parse_match_expr() -> int:
                 body = parse_block_items(head)
             else:
                 // Empty region: `| _ =>` with no deeper line has no value.
-                body = alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_ln(head), tok_cl(head))
+                body = alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_lo(head), tok_hi(head))
         else:
             g_want_value = 1
             body = parse_expr()
         if check(T_COMMA):
             advance_tok()
-        n := alloc_node(EXPR_ARM, pat, body, -1, 0, 0, 0, tok_ln(t), tok_cl(t))
+        n := alloc_node(EXPR_ARM, pat, body, -1, 0, 0, 0, tok_lo(t), tok_hi(t))
         if ac == 0:
             af = n
         if al >= 0:
@@ -1387,7 +1379,7 @@ fn parse_match_expr() -> int:
     if has_items != 0:
         close_region()
     g_want_value = want
-    return alloc_node(EXPR_MATCH, expr, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_MATCH, expr, af, ac, 0, 0, 0, tok_lo(t), tok_hi(t))
 
 // Skip the remainder of a malformed tuple pattern through its matching ')'.
 // The caller has already emitted P005; recovery only prevents cascading
@@ -1414,14 +1406,14 @@ fn parse_pattern() -> int:
     t := cur_tok()
     if tok_k(t) == T_UNDERSCORE:
         advance_tok()
-        return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_INT:
         advance_tok()
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_BIGINT:
         advance_tok()
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
-        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_LPAREN:
         // Tuple pattern: (pat, pat, ...). EXPR_TUPLEPAT layout: a = first wrapper
         // (consecutive), b = element count. wrapper.a = subpattern, wrapper.b =
@@ -1439,12 +1431,12 @@ fn parse_pattern() -> int:
                 "Empty tuple pattern is not supported; use '_'",
                 tok_ln(cur_tok()), tok_cl(cur_tok()))
             advance_tok()
-            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         if check(T_COMMA):
             check_error(EC_P_PATTERN, "Unexpected token in pattern",
                 tok_ln(cur_tok()), tok_cl(cur_tok()))
             tuplepat_recover()
-            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         cap : ., mut = 8
         vals : string, mut = alloc(cap * 8)
         et := cur_tok()
@@ -1453,7 +1445,7 @@ fn parse_pattern() -> int:
             check_error(EC_P_PATTERN, "Unexpected token in pattern",
                 tok_ln(et), tok_cl(et))
             tuplepat_recover()
-            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         cell_store(vals, 0, e0)
         pc : ., mut = 1
         loop:
@@ -1464,24 +1456,24 @@ fn parse_pattern() -> int:
                         "Trailing comma is not supported in a tuple pattern",
                         tok_ln(cur_tok()), tok_cl(cur_tok()))
                     advance_tok()
-                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                 if check(T_COMMA):
                     check_error(EC_P_PATTERN, "Unexpected token in pattern",
                         tok_ln(cur_tok()), tok_cl(cur_tok()))
                     tuplepat_recover()
-                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                 if check(T_EOF):
                     check_error(EC_P_BRACKET,
                         "Missing closing ')' in tuple pattern",
                         tok_ln(cur_tok()), tok_cl(cur_tok()))
-                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                 et2 := cur_tok()
                 en := parse_pattern()
                 if en <= 0:
                     check_error(EC_P_PATTERN, "Unexpected token in pattern",
                         tok_ln(et2), tok_cl(et2))
                     tuplepat_recover()
-                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
                 if pc >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
@@ -1498,12 +1490,12 @@ fn parse_pattern() -> int:
                 check_error(EC_P_BRACKET,
                     "Missing closing ')' in tuple pattern",
                     tok_ln(cur_tok()), tok_cl(cur_tok()))
-                return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
             // Missing separator between elements.
             check_error(EC_P_PATTERN, "Unexpected token in pattern",
                 tok_ln(cur_tok()), tok_cl(cur_tok()))
             tuplepat_recover()
-            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         if pc == 1:
             // Parenthesized pattern: transparent grouping, same as `(expr)`.
             return cell_load(vals, 0)
@@ -1513,34 +1505,34 @@ fn parse_pattern() -> int:
             if pi >= pc:
                 break
             vn := cell_load(vals, pi * 8)
-            ln : ., mut = tok_ln(t)
-            cl : ., mut = tok_cl(t)
+            ln : ., mut = tok_lo(t)
+            cl : ., mut = tok_hi(t)
             if vn >= 0:
-                ln = ast_line(vn)
-                cl = ast_col(vn)
+                ln = ast_lo(vn)
+                cl = ast_hi(vn)
             wl := ast_alloc(EXPR_NONE, vn, pi, 0, 0, 0, 0, ln, cl)
             if pi == 0:
                 pf = wl
             pi = pi + 1
-        return alloc_node(EXPR_TUPLEPAT, pf, pc, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_TUPLEPAT, pf, pc, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_CHAR:
         advance_tok()
-        return alloc_node(EXPR_CHAR, 0, 0, 0, str_intern(tok_lx(t)), TY_CHAR, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_CHAR, 0, 0, 0, str_intern(tok_lx(t)), TY_CHAR, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_TRUE:
         advance_tok()
-        return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_FALSE:
         advance_tok()
-        return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_NONE:
         // Lowercase `none` is a keyword and maps to the canonical variant name `None`.
         // Without this branch it would fall into the identifier case and become a
         // variable binding, which always matches. `Some` is an ordinary identifier
         // and takes the uppercase identifier branch below.
         advance_tok()
-        return alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        return alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
     if tok_k(t) == T_IDENT:
         advance_tok()
         name : ., mut = tok_lx(t)
@@ -1566,8 +1558,8 @@ fn parse_pattern() -> int:
                         parse_pattern()
                         ac = ac + 1
                 advance_tok()
-                return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
-            return alloc_node(EXPR_ENUMPAT, ni, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_lo(t), tok_hi(t))
+            return alloc_node(EXPR_ENUMPAT, ni, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         if check(T_LPAREN):
             advance_tok()
             sub_first : ., mut = -1
@@ -1582,7 +1574,7 @@ fn parse_pattern() -> int:
                     parse_pattern()
                     ac = ac + 1
             advance_tok()
-            return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_lo(t), tok_hi(t))
         if check(T_LBRACE):
             // Struct pattern: Name { field = pat, ... }
             // EXPR_STRUCTPAT layout: a = name index, b = first wrapper, c = field
@@ -1628,19 +1620,19 @@ fn parse_pattern() -> int:
                 if fi2 >= fc:
                     break
                 vn := cell_load(vals, fi2 * 8)
-                ln : ., mut = tok_ln(t)
-                cl : ., mut = tok_cl(t)
+                ln : ., mut = tok_lo(t)
+                cl : ., mut = tok_hi(t)
                 if vn >= 0:
-                    ln = ast_line(vn)
-                    cl = ast_col(vn)
+                    ln = ast_lo(vn)
+                    cl = ast_hi(vn)
                 wl := ast_alloc(EXPR_NONE, vn, cell_load(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
                 if fi2 == 0:
                     ff = wl
                 fi2 = fi2 + 1
-            return alloc_node(EXPR_STRUCTPAT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_STRUCTPAT, ni, ff, fc, 0, 0, 0, tok_lo(t), tok_hi(t))
         if is_upper_first(name):
-            return alloc_node(EXPR_ENUMPAT, ni, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t))
+            return alloc_node(EXPR_ENUMPAT, ni, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
+        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_lo(t), tok_hi(t))
     advance_tok()
     return 0
 
@@ -1811,7 +1803,22 @@ fn parse_fn_tail_tags() -> int:
         advance_tok()
     return pub_flag
 
-fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int):
+// Replace `Self` type nodes with the enclosing impl type. Runs during parsing so
+// declaration collection never sees an unresolved `Self`. Wrapper type nodes
+// (`*Self`, `Self?`, `[Self]`, tuples) are followed.
+fn rewrite_self_type(node: int, impl_ni: int):
+    if node < 0 || impl_ni < 0:
+        return
+    k := ast_kind(node)
+    if k == EXPR_IDENT:
+        if str_eq(istr_get(ast_int_val(node)), "Self") != 0:
+            ast_set_int_val(node, impl_ni)
+        return
+    if k == EXPR_REFTYPE || k == EXPR_PTRTYPE || k == EXPR_OPTIONAL || k == EXPR_ARRAY:
+        rewrite_self_type(ast_a(node), impl_ni)
+        return
+
+fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int, impl_type_ni: int):
     gnames : string, mut
     gnames_cap : int, mut
     gnames = alloc(64 * 8)
@@ -1830,13 +1837,22 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
             // Handle self/&self/&mut self params
             if tok_k(cur_tok()) == T_SELF:
                 pt := advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
                     parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, stv, stn, tok_lo(pt), tok_hi(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1845,13 +1861,22 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 pt := advance_tok()
                 advance_tok()
                 advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
                     parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, stv, stn, tok_lo(pt), tok_hi(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1859,13 +1884,22 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
             if tok_k(cur_tok()) == T_AMPERSAND && tok_k(cur_tok()+1) == T_SELF:
                 pt := advance_tok()
                 advance_tok()
-                if pf < 0:
-                    pf = g_ast_count
-                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, 0, 0, tok_ln(pt), tok_cl(pt))
-                pc = pc + 1
+                stn : ., mut = -1
+                stv : ., mut = TY_UNIT
+                // The receiver never spells its type: the enclosing `impl Type`
+                // binds it. `self: T` was only a compatibility form.
                 if check(T_COLON_DECL):
+                    check_error(EC_P_EXPECTED, "`self` receiver does not take a type annotation; the type comes from the enclosing impl", tok_ln(pt), tok_cl(pt))
                     advance_tok()
                     parse_type()
+                if impl_type_ni < 0:
+                    check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
+                else:
+                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                if pf < 0:
+                    pf = g_ast_count
+                alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, stv, stn, tok_lo(pt), tok_hi(pt))
+                pc = pc + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1879,7 +1913,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 vty := parse_type()
                 if pf < 0:
                     pf = g_ast_count
-                alloc_node(EXPR_PARAM, vn, 0, 0, -1, 0, vty, tok_ln(vt), tok_cl(vt))
+                alloc_node(EXPR_PARAM, vn, 0, 0, -1, 0, vty, tok_lo(vt), tok_hi(vt))
                 pc = pc + 1
                 if !check(T_COMMA):
                     break
@@ -1894,6 +1928,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     advance_tok()
                 else:
                     pty = parse_type()
+                    rewrite_self_type(pty, impl_type_ni)
             // V4: an omitted type or `.`/auto makes the parameter an implicit
             // type variable. The existing monomorph engine consumes it because
             // it is registered in the function's generic list before add_func.
@@ -1902,17 +1937,17 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     check_error(EC_P_GENERIC_LIST,
                         "too many inferred type parameters (max " + int_str(MAX_GENERICS) + ")",
                         tok_ln(pt), tok_cl(pt))
-                    pty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(pt), tok_cl(pt))
+                    pty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(pt), tok_hi(pt))
                 else:
                     ini := str_intern("__infer" + int_str(g_infer_name_seq))
                     g_infer_name_seq = g_infer_name_seq + 1
                     cell_store(gnames, gc * 8, ini)
                     cell_store(gconstrs, gc * 8, -1)
                     gc = gc + 1
-                    pty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(pt), tok_cl(pt))
+                    pty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_lo(pt), tok_hi(pt))
             if pf < 0:
                 pf = g_ast_count
-            alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt))
+            alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_lo(pt), tok_hi(pt))
             pc = pc + 1
             if !check(T_COMMA):
                 break
@@ -1924,6 +1959,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     if check(T_ARROW):
         advance_tok() // ->
         rt = parse_type()
+        rewrite_self_type(rt, impl_type_ni)
         rtv = unpack_type(rt)
     else:
         // Defer return inference until the body is parsed. Only a function with
@@ -1968,7 +2004,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         head := cur_tok()
         if expect_region_head() == 0:
             // Empty function body: no items, no value, block type unit.
-            body = alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_ln(head), tok_cl(head))
+            body = alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_lo(head), tok_hi(head))
         else:
             parse_spec_annotations(fn_ni, 1)   // 文档形：注解独占一行
             body = parse_block_items(head)
@@ -2215,7 +2251,7 @@ fn parse_declaration():
                     extern_opt = 1
                 if first_param < 0:
                     first_param = g_ast_count
-                alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt))
+                alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_lo(pt), tok_hi(pt))
                 param_count = param_count + 1
                 if !check(T_COMMA):
                     break
@@ -2233,7 +2269,7 @@ fn parse_declaration():
             check_error(EC_P_EXTERN_OPTIONAL, "extern declaration cannot use optional type ('?') - no C ABI representation", tok_ln(t), tok_cl(t))
         ext_pub := parse_fn_tail_tags()
         // Create EXPR_EXTERN node (no body)
-        node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, ext_pub * 65536, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t))
+        node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, ext_pub * 65536, ret_type, ffi_lang_ni, tok_lo(t), tok_hi(t))
         // An extern declaration ends at a line boundary. A trailing semicolon is
         // optional.
         end_decl()
@@ -2257,7 +2293,7 @@ fn parse_declaration():
         nt := advance_tok()
         name := tok_lx(nt)
         ni := str_intern(name)
-        parse_body(name, ni, tok_ln(t), tok_cl(t), hotpatch_ver)
+        parse_body(name, ni, tok_lo(t), tok_hi(t), hotpatch_ver, -1)
 
         // A flow function may contain yield. The checker detects yield and skips
         // the return type check.
@@ -2329,7 +2365,7 @@ fn parse_declaration():
                         check_error(EC_P_GENERIC_LIST,
                             "too many inferred type parameters (max " + int_str(MAX_GENERICS) + ")",
                             tok_ln(ft), tok_cl(ft))
-                        fty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(ft), tok_cl(ft))
+                        fty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(ft), tok_hi(ft))
                     else:
                         ini := str_intern("__infer" + int_str(g_infer_name_seq))
                         g_infer_name_seq = g_infer_name_seq + 1
@@ -2339,7 +2375,7 @@ fn parse_declaration():
                         sg_count = sg_count + 1
                         cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
                         save_struct_gen_constrs(si, sg_constrs, sg_count)
-                        fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(ft), tok_cl(ft))
+                        fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_lo(ft), tok_hi(ft))
                 si_set_field_type(si, fc, unpack_type(fty))
                 si_set_field_type_node(si, fc, fty)
                 field_pub : ., mut = 0
@@ -2407,6 +2443,12 @@ fn parse_declaration():
                 skip_newlines()
                 if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                     break
+                // V4 enum variants may use the documented leading `|` form.
+                // The bootstrap parser already accepts it; the self-hosted
+                // parser must accept the same surface. Bare layout variants
+                // remain accepted for existing corpora.
+                if check(T_PIPE):
+                    advance_tok()
                 vt := advance_tok()
                 vname := tok_lx(vt)
                 vni := str_intern(vname)
@@ -2419,6 +2461,13 @@ fn parse_declaration():
                     loop:
                         if check(T_RPAREN):
                             break
+                        // Payload fields are positional. `Circle(r: int)` used to be
+                        // read as a payload of type `r`, which surfaced as an
+                        // unrelated "undefined type" error.
+                        if tok_k(cur_tok()) == T_IDENT && tok_k(cur_tok()+1) == T_COLON_DECL:
+                            nm := advance_tok()
+                            check_error(EC_P_EXPECTED, "named enum payload fields are not supported; write the payload type positionally", tok_ln(nm), tok_cl(nm))
+                            advance_tok()  // ':'
                         fty : ., mut = -1
                         if check(T_DOT) || check(T_AUTO):
                             advance_tok()
@@ -2431,7 +2480,7 @@ fn parse_declaration():
                                 check_error(EC_P_GENERIC_LIST,
                                     "too many inferred type parameters (max " + int_str(MAX_GENERICS) + ")",
                                     tok_ln(vt), tok_cl(vt))
-                                fty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(vt), tok_cl(vt))
+                                fty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(vt), tok_hi(vt))
                             else:
                                 ini := str_intern("__infer" + int_str(g_infer_name_seq))
                                 g_infer_name_seq = g_infer_name_seq + 1
@@ -2441,7 +2490,7 @@ fn parse_declaration():
                                 eg_count = eg_count + 1
                                 cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, eg_count)
                                 save_enum_gen_constrs(ei, eg_constrs, eg_count)
-                                fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(vt), tok_cl(vt))
+                                fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_lo(vt), tok_hi(vt))
                         ei_set_variant_type(ei, vc, tc, unpack_type(fty))
                         // Write the payload type node together with the raw code, as
                         // struct fields do. The raw code collapses non-base payloads
@@ -2642,7 +2691,7 @@ fn parse_declaration():
                 method_ni := str_intern(method_name)
                 mangled := type_name + "." + method_name
                 mangled_ni := str_intern(mangled)
-                parse_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft), 0)
+                parse_body(mangled, mangled_ni, tok_lo(ft), tok_hi(ft), 0, type_ni)
                 // Register in method lookup table
                 grow_methods(g_method_count + 1)
                 cell_store(g_methods, g_method_count * 24, type_ni)
@@ -2769,7 +2818,7 @@ fn parse_declaration():
             tok_ln(cur_tok()), tok_cl(cur_tok()))
         advance_tok()
 
-fn parse_all():
+fn parse_reset():
     g_infer_name_seq = 0
     g_ast_count = 0
     g_token_pos = 0
@@ -2801,6 +2850,12 @@ fn parse_all():
     g_gen_param_count = 0
     g_gen_param_cap = 0
 
+    g_want_value = 0
+
+fn parse_all():
+    if g_parse_multi_keep == 0:
+        parse_reset()
+    g_token_pos = 0
     g_want_value = 0
     ci : ., mut = 0
     loop:
@@ -2865,3 +2920,27 @@ fn parse_all():
     // Parse interpolation hole expressions after the token stream is no longer
     // needed. Re-tokenizing is safe here; see interp_parse_holes.
     interp_parse_holes()
+
+fn parse_all_files():
+    g_parse_multi_keep = 0
+    // Static runtime declarations precede main, as they did when rt.cr was
+    // prepended to the source text.
+    if g_prelude_sm >= 0:
+        tokenize(g_prelude_sm, 0)
+        parse_all()
+        g_parse_multi_keep = 1
+    i : ., mut = 0
+    loop:
+        if i >= g_import_count:
+            break
+        sm := cell_load(g_import_sm, i * 8)
+        tokenize(sm, 0)
+        parse_all()
+        g_parse_multi_keep = 1
+        i = i + 1
+    g_parse_multi_keep = 0
+    vm0 := g_ast_count
+    g_source = sm_file_text(g_main_sm)
+    g_source_len = str_len(g_source)
+    g_source_file = g_main_sm
+    g_line_base = sm_file_line_base(g_main_sm)

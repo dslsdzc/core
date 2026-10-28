@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""`apx` 标签**适用性白名单**（批 8 条目 5；TODO #2026-09-17-4；自举编译器 build/corec）。
+"""`apx` 标签**适用性白名单**（阶段 8 条目 5；TODO #2026-09-17-4；自举编译器 build/corec）。
 
 **现象（修复前实测）**：`apx` 标签在**任意**声明上都被静默接受（`check=0`）——`dex?` · `.`（推断）·
 `auto` · `string` · … 五形 `.cir` 均照发一条 `IR_APPROX`，但**只有显式 `dex` 有表示路径**
 ⇒ 其余三形「**只带标签、不给表示**」= 语义谎（用户要 apx 表示，实现无路可走）。
 
 **裁定（lead 2026-09-18 = (B) 白名单）**：合法 = **显式 `dex`**（表示路径）+ **显式 `int`**
-（既有契约的**纯注解**：`tests/selfhost/test_apx_tag.py` 钉「语法合法 + 语义不变 + `.cir` 携 `approx`」，
+（既有契约的**纯注解**：`tests/selfhost/test_apx_tag.py` 固定「语法合法 + 语义不变 + `.cir` 携 `approx`」，
 `tests/bootstrap/test_apx_tag.py` 同向 ApproxInstr ⇒ **两前端对齐**）；**其余一律硬错**（`error[P26]`，
-`EC_P_APX_TAG = 1026`）。⛔ 裁 (A)（连 `int, apx` 一并拒）**已否**：那会**改契约**（须重定 test_apx_tag +
-登记两前端接受集分歧），而 `int, apx` 不是静默面。判据原则 =「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
+`EC_P_APX_TAG = 1026`）。禁止：裁 (A)（连 `int, apx` 一并拒）**已否**：那会**改契约**（须重定 test_apx_tag +
+登记两前端接受集分歧），而 `int, apx` 不是静默面。判定依据原则 =「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
 
-**判据要件**：① 非白名单形 ⇒ `check` rc=1 + `error[P26]` + 定位 + **`build` rc=1 且零产物**；
-② 白名单两形（`dex, apx` / `int, apx`）**逐字节不变**（本档以 check+build+run + `.cir` `approx` 机制钉承担；
-   批级另有「前态二进制 vs 本链」产物对拍）；
-**突变自证（批级留痕）**：撤掉该检查 ⇒ 拒收组 4 例回 `check=0`。
+**判定依据要件**：① 非白名单形 ⇒ `check` rc=1 + `error[P26]` + 定位 + **`build` rc=1 且零产物**；
+② 白名单两形（`dex, apx` / `int, apx`）**逐字节不变**（本档以 check+build+run + `.cir` `approx` 机制固定承担；
+   阶段级另有「前态二进制 vs 本链」产物对拍）；
+**突变自证（阶段级留痕）**：撤掉该检查 ⇒ 拒收组 4 例回 `check=0`。
 """
 
 import os
@@ -37,7 +37,7 @@ REJECTS = [
 
 ACCEPTS = [
     ("dex_apx", "x : dex, apx = 7.0\n", 0, "白名单：表示路径（合法形，逐字节不变面）"),
-    ("int_apx", "x : int, apx = 42\n", 0, "白名单：既有契约的纯注解（test_apx_tag 钉）"),
+    ("int_apx", "x : int, apx = 42\n", 0, "白名单：既有契约的纯注解（test_apx_tag 固定）"),
 ]
 
 
@@ -73,7 +73,7 @@ def run_case(name, decl, expect_reject):
         if chk.returncode != 0 or bld.returncode != 0:
             return False, f"check={chk.returncode} build={bld.returncode}"
         rr = subprocess.run([out], cwd=BASE, capture_output=True, timeout=120).returncode
-        # 机制钉：白名单形仍应携带 apx 标签（`.cir` 恰一条 `approx`）
+        # 机制固定：白名单形仍应携带 apx 标签（`.cir` 恰一条 `approx`）
         cir = subprocess.run([str(COREC), "cir", path], cwd=BASE,
                              capture_output=True, text=True, timeout=180)
         n_approx = sum(1 for l in cir.stdout.split("\n") if "approx" in l)

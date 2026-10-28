@@ -104,7 +104,7 @@ os_linux_files = [
 # 后端收尾段：ccr 载入 + 运行时 stdlib 桥 + corearch 入口。
 # R2 P3 Task 5：monomorph.cr 自本段**迁出**（→ corec_files），理由 = ① 它的类型项化改造需要
 # 类型表读取器/节点合成（get_type_kind/alloc_node——checker/parser 层，corearch 清单无此层）；
-# ② corearch 侧对它**零引用**（本批以脚本逐符号核对 corearch 链接集：monomorph.cr 的全部
+# ② corearch 侧对它**零引用**（本次以脚本逐符号核对 corearch 链接集：monomorph.cr 的全部
 # 定义符（gen_*/grow_gen_*/g_gen_*）在链接集内只出现在 globals.cr 的**注释**里，无一是代码
 # 引用；单态化本就是前端 ir_gen 期的动作，后端消费已特化的 .ccr）。corearch 行为不变由
 # ELF canary 逐字节 + 全套回归独立验证（本次迁出的唯一产物面影响 = corearch 二进制不再含
@@ -115,11 +115,11 @@ backend_support_files = [
     # 通道还要跑项层原语（tt_norm/tt_is_dnf）⇒ type_terms.cr **必须先于 ccr_io.cr**
     # 入 corearch 清单（清单顺序 = 常量可见性约束——ESZ_TYPE_TERM/OFF_TT_*/TT_*
     # 在本文件；iface_registry.cr:18-23 先例）。
-    # **TF01 收口（2026-09-13）**：type_engine.cr 本条**入 corearch**——原阻塞 = 该文件
+    # **TF01 处理（2026-09-13）**：type_engine.cr 本条**入 corearch**——原阻塞 = 该文件
     # 带两条诊断（lits_copy 真·类型洗白 TF01 + ty_memo_slot_no_grow 的 loop-落空误报）
     # ⇒ 入清单即触发 project-mode `error[`=0 门（test_backend_bootstrap）。两条已修
     # （lits_copy 返回型改 string；落空分析入 checker.cr）⇒ 判定原语（ty_sub 族）跨进程
-    # 同值面**解阻**（T2 报告的 Task 3/4/P5 收口路径 (a)；探针可另批接）。
+    # 同值面**解阻**（T2 报告的 Task 3/4/P5 处理路径 (a)；探针可另阶段接）。
     # 位置 = type_terms 之后（tt_* 常量可见性）、ccr_io 之前（读回路径无关，仅为阅读序）。
     'src/compiler/type_terms.cr',
     'src/compiler/type_engine.cr',
@@ -137,7 +137,7 @@ backend_support_files = [
 # src/targets/x86_64/linux/elf` 的入口 = 该目录 main.cr（load_project 直读）+
 # _import.cr（load_imports 直读）+ Core.toml（工程名）。**不入 concat**：
 # main.cr 的 fn main 与 concat 追加的 wrapper 冲突，且其 .cr 经 project-mode
-# 独立收编（stage0/stage 链即此入口）。仅纳入清单存在性守卫。
+# 独立纳入（stage0/stage 链即此入口）。仅纳入清单存在性守卫。
 x86_linux_elf_target_files = [
     'src/targets/x86_64/linux/elf/main.cr',
     'src/targets/x86_64/linux/elf/_import.cr',

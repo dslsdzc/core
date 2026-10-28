@@ -156,7 +156,7 @@ class IRGen:
             return self.gen_expr(expr.expr)
         if isinstance(expr, Unsafe):
             # 2(a)：bootstrap 侧 `unsafe` 支持（此前自源零使用 ⇒ 从未实现）。语义 = 块作用域；
-            # 视图内建的「允许区」判据在 type_checker 侧（本面与自托管面同款）。
+            # 视图内建的「允许区」判定依据在 type_checker 侧（本面与自托管面同款）。
             return self.gen_block(expr.block)
         if isinstance(expr, Builtin):
             # 2(a) 视图内建 = **直通**（零代码生成）：`@ptr_of(s)` / `@str_of(p)` 不改变那个 64 位字，

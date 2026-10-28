@@ -9,7 +9,7 @@ Path = IDENT { '::' IDENT } ;
 TopLevelDecl = FunctionDecl | FlowDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
 
 (*** 函数 ***)
-(* v4：函数体 = 签名后 `:` + layout region；规约标注（批 6）位于 region 开头，
+(* v4：函数体 = 签名后 `:` + layout region；规约标注（阶段 6）位于 region 开头，
    产生式统一用 Annotation（见下方「规约标注」节），不再另立 VerificationAnnotation。 *)
 FunctionDecl = 'fn' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':'
                FunctionLayout ;
@@ -26,7 +26,7 @@ FlowDecl = 'flow' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':' FlowLayout ;
 
 FlowLayout = { Annotation } { Statement } ;
 
-(*** 规约标注（批 6；2026-09-17 正式接入）***)
+(*** 规约标注（阶段 6；2026-09-17 正式接入）***)
 (* 位置 = **签名之后、body 之前**（spec-design §四）；可多条，按源序。
    终结符 `ANNOT_HASH` = 词法 `#`（self-hosted `T_HASH = 101`；bootstrap `TokenType.HASH`）。
    **`check`/`ensure` 是普通 IDENT 而非关键字**（本仓已有 `fn check`（parser.cr:30）与 CLI
@@ -67,7 +67,8 @@ Equality = Comparison { ('==' | '!=') Comparison } ;
 Comparison = Addition { ('<' | '>' | '<=' | '>=') Addition } ;
 Addition = Multiplication { ('+' | '-') Multiplication } ;
 Multiplication = Unary { ('*' | '/' | '%') Unary } ;
-Unary = ('-' | '!' | '&' | '&mut') Unary | CallOrField ;
+Unary = ('-' | '!' | '&' | '&mut') Unary | Cast ;
+Cast = CallOrField { 'cast' Type } ;
 CallOrField = Primary { '(' [ ArgList ] ')' | '.' IDENT | '[' Expr ']' } ;
 Primary = Literal | IDENT | ProjectAccess | '(' Expr ')' | LambdaExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
 ProjectAccess = '@' IDENT IDENT '::' IDENT ;

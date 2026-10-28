@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """TODO #2026-09-11-14 回归：`EXPR_LET` 站点**无任何兼容检查**（R2 P5 Task 6 修复）。
 
-背景（RED，修复前实测——(a) 冻结基线 `/tmp/p5t0/base/corec`（pre-P5）；(b) 本批起点
-`2342fd03…`；两代二进制同值 ⇒ 预存洞，非本批引入）：
+背景（RED，修复前实测——(a) 冻结基线 `/tmp/p5t0/base/corec`（pre-P5）；(b) 本次起点
+`2342fd03…`；两代二进制同值 ⇒ 预存洞，非本次引入）：
 `checker.cr` 的 `EXPR_LET` 分支（`infer_expr`）**只登记符号**：
     `ti := val_ti; if type_node >= 0 { ti = res_type_node(type_node); }`
 ——不做值/注解比对（该分支无 `type_equal`/`type_compat_strict` 调用；全仓 grep：`EC_TA_DECL`
@@ -25,9 +25,9 @@
 report-only 开门依据：**全语料（72 档）零命中**（check rc 34×0/38×1 与 pre-P5 基线逐档同 +
 诊断正文逐条同 + `check src/compiler` rc=0）——见 `.superpowers/sdd/p5-task6-report.md`。
 
-判据口径（本套件）：拒绝例 = rc≠0 + 定位诊断 needle + **无产物**（bin 与 .ccr）+ 拒绝发生在
+判定依据规则（本套件）：拒绝例 = rc≠0 + 定位诊断 needle + **无产物**（bin 与 .ccr）+ 拒绝发生在
 **前端**（不进入 `lower to ccr`/`save .ccr`/`generate ELF` 阶段）；正控例 = check rc=0 且
-build+运行值正确（防「一律拒绝」的假牙）。
+build+运行值正确（防「一律拒绝」的虚假有效性用例）。
 """
 
 import os
@@ -108,7 +108,7 @@ def case_reject(name, source, needles, cmd="build", forbid=STAGES, want_no_artif
     """拒绝面：rc≠0 + 全部 needle 命中 + 无产物 + 全部 forbid 阶段缺席。
 
     **必须**同时断言 needle（定位诊断文本）——仅断言 rc≠0 会被兜底式失败误当通过。
-    forbid 钉「拒绝发生在**前端**」：护栏若落在读回侧/发射侧，静默面（check rc=0 与
+    forbid 固定「拒绝发生在**前端**」：护栏若落在读回侧/发射侧，静默面（check rc=0 与
     「按注解行发射的错产物」）并不因此消失。
     exact_diags：给出时 = 断言 `error[` 条数**恰为此数**（级联抑制例用）。
     """
@@ -193,11 +193,11 @@ def main():
         # 改后：调用推断 = never ⇒ 豁免③ 生效 ⇒ rc=0。
         case_accept_check("let_never_call_ok",
                           "fn boom() -> never:\n    loop:\nfn main() -> int:\n    x : int = boom()\n    return 0\n"),
-        # near-miss 负控（突变 Mu2 的稳定牙齿）：普通 int 调用的注解位仍判，
+        # near-miss 负控（突变 Mu2 的稳定有效性用例）：普通 int 调用的注解位仍判，
         #   守卫不得退化成「一律透传 never」。
         case_accept_check("let_ordinary_call_unchanged",
                           "fn f2() -> int:\n    return 1\nfn main() -> int:\n    x : int = f2()\n    return 0\n"),
-        # 强负控（Mu2 的**转红**牙齿）：**普通调用**的返回型若真不符仍须拒——
+        # 强负控（Mu2 的**转红**有效性用例）：**普通调用**的返回型若真不符仍须拒——
         #   守卫退化为「无条件 return TI_NEVER」时本例转绿（= 抑制面被误开）。
         case_reject("call_result_mismatch_still_rejected",
                     "fn f2() -> int:\n    return 1\nfn main() -> int:\n    x : char = f2()\n    return 0\n",
@@ -205,9 +205,9 @@ def main():
         # 宽面负控（C5）：语句位调用本无 TA/TF 判定面，改动不得新开抑制/新开诊断。
         case_accept_check("never_stmt_position_unchanged",
                           "fn boom() -> never:\n    loop:\nfn main() -> int:\n    if 1 > 2:\n        boom()\n    return 0\n"),
-        # E-T4-5 收口：never 是底部类型，赋值位与声明位/返回位/if 合并一致。
+        # E-T4-5 处理：never 是底部类型，赋值位与声明位/返回位/if 合并一致。
         #   `busy = boom()` 的发散路径永远不会执行那条 store，因此不报 TA01。
-        #   （旧钉子钉的是既有缺口，缺口已在本轮 type_compat_strict 方向修正中关闭。）
+        #   （旧固定用例固定的是既有缺口，缺口已在本轮 type_compat_strict 方向修正中关闭。）
         case_accept_check("assign_never_source_ok",
                           "fn boom() -> never:\n    loop:\nfn main() -> int:\n    busy : int, mut = 0\n    busy = boom()\n    return 0\n"),
         # ── 正控：合法注解 / 无注解 / auto / 泛型 / 可选注入 / 无初值 / 索引形态 ──

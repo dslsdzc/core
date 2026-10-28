@@ -579,7 +579,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov [r8], r10d: 45 89 10 (restore arena index: r8 = g_current_arena addr)
-    // objdump 验证：45 89 10 = mov %r10d,(%r8) ✓；44 89 00 = mov %r8d,(%rax) ✗
+    // objdump 验证：45 89 10 = mov %r10d,(%r8) 通过；44 89 00 = mov %r8d,(%rax) 失败
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 16)

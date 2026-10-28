@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""受保护面判据的**牙**：证明 `tools/doc_protected_surface.py` 真的抓得住 9 类受保护面。
+"""受保护面判定依据的**有效性用例**：证明 `tools/doc_protected_surface.py` 真的抓得住 9 类受保护面。
 
-被验对象：`tools/doc_protected_surface.py`（文档编辑的「非散文面」抽取 + 多重集对拍判据）。
+被验对象：`tools/doc_protected_surface.py`（文档编辑的「非散文面」抽取 + 多重集对拍判定依据）。
 背景：该脚本自身「PASS」只说明两侧抽取相同——**不能说明它抓得住东西**。一条恒 PASS 的
-空判据与一条真的判据在读数上一模一样（本仓已发生过「空壳绿」：析取断言里一腿恒假，
-绿全来自另一腿，见 `test_region_check_pointer_escape` 实例）。本档给那条判据装上可复现的牙。
+空判定依据与一条真的判定依据在读数上一模一样（本仓已发生过「空壳绿」：析取断言里一路径恒假，
+绿全来自另一路径，见 `test_region_check_pointer_escape` 实例）。本档给那条判定依据装上可复现的有效性用例。
 
 零 jj / 零网络 / 零编译器 / 毫秒级 ⇒ 挂 `bootstrap-tests` job（同 test_block_git /
 test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意不读修订**：
@@ -15,19 +15,19 @@ test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意
 
   E **类别真源双向对账（静态）**：工具**源码**里的类别集（全部 `add('<NAME>'` 调用点）
     ↔ 本档 `COVERED ∪ LEDGER` 双向差集必须为空。防的是本仓一类固定失效形态
-    ——**「覆盖为零」：判据不会红、只会悄悄腐烂**。工具新增一类而本档两表皆无 ⇒ 本档
+    ——**「覆盖为零」：判定依据不会红、只会悄悄腐烂**。工具新增一类而本档两表皆无 ⇒ 本档
     静默少覆盖一类，**读数完全一样**；故：加进 `COVERED` 打突变，或登记进 `LEDGER` 带理由。
     真源取**源码**不取 manifest 的 `# categories:`——后者只列本语料命中过的类，新增一类
     若在本语料零命中就不会出现，拿它当真源恰好漏掉要防的那种情况。
-    反向腿 = **内存内注入一类 ⇒ 对账必失配**（零副作用；只写正向那句则「两边同时漏掉
+    反向路径 = **内存内注入一类 ⇒ 对账必失配**（零副作用；只写正向那句则「两边同时漏掉
     一类」恒绿）。
   A 正控：同一份语料抽两次 ⇒ compare 必 PASS（下限按本仓数法当场算：冻结读数 × 0.9）。
   B **反向（本档的核心）**：9 类受保护面**各打一个突变** ⇒ 逐类必须「真红」
-    （rc=1 且首行「受保护面有差异」）。本批 `docs/developer` 语料没有 TODO 编号
+    （rc=1 且首行「受保护面有差异」）。本次 `docs/developer` 语料没有 TODO 编号
     （`#YYYY-MM-DD-N`），`TODOID` 改走**注入式突变**：往临时副本追加一个编号，
     验证「新增受保护面条目」同样被抓；这比跳过该类更强，也不降低 9 类下限。
   B2 散文自检：改一处**纯散文** ⇒ 该档切片必须**不变** ⇒ 门不误伤散文编辑
-    （这正是工具的用途：散文自由、非散文钉死）。没有这一层，「门永不误伤」与
+    （这正是工具的用途：散文自由、非散文固定）。没有这一层，「门永不误伤」与
     「门根本没在工作」读数一样。
   C fail-closed：围栏不成对 ⇒ 必须**拒绝出数**（rc≠0），这是「不出数」不是「红」。
   D 下限闸：语料被削薄 ⇒ 必须被非空转闸拦下（防「空语料 0==0 PASS」重演）。
@@ -36,10 +36,10 @@ test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意
   ① **替换真的落地**：`str.replace` + assert 串存在（挡「改成不存在的串」＝打空）。
   ② **突变真的进了受保护面**：该档 manifest 切片必变，且 diff 里**必须含该类**的条目。
      这条专治「文件字节变了、但抽取面没变」的假突变——典型是改到 `# categories:`
-     之类的**头行**（头行被 load_manifest 忽略），此时对比会 PASS，看着像「判据漏检」，
+     之类的**头行**（头行被 load_manifest 忽略），此时对比会 PASS，看着像「判定依据漏检」，
      其实是**突变自己打空**。二者在读数上无法区分，只能靠这条判定分开。
   ③ **两侧同一路径串**跑 extract：否则 `set(a_per) != set(b_per)` 会让档清单不同，
-     判据因**错因**变红——那是**假红**，不是突变证据。
+     判定依据因**错因**变红——那是**假红**，不是突变证据。
 
 ── 两次实战翻车（比结论值钱，故留在档头）────────────────────────────────────
   · 翻车一（假红）：harness 第一版 A 侧取 `docs/developer/...`、B 侧取
@@ -51,11 +51,11 @@ test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意
   · 翻车三（同一族的第三次，且栽在 C 层）：C 层最初用 `"```" in text` 选档，命中的是
     errors.md **表格单元格里的行内代码**（该档真围栏数为 0）⇒ 替换它没破坏任何围栏，
     抽取照常 rc=0，**看着像「fail-closed 失效」**，实为突变打空。**子串计数 ≠ 结构计数**：
-    围栏一律用工具同款**行首**正则数；C 层的落地判据也因此加了「替换后围栏行数必须变奇」。
+    围栏一律用工具同款**行首**正则数；C 层的落地判定依据也因此加了「替换后围栏行数必须变奇」。
   （另一独立陷阱：突变手法若不干净——例如顺手改到别的档——「只有该档变」的伴随损伤检查
     会拦下；见 B 层 COLLATERAL 分支。）
 
-**本档自身的纪律**：C 层的落地判据与 B 层同规格（判定①对每一层都适用）。C 层那次翻车
+**本档自身的纪律**：C 层的落地判定依据与 B 层同规格（判定①对每一层都适用）。C 层那次翻车
 说明「我写了三条落地判定」不等于「我在每一层都用了它们」——**新增层必须显式过判定①**。
 
 跑法：python3 tests/harness/test_doc_protected_surface.py
@@ -72,7 +72,7 @@ from collections import Counter
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOOL = os.path.join(BASE, "tools", "doc_protected_surface.py")
 
-# 语料 = 本批受审目录（文档风格审查第一批）。目录迁移时须同步改本常量——故下面
+# 语料 = 本次受审目录（文档风格审查第一组）。目录迁移时须同步改本常量——故下面
 # 「目录不存在 / 无 .md」判 FAIL 而非 SKIP：**显式失败**，不静默消失。
 TARGET = os.path.join("docs", "developer")
 
@@ -86,21 +86,21 @@ MIN_CATEGORIES = 9
 COVERED = ("ANCHOR", "FENCE_LINE", "FENCE_OPEN", "INLINE", "LINKTARGET",
            "NUM", "TODOID", "TROW", "URL")
 
-# 本批语料零命中、但 B 层仍可验证的类别：在临时副本里**注入**该类条目，证明
+# 本次语料零命中、但 B 层仍可验证的类别：在临时副本里**注入**该类条目，证明
 # 「新增受保护面」也被抓住。仍计入 MIN_CATEGORIES（不靠降低下限放行）。
 INJECTABLE = {
     "TODOID": "docs/developer 语料无 TODO 编号；B 层注入 #YYYY-MM-DD-N 后必红",
 }
 
-# 注入用的完整编号在运行时拼接：全仓 TODO-ID 迁移判据会把源码里任何
+# 注入用的完整编号在运行时拼接：全仓 TODO-ID 迁移判定依据会把源码里任何
 # `#YYYY-MM-DD-N` 字面量当成真实引用去查悬空（本文件不是 TODO 清单）。
 INJECT_ID = "#2026-10-" + "25-1"
 
 # 工具里存在、但**不由 B 层打突变**的类别——每条**必须带理由**。E 层拿本表做双向对账：
-# 工具新增一类而两表皆无 ⇒ 必红（防「覆盖为零」：判据不会红、只会悄悄腐烂，**读数完全一样**）。
+# 工具新增一类而两表皆无 ⇒ 必红（防「覆盖为零」：判定依据不会红、只会悄悄腐烂，**读数完全一样**）。
 LEDGER = {
-    "FENCE_CLOSE": "走 C 层——缺陷形态是「围栏失衡」而非「改值」，判据是拒绝出数（rc≠0）",
-    "MARKER": "本批语料零命中（原文保留/加注 记录标记）；无可突变对象 ⇒ 挂空，见 B 层零命中闸",
+    "FENCE_CLOSE": "走 C 层——缺陷形态是「围栏失衡」而非「改值」，判定依据是拒绝出数（rc≠0）",
+    "MARKER": "本次语料零命中（原文保留/加注 记录标记）；无可突变对象 ⇒ 挂空，见 B 层零命中闸",
 }
 
 NUM_RE = re.compile(r"\d+")
@@ -257,7 +257,7 @@ def category_audit(src_text):
 # ────────────────────────────────────────────────────────────── 主流程
 def main():
     if not os.path.isfile(TOOL):
-        print("FAIL  判据脚本不在: %s" % TOOL)
+        print("FAIL  判定依据脚本不在: %s" % TOOL)
         return 1
     src = os.path.join(BASE, TARGET)
     if not os.path.isdir(src):
@@ -303,7 +303,7 @@ def main():
         fwd, rev = category_audit(src_text)
         if fwd:
             fails.append("[E 类别真源] 工具里有本档既未打突变、也未登记的类 %s ⇒ 覆盖为零"
-                         "（判据不会红、只会悄悄腐烂）。二选一：加进 COVERED 打突变，"
+                         "（判定依据不会红、只会悄悄腐烂）。二选一：加进 COVERED 打突变，"
                          "或登记进 LEDGER 带理由" % fwd)
         if rev:
             fails.append("[E 类别真源] 本档表里有、工具源码里已不存在的类 %s ⇒ 表腐烂"
@@ -311,17 +311,17 @@ def main():
         if not fwd and not rev:
             # ── E 的反向自证：**往工具里多加一类但不改本档** ⇒ 对账必须立刻失配
             #    （内存内突变，零副作用；正控「对账通过」与「对账根本没在看」读数一样，
-            #     故必须有这一腿才能证明 E 有牙）
+            #     故必须有这一路径才能证明 E 有效）
             injected = src_text.replace("def extract(", "add('SYNTHETIC_PROBE', '')\n\n\ndef extract(", 1)
             if injected == src_text:
-                fails.append("[E 自证] 注入点失效（工具源码结构已变）⇒ E 的反向腿未覆盖")
+                fails.append("[E 自证] 注入点失效（工具源码结构已变）⇒ E 的反向路径未覆盖")
             else:
                 f2, r2 = category_audit(injected)
                 if "SYNTHETIC_PROBE" in f2:
                     print("[E 类别真源] OK  %d 类双向对账通过；反向自证：注入一类 ⇒ 必红"
                           % len(set(COVERED) | set(LEDGER)))
                 else:
-                    fails.append("[E 自证] 注入一类后对账**未**失配（fwd=%s）⇒ E 无牙" % f2)
+                    fails.append("[E 自证] 注入一类后对账**未**失配（fwd=%s）⇒ E 无效" % f2)
 
         # ── A 正控
         p2 = extract(base, os.path.join(tmp, "base2.txt"))
@@ -407,7 +407,7 @@ def main():
             elif c.returncode == 1:
                 fails.append("[B %s] rc=1 但**错因不是受保护面**（假红）: %s" % (cat, head))
             else:
-                fails.append("[B %s] **假绿**：切片变了、compare 仍 rc=0 ⇒ 判据漏检" % cat)
+                fails.append("[B %s] **假绿**：切片变了、compare 仍 rc=0 ⇒ 判定依据漏检" % cat)
 
         # ── B2 散文自检：改散文 ⇒ 切片必须不变，且 compare 仍 PASS
         mut = os.path.join(tmp, "mut_PROSE")
@@ -443,7 +443,7 @@ def main():
         # 选档/落地一律用**工具同款的行首正则**数围栏，不用 `"```" in text`——后者在
         # errors.md 命中的是表格单元格里的行内代码（```continue` outside of loop`），
         # 该档真围栏数为 0 ⇒ 替换它什么也没破坏，抽取照常 rc=0，看着像「fail-closed 失效」。
-        # 这是**突变自己打空**，不是判据缺陷（实战翻车三，见档头）。
+        # 这是**突变自己打空**，不是判定依据缺陷（实战翻车三，见档头）。
         mut = os.path.join(tmp, "mut_FENCE")
         os.makedirs(os.path.join(mut, os.path.dirname(TARGET)), exist_ok=True)
         shutil.copytree(src, os.path.join(mut, TARGET))

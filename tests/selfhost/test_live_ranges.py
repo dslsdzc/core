@@ -116,14 +116,14 @@ def parse_entry_blocks(out: str) -> dict:
 
 
 def check_versioned_entries() -> tuple:
-    """Task 2：多定值变量版本切割断言（GC 批 2 扩权后同步：定值 = dest≥0 全定值）。
+    """Task 2：多定值变量版本切割断言（GC 阶段 2 扩权后同步：定值 = dest≥0 全定值）。
 
     x := 1 在 IR 中 = IR_ALLOC + IR_STORE（let 初始化发射两条定值），
     再加 x=x+1 / x=x+2 两条 STORE → x 应有 4 个版本条目（1×ALLOC + 3×STORE），
     版本区间按 [def_j, min(def_{j+1}-1, last_ref)] 切割（全局指令序闭区间）：
     e_j.live_end == def_{j+1} - 1（j < 末版），末版 live_end = var 的 last_ref ≥ 其 def。
 
-    GC 批 2（定值识别扩权，格式定稿 §4.1 dest≥0 = 定值点）：producer 临时值
+    GC 阶段 2（定值识别扩权，格式定稿 §4.1 dest≥0 = 定值点）：producer 临时值
     （CONST/BINARY/ARENA_NEW 等）也按定值切版本——按 name 分组断言（跨组断言
     会因临时值条目数变化而脆弱）；每个 def'd 条目 ls == def 与同组版本链
     不变量仍全表成立。
@@ -137,7 +137,7 @@ def check_versioned_entries() -> tuple:
         return False, f"no 'main' entry block in dump:\n{out[-500:]}"
     ent = blocks["main"]
 
-    # x 的 4 版本：ALLOC + 3×STORE（GC 批 2 语义下 x 只被 ALLOC/STORE 定值）
+    # x 的 4 版本：ALLOC + 3×STORE（GC 阶段 2 语义下 x 只被 ALLOC/STORE 定值）
     multi = [e for e in ent if e["name"] == "x"]
     if len(multi) != 4:
         return False, f"main/x: expected 4 version entries (ALLOC+3 STORE), got {len(multi)}:\n{out}"
@@ -157,7 +157,7 @@ def check_versioned_entries() -> tuple:
     if multi[3]["le"] < multi[3]["def"]:
         return False, f"main/x: last version live_end < its def:\n{multi}"
 
-    # GC 批 2 扩权实证：main 里 producer 临时值（CONST/BINARY/ARENA_NEW）也有
+    # GC 阶段 2 扩权实证：main 里 producer 临时值（CONST/BINARY/ARENA_NEW）也有
     # def'd 版本条目（旧实现止于 ALLOC/STORE——def'd 条目仅 x 一组 4 条）。
     kinds = [e["kind"] for e in ent if e["def"] >= 0]
     for want in ("ALLOC", "CONST", "BINARY", "ARENA_NEW"):
@@ -180,7 +180,7 @@ def check_versioned_entries() -> tuple:
     if "identity" not in blocks or not blocks["identity"]:
         return False, f"identity: expected an entry block:\n{out}"
     id_ent = blocks["identity"]
-    # 参数 n 单条目 def=-1（GC 批 2 后 identity 的 _arena 等 producer 有 def'd 条目）
+    # 参数 n 单条目 def=-1（GC 阶段 2 后 identity 的 _arena 等 producer 有 def'd 条目）
     n_ent = [e for e in id_ent if e["name"] == "n"]
     if len(n_ent) != 1 or n_ent[0]["def"] != -1 or n_ent[0]["kind"] != "-":
         return False, f"identity/n: param must be a single def=-1 entry:\n{id_ent}"
@@ -190,7 +190,7 @@ def check_versioned_entries() -> tuple:
 
 
 def check_array_birth_versions() -> tuple:
-    """GC 批 2（Task 2 评审 Important #2）：内存对象诞生 = 定值点。
+    """GC 阶段 2（Task 2 评审 Important #2）：内存对象诞生 = 定值点。
 
     `a : [int; 3]` 无初值声明不发 IR_ALLOC——旧实现只认 ALLOC/STORE 定值 →
     a 首个版本化定值 = 后续 STORE 重定值，诞生与重定值之间的读窗口无条目覆盖。
@@ -320,9 +320,9 @@ def check_regalloc(source: str, extra_flags) -> tuple:
 
 # 措辞注记（Task 4 输出面中性化——测试 = 行为锚, 措辞 = 输出面）：内核违反
 # 诊断前缀 "regalloc-consistency" → "entry-consistency"（条目版本表一致性——
-# 中性语义名；内核措辞批，判定语义/规则号/数值结构不变）；SUMMARY_LINE/
+# 中性语义名；内核措辞阶段，判定语义/规则号/数值结构不变）；SUMMARY_LINE/
 # ASSIGN_LINE 前缀 = 实例侧（corearch.cr 通道名 --check-regalloc 命名空间）
-# 输出——措辞批范围外，断言保持。
+# 输出——措辞阶段范围外，断言保持。
 SUMMARY_LINE = re.compile(r"^regalloc-consistency: funcs (\d+) violations (\d+)$", re.MULTILINE)
 VIOLATION_LINE = re.compile(r"^entry-consistency: func \d+ \(.+\): rule (\d+) violation", re.MULTILINE)
 ASSIGN_LINE = re.compile(r"^regalloc-assign: (\d+) pairs$", re.MULTILINE)
@@ -364,7 +364,7 @@ def check_regalloc_real_use() -> tuple:
     单调不复用 + 循环末只收集仍活跃 var → meta 恒空 → 后端全栈发射——正确但无
     寄存器加速）→ 本断言红；真实分配后 pairs > 0 → 绿。
 
-    计数载体注记（评审 I-2 措辞修正）：看门狗数的是**整语料** REG_ASSIGN 对
+    计数文件注记（评审 I-2 措辞修正）：看门狗数的是**整语料** REG_ASSIGN 对
     （被测 main + 15 个自动并入的标准库函数，funcs 16）——断言对象是总数 ≥ 5
     （证明分配真实发生、防 rc=0 回退），不断言被测 main 的 6 变量各获分配。
     6 共存 int var 的作用是把共存压力拉到 5 callee-saved 上限，使分配必然发生
@@ -527,7 +527,7 @@ def check_regalloc_read_gap_nonfunc0() -> tuple:
     函数：旧实现漏报 rc=0（红），修复（三处比较改用 inst := ist + ii）后
     rc=1 + 非 func 0 规则 ② 诊断行（绿）。
 
-    GC 批 2 注记：定值扩权后每函数的 _arena 等首条 def 使 func 0 恒可注入——
+    GC 阶段 2 注记：定值扩权后每函数的 _arena 等首条 def 使 func 0 恒可注入——
     inject_read_gap 的迭代序改为 1..n-1 再 0（调试钩子，真实路径永不注入），
     注入恒落非 func 0 函数；注入目标函数不再固定为 sum6（按函数序首个可注入
     者定，此处为 ist>0 的 stdlib/用户函数）——断言 = func > 0 + rule 2。"""

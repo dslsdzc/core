@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""TODO #2026-09-11-7：`.claude/hooks/block-git.py`（铁律 #2 机械执行）的加固判据。
+"""TODO #2026-09-11-7：`.claude/hooks/block-git.py`（硬性规则 #2 机械执行）的加固判定依据。
 
 原缺口：hook 只拦「整条命令以 git 开头」⇒ `cd x && git …` / `bash -c 'git …'` /
 `… | git …` / `$(git …)` 全能绕过（2026-09-11 R2 P1 Task 3 评审登记）。
 
-判据两组：
+判定依据两组：
   · BLOCK —— 必须 rc=2（拦截）
   · ALLOW —— 必须 rc=0（放行；**误伤 = 同样的失败**：把 jj 用法的常用命令拦掉会让人绕开 hook）
 

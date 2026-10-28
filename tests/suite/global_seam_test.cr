@@ -1,11 +1,11 @@
-// 全局行 operand seam 回归语料（2026-09-16 批；run_suite 逐档 build + run ⇒ 期望 rc=0）。
+// 全局行 operand seam 回归语料（2026-09-16 阶段；run_suite 逐档 build + run ⇒ 期望 rc=0）。
 // 覆盖：B1 IR_BINARY(TI_DEX) 全局操作数 · B2 IR_I2F 全局源 · B4 IR_SLICE 全局数组/低界 ·
 //       B5 IR_AWAIT 全局源（全部 = 修复前 ELF 侧静默错值/139 的形态；逐点局部对照见
 //       tests/selfhost/test_global_seams.py）。
 // 两条硬约束（改动本档前必读）：
 //   ① 必须以 **mut 全局**表达被测形态——`find_global_const_node`（ir_gen.cr:592-611）把
 //      「不可变 + 字面量初值」的全局折叠成 IR_CONST ⇒ 读点不碰全局行、探针不触达被测面。
-//   ② apx 算术**无解释器腿**（`corec run` 显式拒收 rc=255，能力边界非缺陷）⇒ 本档只走 ELF 腿。
+//   ② apx 算术**无解释器路径**（`corec run` 显式拒收 rc=255，能力边界非缺陷）⇒ 本档只走 ELF 路径。
 
 g1_neg : dex, apx, mut = -100.0
 g1_pos : dex, apx, mut = 100.0

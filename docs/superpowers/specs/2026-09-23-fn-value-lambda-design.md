@@ -81,7 +81,7 @@ Primary += LambdaExpr
 
 - `iface_kind_of(TYP_FN)` 返回 `AK_FN`。
 - `sh_term_of_ti` 和 `sh_sig_term_of_ti` 两个构造点都要处理 `TYP_FN`，构造 `tt_atom(AK_FN, -1, [返回项, 参数项…])`，返回项在链首。
-- 不给分支时，未知 kind 会回退成命名类，类型引擎得到 `-1`。结果是不报错但判不了，因此两个构造点必须同批修改。
+- 不给分支时，未知 kind 会回退成命名类，类型引擎得到 `-1`。结果是不报错但判不了，因此两个构造点必须同阶段修改。
 
 ## IR 与后端
 
@@ -118,7 +118,7 @@ Primary += LambdaExpr
 “无法推导 lambda 参数类型”不是类型错误，需要单独一类诊断。
 
 - 建议族号 18，前缀 `U`。
-- 同批修改 `error_cat_prefix`、`ast.cr` 的错误码注释表、`docs/developer/errors.md` 的族节和统计表。
+- 同阶段修改 `error_cat_prefix`、`ast.cr` 的错误码注释表、`docs/developer/errors.md` 的族节和统计表。
 - 新码必须在 `diag_gate_exempt` 中有明确归属：要么有真实 raise 点，要么按豁免表格式登记。
 - 未知 `@` 内建仍然报 `N01`，不能不报错地忽略。
 

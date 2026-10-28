@@ -258,7 +258,7 @@ spec fn all_nonneg(arr: [int]) -> bool
 `forall x: int => P(x)` 必须是规约语言的一等构造（不是 for 循环的翻译），int 域无限，无法用遍历表达；for 循环只是有限域的便利糖（第 7 节纯公式支持的 `forall x in arr` 是有限域情形）。
 
 ```core
-// 修订（2026-09-16 文档审计）：EBNF 尚未定义，原写「EBNF 已定义（2026-09 起归口
+// 修订（2026-09-16 文档审计）：EBNF 尚未定义，原写「EBNF 已定义（2026-09 起归属
 // grammar/core.ebnf；corespec.ebnf 为迁移期残留）」两处均不成立：
 //   1 `grammar/core.ebnf` 对 `forall|exists|#check|#ensure|spec ` 零命中（实核 2026-09-16）；
 //   2 `grammar/corespec.ebnf` 已于 2026-09-06 退役（ADR-0001；其头部自述「规约语法并入

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R2 P3 Task 4：联合/可选（`T?` = `T ∪ null`；退役内建 Option 注册）行为覆盖集。
 
-判据（语义见 docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md Task 4 +
+判定依据（语义见 docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md Task 4 +
 docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）：
 
   正（**解释器 + ELF 双路径同值**）：`T ⊆ T?`（裸值 `return 5` 入 `int?` 返回位）/
@@ -19,11 +19,11 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）�
       路径沿用既有 tag 分派 + 字段 fi+1。跨函数面（返回/形参）走隐藏全局信道（纯 IR）。
       **前置红态（B.7 一等条目）**：裸值 + `Some` 臂 = 双路径 SIGSEGV（check/build rc=0
       零诊断）——修复前后 rc 逐形态见任务报告。
-  聚合面（**容量批 T2，裁-CAP-1 (a)「存储边界规范化」**）：结构体字段 / 数组·切片元素 /
+  聚合面（**容量阶段 T2，裁-CAP-1 (a)「存储边界规范化」**）：结构体字段 / 数组·切片元素 /
       元组元素 / 枚举载荷 / 全局槽的可选值在**写点装箱**（裸 T 值 ⇒ Some(v)），读取侧
       零改动（既有装箱假定）。局部/形参/返回/调用结果仍走表示位机制（P4 T5，可持裸值）。
-      **修复前**这四面的裸值形态是**响亮失败**（rc=139 双路径同，非静默）；本批转为正确值
-      （下方 `uncovered_*` 四例为**重钉**，死亡证据 = 本批能力变更）。**未覆盖面（登记）**：
+      **修复前**这四面的裸值形态是**响亮失败**（rc=139 双路径同，非静默）；本次转为正确值
+      （下方 `uncovered_*` 四例为**重固定**，死亡证据 = 本次能力变更）。**未覆盖面（登记）**：
       指针写 `IR_STORE_PTR`（同一站点服务局部与聚合 + 别名不可静态闭合）、元组/数组字面量
       的非 ident/调用元素、泛型形参字段实例化为 `T?` 的形态。
 """
@@ -91,9 +91,9 @@ def run_interp(source: str):
 
 
 def case_dual(name, source, expect_rc):
-    """**双路径**（ELF 产物 + 解释器）同值断言——本任务主判据形。
+    """**双路径**（ELF 产物 + 解释器）同值断言——本任务主判定依据形。
 
-    ⚠️ 附加 `check` rc=0 断言（**必要**，实测教训）：本仓库多数类型诊断（TF01/TA01…）是
+    警告：附加 `check` rc=0 断言（**必要**，实测教训）：本仓库多数类型诊断（TF01/TA01…）是
     **软诊断**——`build` 路径 rc=0 + 产物照出，仅 `check` 因「有诊断即 rc=1」暴露。只断
     「build+run rc」会让「判定面整体失效」的突变**照样全绿**（M1 实测：注入失效后
     plain_value_into_optional 仍 PASS）。故正例 = 三路同证：check rc=0 ∧ build/run rc=N ∧ interp rc=N。
@@ -121,7 +121,7 @@ def case_dual(name, source, expect_rc):
 
 
 def case_dual_rc(name, source, expect_rc):
-    """双路径**同 rc**（不要求 check rc=0）：用于**未覆盖面登记**——钉「未覆盖面要么正确、
+    """双路径**同 rc**（不要求 check rc=0）：用于**未覆盖面登记**——固定「未覆盖面要么正确、
     要么响亮失败（elf rc == interp rc），**绝不静默分歧**」；rc=139 = 既有装箱假定下的
     响亮失败（非本任务面，逐形态实测见任务报告 §未覆盖面）。"""
     r, rr = build_and_run(source)
@@ -137,11 +137,11 @@ def case_dual_rc(name, source, expect_rc):
 
 
 def case_dual_softdiag(name, source, expect_rc, diag="B04"):
-    """双路径同值 + check 面**已知软诊断**钉死（(A) 批新增面特有）。
+    """双路径同值 + check 面**已知软诊断**固定（(A) 阶段新增面特有）。
 
     面特性：`p := &x` 借出 x 后**再读 x** ⇒ 既有 B04（`Cannot use 'x' while it is
-    borrowed`）——**非本批引入**（T1 四形态探针同一诊断），属软诊断：`build` 路径
-    rc=0 + 产物照出。判据 = 诊断码集**恰为** {diag}（多一条即红，防新诊断混入）
+    borrowed`）——**非本次引入**（T1 四形态探针同一诊断），属软诊断：`build` 路径
+    rc=0 + 产物照出。判定依据 = 诊断码集**恰为** {diag}（多一条即红，防新诊断混入）
     ∧ build/ELF/interp 同值。
     """
     rc_chk, outc, srcc = _compile(source, cmd="check")
@@ -163,7 +163,7 @@ def case_dual_softdiag(name, source, expect_rc, diag="B04"):
     if ri.returncode != expect_rc:
         print(f"[FAIL] {name}: interp expected rc {expect_rc}, got {ri.returncode}: {ri.stdout}{ri.stderr}")
         return False
-    print(f"[PASS] {name}: ELF+interp rc={rr.returncode}（check 面既有软诊断 {diag} 钉死）")
+    print(f"[PASS] {name}: ELF+interp rc={rr.returncode}（check 面既有软诊断 {diag} 固定）")
     return True
 
 
@@ -188,7 +188,7 @@ def case_reject(name, source, needles, cmd="build"):
 
 
 def case_evp(name, source, needles):
-    """载荷类型节点列**入库断言**（隐藏调试通道 `--verify-evp-nodes`；T0 交接 ① 的判据）。"""
+    """载荷类型节点列**入库断言**（隐藏调试通道 `--verify-evp-nodes`；T0 交接 ① 的判定依据）。"""
     r, out, src = _compile(source, cmd="check", extra=["--verify-evp-nodes"])
     try:
         if r.returncode != 0:
@@ -246,7 +246,7 @@ fn main() -> int:
 """
 
 # ── R2 P4 Task 5（裁决 5：解包侧判表示）：B.7 四形态 + 跨函数面 ──────────────
-# 语义口径：裸值入 `T?` = 该值本身（`T ⊆ T?`）⇒ Some 臂**命中**且载荷 = 裸值。
+# 语义规则：裸值入 `T?` = 该值本身（`T ⊆ T?`）⇒ Some 臂**命中**且载荷 = 裸值。
 BARE_SOME_ARM = """fn main() -> int:
     x : int?, mut = 5
     return match x:
@@ -414,7 +414,7 @@ BOXED_WILDCARD = """fn main() -> int:
             return 12
 """
 # 未覆盖面（登记，非本任务面）：结构体字段裸值 + Some 臂 ⇒ 既有装箱假定 ⇒ 响亮失败
-# （rc=139 双路径**同**：钉「未覆盖面不静默分歧」，不钉错误值本身）
+# （rc=139 双路径**同**：固定「未覆盖面不静默分歧」，不固定错误值本身）
 UNCOVERED_FIELD_BARE = """struct S:
     a: int?
 fn main() -> int:
@@ -455,7 +455,7 @@ fn main() -> int:
             return 9
 """
 
-# ── 容量批 T2：聚合面存储边界规范化（裁-CAP-1 (a)）——A 类 8 写点逐点覆盖 ──────────
+# ── 容量阶段 T2：聚合面存储边界规范化（裁-CAP-1 (a)）——A 类 8 写点逐点覆盖 ──────────
 # 每例 = 裸值写入可选聚合槽后解包（修复前 139；现须给精确值）；装箱/None 形为对照。
 CAP_FIELD_ASSIGN = """struct S:
     a: int?
@@ -598,13 +598,13 @@ fn main() -> int:
 """
 
 
-# ── (A) 批 T2：表示位随存储走（裁-REP-1 (iii)：取址槽恒装箱）──────────────────
-# 载体 = 指针写（`p := &slot; *p = v`）。**四形态 × {裸, 装箱, None, 条件写}**：
+# ── (A) 阶段 T2：表示位随存储走（裁-REP-1 (iii)：取址槽恒装箱）──────────────────
+# 文件 = 指针写（`p := &slot; *p = v`）。**四形态 × {裸, 装箱, None, 条件写}**：
 #   INV-1 取址槽恒持装箱值 ⇒ 裸值经指针写 ⇒ 写点装箱（W5）。
-# 判据形态：`case_dual_softdiag`（这些源带**既有** B04 软诊断：&x 借出后读 x；T1 探针同），
+# 判定依据形态：`case_dual_softdiag`（这些源带**既有** B04 软诊断：&x 借出后读 x；T1 探针同），
 # `case_dual`（check 零诊断面：数组元素 / 非可选对照），`case_dual_rc`（登记面：REP-2/REP-3）。
-# **形态③（全局）另钉第二根因**：ELF 后端 `IR_REF` 全局取址修复（`&g` 曾取帧外伪偏移 ⇒
-# 与全局槽脱钩）——负控 `a_neg_nonopt_global_ptr` 即其钉子（修复前 ELF 恒初值）。
+# **形态③（全局）另固定第二根因**：ELF 后端 `IR_REF` 全局取址修复（`&g` 曾取帧外伪偏移 ⇒
+# 与全局槽脱钩）——负控 `a_neg_nonopt_global_ptr` 即其固定用例（修复前 ELF 恒初值）。
 A_LOCAL_BARE = """fn main() -> int:
     x : int? = Some(0)
     p := &x
@@ -718,8 +718,8 @@ fn main() -> int:
             return 0
 """
 # ④ 结构体字段取址：**裁-REP-3 维持登记**（`UOP_REF` 无字段分支 ⇒ 取临时量地址 ⇒ 写入丢失；
-# 属另一缺陷，须新增 `IR_ADDR_FIELD` 面才能修）——本例只钉「双路径同 rc（响亮同态）**不静默分歧**」，
-# 不钉错值本身（修好后本例会照常通过：rc=0 面两支同）。
+# 属另一缺陷，须新增 `IR_ADDR_FIELD` 面才能修）——本例只固定「双路径同 rc（响亮同态）**不静默分歧**」，
+# 不固定错值本身（修好后本例会照常通过：rc=0 面两支同）。
 A_FIELD_ADDR = """struct S:
     a: int?
 fn main() -> int:
@@ -732,7 +732,7 @@ fn main() -> int:
         none =>:
             return 0
 """
-# ①d 形参槽（W4：形参序言**条件装箱** + 表示位钉 1）——裸值经信道入形参后被取址
+# ①d 形参槽（W4：形参序言**条件装箱** + 表示位固定 1）——裸值经信道入形参后被取址
 A_PARAM_BARE = """fn f(x: int?) -> int:
     p := &x
     *p = 7
@@ -765,8 +765,8 @@ A_C2_BIT1_BARE = """fn main() -> int:
         none =>:
             return 0
 """
-# c3 转正判据按 T1 修正：**断言「= 正确值」不钉历史观测数值**（T1 实测 ELF 8 / interp 96，
-# 数值随状态漂移）——判据内置：写入载荷 = 9 ⇒ 解包值须 == 9（自证，非外部钉数）。
+# c3 转正判定依据按 T1 修正：**断言「= 正确值」不固定历史观测数值**（T1 实测 ELF 8 / interp 96，
+# 数值随状态漂移）——判定依据内置：写入载荷 = 9 ⇒ 解包值须 == 9（自证，非外部固定数）。
 A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int:
     x : int?, mut = 5
     p := &x
@@ -793,7 +793,7 @@ A_REP2_PTRADD = """fn main() -> int:
         none =>:
             return 0
 """
-# 负控：**非可选**取址槽不受本律影响（不装箱、值形态不变）；第二例同时钉 ELF 全局取址修复
+# 负控：**非可选**取址槽不受本律影响（不装箱、值形态不变）；第二例同时固定 ELF 全局取址修复
 A_NEG_NONOPT_LOCAL = """fn main() -> int:
     n : int, mut = 1
     p := &n
@@ -808,7 +808,7 @@ fn main() -> int:
 """
 
 
-# ── (A) 批 T3（裁-T3-1）：**推断（无标注）可选数组/切片**的元素写点 ────────────
+# ── (A) 阶段 T3（裁-T3-1）：**推断（无标注）可选数组/切片**的元素写点 ────────────
 # 漏点实证（修复前）：`a := [Some(1), None]; a[0] = 5;` 等 7 形态 **139/139**（双路径同，响亮）
 # ——元素写点的元素类型取自**声明表**，而声明表此前只在**带注解**的 LET 登记。
 # 修法 = 字面量/切片两站点按「元素可选性」登记声明面 + LET/全局初值处**继承到绑定 var**
@@ -964,9 +964,9 @@ def main():
         case_dual("some_flow_some_arm", SOME_FLOW, 101),
         # 正：None 值流经 match 的 None 臂（双路径）
         case_dual("none_flow_none_arm", NONE_FLOW, 7),
-        # 负：T? ⊄ T（方向性——可选**不是**裸类型的子类型；钉死 soundness 面）。
-        # 口径：TF01 是**软诊断**（本仓库硬门名单只含 R002/TK05-06/TS01-04/TK02/TM03，
-        # build 路径 rc=0 + 产物照出）⇒ 判据走 `check`（有诊断即 rc=1）+ 措辞断言。
+        # 负：T? ⊄ T（方向性——可选**不是**裸类型的子类型；固定 soundness 面）。
+        # 规则：TF01 是**软诊断**（本仓库硬门名单只含 R002/TK05-06/TS01-04/TK02/TM03，
+        # build 路径 rc=0 + 产物照出）⇒ 判定依据走 `check`（有诊断即 rc=1）+ 措辞断言。
         case_reject("optional_not_assignable_to_plain",
                     "fn f(x: int?) -> int:\n    return x\nfn main() -> int:\n    return f(1)\n",
                     ["error[TF01]"], cmd="check"),
@@ -1017,17 +1017,17 @@ def main():
         case_dual("mixed_return_boxed_taken", MIXED_RET_BOXED, 4),
         # 装箱值 + 通配臂（既有语义保持）
         case_dual("boxed_value_wildcard", BOXED_WILDCARD, 12),
-        # ── 原未覆盖面（**容量批 T2 重钉**：裸值形态已由写点装箱闭合）──
-        # 死亡证据 = 本批能力变更：修复前 `uncovered_field_bare_is_loud` 期望 -11（响亮
-        # 失败），本批后为正确值 5 ⇒ 改判 `case_dual` 断言精确值（**禁令**：只断 rc 会
+        # ── 原未覆盖面（**容量阶段 T2 重固定**：裸值形态已由写点装箱闭合）──
+        # 死亡证据 = 本次能力变更：修复前 `uncovered_field_bare_is_loud` 期望 -11（响亮
+        # 失败），本次后为正确值 5 ⇒ 改判 `case_dual` 断言精确值（**禁令**：只断 rc 会
         # 让「静默错值」类突变假绿——突变 M4 即此形态）。
         case_dual("uncovered_field_bare_now_ok", UNCOVERED_FIELD_BARE, 5),
         case_dual("uncovered_field_boxed_ok", UNCOVERED_FIELD_BOXED, 5),
-        # 全局槽：装箱/None 形态照常正确（钉 tag 读取源的全局行分派）
+        # 全局槽：装箱/None 形态照常正确（固定 tag 读取源的全局行分派）
         case_dual("uncovered_global_boxed_ok", UNCOVERED_GLOBAL_BOXED, 5),
         case_dual("uncovered_global_none_ok", UNCOVERED_GLOBAL_NONE, 9),
 
-        # ── 容量批 T2：聚合面存储边界规范化（裁-CAP-1 (a)；A 类 8 写点逐点）──
+        # ── 容量阶段 T2：聚合面存储边界规范化（裁-CAP-1 (a)；A 类 8 写点逐点）──
         # 字段：赋值点 / 字面量点（**两个独立写点**，突变 M1 专测其可判别性）
         case_dual("cap_field_bare_assign", CAP_FIELD_ASSIGN, 5),
         case_dual("cap_field_bare_literal", CAP_FIELD_LITERAL, 6),
@@ -1050,7 +1050,7 @@ def main():
         # 负控：非可选聚合槽不受本律影响
         case_dual("cap_nonopt_field_unaffected", CAP_NONOPT_FIELD, 16),
 
-        # ── (A) 批 T2：表示位随存储走（裁-REP-1 (iii)；四形态 × 值形态）──
+        # ── (A) 阶段 T2：表示位随存储走（裁-REP-1 (iii)；四形态 × 值形态）──
         # ① 局部槽（T1: 139 双路径）
         case_dual_softdiag("a_local_bare_ptrwrite", A_LOCAL_BARE, 7),
         case_dual_softdiag("a_local_boxed_ptrwrite", A_LOCAL_BOXED, 8),
@@ -1066,9 +1066,9 @@ def main():
         case_dual_softdiag("a_global_boxed_ptrwrite", A_GLOBAL_BOXED, 5),
         case_dual_softdiag("a_global_none_ptrwrite", A_GLOBAL_NONE_WRITE, 4),
         case_dual_softdiag("a_global_cond_ptrwrite", A_GLOBAL_COND, 5),
-        # ④ 结构体字段取址：裁-REP-3 维持登记（只钉「双路径同 rc」）
+        # ④ 结构体字段取址：裁-REP-3 维持登记（只固定「双路径同 rc」）
         case_dual_rc("a_field_addr_registered", A_FIELD_ADDR, 0),
-        # 三子形态：c1 保持 / c2 转正 / c3 转正（自证式断言，不钉历史数值）
+        # 三子形态：c1 保持 / c2 转正 / c3 转正（自证式断言，不固定历史数值）
         case_dual_softdiag("a_c1_bit0_bare", A_C1_BIT0_BARE, 7),
         case_dual_softdiag("a_c2_bit1_bare", A_C2_BIT1_BARE, 7),
         case_dual_softdiag("a_c3_bit0_boxed_selfcheck", A_C3_BIT0_BOXED_SELFCHECK, 1),
@@ -1078,7 +1078,7 @@ def main():
         case_dual_softdiag("a_neg_nonopt_local_ptr", A_NEG_NONOPT_LOCAL, 5),
         case_dual_softdiag("a_neg_nonopt_global_ptr", A_NEG_NONOPT_GLOBAL, 5),
 
-        # ── (A) 批 T3（裁-T3-1）：推断可选数组/切片的元素写点（修复前 7 形态 139/139）──
+        # ── (A) 阶段 T3（裁-T3-1）：推断可选数组/切片的元素写点（修复前 7 形态 139/139）──
         case_dual("t3_inferred_arr_bare_write", T3_INFERRED_ARR_BARE, 5),
         case_dual("t3_inferred_arr_lit_idx_write", T3_INFERRED_ARR_LIT_IDX, 5),
         case_dual("t3_inferred_ident_elem_write", T3_INFERRED_IDENT_ELEM, 7),

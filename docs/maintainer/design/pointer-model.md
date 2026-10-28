@@ -37,10 +37,10 @@ p := &arr[0]          // REF 或 ADDR_INDEX，产生 self-pointer
 p = p + n             // 偏移，不影响 pts；偏移写入 g_offsets
 x := *p               // DEREF，读取 alloc content
 *p = v                // STORE_PTR，把 v 的 pts 写入 alloc content
-q := cast<int*>(p)    // 类型转换，pts 不变，视图变化
+q := p cast *int     // 类型转换，pts 不变，视图变化
 
 unsafe:
-    mmio := 0x7fff0000 as *int   // 图边界输入：整数转指针，asp=1
+    mmio := 0x7fff0000 cast *int   // 图边界输入：整数转指针，asp=1
     *mmio = 42
 ```
 
@@ -102,7 +102,7 @@ unsafe:
 
 | 场景 | 原因 |
 |---|---|
-| 外部硬件地址 | 直接写 `0x7fff0000 as *int`，没有 ALLOC。整数转指针带 `asp=1`，解引用必须在 `unsafe` 域内，由 pa 和 pv 的 `unsafe` 感知处理 |
+| 外部硬件地址 | 直接写 `0x7fff0000 cast *int`，没有 ALLOC。整数转指针带 `asp=1`，解引用必须在 `unsafe` 域内，由 pa 和 pv 的 `unsafe` 感知处理 |
 | FFI 返回值 | 外部指针没有 Core provenance |
 | inline asm | 输出指针没有来源 |
 

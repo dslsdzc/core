@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""可选值 `==`/`!=` 表示透明回归套件（批 8 条目 2；TODO #2026-09-17-6；自举编译器 build/corec）。
+"""可选值 `==`/`!=` 表示透明回归套件（阶段 8 条目 2；TODO #2026-09-17-6；自举编译器 build/corec）。
 
-**现象（修复前实测，2026-09-17 批 8 T0）**：`==` 走通用二元路径**不读表示位** ⇒ 逐槽比原始值：
+**现象（修复前实测，2026-09-17 阶段 8 T0）**：`==` 走通用二元路径**不读表示位** ⇒ 逐槽比原始值：
 裸（rep=0，槽值=载荷）⇒ 比载荷（正确）；**装箱**（`Some`/`None` 对象）⇒ 比**指针** ⇒ 恒假。
 五读数（位码打包，见下）修复前 = **24**（bit3+bit4 置位 = 0/0/0/1/1）。
 **锚更正留痕（2026-09-18 复核 Important）**：本行原文写「修复前 = 8（仅 bit3）」——那是**旧探针形状**
 （bit4 用 `n == 7`，`n = None` ⇒ 0）的读数；`0186427f` 把 bit4 重定为 `a == 7`（present 形）并补 bit5 后，
 **真值 = 24**（由**前态二进制** `/tmp/corec2` 实测：ELF=24 · interp=24；本链 30；突变回退亦 24）。
 
-**修复（批 8 条目 2）**：比较点把两侧归一为 `(absent, payload)` 后再比（`ir_gen.cr`
+**修复（阶段 8 条目 2）**：比较点把两侧归一为 `(absent, payload)` 后再比（`ir_gen.cr`
 `opt_cmp_optish`/`opt_cmp_norm`/`opt_cmp_extract_boxed` + `==`/`!=` 分派块）：
 缺省性不同 ⇒ 不等；同缺省 ⇒ 相等；同在 ⇒ 比载荷。触发面**保守**（带表示位 / `Some`·`None`
-构造子 / 可选声明面）⇒ 非可选比较走原路径（判据 ⑤）。
+构造子 / 可选声明面）⇒ 非可选比较走原路径（判定依据 ⑤）。
 
-**判据要件（计划 §1 条目 2）**：① `Some(x)==Some(x)` 必真 · ② `None==None` 必真 ·
+**判定依据要件（计划 §1 条目 2）**：① `Some(x)==Some(x)` 必真 · ② `None==None` 必真 ·
 ③ `Some(x)==None` 必假 · ④ **同源自比较 `x==x` 必真（bare/boxed 两表示都测）** ·
 ⑤ 非可选 `==` 语义与产物零变化。
 
@@ -22,13 +22,13 @@
 `bit4 = a==7`（可选 vs 内层值，**present**）· `bit5 = n==7`（None vs 内层值）。
 修复前 = **24**（bit3+bit4 ⇒ 五读数 0/0/0/1/1）· 修复后 = **30**（②③④⑤ 置位；① 与 bit5 不置位）。
 
-**突变自证（批级留痕，2026-09-17 实测）**：把比较点分派门退回不触发 ⇒ 位码回 **8**（②③ 回红）。
+**突变自证（阶段级留痕，2026-09-17 实测）**：把比较点分派门退回不触发 ⇒ 位码回 **8**（②③ 回红）。
 
 **已登记未覆盖面**：字符串载荷的装箱可选比较（`Some("a")==Some("a")`）仍按指针比 ⇒ 0
-（与本修复前一致；载荷定型通道未覆盖 ⇒ 见档末 `known_uncovered` 用例，**不得**当作判据）。
+（与本修复前一致；载荷定型通道未覆盖 ⇒ 见档末 `known_uncovered` 用例，**不得**当作判定依据）。
 
-**非可选零变化（判据 ⑤）**：本档 `plain_*` 组 = 非可选比较逐值钉子；产物面（canary / `.ccr`
-IDENTICAL）在批级判据核，不在本档。
+**非可选零变化（判定依据 ⑤）**：本档 `plain_*` 组 = 非可选比较逐值固定用例；产物面（canary / `.ccr`
+IDENTICAL）在阶段级判定依据核，不在本档。
 """
 
 import os
@@ -85,7 +85,7 @@ def case_dual(name, source, want, note=""):
 
 
 CASES = [
-    # ── 判据 ①：Some(x)==Some(x)（两个**不同对象**、载荷相等）──
+    # ── 判定依据 ①：Some(x)==Some(x)（两个**不同对象**、载荷相等）──
     ("some_eq_some_true", B2I + """
 fn main() -> int:
     return b2i(Some(7) == Some(7))
@@ -94,7 +94,7 @@ fn main() -> int:
 fn main() -> int:
     return b2i(Some(7) == Some(8))
 """, 0, "① 反向：载荷不等"),
-    # ── 判据 ②：None==None（两个不同 None 源）──
+    # ── 判定依据 ②：None==None（两个不同 None 源）──
     ("none_eq_none_vars", B2I + """
 fn main() -> int:
     n : int? = none
@@ -106,7 +106,7 @@ fn main() -> int:
     n : int? = none
     return b2i(n == none)
 """, 1, "② 变量 vs None 字面量"),
-    # ── 判据 ③：Some(x)==None 必假（双向）──
+    # ── 判定依据 ③：Some(x)==None 必假（双向）──
     ("some_ne_none", B2I + """
 fn main() -> int:
     n : int? = Some(7)
@@ -117,7 +117,7 @@ fn main() -> int:
     n : int? = none
     return b2i(n == Some(7))
 """, 0, "③ None vs Some（反向）"),
-    # ── 判据 ④：同源自比较 x==x（bare / boxed 两表示）──
+    # ── 判定依据 ④：同源自比较 x==x（bare / boxed 两表示）──
     ("self_eq_bare", B2I + """
 fn main() -> int:
     a : int? = 7
@@ -129,7 +129,7 @@ fn main() -> int:
     p := &a
     *p = Some(9)
     return b2i(*p == *p)
-""", 1, "④ 装箱表示自比较（INV-1 取址槽；`*p` 形态绕开软诊断 B04，同批 5 体例）"),
+""", 1, "④ 装箱表示自比较（INV-1 取址槽；`*p` 形态绕开软诊断 B04，同阶段 5 体例）"),
     # ── 表示透明：同语义两种表示同判（本修复的核心命题）──
     ("rep_transparent_bare", B2I + """
 fn main() -> int:
@@ -173,10 +173,10 @@ fn main() -> int:
     m : int? = none
     return b2i((n == none) == (m == none))
 """, 1, "两比较结果相等（bool 面）"),
-    # ── 位码总钉（五读数打包；ELF 与 interp 同判）──
+    # ── 位码总固定（五读数打包；ELF 与 interp 同判）──
     ("bitcode_five_readings", B2I + BITCODE, BITCODE_POST,
      f"五读数位码（修复前 {BITCODE_PRE}）"),
-    # ── 判据 ⑤：非可选对比 = 零变化（逐值钉子）──
+    # ── 判定依据 ⑤：非可选对比 = 零变化（逐值固定用例）──
     ("plain_eq_true", B2I + """
 fn main() -> int:
     a := 7
@@ -196,7 +196,7 @@ fn main() -> int:
     b := "hi"
     return b2i(a == b)
 """, 1, "⑤ 非可选字符串相等（走 str_eq 原路径）"),
-    # ── 已登记未覆盖面（**记录现状**，不是判据：字符串载荷的装箱比较仍按指针）──
+    # ── 已登记未覆盖面（**记录现状**，不是判定依据：字符串载荷的装箱比较仍按指针）──
     ("known_uncovered_str_payload", B2I + """
 fn main() -> int:
     a : string? = none

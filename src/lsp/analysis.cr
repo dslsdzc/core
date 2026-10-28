@@ -1,7 +1,7 @@
 // === analysis.cr ===
 // Hover and go-to-definition for the LSP: position to token to symbol lookup.
 // Queries read the snapshot from the last successful check (g_tokens, g_funcs,
-// g_structs, g_enums, g_ast, g_types, g_files, segment tables, and g_source).
+// g_structs, g_enums, g_ast, g_types, g_files, and the main source text).
 // They do not run a check or modify frontend state.
 //
 // Coordinates: entry line and col are LSP 0-based. Tokens, AST nodes, and line
@@ -10,12 +10,13 @@
 // Declaration lookup:
 // - functions: fi_ast_node gives the EXPR_FN node's line and col.
 // - structs and enums: the parser does not create declaration AST nodes, so scan
-//   g_tokens for T_STRUCT or T_ENUM followed by the matching identifier.
+//   the main token stream and then imported token streams for T_STRUCT or T_ENUM
+//   followed by the matching identifier.
 // - locals: g_syms is popped after check_all, so scan g_ast for the nearest
 //   EXPR_LET, EXPR_PARAM, or EXPR_FOR with the same name before the query.
 //
-// Cross-file: declaration line to g_line_fileid to the g_files path. Subtract the
-// segment's line offset to get the target file's own coordinates.
+// Cross-file: declaration line to the owning file and its path. Subtract the
+// owning SourceManager line base to get the target file's own coordinates.
 //
 // String building uses literal-initialized accumulators. Do not name a variable
 // match: it is reserved in the bootstrap parser and crashes.
@@ -187,56 +188,65 @@ fn analysis_line_start(line: int) -> int:
     return sl
 
 // Decode one UTF-8 sequence from g_source. Invalid bytes occupy one unit.
-fn analysis_utf8_next(pos: int, sl: int) -> int:
+fn analysis_utf8_next_in(text: string, pos: int, sl: int) -> int:
     if pos < 0 || pos >= sl:
         return 1
-    b0 := load8(g_source, pos)
+    b0 := load8(text, pos)
     if b0 < 128:
         return 1
     if b0 < 224 && pos + 1 < sl:
-        b1 := load8(g_source, pos + 1)
+        b1 := load8(text, pos + 1)
         if b1 >= 128 && b1 < 192:
             return 2
     if b0 < 240 && pos + 2 < sl:
-        b1 := load8(g_source, pos + 1)
-        b2 := load8(g_source, pos + 2)
+        b1 := load8(text, pos + 1)
+        b2 := load8(text, pos + 2)
         if b1 >= 128 && b1 < 192 && b2 >= 128 && b2 < 192:
             return 3
     if b0 >= 240 && b0 < 248 && pos + 3 < sl:
-        b1 := load8(g_source, pos + 1)
-        b2 := load8(g_source, pos + 2)
-        b3 := load8(g_source, pos + 3)
+        b1 := load8(text, pos + 1)
+        b2 := load8(text, pos + 2)
+        b3 := load8(text, pos + 3)
         if b1 >= 128 && b1 < 192 && b2 >= 128 && b2 < 192 && b3 >= 128 && b3 < 192:
             return 4
     return 1
 
-fn analysis_utf8_cp(pos: int, adv: int) -> int:
-    b0 := load8(g_source, pos)
+fn analysis_utf8_next(pos: int, sl: int) -> int:
+    return analysis_utf8_next_in(g_source, pos, sl)
+
+fn analysis_utf8_cp_in(text: string, pos: int, adv: int) -> int:
+    b0 := load8(text, pos)
     if adv == 1:
         return b0
     if adv == 2:
-        return (b0 - 192) * 64 + load8(g_source, pos + 1) - 128
+        return (b0 - 192) * 64 + load8(text, pos + 1) - 128
     if adv == 3:
-        return (b0 - 224) * 4096 + (load8(g_source, pos + 1) - 128) * 64 + load8(g_source, pos + 2) - 128
-    return (b0 - 240) * 262144 + (load8(g_source, pos + 1) - 128) * 4096 + (load8(g_source, pos + 2) - 128) * 64 + load8(g_source, pos + 3) - 128
+        return (b0 - 224) * 4096 + (load8(text, pos + 1) - 128) * 64 + load8(text, pos + 2) - 128
+    return (b0 - 240) * 262144 + (load8(text, pos + 1) - 128) * 4096 + (load8(text, pos + 2) - 128) * 64 + load8(text, pos + 3) - 128
 
-fn analysis_utf16_units(start: int, end: int) -> int:
-    sl := str_len(g_source)
+fn analysis_utf8_cp(pos: int, adv: int) -> int:
+    return analysis_utf8_cp_in(g_source, pos, adv)
+
+fn analysis_utf16_units_in(text: string, start: int, end: int) -> int:
+    sl := str_len(text)
     p : ., mut = start
     units : ., mut = 0
     loop:
         if p >= end || p >= sl:
             break
-        adv : ., mut = analysis_utf8_next(p, sl)
+        adv : ., mut = analysis_utf8_next_in(text, p, sl)
         if p + adv > end:
             adv = 1
-        cp := analysis_utf8_cp(p, adv)
+        cp := analysis_utf8_cp_in(text, p, adv)
         if cp >= 65536:
             units = units + 2
         else:
             units = units + 1
         p = p + adv
     return units
+
+fn analysis_utf16_units(start: int, end: int) -> int:
+    return analysis_utf16_units_in(g_source, start, end)
 
 fn analysis_source_byte(pos: int, sl: int) -> int:
     if pos < 0 || pos >= sl:
@@ -457,6 +467,43 @@ fn analysis_hover(line: int, col: int) -> string:
 
 // Definition.
 
+// Result of a cross-file declaration scan. The token stream is restored to the
+// main file before the caller reads these fields.
+g_decl_line : int, mut
+g_decl_col : int, mut
+
+fn analysis_restore_main_tokens():
+    g_source = sm_file_text(g_main_sm)
+    g_source_len = str_len(g_source)
+    g_source_file = g_main_sm
+    g_line_base = sm_file_line_base(g_main_sm)
+    tokenize(g_main_sm, 0)
+
+// Find a struct/enum declaration in the main file or any imported file.
+// Struct and enum declarations have no AST node, so this scans token streams.
+fn analysis_decl_any(kw: int, name_ni: int) -> int:
+    d := analysis_decl_tok(kw, name_ni)
+    if d >= 0:
+        g_decl_line = cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
+        g_decl_col = cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL)
+        return 1
+    i : ., mut = 0
+    loop:
+        if i >= g_import_count:
+            break
+        sm := cell_load(g_import_sm, i * 8)
+        if sm != g_main_sm:
+            tokenize(sm, 0)
+            d2 := analysis_decl_tok(kw, name_ni)
+            if d2 >= 0:
+                g_decl_line = cell_load(g_tokens, d2 * ESZ_TOKEN + OFF_TK_LINE)
+                g_decl_col = cell_load(g_tokens, d2 * ESZ_TOKEN + OFF_TK_COL)
+                analysis_restore_main_tokens()
+                return 1
+        i = i + 1
+    analysis_restore_main_tokens()
+    return 0
+
 // Scan g_tokens for T_STRUCT or T_ENUM followed by the matching identifier.
 // Returns the name token index, or -1. Struct and enum declarations have no AST
 // node; see the file header.
@@ -470,58 +517,52 @@ fn analysis_decl_tok(kw: int, name_ni: int) -> int:
                 return i + 1
         i = i + 1
 
-// 1-based line to file path through g_line_fileid and g_files; fall back to the main file.
+// 1-based line to the owning file and its path; fall back to the main file.
 fn analysis_path_for_line(ln1: int) -> string:
     fid : ., mut = -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
+        fid = fileid_of_line(ln1)
     if fid < 0 && g_file_count > 0:
         fid = cell_load(g_files, 0)
     i : ., mut = 0
     loop:
         if i >= g_file_count:
             break
-        if cell_load(g_files, i * 16) == fid:
-            p : ., mut = load_str_ptr(g_files, i * 16 + 8)
+        if cell_load(g_files, i * 24) == fid:
+            p := load_str_ptr(g_files, i * 24 + 8)
+
             if str_len(p) > 0:
                 return p
         i = i + 1
     return ""
 
-// 1-based line to its segment line offset, converting concatenated coordinates back to the target file.
+// 1-based line to the owning file's line offset in the flat line space.
+// The main file has offset 0; imported files start after the files registered
+// before them.
 fn analysis_line_offset(ln1: int) -> int:
-    fid : ., mut = -1
-    if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
-    if fid < 0:
+    sm := sm_for_line(ln1)
+    if sm < 0:
         return 0
-    i : ., mut = 1
-    loop:
-        if i >= g_seg_count:
-            break
-        if cell_load(g_seg_fileids, i * 8) == fid:
-            limit := cell_load(g_seg_starts, i * 8)
-            off_lines : ., mut = 0
-            pos : ., mut = 0
-            loop:
-                if pos >= limit:
-                    break
-                if load8(g_source, pos) == 10:
-                    off_lines = off_lines + 1
-                pos = pos + 1
-            return off_lines
-        i = i + 1
-    return 0   // 主文件（段 0）：偏移 0
+    return sm_file_line_base(sm)
 
 // Declaration position in 1-based concatenated coordinates to Location JSON.
 // Convert line and column to 0-based and subtract the segment offset. Escape the
 // URI with lsp_json_escape_str.
 fn analysis_def_json(ln1: int, cl1: int) -> string:
-    off := analysis_line_offset(ln1)
-    line0 : ., mut = ln1 - 1 - off
-    line_start := analysis_line_start(ln1 - 1)
+    fid := -1
+    if ln1 >= 1 && ln1 - 1 < g_line_count:
+        fid = fileid_of_line(ln1)
+    sm := file_sm_id(fid)
+    txt : string, mut = g_source
+    local_ln : ., mut = ln1
+    line_start : ., mut = analysis_line_start(ln1 - 1)
+    if sm >= 0:
+        txt = sm_file_text(sm)
+        local_ln = ln1 - sm_file_line_base(sm)
+        line_start = sm_line_start(sm, local_ln)
+    line0 : ., mut = local_ln - 1
     decl_pos := line_start + cl1 - 1
-    col0 := analysis_utf16_units(line_start, decl_pos)
+    col0 := analysis_utf16_units_in(txt, line_start, decl_pos)
     uri : string, mut = "file://"
     uri = uri + analysis_path_for_line(ln1)
     out : string, mut = "{\"uri\":"
@@ -533,8 +574,8 @@ fn analysis_def_json(ln1: int, cl1: int) -> string:
     out = out + "},\"end\":{\"line\":"
     out = out + int_str(line0)
     out = out + ",\"character\":"
-    adv := analysis_utf8_next(decl_pos, str_len(g_source))
-    out = out + int_str(analysis_utf16_units(line_start, decl_pos + adv))
+    adv := analysis_utf8_next_in(txt, decl_pos, str_len(txt))
+    out = out + int_str(analysis_utf16_units_in(txt, line_start, decl_pos + adv))
     out = out + "}}}"
     return out
 
@@ -551,26 +592,21 @@ fn analysis_definition(line: int, col: int) -> string:
     vd := analysis_var_decl(name_ni, line, col)
     if vd >= 0:
         return analysis_def_json(ast_line(vd), ast_col(vd))
-    // 函数
+    // 函数：AST 节点携带全局行号，导入文件里的声明也能定位。
     fi := find_func(name_ni)
     if fi >= 0:
-        dfn := analysis_decl_tok(T_FN, name_ni)
-        if dfn >= 0:
-            return analysis_def_json(cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_LINE),
-                cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_COL))
+        fn_node := fi_ast_node(fi)
+        if fn_node >= 0:
+            return analysis_def_json(ast_line(fn_node), ast_col(fn_node))
         return ""
-    // 结构体 / 枚举（令牌反查声明）
+    // 结构体 / 枚举（令牌反查声明；主文件找不到时扫描导入文件）
     if analysis_type_visible(name_ni) != 0:
         if find_struct_by_name(name_ni) >= 0:
-            d := analysis_decl_tok(T_STRUCT, name_ni)
-            if d >= 0:
-                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            if analysis_decl_any(T_STRUCT, name_ni) != 0:
+                return analysis_def_json(g_decl_line, g_decl_col)
         if find_enum(name_ni) >= 0:
-            d := analysis_decl_tok(T_ENUM, name_ni)
-            if d >= 0:
-                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            if analysis_decl_any(T_ENUM, name_ni) != 0:
+                return analysis_def_json(g_decl_line, g_decl_col)
     return ""
 
 // Completion: position to prefix, then filter candidates and emit JSON.
@@ -1186,7 +1222,7 @@ fn analysis_document_symbol() -> string:
 
 // Token kind to legend index. T_IDENT returns -1 because it is classified by name.
 fn analysis_kind_type(k: int) -> int:
-    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_AS || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_EXTERN || k == T_CATCH || k == T_FAIL || k == T_SPEC:
+    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_CAST || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_EXTERN || k == T_CATCH || k == T_FAIL || k == T_SPEC:
         return 0
     if k == T_UNIT || (k >= T_INT_TYPE && k <= T_AUTO_TYPE) || k == T_REF || k == T_DYN || k == T_NEVER:
         return 1
@@ -1393,10 +1429,9 @@ fn analysis_semantic_tokens() -> string:
         cell_store(offs, i * 8, pos)
         i = i + 1
     // Pass 2: differential encoding relative to the previous token; the first is
-    // relative to (0, 0), and modifiers are always 0. Emit only main-file tokens.
+    // relative to (0, 0), and modifiers are always 0. lsp_check_file restores the
+    // main file's token stream before analysis, so every token here is main-file.
     main_limit : ., mut = sl
-    if g_seg_count > 1:
-        main_limit = cell_load(g_seg_starts, 8)
     out : string, mut = "{\"data\":["
     prev_line : ., mut = 0
     prev_col : ., mut = 0

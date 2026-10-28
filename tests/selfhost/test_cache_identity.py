@@ -19,8 +19,8 @@
   与 CIR_CACHE_VER 的分工：VER = 手工粗粒度（格式/行为代），身份 = 自动细粒度
   （编译器内容驱动）——两者都必须匹配才命中。
 
-判据（5 组 7 例）：
-  ① identity_semantics：条目身份字段 == FNV-1(运行中编译器 ELF 全文件) 且 ver==VER_EXPECTED（**#2026-09-16-16 批 2 起 = 18**；**批 5（opt-dex）2026-09-17 起 = 19**）
+判定依据（5 组 7 例）：
+  ① identity_semantics：条目身份字段 == FNV-1(运行中编译器 ELF 全文件) 且 ver==VER_EXPECTED（**#2026-09-16-16 阶段 2 起 = 18**；**阶段 5（opt-dex）2026-09-17 起 = 19**）
   ② same_identity_hit：同身份条目仍命中（正常路径无退化）——改条目内**被装载
      跳过**的“函数名字节”（canary），重跑后字节原样留存（命中 = 从不重写）
   ③ foreign_identity_rejected：身份字段被改（+载荷 name_ni 互换，模拟异序）→
@@ -32,7 +32,7 @@
      源码构建出的新二进制 = 同内容副本 + 追加一字节）——A 写的条目不被 B 接受：
      canary 被重写抹除 + 条目身份改写为 B；反向亦然。
      （人工另以真实第二编译器 corec2 = `corec build src/compiler/main.cr` 自举
-     产物验证同判据：身份 3584… vs -3398…，条目被改写为运行方身份。）
+     产物验证同判定依据：身份 3584… vs -3398…，条目被改写为运行方身份。）
 """
 
 import os
@@ -46,10 +46,10 @@ BASE = pathlib.Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 CACHE_DIR = BASE / ".core" / "cache" / "cir"
 
-# 17 → 18：TODO #2026-09-16-16「聚合读丢型」批 2（裁-AGG-7）换代——旧值 17 / 新值 18 /
+# 17 → 18：TODO #2026-09-16-16「聚合读丢型」阶段 2（裁-AGG-7）换代——旧值 17 / 新值 18 /
 # 归因 = 聚合读结果槽型由 TI_INT 改为声明面形式（旧快照与新语义不等价，命中旧条目会把
 # 「丢型」的坏 IR 复活）/ 出处 = docs/superpowers/plans/2026-09-16-agg-read-type.md §12.4·§13。
-# 19 = 批 5（opt-dex，2026-09-17）：**可选 dex（`dex?`）载荷形式规范化**（写点门/槽型/形参槽/
+# 19 = 阶段 5（opt-dex，2026-09-17）：**可选 dex（`dex?`）载荷形式规范化**（写点门/槽型/形参槽/
 # 返回门/读点定型一律按声明面定形式，G1 裁决 = scaled）⇒ 旧快照里 `dex?` 的槽是修复前形态
 # （未规范化装箱 bits / 读槽 TI_INT），与新语义不等价，命中即「坏 IR 复活成活产物 rc=0」。
 # **布局未变**（v19 与 v18/v17 同构：magic/ver/identity/fp/sig/name_len/name…）⇒ layout() 的
@@ -100,7 +100,7 @@ def identity_of(path: pathlib.Path) -> int:
 def layout(d: bytes):
     """按头部版本给出字段偏移（v17 = 本修复；v16 = 修复前布局，用于 RED 对照）。"""
     ver = struct.unpack_from("<q", d, 8)[0]
-    # v22（2026-09-18 插值展开批）：**布局与 v21 相同**（只是语义面换代）⇒ 同一组偏移
+    # v22（2026-09-18 插值展开阶段）：**布局与 v21 相同**（只是语义面换代）⇒ 同一组偏移
     if ver == VER_EXPECTED:          # magic/ver/identity/fp/sig/name_len
         return {"ver": ver, "ident_off": 16, "name_len_off": 40, "name_off": 48}
     if ver == 16:                    # magic/ver/fp/sig/name_len（无身份字段）
@@ -207,7 +207,7 @@ def main():
         expect_id = identity_of(COREC)
         cleanup_cache()
 
-        # ① 身份语义：条目身份 = 运行中编译器 ELF 全文件哈希 + 版本 VER_EXPECTED（#2026-09-16-16 批 2 起 = 18；批 5（opt-dex）2026-09-17 起 = 19）
+        # ① 身份语义：条目身份 = 运行中编译器 ELF 全文件哈希 + 版本 VER_EXPECTED（#2026-09-16-16 阶段 2 起 = 18；阶段 5（opt-dex）2026-09-17 起 = 19）
         r = run_corec(COREC, src, dot)
         if r.returncode != 0 or not alpha.exists():
             print(f"[FAIL] 探针首次编译失败 rc={r.returncode} alpha_exists={alpha.exists()}\n{r.stdout}{r.stderr}")
@@ -252,7 +252,7 @@ def main():
               and strip_dot_line(r_x.stdout, dot) == strip_dot_line(r_y.stdout, dot),
               "条目缺失 ≡ 条目毒化（dump + 重建条目逐字节同）")
 
-        # ⑤ 跨二进制 A/B：内容不同的编译器不共享条目（canary 判据与版本无关）
+        # ⑤ 跨二进制 A/B：内容不同的编译器不共享条目（canary 判定依据与版本无关）
         compiler_b = tmpdir / "corec_rebuilt"
         shutil.copyfile(COREC, compiler_b)
         os.chmod(compiler_b, 0o755)
@@ -277,8 +277,8 @@ def main():
               f"A写={a_ident} → B读后={after_b['identity']}(=B身份, canary "
               f"{'gone' if after_b['name'] != canary else 'KEPT!'}) → A读后={after_a['identity']}")
 
-        # ⑥ **含可选程序 ⇒ 缓存整体关闭**（`g_optrep_on ⇒ cache_enabled = 0`，`main.cr`；批 5 起策略，
-        #    批 8 条目 2 的换代判据依赖它）——**可机械复跑的不变量**：编译含可选语料后，
+        # ⑥ **含可选程序 ⇒ 缓存整体关闭**（`g_optrep_on ⇒ cache_enabled = 0`，`main.cr`；阶段 5 起策略，
+        #    阶段 8 条目 2 的换代判定依据依赖它）——**可机械复跑的不变量**：编译含可选语料后，
         #    该探针 key 的 `.cir` 条目数**保持 0**（即「无复活通道」由推理降为机检）。
         #    正控（防真空）= 上方 ① 已断言非可选探针**确实**写出 `alpha` 条目。
         opt_fd, opt_name = tempfile.mkstemp(suffix="_cacheid_opt.cr")

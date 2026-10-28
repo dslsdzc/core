@@ -146,7 +146,7 @@ struct IntMap:
     z: int
 
 impl IntMap:
-    fn put(self: IntMap, v: int) -> int:
+    fn put(self, v: int) -> int:
         return v + 1
 
 fn main() -> int:

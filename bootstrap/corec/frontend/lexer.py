@@ -215,7 +215,7 @@ class Lexer:
         # 前缀进制（0x/0o/0b）整数字面量超形状拒绝——与 self-hosted lexer 的
         # base 校准守卫一致（P2）。层语义（int-unbounded-semantics 定稿）：
         # 语言 int = 无上限数学整数，本守卫是编码层限制错误（本编译器内部
-        # 表示 = 经典 64 位机器字投影；超形状 = 该投影无载体），非语义溢出。
+        # 表示 = 经典 64 位机器字投影；超形状 = 该投影无表示），非语义溢出。
         # 十进制保持原样词法（Python int 任意精度 = 同语义的另一份投影实例）：
         # self-hosted 对十进制幅值边界有既有处理（-9223372036854775808），
         # 不一致处理——两编译器差异 = 各自投影形状差异，非语义分歧。
@@ -267,7 +267,7 @@ class Lexer:
             start_line, start_col = self.line, self.col
 
             # 单字符 token
-            # 批 6（裁-S7，bounded）：`#` = 规约标注 sigil（`#check(...)` / `#ensure(...)`）。
+            # 阶段 6（裁-S7，bounded）：`#` = 规约标注 sigil（`#check(...)` / `#ensure(...)`）。
             # 修复前 `#` 走末尾 `self.error("Unexpected character")`（**响亮拒收**）——
             # 而 self-hosted 侧是**静默丢弃**（`lexer.cr` Unknown 分支）⇒ 两前端分歧；
             # 现两侧同判：都产出一个 `#` token，语义面由各自的 parser 消费（**接受并跳过**）。

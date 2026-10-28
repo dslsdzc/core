@@ -23,11 +23,11 @@ struct B:
     b: string
 
 impl A:
-    fn show(self: A) -> int:
+    fn show(self) -> int:
         return self.a
 
 impl B:
-    fn show(self: B) -> string:
+    fn show(self) -> string:
         return self.b
 
 fn f(a) -> int:

@@ -608,8 +608,8 @@ fn gen_clone_tree(node: int) -> int:
     iv := ast_int_val(node)
     tv := ast_type_val(node)
     d := ast_data(node)
-    ln := ast_line(node)
-    cl := ast_col(node)
+    ln := ast_lo(node)
+    cl := ast_hi(node)
 
     // ── EXPR_IDENT: might be a generic param reference ──
     if k == EXPR_IDENT:
@@ -1231,7 +1231,7 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
                 ntv : ., mut = 0
                 if nd2 >= 0 && ast_kind(nd2) == 0:
                     ntv = ast_type_val(nd2)
-                np := ast_alloc(EXPR_PARAM, ast_a(opn), ast_b(opn), ast_c(opn), ast_int_val(opn), ntv, nd2, ast_line(opn), ast_col(opn))
+                np := ast_alloc(EXPR_PARAM, ast_a(opn), ast_b(opn), ast_c(opn), ast_int_val(opn), ntv, nd2, ast_lo(opn), ast_hi(opn))
                 gen_dedup_add(opn, np)
                 if first_np < 0:
                     first_np = np

@@ -53,7 +53,7 @@ ENT 记录字段与规则 1–7 的对应：
 
 Core IR 非 SSA，变量每次定值切分一个新版本条目，相邻版本存在区间按定值点切割（版本 k 区间终点 = 版本 k+1 定值点）。
 
-定值点收集规则：扫 NOD,dest ≥ 0 的节点 = 该变量的定值点，两处 carve-out（GC 批 2 勘定）：
+定值点收集规则：扫 NOD,dest ≥ 0 的节点 = 该变量的定值点，两处 carve-out（GC 阶段 2 勘定）：
 - IR_STORE 单列：定值目标在 s1(ρ（s1）:=ρ（s2）),dest 恒 -1，不走 dest 列
 - 三 op 排除：STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 的 dest ≥ 0 非定值（值 = 被存值源/基址标注/占位）
 

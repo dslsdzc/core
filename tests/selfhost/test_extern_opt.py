@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""extern 声明含可选（`?`）的拒收面（批 8 条目 3；TODO #2026-09-17-7；自举编译器 build/corec）。
+"""extern 声明含可选（`?`）的拒收面（阶段 8 条目 3；TODO #2026-09-17-7；自举编译器 build/corec）。
 
-**现象（修复前实测，批 8 预备扫描）**：`extern fn e(x: dex?) -> int;` ⇒ `check` rc=0（零诊断）、
+**现象（修复前实测，阶段 8 预备扫描）**：`extern fn e(x: dex?) -> int;` ⇒ `check` rc=0（零诊断）、
 `build` rc=0、运行期垃圾值/139——两条早退路径（checker 对 EXPR_EXTERN 声明整段跳过 + ir_gen 的
 `cfn_ext == 0` 守卫）都不报。
 
-**修复（批 8 条目 3，`parser.cr` extern 分支）**：extern 声明的**形参/返回**类型节点若为
+**修复（阶段 8 条目 3，`parser.cr` extern 分支）**：extern 声明的**形参/返回**类型节点若为
 `EXPR_OPTIONAL` ⇒ `error[P24]`（`EC_P_EXTERN_OPTIONAL = 1024`）定位硬错 ⇒ check rc=1 + build 零产物。
-（落点选 parser 的**签名规则**位：同 P020「形参数上限」先例；返回类型节点在 parser 内可用，
+（位置选 parser 的**签名规则**位：同 P020「形参数上限」先例；返回类型节点在 parser 内可用，
 EXPR_EXTERN 节点本身不存返回节点。）
 
-**判据要件（计划 §1 条目 3）**：① 含可选形参 ⇒ rc=1 + 专属诊断 + **零产物**；
+**判定依据要件（计划 §1 条目 3）**：① 含可选形参 ⇒ rc=1 + 专属诊断 + **零产物**；
 ② 非可选 extern **逐字节不变**（守卫档 = `tests/selfhost/test_iface_ops.py`（`-> char` / `-> never`）·
 `tests/suite/ffi_test.cr` · `tests/probes/p_ffi2.cr`）；③ `dex?` 与 `int?` **同一拒收路径**。
 
-**语料实核（批 8 预备扫描）**：全仓 12 处 `extern fn` 声明中**含 `?` 者 = 0** ⇒ 本硬错零语料代价。
+**语料实核（阶段 8 预备扫描）**：全仓 12 处 `extern fn` 声明中**含 `?` 者 = 0** ⇒ 本硬错零语料代价。
 
-**突变自证（批级留痕）**：撤掉 parser 的 `extern_opt` 检查 ⇒ ①/③ 两例回 `check=0` ⇒ 必红。
+**突变自证（阶段级留痕）**：撤掉 parser 的 `extern_opt` 检查 ⇒ ①/③ 两例回 `check=0` ⇒ 必红。
 """
 
 import os
@@ -74,7 +74,7 @@ def run_case(decl, should_reject):
 
 
 def guard_corpora():
-    """守卫档：非可选 extern 语料 check 面必须 rc=0（逐字节不变由批级判据承担）。"""
+    """守卫档：非可选 extern 语料 check 面必须 rc=0（逐字节不变由阶段级判定依据承担）。"""
     guards = ["tests/suite/ffi_test.cr", "tests/probes/p_ffi2.cr"]
     outs = []
     for g in guards:

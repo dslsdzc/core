@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""RegionCheck 三条逃逸检查的**真触发**判据（TODO #2026-09-20-1）。
+"""RegionCheck 三条逃逸检查的**真触发**判定依据（TODO #2026-09-20-1）。
 
-修前状态（本套件的每颗正钉都在修前实测过，读数见下）：
+修前状态（本套件的每颗正固定都在修前实测过，读数见下）：
   · 判定用了 `ni > alloc_exit`，而 SG 区间是半开 [NSTART, EXIT)、EXIT = 区域关闭后
     **第一个节点**的下标 ⇒ 「使用点紧跟区域」这一格被漏掉（最典型的逃逸形状）。
   · 判定把「任何区域关闭」当内存归还点 ⇒ `if` 分支内分配在分支后被误报 rc=1
@@ -12,20 +12,20 @@
   · 返回逃逸误用 B011（应为 B010 = errors.md:245「Reference to local escapes the
     function」，例子即 `return &x`）。
 
-**两向钉子**：每颗正钉断言到**具体错误码 + rc**，并各配一颗反向对照断言 rc=0；
+**两向固定用例**：每颗正固定断言到**具体错误码 + rc**，并各配一颗反向对照断言 rc=0；
 反向对照覆盖 if 型 / 函数级返回型 / 重赋值型 / 循环内使用型四类。
 
-**覆盖面的两条事实（新基 `84a4debe` 实测；勿据此加假钉）**：
-  · 本基上 `&局部` 一律是 `TYP_REF`（#153 裁定二），且 `&局部 as *T`（REF→PTR cast）**本身即
-    TF01** ⇒ 由 `&局部` **构造不出** `TYP_PTR` 的区域局部形状。**本套件的钉子实际走 REF 分支**；
+**覆盖面的两条事实（新基 `84a4debe` 实测；勿据此加假固定）**：
+  · 本基上 `&局部` 一律是 `TYP_REF`（#153 裁定二），且 `&局部 cast *T`（REF→PTR cast）**本身即
+    TF01** ⇒ 由 `&局部` **构造不出** `TYP_PTR` 的区域局部形状。**本套件的固定用例实际走 REF 分支**；
     判定的 PTR 半边在当前基上对这一面是**惰性的**（并集保留，PTR 侧对 alloc()/FFI 派生值有效）。
-    **不得为凑 PTR 形状编造钉子** —— 凑出来的会是假钉。
-  · `fn ... -> *int { …; return &arr[0]; }` 在本基上是 **TF01（返回型不符）**，**基线与本批都是**，
-    与逃逸面无关（连 `&seed as *int` 亦然）⇒ 钉子的返回型写 `&int`。
+    **不得为凑 PTR 形状编造固定用例** —— 凑出来的会是假固定。
+  · `fn ... -> *int { …; return &arr[0]; }` 在本基上是 **TF01（返回型不符）**，**基线与本次都是**，
+    与逃逸面无关（连 `&seed cast *int` 亦然）⇒ 固定用例的返回型写 `&int`。
 
 运行面 = `ccr`（region_check 在 `check` 面早退 —— main.cr:458-460 在 IR 生成前返回
 ⇒ 旧 `test_region_cfg.py::test_region_check_pointer_escape` 走的 `check` 面根本不经过
-本 pass，其断言只能靠 `or 'error'` 兜底通过，不是钉子）。
+本 pass，其断言只能靠 `or 'error'` 兜底通过，不是固定用例）。
 """
 
 import os
@@ -77,7 +77,7 @@ def assert_accepted(src: str):
 
 
 def build_and_run(src: str, expect_rc: int = 0):
-    """反向对照的运行期腿：被判「合法」的程序必须真的跑出预期结果。"""
+    """反向对照的运行期路径：被判「合法」的程序必须真的跑出预期结果。"""
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as source:
         source.write(src)
         source_path = source.name
@@ -108,7 +108,7 @@ def build_and_run(src: str, expect_rc: int = 0):
                 pass
 
 
-# ── 正钉：必须触发，断言具体码 ────────────────────────────────────────────
+# ── 正固定：必须触发，断言具体码 ────────────────────────────────────────────
 
 def test_p1_loop_alloc_deref_immediately_after_loop():
     """P1 边界格：循环内分配 → 循环后**紧邻**解引用（修前 rc=0 静默通过）。"""
@@ -129,9 +129,9 @@ def test_p2_loop_alloc_deref_after_intervening_stmt():
 def test_p3_return_escape_is_b010():
     """P3 返回逃逸：码必须是 B10（EC_B_ESCAPE）。
 
-    ⚠ 形态说明（新基 84a4debe 起）：`&local` 经 #153 改判 `TYP_REF` ⇒
+    警告：形态说明（新基 84a4debe 起）：`&local` 经 #153 改判 `TYP_REF` ⇒
     `fn ... -> *int { ...; return &arr[0]; }` 在本基上是 **TF01（返回型不符）**，
-    与逃逸面无关（基线与本批**都是** TF01，已实测）。故本钉写 `-> &int`。
+    与逃逸面无关（基线与本次**都是** TF01，已实测）。故本固定写 `-> &int`。
     旧基（38e6c992）读数：同形 `-> *int` 版 = rc=1 但报 **B11**（码位错配）；
     新基线（仅 S6）= rc=0（只放宽 kind 不足以触发，边界缺陷仍在）。"""
     assert_rejected(
@@ -190,12 +190,12 @@ def test_p7_build_face_is_hard_error_with_zero_artifact():
                 pass
 
 
-# ── `&x`（TYP_REF）路径钉子：与 S6 的扩谓词正交（PR #153 同批并入）──────
+# ── `&x`（TYP_REF）路径固定用例：与 S6 的扩谓词正交（PR #153 同阶段并入）──────
 # #153 的 S6 把本文件三处 kind 谓词从 `TYP_PTR` 放宽为 `TYP_PTR ∪ TYP_REF`（裁定二把
-# `&x` 改判 REF）。本批抽单源后该放宽**收敛为 rc_var_dead 一处**；以下两钉走的就是
+# `&x` 改判 REF）。本次抽单源后该放宽**收敛为 rc_var_dead 一处**；以下两固定走的就是
 # 那条路——**基线（`84a4debe`，仅 S6）实测 rc=0**（只放宽 kind 不足以触发，边界缺陷
-# 仍在）；本批实测 rc=1 + 具体码 ⇒ 证明 REF 值走的是**修好的判定**，而不是被 S6 放宽
-# 后绕过去的另一条路。第三钉是它的反向对照。
+# 仍在）；本次实测 rc=1 + 具体码 ⇒ 证明 REF 值走的是**修好的判定**，而不是被 S6 放宽
+# 后绕过去的另一条路。第三固定是它的反向对照。
 
 def test_p9_ref_typed_dangling_deref_is_b011():
     """P9 同上但循环后解引用 ⇒ B11（REF 型走悬垂 DEREF 判定）。基线 rc=0。"""
@@ -205,7 +205,7 @@ def test_p9_ref_typed_dangling_deref_is_b011():
     )
 
 
-# ── 反向对照：必须保持 rc=0（否则「一律报」会让正钉全绿）─────────────────
+# ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
     """R1 函数级返回型：SG_FUNC 分配返回给调用者合法（不属任何归还区）。
@@ -247,7 +247,7 @@ def test_r4_use_inside_the_loop_stays_clean():
 
 
 def test_r5_deref_loaded_int_is_not_pointer_escape():
-    """R5 非指针面：deref 读出的 int 是普通数据，不做逃逸判定（既有回归钉子）。"""
+    """R5 非指针面：deref 读出的 int 是普通数据，不做逃逸判定（既有回归固定用例）。"""
     assert_accepted(
         "fn main() -> int:\n    value := 42\n    pointer := &value\n    loaded := *pointer\n    return loaded\n"
     )

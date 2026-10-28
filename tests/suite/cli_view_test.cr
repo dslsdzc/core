@@ -1,13 +1,13 @@
-// cli.cr 值面 e2e（2(a) 视图内建批补网）。
+// cli.cr 值面 e2e（2(a) 视图内建阶段补网）。
 //
 // 为什么有这一档：2(a) 计划 §2.3 实测 `grep -rln "cli_cmd\|cli_flag" tests/ examples/` = **0**
 // ⇒ cli.cr 的 29 个「裸字 ⇄ 串」视图点**值面零覆盖**——改完也无从分辨「修好了」与「没测到」。
-// 本档把注册（`@ptr_of` 写裸字表）与帮助打印（`@str_of` 读裸字表）串成一条**运行值**判据：
-// 断言在 `tests/selfhost/test_view_builtins.py` 的 cli 腿（逐子串 + rc），本档自身 rc=0。
+// 本档把注册（`@ptr_of` 写裸字表）与帮助打印（`@str_of` 读裸字表）串成一条**运行值**检查：
+// 断言在 `tests/selfhost/test_view_builtins.py` 的 cli 用例（逐子串 + rc），本档自身 rc=0。
 //
-// 运行面：**原生腿**（`corec build --static`）。解释器腿对本档**不适用**——
+// 运行面：**原生路径**（`corec build --static`）。解释器路径对本档**不适用**——
 // 解释器对 `alloc`+`w64/r64` 的裸内存路径是「近似」（`interp.cr:719` 自注），
-// 与 2(a) 无关（实测：无 unsafe、无视图的同形程序在两腿亦分歧，见计划 §7.3 记录）。
+// 与 2(a) 无关（实测：无 unsafe、无视图的同形程序在两条路径上也不一致，见计划 §7.3 记录）。
 import cli
 import io
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""TODO #2026-09-10-7 判据：解释器 callee 内联路径 ≡ 主循环路径（≡ ELF oracle）。
+"""TODO #2026-09-10-7 判定依据：解释器 callee 内联路径 ≡ 主循环路径（≡ ELF oracle）。
 
 R1 终审实测：`interp.cr` 的 callee 内联分派相对主循环缺 18 个 opcode
 （4/17/18/23/24/25/26/27/28/29/30/41/42/43/44/45/48/51）——同一段源码写在
 main 里正确、写进普通函数（被内联执行）里错值 / SIGSEGV，ELF 侧均正确。
 
-本判据把三条路径钉在一起（每例两条断言 + 一条 oracle 断言）：
+本判定依据把三条路径固定在一起（每例两条断言 + 一条 oracle 断言）：
   ① interp(callee) —— 内联路径（被内联的 probe()）
   ② interp(main)   —— 主循环路径（同一段源码，省一次 ELF 构建）
   ③ elf(callee)    —— ELF oracle（本修复不改动发射面）
@@ -21,13 +21,13 @@ main 里正确、写进普通函数（被内联执行）里错值 / SIGSEGV，EL
 对 parity/approx 追加「诊断奇偶性」断言：同一段源码在两种形态（包进 probe() /
 内联进 main）下，前端诊断的**存在性必须相等**——前端两形态共享，诊断只出现在
 一条路径上才是分叉信号；两形态共有的既存诊断（B04 借用报错、apx dex 的
-N01/TA01）属于前端既有行为，不属本判据判域。
+N01/TA01）属于前端既有行为，不属本判定依据判域。
 
 ELF 侧 SIGILL/SIGSEGV 在 subprocess.returncode 里是负信号号（-4 / -11）；解释器
 侧越界陷阱与深度守卫的 rc 是 255（main 返回 -1，低 8 位）。
 
-判据前清 cir 缓存（缓存键不含编译器身份，TODO #2026-09-10-1）：否则旧 IR 冒充新编译器，
-本判据会被静默污染（见 test_global_init.py 同款说明）。
+判定依据前清 cir 缓存（缓存键不含编译器身份，TODO #2026-09-10-1）：否则旧 IR 冒充新编译器，
+本判定依据会被静默污染（见 test_global_init.py 同款说明）。
 """
 
 import os
@@ -77,7 +77,7 @@ CASES = [
     # —— 裸指针族（18 REF / 25 DEREF / 26 STORE_PTR / 31 ADDR_INDEX）——
     (
         # TODO #2026-09-10-7 复现原件（本仓 v10 前置基线亦返回 0：全局数组取址
-        # 是独立既有缺陷，本判据只锁 callee 内联路径）⇒ 用局部数组覆盖同一
+        # 是独立既有缺陷，本判定依据只锁 callee 内联路径）⇒ 用局部数组覆盖同一
         # ADDR_INDEX + DEREF 组合。
         "bare_ptr_deref_callee",
         "",
@@ -242,7 +242,7 @@ CASES = [
     (
         # IR_APPROX (51)：apx 标注（`apx dex` 不是合法语法——真形式是 `dex, apx`
         # 标签）。先前写成 `d : apx dex = 2.0` 时 checker 发 N01/TA01、IR_APPROX
-        # 根本未发射，判据形同虚设（两形态的诊断奇偶断言也掩盖了它）。
+        # 根本未发射，判定依据形同虚设（两形态的诊断奇偶断言也掩盖了它）。
         "approx_apx_dex_callee",
         "",
         "d : dex, apx = 2.0\nreturn 7\n",
@@ -260,7 +260,7 @@ LOUD_MARKERS = {
 # 覆盖自检：每例必须在 probe() 的 DFG 节点区内**真的**出现这些 opcode。
 # 内联路径只执行 probe() 的节点区（g_df_func_node_start..+count），故节点区
 # 里没有目标 opcode 的用例等于没测（空转）——写法错（如 `apx dex`）或前端
-# 不再发射该 opcode 时，用例会静默失去判据价值，此处用 `corec cir` 钉死。
+# 不再发射该 opcode 时，用例会静默失去判定依据价值，此处用 `corec cir` 固定。
 # TODO #2026-09-10-7 清单里唯一无法覆盖的是 41 IR_DYN_TAG：ir_gen.cr 无发射点
 # （regalloc/instr/sizes/dataflow/opt/interp 均已有处理器）——该 opcode 当前
 # 不可达，内联路径的处理器是纯防御性对齐，不列入下表。
@@ -292,7 +292,7 @@ EXPECT_OPS = {
 
 
 def clean_cache() -> None:
-    """cir 缓存键不含编译器身份（TODO #2026-09-10-1）——判据前清缓存，失败即报错退出。"""
+    """cir 缓存键不含编译器身份（TODO #2026-09-10-1）——判定依据前清缓存，失败即报错退出。"""
     result = subprocess.run(
         ["nice", "-n", "19", str(COREC), "clean-cache"],
         cwd=BASE, capture_output=True, text=True,
@@ -393,7 +393,7 @@ def probe_ops(name: str, source: str):
                     ops.add(tok)
         return ops, dumped.returncode
     finally:
-        # 源文件 + cir 缓存一起删（缓存就落在源文件旁）——判据不留垃圾
+        # 源文件 + cir 缓存一起删（缓存就落在源文件旁）——判定依据不留垃圾
         for artifact in (src, src.with_suffix(".cir")):
             try:
                 artifact.unlink()
@@ -463,7 +463,7 @@ def main() -> int:
         # 同一段源码包进 probe() 与内联进 main 必须得到同一套诊断。只有诊断
         # 「只在一条路径上出现」才是分叉信号——要求的是存在性相等，不是必须为零：
         # 两形态共有的既存诊断（如 B04 借用报错、apx dex 的 N01/TA01）是前端既有
-        # 行为，不属本判据判域；rc 已单独断言，不存在被诊断掩盖的通道。
+        # 行为，不属本判定依据判域；rc 已单独断言，不存在被诊断掩盖的通道。
         if mode != "loud" and has_diag(out) != has_diag(out_m):
             ok = False
             print(f"[FAIL] {name}/diag-parity: callee diag={has_diag(out)}, "

@@ -78,7 +78,7 @@ fn counter() -> int:
 
 引入的概念：
 
-- 原始指针：`*T` 类型、`&x` 取址、`*p` 解引用、`cast<T>(p)` 转换。
+- 原始指针：`*T` 类型、`&x` 取址、`*p` 解引用、`p cast *T` 转换。
 - `unsafe` 块：图边界输入，用于外部地址、FFI 返回值和无法自动追踪来源的场景。
 - `@` 内建：`@sizeOf(T)`、`@alignOf(T)`、`@fields(T)`、`@comptime`、`@inline`。
 - 内存控制：`alloc_at(addr, size, align)` 声明式放置。
@@ -87,7 +87,7 @@ fn counter() -> int:
 
 理解方式：指针和 C 一样自由，安全由编译器自动验证，包括来源追踪和边界核对。`unsafe` 不是关闭验证，而是声明此处是图边界输入。进入图内部后，编译器重新获得追踪能力。
 
-阶段目标：能安全地进行指针算术、类型双关和外部地址访问，不需要学习借用检查器。
+阶段目标：能安全地做指针算术、类型双关和外部地址访问，不需要学习借用检查器。
 
 应用场景：
 
@@ -102,7 +102,7 @@ fn deref(arr: [int], i: int) -> int:
     return *p         // 越界时在编译期拦截，或在运行时检查
 
 unsafe:
-    mmio := 0x7fff0000 as *int   // 外部地址：图边界输入
+    mmio := 0x7fff0000 cast *int   // 外部地址：图边界输入
     *mmio = 42
 ```
 
@@ -193,7 +193,7 @@ fn divide(a: int, b: int) -> int #check(b != 0) #ensure(result * b <= a):
 
 新增概念：
 
-- 原始指针：`*T` 类型、`&x` 取址、`*p` 解引用、`cast<T>(p)` 转换。
+- 原始指针：`*T` 类型、`&x` 取址、`*p` 解引用、`p cast *T` 转换。
 - `unsafe` 块：图边界输入，用于外部地址、FFI 返回值和无法自动追踪来源的场景。
 - `@` 内建：`@sizeOf(T)`、`@alignOf(T)`、`@fields(T)`、`@comptime`、`@inline`。
 - 内存控制：`alloc_at(addr, size, align)` 声明式放置和布局控制。
@@ -203,7 +203,7 @@ fn divide(a: int, b: int) -> int #check(b != 0) #ensure(result * b <= a):
 
 ```core
 unsafe {
-    mmio := 0x7fff0000 as *int;   // 外部地址：图边界输入
+    mmio := 0x7fff0000 cast *int;   // 外部地址：图边界输入
     *mmio = 42;
 }
 ```

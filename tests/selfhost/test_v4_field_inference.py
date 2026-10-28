@@ -1,6 +1,6 @@
 """V4 字段投影推断：模板宽松，monomorph 实例严格重查。
 
-判据：
+判定依据：
   * `struct Event: payload: .` + `e.payload.show()` 在实例化后解析到具体类型。
   * 字段类型没有该方法 -> 构建失败并零产物。
   * 实参不是含该字段的 struct -> 构建失败。
@@ -23,7 +23,7 @@ struct S:
     a: int
 
 impl S:
-    fn show(self: S) -> int:
+    fn show(self) -> int:
         return self.a
 
 struct Event:

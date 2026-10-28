@@ -5,40 +5,15 @@
 // ─── helpers ────────────────────────────────────────────────────
 
 fn read_source_line(line: int) -> string:
-    slen := str_len(g_source)
-    cur : ., mut = 1
-    start : ., mut = 0
-    i : ., mut = 0
-    loop:
-        if i >= slen:
-            break
-        if cur == line:
-            j : ., mut = i
-            loop:
-                if j >= slen:
-                    break
-                c := get_char(g_source, j)
-                if c == "\n":
-                    break
-                j = j + 1
-            return str_sub(g_source, i, j - i)
-        if cell_load_byte(g_source, i) == 10:
-            cur = cur + 1
-            start = i + 1
-        i = i + 1
-    return ""
-
-fn source_line_count() -> int:
-    count : ., mut = 1
-    i : ., mut = 0
-    slen := str_len(g_source)
-    loop:
-        if i >= slen:
-            break
-        if cell_load_byte(g_source, i) == 10:
-            count = count + 1
-        i = i + 1
-    return count
+    // Every parsed line belongs to a SourceManager file. Manifest lines have no
+    // fileid and resolve through the line-range fallback.
+    sm : ., mut = file_sm_id(diag_fileid_for_line(line))
+    if sm < 0:
+        sm = sm_for_line(line)
+    if sm < 0:
+        return ""
+    local := line - sm_file_line_base(sm)
+    return sm_line_text(sm, local)
 
 fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
     if line <= 0:
@@ -82,8 +57,8 @@ fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
         print(str_sub(annotation, 0, cutoff))
     println("")
 
-// Legacy entry: render a line from the global g_source. Used only when a
-// diagnostic has no SourceManager span.
+// Render a line through the SourceManager line map. Used when a diagnostic has
+// no source span.
 fn print_source_line(line: int, col: int, annotation: string):
     if line <= 0:
         return
@@ -118,16 +93,13 @@ fn pad_diag_num(num: int) -> string:
 
 // ─── diagnostics (g_diags) ─────────────────────────────────────
 
-// Line number to file id through g_line_fileid. -1 is out of range.
+// Line number to file id. -1 is out of range.
 fn diag_fileid_for_line(line: int) -> int:
-    if line >= 1 && line <= g_line_count:
-        return cell_load(g_line_fileid, (line - 1) * 8)
-    return -1
+    return fileid_of_line(line)
 
 fn print_diagnostics():
     if g_diag_count == 0:
         return
-    source_lines := source_line_count()
     di : ., mut = 0
     loop:
         if di >= g_diag_count:
@@ -142,12 +114,28 @@ fn print_diagnostics():
         pcl : ., mut = cl
         pltext : ., mut = ""
         attributed : ., mut = 0
+        path_txt : ., mut = ""
         if smf >= 0 && smf < sm_file_count():
             pln = sm_location_line(smf, slo)
             pcl = sm_location_col(smf, slo)
             pltext = sm_line_text(smf, pln)
+            if smf != g_main_sm:
+                path_txt = sm_file_path(smf)
             if str_len(pltext) > 0:
                 attributed = 1
+        else:
+            fni := diag_fileid_for_line(ln)
+            sm : ., mut = file_sm_id(fni)
+            if sm < 0:
+                sm = sm_for_line(ln)
+            if sm >= 0:
+                pln = ln - sm_file_line_base(sm)
+                pcl = cl
+                pltext = sm_line_text(sm, pln)
+                if sm != g_main_sm:
+                    path_txt = sm_file_path(sm)
+                if str_len(pltext) > 0:
+                    attributed = 1
         cat : ., mut = ec / 1000
         num : ., mut = ec % 1000
         print("error[")
@@ -156,13 +144,16 @@ fn print_diagnostics():
         print("]: ")
         println(msg)
         print(" --> ")
+        if str_len(path_txt) > 0:
+            print(path_txt)
+            print(":")
         print(int_str(pln))
         print(":")
         println(int_str(pcl))
         if attributed != 0:
             println("   |")
             print_source_text(pln, pcl, pltext, msg)
-        else if ln > 0 && ln <= source_lines:
+        else if ln > 0:
             println("   |")
             print_source_line(ln, cl, msg)
         println("")

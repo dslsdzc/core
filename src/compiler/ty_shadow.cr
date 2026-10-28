@@ -252,7 +252,7 @@ fn sh_named_identity_term(ti: int) -> int:
         return -1
     return tt_atom(AK_NAMED, ti, tt_cons(sh_name_token(ni), tt_nil()))
 
-// 泛型应用实参列表（两构造点共用骨架；variant：0 = 桥接侧递归 sh_term_of_ti /
+// 泛型应用实参列表（两构造点共用结构；variant：0 = 桥接侧递归 sh_term_of_ti /
 // 1 = 签名数据递归 sh_sig_term_of_ti）。
 fn sh_apply_args_chain(ti: int, variant: int) -> int:
     start := get_type_extra(ti)
@@ -340,7 +340,7 @@ fn sh_term_of_ti(ti: int) -> int:
             term = tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(get_type_extra(ti)), tt_cons(in2, tt_nil())))
     else if k1 == TYP_OPTIONAL:
         // `T?` = `T ∪ null`（spec 5.4）。这是桥接层唯一译作非原子项的行
-        // （其余行 -> 单原子）；依据 = 定义式本身（不是名义展开，T? 无名字可展开）。语义落点：
+        // （其余行 -> 单原子）；依据 = 定义式本身（不是名义展开，T? 无名字可展开）。语义位置：
         // 引擎对 union 的一切判定（包含/等价/不相交/穷尽性）零新规则。
         in3 := sh_term_of_ti(d1)
         if in3 >= 0:
@@ -453,7 +453,7 @@ fn sh_tk_face_of_code(opcode: int, tk: int) -> int:
 fn sh_tk_split(opcode: int, tk: int):
     sh_tk_split_impl(opcode, tk, 1)
 
-// 装载侧变体（.cir 快照重派生）不置建项失败位，因为判据不同：
+// 装载侧变体（.cir 快照重派生）不置建项失败位，因为判断依据不同：
 //   emit 路径（count_fail=1）：类型信息记录的可译性是真不变量。记录刚由前端和
 //   IR 生成，越界或译不出就是编译器 bug 或桥接缺口，必须拒绝写入文件。
 //   装载路径（count_fail=0）：文件里的码是历史值，暖进程的类型表可能更小。
@@ -839,7 +839,7 @@ fn sh_variant_term(ti: int, name_ni: int) -> int:
         return -1
     // 身份两名经 sh_name_token 加入序列（当前约定 = 裸 name 索引加入序列，索引用作
     // 序列元素时会被结构比较当术语下标解释，见 sh_name_token 注记）；两构造点（域/模式项）
-    // 仍逐位同一 ✓
+    // 仍逐位同一 通过
     return tt_atom(AK_SUM, ti, tt_cons(sh_name_token(ei_name(ea)), tt_cons(sh_name_token(name_ni), tt_nil())))
 
 // enum 命名行 / 泛型应用行 -> 域 = 各变体项之并（左深 union）。
@@ -1185,7 +1185,7 @@ fn sh_seq_fixed_len_of_ti(ti: int) -> int:
     return tt_b(t)
 
 // ═══════════════ match 穷尽性消费点（补集空性 + 具体变体反例）═══════════════
-// 判据本体 = 引擎的补集空性（`ty_exhaustive`：domain \ ⋃patterns 的可满足性； 已落）。
+// 判断逻辑 = 引擎的补集空性（`ty_exhaustive`：domain \ ⋃patterns 的可满足性； 已落）。
 // 引擎不在本文件范围内-> 引擎侧的两处缺口一律在消费点消化：
 //   1 域检查（域限定，计划显式登记）：仅枚举 scrutinee 判穷尽（域 = 变体集）；
 //      scrutinee 非枚举/域不可展开（struct/原生/int/string/bool…）-> 不判（-1）。非枚举域
@@ -1197,7 +1197,7 @@ fn sh_seq_fixed_len_of_ti(ti: int) -> int:
 //      when B is missing it can be (A∩¬A)∪(B∩¬A), which ty_equiv does not equate
 //      with the missing variant)
 //      -> 反例不取 witness 项，而按变体逐项覆盖位命名（`sh_match_first_missing`）：
-//      与引擎判据同源（同一变体项构造）但独立计算 -> 两路一致性由自测用例固定。
+//      与引擎判断依据同源（同一变体项构造）但独立计算 -> 两路一致性由自测用例固定。
 // 模式项约定（与展开层/引擎对齐）：通配 `_` 与绑定 ident = `tt_top()`（引擎侧 ⊤ 覆盖 = 覆盖
 // 一切；值域不绑）；变体模式 = `sh_variant_term(scrut_ti, vni)`，与域内对应变体同一构造
 // （两个构造点不同 -> 补集判定失真）。
@@ -1418,7 +1418,7 @@ fn mc_has(vi: int) -> int:
         pw = pw * 2
         k = k - 1
     return (b / pw) % 2
-// 首个未覆盖位（-1 = 全覆盖）；判定结果口径与 sh_match_first_missing 同
+// 首个未覆盖位（-1 = 全覆盖）；判定结果的规则与 sh_match_first_missing 相同
 fn mc_first_missing(count: int) -> int:
     i : ., mut = 0
     loop:

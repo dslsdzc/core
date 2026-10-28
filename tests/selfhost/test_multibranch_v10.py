@@ -898,7 +898,7 @@ fn main() -> int:
 """
 
 MATCH_CHAR_SOURCE = """fn code_a() -> int:
-    return 'A' as int
+    return 'A' cast int
 
 fn pick(c: char) -> int:
     return match c:
@@ -910,7 +910,7 @@ fn main() -> int:
     a := code_a()
     if a == 0:
         return 9
-    c := a as char
+    c := a cast char
     if pick(c) != 1:
         return 10
     if pick('B') != 2:
@@ -2694,7 +2694,7 @@ def test_char_match_uses_interned_char_value():
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_CHAR_SOURCE, "match_char")
         assert _pattern_match_nodes(data) == [], "char patterns must not become CASE rows"
-        # The program itself compares the char match against `'A' as int`, i.e.
+        # The program itself compares the char match against `'A' cast int`, i.e.
         # the current intern-index value, not a Unicode codepoint.
         _assert_program(tmp, MATCH_CHAR_SOURCE, 42, opts=(0, 2), name="match_char")
 

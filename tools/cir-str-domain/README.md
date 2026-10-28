@@ -1,7 +1,7 @@
 # `tools/cir-str-domain/`：`.cir` 快照串域跨进程 id 缺陷的证据复现包
 
 性质：证据复现 + 检查实现方式。本目录随只读调查轮入库（动机 = 可重复运行的证据不能只留在 `/tmp`），
-修复批（`CIR_CACHE_VER` 从 20 到 21）已把 `run_scope.sh --assert` 接入 CI（`src/ci/run.sh` 的
+修复阶段（`CIR_CACHE_VER` 从 20 到 21）已把 `run_scope.sh --assert` 接入 CI（`src/ci/run.sh` 的
 `selfhost-tests`），与 `tests/selfhost/test_cir_str_domain_warm.py`（17 例：入口/判别/三路径/混合态/突变自证/日志段结构）
 并列。
 
@@ -16,7 +16,7 @@
 ```bash
 # 1) 范围矩阵（7 档：lit/concat/interp/typeinfo/fields/firstintern/partial），报告模式，恒 rc=0
 CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh
-# 2) 判据模式（冷态和暖态都通过才算通过；已接入 CI）。缺陷未修时必然失败，这是判据语义，不是脚本故障
+# 2) 判定依据模式（冷态和暖态都通过才算通过；已接入 CI）。缺陷未修时必然失败，这是判定依据语义，不是脚本故障
 CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh --assert
 # 3) 年龄判定（对历史二进制；读回其自写的 CIR_CACHE_VER）
 bash tools/cir-str-domain/age_probe.sh /path/to/old/bin_dir [tag]
@@ -43,6 +43,6 @@ bash tools/cir-str-domain/age_probe.sh /path/to/old/bin_dir [tag]
 
 ## 为什么暂不接入 CI job
 
-`run_scope.sh --assert` 的语义是“修复后行为”，缺陷未修时它按定义就是失败的。接入点由修复批随修法一起实施
+`run_scope.sh --assert` 的语义是“修复后行为”，缺陷未修时它按定义就是失败的。接入点由修复阶段随修法一起实施
 （计划 3 节第 6 条：实现方式 = `tests/selfhost/test_cir_str_domain_warm.py`，接入 `run.sh selfhost-tests`，在 PR 检查上运行）。
 在此之前本目录只提供可重复运行的证据，不参与任何检查。

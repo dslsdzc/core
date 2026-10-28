@@ -63,7 +63,7 @@ T_DOTDOTDOT : int = 59
 T_TYPE : int = 60
 T_MOD : int = 61
 T_IMPORT : int = 62
-T_AS : int = 63
+T_CAST : int = 63
 T_GO : int = 64
 T_AWAIT : int = 65
 T_FLOW : int = 66
@@ -440,6 +440,7 @@ EC_TA_NOT_MUT    : int = 4005 // TA05  Variable not mutable
 EC_TA_GLOBAL_MUT : int = 4006 // TA06  Global not mutable
 EC_TA_TUPLE_ARITY : int = 4007 // TA07  Tuple destructuring arity
 EC_TA_UNKNOWN_TAG : int = 4008 // TA08  Unknown declaration tag
+EC_TA_CAST        : int = 4009 // TA09  Cast between unsupported types
 
 // TF0xx; Type: Function
 EC_TF_RETURN     : int = 5001 // TF01  Return type mismatch
@@ -587,14 +588,7 @@ g_gen_apply_data_count : int, mut
 g_gen_apply_data_cap : int, mut
 
 // Module system globals
-g_seg_starts : string, mut
-g_seg_fileids : string, mut
-g_seg_count : int, mut
-g_seg_cap : int, mut
-g_line_fileid : string, mut
-g_line_lib : string, mut
 g_line_count : int, mut
-g_line_cap : int, mut
 g_source_dir : string, mut  // directory of the main source file (for _import.core lookup)
 
 // IR instruction opcodes

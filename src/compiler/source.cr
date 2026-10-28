@@ -1,12 +1,14 @@
 // === source.cr ===
 // SourceManager: file identity, spans, line tables, and virtual files.
 //
-// This is the first rewrite slice. It is standalone: no existing path uses it
-// yet. A later slice makes tokenize() take (SourceManager, FileId) and gives
-// every token a Span.
+// tokenize() takes a SourceManager FileId, so every file keeps a file-local
+// line/column space and tokens carry a Span. res_imports registers one file per
+// import; no concatenated source is tokenized.
 //
 // File record (40 bytes):
-//   path_ni, text, length, line_base, line_count
+//   path_ptr, text, length, line_base, line_count
+// Paths are raw heap strings, not interned names: file paths are diagnostics
+// metadata, and interning them would leak host paths into the IR string table.
 // Line starts are flattened across files. A file's line table is the range
 // [line_base, line_base + line_count). Offsets are file-local, never the
 // concatenated source offset.
@@ -16,7 +18,8 @@ OFF_SMF_TEXT : int = 8
 OFF_SMF_LEN : int = 16
 OFF_SMF_LINE_BASE : int = 24
 OFF_SMF_LINE_COUNT : int = 32
-ESZ_SM_FILE : int = 40
+OFF_SMF_BYTE_BASE : int = 40
+ESZ_SM_FILE : int = 48
 
 g_sm_file_count : int, mut
 g_sm_file_cap : int, mut
@@ -30,6 +33,7 @@ g_sm_line_starts : string, mut
 g_sm_file_libs : string, mut
 g_sm_file_lib_count : int, mut
 g_sm_file_lib_cap : int, mut
+g_sm_byte_total : int, mut
 
 struct Span:
     file: int
@@ -40,6 +44,8 @@ fn sm_reset():
     g_sm_file_count = 0
     g_sm_line_count = 0
     g_sm_file_lib_count = 0
+    g_sm_byte_total = 0
+    g_prelude_sm = -1
 
 fn grow_sm_files(needed: int):
     if needed <= g_sm_file_cap:
@@ -78,7 +84,6 @@ fn grow_sm_lines(needed: int):
 fn sm_add_file(path: string, text: string) -> int:
     id := g_sm_file_count
     grow_sm_files(id + 1)
-    path_ni := str_intern(path)
     base := g_sm_line_count
     grow_sm_lines(base + 1)
     cell_store(g_sm_line_starts, base * 8, 0)
@@ -95,8 +100,11 @@ fn sm_add_file(path: string, text: string) -> int:
             g_sm_line_count = g_sm_line_count + 1
         i = i + 1
 
+    bbase := g_sm_byte_total
+    g_sm_byte_total = g_sm_byte_total + tlen
     off := id * ESZ_SM_FILE
-    cell_store(g_sm_files, off + OFF_SMF_PATH, path_ni)
+    cell_store(g_sm_files, off + OFF_SMF_BYTE_BASE, bbase)
+    cell_store_str(g_sm_files, off + OFF_SMF_PATH, path)
     cell_store_str(g_sm_files, off + OFF_SMF_TEXT, text)
     cell_store(g_sm_files, off + OFF_SMF_LEN, tlen)
     cell_store(g_sm_files, off + OFF_SMF_LINE_BASE, base)
@@ -125,7 +133,7 @@ fn sm_file_lib(id: int) -> int:
 fn sm_file_path(id: int) -> string:
     if id < 0 || id >= g_sm_file_count:
         return ""
-    return istr_get(cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_PATH))
+    return cell_load_str(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_PATH)
 
 fn sm_file_len(id: int) -> int:
     if id < 0 || id >= g_sm_file_count:
@@ -136,6 +144,40 @@ fn sm_file_line_count(id: int) -> int:
     if id < 0 || id >= g_sm_file_count:
         return 0
     return cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_COUNT)
+
+fn sm_file_line_base(id: int) -> int:
+    if id < 0 || id >= g_sm_file_count:
+        return 0
+    return cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+
+// Owning file for a 1-based global line. Used when the line table has no
+// fileid, notably for manifest lines that are scanned but never parsed.
+fn sm_for_line(line: int) -> int:
+    if line < 1:
+        return -1
+    id : ., mut = 0
+    loop:
+        if id >= g_sm_file_count:
+            break
+        base := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+        cnt := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_COUNT)
+        if line > base && line <= base + cnt:
+            return id
+        id = id + 1
+    return -1
+
+// Owning file id (interned source name) for a global line. The line space is the
+// concatenation of per-file ranges, so no side table is needed.
+fn fileid_of_line(line: int) -> int:
+    id := sm_for_line(line)
+    if id < 0:
+        return -1
+    i : ., mut = 0
+    while i < g_file_count:
+        if cell_load(g_files, i * 24 + 16) == id:
+            return cell_load(g_files, i * 24)
+        i = i + 1
+    return -1
 
 fn sm_line_start(id: int, line: int) -> int:
     if id < 0 || id >= g_sm_file_count:
@@ -202,6 +244,75 @@ fn sm_line_text(id: int, line: int) -> string:
 
 fn sm_span(file: int, lo: int, hi: int) -> Span:
     return Span { file = file, lo = lo, hi = hi }
+
+// Byte-offset axis. Files are registered in order and each owns
+// [byte_base, byte_base + len), so a global offset identifies its file by
+// binary search. Line and column are then derived from that file's line table.
+g_last_span_file : int, mut
+g_last_span_lo : int, mut
+g_last_span_hi : int, mut
+
+fn sm_span_file(lo: int) -> int:
+    if lo < 0 || g_sm_file_count <= 0:
+        return -1
+    // Consecutive lookups usually stay in one file (symbol visibility walks a
+    // single declaration body), so keep the last hit.
+    if lo >= g_last_span_lo && lo < g_last_span_hi:
+        return g_last_span_file
+    li : ., mut = 0
+    hi_i : ., mut = g_sm_file_count - 1
+    while li <= hi_i:
+        mid := (li + hi_i) / 2
+        b := cell_load(g_sm_files, mid * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+        e := b + cell_load(g_sm_files, mid * ESZ_SM_FILE + OFF_SMF_LEN)
+        if lo < b:
+            hi_i = mid - 1
+        else if lo >= e:
+            li = mid + 1
+        else:
+            g_last_span_file = mid
+            g_last_span_lo = b
+            g_last_span_hi = e
+            return mid
+    return -1
+
+fn sm_span_line(lo: int) -> int:
+    id := sm_span_file(lo)
+    if id < 0:
+        return 1
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_line(id, lo - b)
+
+fn sm_span_col(lo: int) -> int:
+    id := sm_span_file(lo)
+    if id < 0:
+        return 1
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_col(id, lo - b)
+
+// AST position accessors. `ast_line` keeps the historical meaning: the global
+// flat line index, because diagnostics and library ownership index by it. The
+// byte span is decoded per call.
+fn ast_line(n: int) -> int:
+    lo := ast_lo(n)
+    if lo <= 0:
+        return 0
+    id := sm_span_file(lo - 1)
+    if id < 0:
+        return 0
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    lb := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+    return lb + sm_location_line(id, lo - 1 - b)
+
+fn ast_col(n: int) -> int:
+    lo := ast_lo(n)
+    if lo <= 0:
+        return 0
+    id := sm_span_file(lo - 1)
+    if id < 0:
+        return 0
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_col(id, lo - 1 - b)
 
 fn sm_selftest() -> int:
     sm_reset()

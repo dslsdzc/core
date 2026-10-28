@@ -3,7 +3,7 @@
 - 日期：2026-05-28（拆分，随 .core 更名为 .cr）；2026-08（自举贯通后职责确定，corearch 独立发射）
 - 状态：accepted
 - 决策者：DslsDZC
-- 关联提交：main.cr/corearch.cr 拆分批（CLAUDE.md 已记录）
+- 关联提交：main.cr/corearch.cr 拆分阶段（CLAUDE.md 已记录）
 
 ## 背景
 

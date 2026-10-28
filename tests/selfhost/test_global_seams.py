@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""全局行 operand seam 回归（2026-09-16 批；`src/arch/x86_64/instr.cr` + `src/os/linux/callseq.cr`）。
+"""全局行 operand seam 回归（2026-09-16 阶段；`src/arch/x86_64/instr.cr` + `src/os/linux/callseq.cr`）。
 
-背景（RED，修复前实测；批计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md` §T1）：
+背景（RED，修复前实测；阶段计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md` §T1）：
 `g2_slot`（`instr.cr`）对**全局行**（IR var 索引 < 当前函数 `var_start`）返回**帧外伪 rbp 偏移**
 （指向调用者帧的合法位移）⇒ 任何直吃 `g2_slot` 的操作数读写点都**静默读写调用者帧**：
   * B1 `IR_BINARY`(TI_DEX) 双操作数 —— `g : dex, apx, mut = -100.0` + `if g > 0.0` ⇒ ELF 判真（7），
@@ -13,13 +13,13 @@
 **两条硬约束（写全局探针前必读）**：
   ① **必须用 `mut` 全局**：`find_global_const_node`（`ir_gen.cr:592-611`，要求 `ast_data(node) == 0`
      = 非 mut）把「不可变 + 字面量初值」的全局**折叠成 `IR_CONST`** ⇒ 读点根本不碰全局行 ⇒
-     探针不触达被测面、假绿（本批 T1 第一轮即栽在此处；亦见 TODO.md dex/apx 迁移遗留节补注）。
-  ② **apx 算术无解释器腿**：`corec run` 遇 `IR_I2F/IR_F2I` 的 apx 路径**显式报错 + rc=255**
-     （能力边界、非缺陷）⇒ B1/B2 判据只走 ELF 腿，且**不得把 255 当错值信号**；主判据 =
+     探针不触达被测面、假绿（本次 T1 第一轮即栽在此处；亦见 TODO.md dex/apx 迁移遗留节补注）。
+  ② **apx 算术无解释器路径**：`corec run` 遇 `IR_I2F/IR_F2I` 的 apx 路径**显式报错 + rc=255**
+     （能力边界、非缺陷）⇒ B1/B2 判定依据只走 ELF 路径，且**不得把 255 当错值信号**；主判定依据 =
      「**同形局部 vs 全局 ELF 对拍**」。
 
-判据面：B1/B2/B4/B5 = 全局形 + 局部形（同值对拍）+ 正负号差分；B6(b) = **发射字节级**
-（静态无 `.so` ⇒ extern 调用必崩 139，与全局实参无关——对照 `seam_ext(1.5)` 同样 139 ⇒ 无运行期腿）；
+判定依据面：B1/B2/B4/B5 = 全局形 + 局部形（同值对拍）+ 正负号差分；B6(b) = **发射字节级**
+（静态无 `.so` ⇒ extern 调用必崩 139，与全局实参无关——对照 `seam_ext(1.5)` 同样 139 ⇒ 无运行期路径）；
 B7 = 非回归（非 dex 全局返回已正确）。
 """
 
@@ -73,7 +73,7 @@ def build_and_run(source: str):
 
 
 def case_run(name, source, expect_rc, interp_rc=None):
-    """ELF 腿（build + 跑产物）为主判据；interp_rc 非 None 时附加 `corec run` 腿对照。"""
+    """ELF 路径（build + 跑产物）为主判定依据；interp_rc 非 None 时附加 `corec run` 路径对照。"""
     r = build_and_run(source)
     if isinstance(r, str):
         print(f"[FAIL] {name}: {r}")
@@ -93,9 +93,9 @@ def case_run(name, source, expect_rc, interp_rc=None):
 
 
 def case_elf_match(name, source, patterns):
-    """发射字节级判据（无运行期腿时用）：产物须命中全部**连续序列**正则。
+    """发射字节级判定依据（无运行期路径时用）：产物须命中全部**连续序列**正则。
 
-    逐片段独立 find 是坏判据（本批实测踩过：把 `4c 8d 1d` 与 `f2 0f 10 03` 分别查找时，
+    逐片段独立 find 是坏判定依据（本次实测踩过：把 `4c 8d 1d` 与 `f2 0f 10 03` 分别查找时，
     一个**缺 REX.B** 的坏序列 `f2 0f 10 03`（实际寻址 [rbx] 而非 [r11]）照样通过）——
     必须按连续序列查。
     """
@@ -199,7 +199,7 @@ fn main() -> int:
 """
 
 # ── B6(b)：callseq dex 实参（单实参 extern = 恒不打包 ⇒ 全局实参直达分派）──
-# 静态无 .so ⇒ 调用未解析符号必崩（对照 seam_ext(1.5) 同样 139）⇒ 判据只到发射字节。
+# 静态无 .so ⇒ 调用未解析符号必崩（对照 seam_ext(1.5) 同样 139）⇒ 判定依据只到发射字节。
 B6B_EXTERN = """
 g : dex, apx, mut = 1.5
 extern fn seam_ext(x: dex) -> dex
@@ -259,13 +259,13 @@ def main():
         case_run("b2_global_neg_mut", B2_NEG, 1),
         case_run("b2_global_pos_mut", B2_POS, 7),
         case_run("b2_local_neg_mut_control", B2_NEG_LOCAL, 1),
-        # B4：切片首元素 = 20（修复前 ELF 71）；局部对照同值；解释器腿可用
+        # B4：切片首元素 = 20（修复前 ELF 71）；局部对照同值；解释器路径可用
         case_run("b4_slice_global", B4_GLOBAL, 20, interp_rc=20),
         case_run("b4_slice_local_control", B4_LOCAL, 20, interp_rc=20),
         # B5：await 全局读 = 9（修复前 ELF 26）；局部对照同值
         case_run("b5_await_global", B5_GLOBAL, 9, interp_rc=9),
         case_run("b5_await_local_control", B5_LOCAL, 9, interp_rc=9),
-        # B6(b)：发射字节级（无运行期腿）
+        # B6(b)：发射字节级（无运行期路径）
         case_elf_match("b6b_extern_global_arg_rip_form", B6B_EXTERN, b6b_frags),
         # B7：非回归
         case_run("b7_non_dex_global_return", B7_RET_GLOBAL, 5),

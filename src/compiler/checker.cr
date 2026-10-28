@@ -615,7 +615,7 @@ fn loop_body_has_break(node: int) -> int:
     if k == EXPR_ARRAY || k == EXPR_TUPLE || k == EXPR_TUPLEPAT:
         return seg_has_break(ast_a(node), ast_b(node))
     if k == EXPR_NONE:
-        // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判据
+        // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判断依据
         if ast_a(node) >= 0 && ast_a(node) != node:
             return loop_body_has_break(ast_a(node))
         return 0
@@ -907,7 +907,7 @@ fn find_so_fn(name_idx: int) -> int:
 // 故在 `EXPR_RETURN` 处额外取一次当前函数的声明返回型做比对（诊断，不参与节点类型）。
 // 承载：save/restore 两个全局（与 `g_unsafe_depth` 同款的显式上下文约定；嵌套函数声明已被
 // 已拒绝，因此无需真栈）。`g_cur_fn_ret_checked == 0`，因此不判（flow 函数 / 声明返回型是
-// 泛型形参，与既有 TF01 体检查的检查同口径）。
+// 泛型形参，与既有 TF01 体检查使用同一规则）。
 g_cur_fn_ret_ti : int, mut
 g_cur_fn_ret_checked : int, mut
 
@@ -932,13 +932,19 @@ fn check_error(code: int, msg: string, line: int, col: int):
     file : ., mut = -1
     lo : ., mut = 0
     hi : ., mut = 0
-    if line > 0 && g_source_file >= 0:
+    if line > 0:
         c : ., mut = col
         if c < 1:
             c = 1
-        file = g_source_file
-        lo = sm_line_start(file, line) + c - 1
-        hi = lo + 1
+        // The line is in the flat SourceManager line space. Resolve it to the
+        // owning file instead of the most recently tokenized file: checker
+        // diagnostics run after all files have been parsed.
+        sm := file_sm_id(diag_fileid_for_line(line))
+        if sm >= 0:
+            local_line := line - sm_file_line_base(sm)
+            file = sm
+            lo = sm_line_start(sm, local_line) + c - 1
+            hi = lo + 1
     check_error_span(code, msg, line, col, file, lo, hi)
 
 // --- Borrow checking ---
@@ -1045,6 +1051,31 @@ fn borrow_var_name(node: int) -> int:
 
 // --- Type resolution utilities ---
 
+// Resolve `Self` from the function currently being checked. A method's name is
+// "Type.method", so the prefix names the impl type. Returns -1 outside a method.
+fn self_type_of_current_fn() -> int:
+    fi := g_checker_current_fi
+    if fi < 0 || fi >= g_func_count:
+        return -1
+    fn_name := istr_get(fi_name(fi))
+    fn_len := str_len(fn_name)
+    dot_pos : ., mut = -1
+    di : ., mut = 0
+    loop:
+        if di >= fn_len:
+            break
+        if cell_load_byte(fn_name, di) == 46:
+            dot_pos = di
+            break
+        di = di + 1
+    if dot_pos <= 0:
+        return -1
+    struct_ni := str_intern(str_sub(fn_name, 0, dot_pos))
+    si := find_gsym(struct_ni)
+    if si < 0 || sym_kind(si) != SYM_TYPE:
+        return -1
+    return sym_type(si)
+
 fn res_type_node(node: int) -> int:
     if node < 0:
         return TI_UNIT
@@ -1061,6 +1092,14 @@ fn res_type_node(node: int) -> int:
     if ast_kind(node) == EXPR_IDENT:
         // Named type: int_val = name string index
         name_idx := ast_int_val(node)
+        if str_eq(istr_get(name_idx), "Self") != 0:
+            // `Self` is the enclosing impl type. It is derived from the current
+            // method's mangled name "Type.method"; there is no separate table.
+            self_ti := self_type_of_current_fn()
+            if self_ti >= 0:
+                return self_ti
+            check_error(EC_N_UNDEFINED, "Self is only available inside an impl method", ast_line(node), ast_col(node))
+            return ti_error()
         si := find_gsym(name_idx)
         if si >= 0 && sym_kind(si) == SYM_TYPE:
             return sym_type(si)
@@ -1345,7 +1384,7 @@ fn check_iface(type_ni: int, iface_ii: int) -> bool:
 // 实例化检查使用 ty_sub(实参, 约束)，失败时给出非空反例 tt_witness。
 //
 // 本质轴（约束项是原生或已声明类型名）由 gen_constr_satisfied 走引擎判定。
-// 用户轴（I 是 interface 名）由 iface_satisfies 判定。两个站点的口径不同：
+// 用户轴（I 是 interface 名）由 iface_satisfies 判定。两个站点的规则不同：
 //  函数调用点 gen_constr_satisfied 只接受 1；0 和 -1 走既有 check_iface 名拼接路径，
 //  诊断措辞、去重和返回码保持不变。
 //  结构/枚举实例化点 gen_inst_constr_satisfied 直接取 iface_satisfies 的布尔结果，0 报 TG02。
@@ -1404,7 +1443,7 @@ fn gen_constr_satisfied(c_ni: int, arg_ti: int) -> int:
     return s                                      // 1/0/-1 直传
 
 // 结构/枚举实例化点的约束判定：用户轴直接取 iface_satisfies 的布尔结果，不回落。函数调用点
-// 的消息和去重口径与本函数无关。1/0/-1 原样返回：1 满足，0 违反，-1 不判，调用方在 -1 时不动。
+// 的消息和去重规则与本函数无关。1/0/-1 原样返回：1 满足，0 违反，-1 不判，调用方在 -1 时不动。
 fn gen_inst_constr_satisfied(c_ni: int, arg_ti: int) -> int:
     if c_ni < 0 || arg_ti < 0:
         return -1
@@ -1563,12 +1602,13 @@ fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_coun
 // owning library is derived from its real declaration line (types have no
 // EXPR_* declaration node of their own).
 fn def_type_sym(name_idx: int, ti: int, line: int):
-    node : ., mut = -1
-    if line > 0:
-        node = alloc_node(EXPR_NONE, 0, 0, 0, 0, 0, 0, line, 1)
-    def_sym(name_idx, SYM_TYPE, ti, node)
+    def_sym(name_idx, SYM_TYPE, ti, -1)
     si := g_sym_count - 1
-    owner := lib_of_node(node)
+    // Types have no declaration node of their own. The owner comes straight from
+    // the declaration line; a synthetic node would have no span.
+    owner : ., mut = -1
+    if line > 0:
+        owner = lib_of_line(line)
     sym_set_owner(si, owner)
     type_pub : ., mut = 0
     if owner >= 0 && lib_export_find_kind(owner, name_idx, SYM_TYPE) >= 0:
@@ -1613,7 +1653,7 @@ fn bind_bare_generic_type(node: int, fi: int) -> int:
         // The language guardrail is four generic parameters per declaration.
         // Leave the node untouched; the field projection will fail closed.
         return node
-    ga := alloc_node(EXPR_GENERIC_APPLY, name_ni, -1, need, 0, 0, 0, ast_line(node), ast_col(node))
+    ga := alloc_node(EXPR_GENERIC_APPLY, name_ni, -1, need, 0, 0, 0, ast_lo(node), ast_hi(node))
     first_arg := g_ast_count
     gi : ., mut = 0
     loop:
@@ -1621,7 +1661,7 @@ fn bind_bare_generic_type(node: int, fi: int) -> int:
             break
         bname := str_intern("__bind" + int_str(g_infer_name_seq))
         g_infer_name_seq = g_infer_name_seq + 1
-        alloc_node(EXPR_IDENT, 0, 0, 0, bname, 0, 0, ast_line(node), ast_col(node))
+        alloc_node(EXPR_IDENT, 0, 0, 0, bname, 0, 0, ast_lo(node), ast_hi(node))
         fi_set_generic_name(fi, gc + gi, bname)
         gi = gi + 1
     fi_set_generic_count(fi, gc + need)
@@ -2384,8 +2424,8 @@ fn collect_decls():
         fn_node := fi_ast_node(fi)
         fn_line := ast_line(fn_node)
         if fn_line > 0 && fn_line <= g_line_count:
-            fileid_ni := cell_load(g_line_fileid, (fn_line - 1) * 8)
-            if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
+            fileid_ni := fileid_of_line(fn_line)
+            if fileid_ni >= 0 && fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
                 grow_mod_funcs(g_mod_func_count + 1)
                 cell_store(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni)
                 cell_store(g_mod_func_names, g_mod_func_count * 8, fi_name(fi))
@@ -3180,6 +3220,15 @@ fn is_struct_generic(si: int, name_idx: int) -> bool:
 fn find_struct_by_name(name_idx: int) -> int:
     if g_cur_lib < 0:
         return find_struct(name_idx)
+    // The parser stores the source name, not the library-qualified unique name.
+    // Resolve source + current library first, otherwise a user declaration that
+    // shadows a library type falls through to the library's entry.
+    own := decl_map_find(name_idx, DECL_STRUCT, g_cur_lib)
+    if own >= 0:
+        uniq_own := cell_load(g_decl_map, own * 40 + 24)
+        so := find_struct(uniq_own)
+        if so >= 0:
+            return so
     rec := decl_map_find_unique(name_idx)
     if rec >= 0:
         if cell_load(g_decl_map, rec * 40 + 8) == DECL_STRUCT && cell_load(g_decl_map, rec * 40) != name_idx:
@@ -3366,6 +3415,14 @@ fn substitute_return_type(ti: int) -> int:
     return ti
 
 fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> int:
+    return infer_gen_call_recv(fi, call_node, first_arg, arg_count, -1)
+
+// `recv_ti >= 0` means this is a method call: the receiver is bound against the
+// first parameter and the argument list starts at the second one. Direct calls
+// pass -1 and keep the 1:1 mapping. Before this, a method on a generic struct
+// had no binding at all (its argument list excludes the receiver), so the
+// instance fell back to unit.
+fn infer_gen_call_recv(fi: int, call_node: int, first_arg: int, arg_count: int, recv_ti: int) -> int:
     // Infer concrete types for a generic function call
     fn_node := fi_ast_node(fi)
     first_param := ast_b(fn_node)
@@ -3379,6 +3436,22 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
     pi : ., mut = 0
     pn : ., mut = first_param
     an : ., mut = first_arg
+    if recv_ti >= 0 && pn >= 0:
+        orig_recv_node := ast_data(pn)
+        if orig_recv_node >= 0:
+            recv_pattern := res_call_type(orig_recv_node, fi)
+            if !unify_types(recv_pattern, recv_ti):
+                println("[S1-RECV] line=" + int_str(ast_line(call_node)) + " p=" + type_display(recv_pattern)
+                    + " r=" + type_display(recv_ti))
+        pn = pn + 1
+        loop:
+            if pn >= g_ast_count:
+                pn = -1
+                break
+            if ast_kind(pn) == EXPR_PARAM:
+                break
+            pn = pn + 1
+        pi = 1
     loop:
         if pi >= param_count || pi >= arg_count:
             break
@@ -3594,7 +3667,6 @@ fn check_func(fi: int):
                 if ptype_mapped >= 0 && ptype_mapped != TI_NEVER && ptype_mapped != TI_DYN:
                     ti = ptype_mapped
         else:
-            // Self param: derive struct type from mangled function name "Struct.method"
             fn_name := istr_get(fi_name(fi))
             fn_len := str_len(fn_name)
             dot_pos : ., mut = -1
@@ -3612,7 +3684,11 @@ fn check_func(fi: int):
                 struct_ni := str_intern(struct_name)
                 si := find_gsym(struct_ni)
                 if si >= 0 && sym_kind(si) == SYM_TYPE:
-                    struct_ti := sym_type(si)
+                    // Resolve through a type node, not sym_type: a generic struct
+                    // written as a bare name becomes a generic apply there, which
+                    // is what lets `self.field` substitute an inferred field type.
+                    tnode := alloc_node(EXPR_IDENT, 0, 0, 0, struct_ni, 0, 0, 0, 0)
+                    struct_ti := res_type_node(tnode)
                     if self_mode == 1:
                         // self by value
                         ti = struct_ti
@@ -3622,6 +3698,20 @@ fn check_func(fi: int):
                         if self_mode == 3:
                             mut_flag = 1
                         ti = alloc_type(TYP_REF, struct_ti, mut_flag)
+            // A receiver may carry an explicit annotation (`self: Box`). It wins
+            // over the mangled name: a free function has no "Struct.method" name
+            // to derive from, and a method on a generic struct needs the same
+            // generic-apply path a normal parameter takes.
+            ann_node := ast_data(pn)
+            if ann_node >= 0 && ast_kind(ann_node) != 0:
+                base_ti := res_type_node(ann_node)
+                if self_mode == 1:
+                    ti = base_ti
+                else:
+                    ann_mut : ., mut = 0
+                    if self_mode == 3:
+                        ann_mut = 1
+                    ti = alloc_type(TYP_REF, base_ti, ann_mut)
         def_sym(pname_idx, SYM_PARAM, ti, -1)
         pi = pi + 1
         // Params are not contiguous — type nodes are allocated between them
@@ -3677,7 +3767,7 @@ fn check_func(fi: int):
         g_cur_fn_ret_ti = saved_ret_ti
         g_cur_fn_ret_checked = saved_ret_ok
         compat := type_compat_strict(body_ti, ret_ti)
-        // 落空分析（TF01 收口，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
+        // 落空分析（TF01 统一处理，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
         // 无 break 的 loop 收尾），因此块类型 = 末语句类型推出的 unit 不是缺返回值的证据，
         // 等价于 never 格（与下行既有 TI_NEVER 豁免同路）。
         if compat != 1 && body_ti != TI_NEVER && stmt_cannot_fall_through(body) == 0:
@@ -3976,8 +4066,8 @@ fn infer_call_args(first_arg: int):
 // bool 洞的转换节点：改写为 `bool_str(x)` 调用（`fmt.cr`）。抽成函数是为了让 `infer_expr` 的
 // 分支保持单行、便于审计（转换表：string 恒等 · int->int_str · bool->bool_str · 其它 P028）。
 fn interp_bool_node(node: int, inner: int) -> int:
-    callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("bool_str"), 0, 0, ast_line(node), ast_col(node))
-    wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node))
+    callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("bool_str"), 0, 0, ast_lo(node), ast_hi(node))
+    wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_lo(node), ast_hi(node))
     ast_set_kind(node, EXPR_CALL)
     ast_set_a(node, callee)
     ast_set_b(node, wrapper)
@@ -3986,34 +4076,20 @@ fn interp_bool_node(node: int, inner: int) -> int:
     ast_set_type_val(node, TY_STRING)
     return TI_STR
 
-// S1P 测量辅助（只在 CORE_S1P=1 路径被调用）：从 `g_source` 取第 line 行的前 48 字符。
-// 目的 = 把合并流坐标映射回源文本（跨文件定位：本仓的 S1P 打点原本只有合并流行号，
-// 反推文件归属两种假设均对不上）。只用于测量：默认位不被调用，因此产物零足迹不受影响；
-// `str_sub` 走 alloc（不 intern），因此不向 STR 段写入额外数据。
+// S1P 测量辅助（只在 CORE_S1P=1 路径被调用）：取全局行 line 所属文件的前 48 字符。
+// 目的 = 把 S1P 的流行号映射回真实源文本。只用于测量：默认位不被调用，因此产物
+// 零足迹不受影响；`sm_line_text` 走 alloc（不 intern），不向 STR 段写入额外数据。
 fn s1p_src_frag(line: int) -> string:
-    p : ., mut = 0
-    ln : ., mut = 1
-    start : ., mut = -1
-    end : ., mut = -1
-    loop:
-        if p >= g_source_len:
-            break
-        c := cell_load_byte(g_source, p)
-        if ln == line && start < 0:
-            start = p
-        if start >= 0 && c == 10:
-            end = p
-            break
-        if c == 10:
-            ln = ln + 1
-        p = p + 1
-    if start < 0:
+    sm : ., mut = file_sm_id(diag_fileid_for_line(line))
+    if sm < 0:
+        sm = sm_for_line(line)
+    if sm < 0:
         return ""
-    if end < 0:
-        end = p
-    if end - start > 48:
-        end = start + 48
-    return str_sub(g_source, start, end - start)
+    local := line - sm_file_line_base(sm)
+    txt := sm_line_text(sm, local)
+    if str_len(txt) > 48:
+        return str_sub(txt, 0, 48)
+    return txt
 
 // ─── S1P 台账三件：检查、单实参判定、枚举环，与 s1p_arg_ring 同一契约 ───
 // 检查：进程启动时由 prelude_init 读取 `CORE_S1P`。所有类型引擎调用都必须在
@@ -4044,7 +4120,7 @@ fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: i
     //  索引空间 vs kind 空间：`TI_DYN`(下标常量 = 7) 与 `TYP_GENERIC_PARAM`(kind 码 = 7)
     //   数值相同、空间不同，因此把 `ati == TI_DYN` 写成 `ati == TYP_GENERIC_PARAM`（或把 kind 判定
     //   写成 `get_type_kind(ati) == TI_DYN`）能编过、且可能蒙对一部分用例（两条 skip 在同一屏、
-    //   都让同一批输入不再报），因此判据必须能区分空间写错与规则缺一条：见
+    //   都让同一组输入不再报），因此判断依据必须能区分空间写错与规则缺一条：见
     //   `tests/selfhost/test_s1p_sentinel_skips.py` 的逐条突变自证（本刀强制要求）。
     if ati == TI_NEVER:
         skip = 1
@@ -4118,17 +4194,17 @@ fn s1p_enum_ring(name_idx: int, first_arg: int, arg_count: int):
 // ─── S1P 台账环，四调用形态共用一份，结构参照 dex_align_call_args ───
 // 契约：
 // · 只在 `CORE_S1P=1` 路径被调用：检查 `g_s1p_on != 0` 在环内，因此默认位一步不执行（零足迹，
-//  判据见 `tests/selfhost/test_s1p_liveness.py` 的对偶腿 + 本刀的逐字节对拍）；
+//  判断依据见 `tests/selfhost/test_s1p_liveness.py` 的对偶用例 + 本刀的逐字节对拍）；
 // · 不改产物：只 println 数值、不新增 intern（`istr_get(fi_name(fi))` 只读既有串，
 //  台账注释见调用点：字符串与 `type_display` 会把新串写进 `.ccr` 的 STR 段）；
 // · 格式继承：`9917|9918 <line> <col> <param_idx> <param_ti> <arg_ti> <call> @@ <片段>`
-//  字段序/数量/前缀一律照旧（参考套件 = `tests/selfhost/test_s1p_liveness.py`；扩字段须同批重锁该套件）。
+//  字段序/数量/前缀一律照旧（参考套件 = `tests/selfhost/test_s1p_liveness.py`；扩字段须同阶段重锁该套件）。
 // 参数：
 // · `fi` = 被调 FuncInfo（参数列表来源）；`is_ext` = extern/C ABI，因此单列前缀 `9918`；
 // · `first_arg`/`arg_count` = EXPR_ARG 列表首项/列表长度，列表中不含接收者（parser 实证：接收者属
 //  `EXPR_FIELD` 的被调对象位），因此`param_skip` 指明参数列表首需跳过的接收者位数：
-//  直调/extern/模块限定 = 0（参数列表无 self）· 方法 = 1（参数列表含 self，与实参列表对齐时跳过）。
-// 元数口径：arg_count + param_skip 不等于 fi_param_count(fi) 时跳过且不报错，不打点，
+//  直调/extern/模块限定 = 0（参数列表无 self）· 方法 = 1（参数列表含 self，与实参列表对应时跳过）。
+// 元数规则：arg_count + param_skip 不等于 fi_param_count(fi) 时跳过且不报错，不打点，
 // 也不据此判定。
 fn s1p_arg_ring(fi: int, first_arg: int, arg_count: int, param_skip: int, is_ext: int):
     if fi < 0:
@@ -4270,8 +4346,8 @@ fn infer_expr(node: int) -> int:
             return interp_bool_node(node, inner)
         if hti == TI_INT:
             cname := "int_str"
-            callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(cname), 0, 0, ast_line(node), ast_col(node))
-            wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node))
+            callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(cname), 0, 0, ast_lo(node), ast_hi(node))
+            wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_lo(node), ast_hi(node))
             ast_set_kind(node, EXPR_CALL)
             ast_set_a(node, callee)
             ast_set_b(node, wrapper)
@@ -4581,7 +4657,7 @@ fn infer_expr(node: int) -> int:
                     // a（E-11，姊妹站点）：与直调站点检查同形，
                     //  `func_ni` = parser impl 分支写入的 mangled ni（"S.m"，
                     //  parser.cr:1887-1894），因此与直调同一张 g_funcs/符号表，
-                    //  `fi_return_type`/`sym_type` 语义逐位同。差异一处（显式对齐）：
+                    //  `fi_return_type`/`sym_type` 语义逐位同。差异一处（显式对应）：
                     //  本尾无泛型早退（直调走 `infer_gen_call`），因此补
                     //  `fi_generic_count == 0` 检查，使泛型两站点一致不动
                     //  （参数化方法的返回型依实例化）。本范围恒无 extern（impl 分支
@@ -4591,11 +4667,11 @@ fn infer_expr(node: int) -> int:
                     fi_m := find_func(func_ni)
                     // 方法调用接入 S1P 台账。本分支在 S1P 块之前早退，方法实参位原本是盲区。
                     // param_skip = 1：实参列表不含接收者，参数列表含 self；跳过 self 后形参与实参
-                    // 一一对应，元数口径为 arg_count + 1 == pc。
+                    // 一一对应，元数规则为 arg_count + 1 == pc。
                     s1p_arg_ring(fi_m, first_arg, arg_count, 1, 0)
                     if fi_m >= 0:
                         if fi_generic_count(fi_m) > 0:
-                            return infer_gen_call(fi_m, node, first_arg, arg_count)
+                            return infer_gen_call_recv(fi_m, node, first_arg, arg_count, obj_ti)
                         if fi_generic_count(fi_m) == 0:
                             if sym_type(si) == TI_UNIT:
                                 if fi_return_type(fi_m) == TY_NEVER:
@@ -4792,7 +4868,7 @@ fn infer_expr(node: int) -> int:
             // 参序归一：合并结果类型 = then_ti（下方 return then_ti），因此源 = else 侧，
             // 目标 = then 侧（长度约束更弱者放前面会被这里拦住 = 与结果类型一致；反之亦然）
             compat := type_compat_strict(else_ti, then_ti)
-            // TC02 收口：if 的值类型定义为 then_ti（下方 return then_ti），因此当 else 支
+            // TC02 统一处理：if 的值类型定义为 then_ti（下方 return then_ti），因此当 else 支
             // 确定发散（`return` 族收尾、不产出值）时，else 侧的类型是幻影（EXPR_RETURN 推断
             // = 所返回值类型），因此相容判定无对象，因此不报。
             // 不对称是有意的：then 支发散时 then_ti 本身即幻影（模型，另案），因此该形态继续报
@@ -4919,11 +4995,11 @@ fn infer_expr(node: int) -> int:
         an : ., mut = first_arm
         // 穷穷尽性判定（补集空性 + 具体变体反例）。收集与臂体推断同趟：
         // 模式类别/归属 -> 模式项 CONS 列表（m_pats）+ 覆盖位（m_cover）+ 不可映射标记
-        // （m_unmappable）；臂体推断后统一判（判据本体与消费点封装见 ty_shadow.cr 末段）。
+        // （m_unmappable）；臂体推断后统一判（判断逻辑本体与消费点封装见 ty_shadow.cr 末段）。
         m_pats : ., mut = tt_nil()
         mc_save := mc_begin()     // 覆盖位图入栈，容量无界
         m_unmappable : ., mut = 0
-        m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
+        m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判断用；非穷尽性判断本体）
         m_literal : ., mut = 0   // 任一 int/bool/string/char 字面量臂已见（无限域 -> 需 irrefutable 臂）
         m_order_rep : ., mut = 0 // 通配/绑定后仍有臂（TM05 只报一次）
         m_dup : ., mut = -1      // 首个冗余臂模式节点（-1 = 无）
@@ -5072,7 +5148,7 @@ fn infer_expr(node: int) -> int:
             check_error(EC_TM_EXHAUST, msg, ast_line(node), ast_col(node))
         if m_dup >= 0:
             check_error(EC_TM_REDUNDANT, "Redundant match arm", ast_line(m_dup), ast_col(m_dup))
-        mc_end(mc_save)   // 容量批 T3：覆盖位图出栈（清零本层位 + 回退长度）
+        mc_end(mc_save)   // 容量阶段 T3：覆盖位图出栈（清零本层位 + 回退长度）
         // Cache the inferred scrutinee type on the MATCH node for IR lowering.
         // +1 keeps 0 as the "absent" sentinel because TI_INT itself is 0.
         ast_set_data(node, match_ti + 1)
@@ -5126,9 +5202,31 @@ fn infer_expr(node: int) -> int:
             if g_cur_fn_ret_checked != 0 && bool_int_idiom == 0:
                 c := type_compat_strict(vt, g_cur_fn_ret_ti)
                 if c != 1:
-                    diag_type_incompatible(c, EC_TF_RETURN,
-                        "Returned value type does not match the function's declared return type",
-                        ast_line(node), ast_col(node))
+                    // A struct with an inferred (`.`) field is a family, not a
+                    // single type: the body fixes the instantiation. Naming the
+                    // bare struct in `-> T` cannot match it, so point at the
+                    // form that does work.
+                    family_hint : ., mut = 0
+                    if get_type_kind(vt) == TYP_GENERIC_APPLY:
+                        // TYP_GENERIC_APPLY stores the base type row in `data`,
+                        // and the base row is TYP_NAMED, whose `data` is the name.
+                        base_ti := get_type_data(vt)
+                        if get_type_kind(base_ti) == TYP_NAMED && get_type_kind(g_cur_fn_ret_ti) == TYP_NAMED:
+                            if get_type_data(base_ti) == get_type_data(g_cur_fn_ret_ti):
+                                family_hint = 1
+                    else if get_type_kind(vt) == TYP_NAMED && get_type_kind(g_cur_fn_ret_ti) == TYP_NAMED:
+                        if get_type_data(vt) == get_type_data(g_cur_fn_ret_ti):
+                            sfi := find_struct(get_type_data(vt))
+                            if sfi >= 0 && si_generic_count(sfi) > 0:
+                                family_hint = 1
+                    if family_hint != 0:
+                        check_error(EC_TF_RETURN,
+                            "Returned an instantiation of this struct, but the declared return type names the family; omit the return type to infer it from the body",
+                            ast_line(node), ast_col(node))
+                    else:
+                        diag_type_incompatible(c, EC_TF_RETURN,
+                            "Returned value type does not match the function's declared return type (" + type_display(vt) + " vs " + type_display(g_cur_fn_ret_ti) + ")",
+                            ast_line(node), ast_col(node))
         return TI_NEVER
 
     if ast_kind(node) == EXPR_ENUM_CONSTRUCTOR:
@@ -5212,7 +5310,11 @@ fn infer_expr(node: int) -> int:
                 ast_set_type_val(node, 0)
                 ast_set_c(node, -1)
                 return TI_INT
-        // Handle generic apply: unwrap to base named type for struct lookup
+        // Handle generic apply: unwrap to base named type for struct lookup.
+        // `apply_ti` keeps the generic apply row: field substitution needs the
+        // arguments, and a `&self` receiver only becomes an apply after the
+        // auto-deref above.
+        apply_ti : ., mut = actual_ti
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_GENERIC_APPLY:
             actual_ti = get_type_data(actual_ti)
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_NAMED:
@@ -5246,9 +5348,9 @@ fn infer_expr(node: int) -> int:
                             if ast_kind(ft_node) == EXPR_IDENT:
                                 ft_name_idx := ast_int_val(ft_node)
                                 // Check if this field type is a generic param (substitute if we have a generic apply)
-                                if is_struct_generic(si, ft_name_idx) && get_type_kind(obj_ti) == TYP_GENERIC_APPLY:
-                                    base_ti := get_type_data(obj_ti)
-                                    ga_start := get_type_extra(obj_ti)
+                                if is_struct_generic(si, ft_name_idx) && get_type_kind(apply_ti) == TYP_GENERIC_APPLY:
+                                    base_ti := get_type_data(apply_ti)
+                                    ga_start := get_type_extra(apply_ti)
                                     ga_count := cell_load(g_gen_apply_data, ga_start * 8)
                                         // Find which generic param index
                                     gpi : ., mut = 0
@@ -5602,19 +5704,52 @@ fn infer_expr(node: int) -> int:
         // bind_tuple_pattern_idents).
         return TI_UNIT
     if ast_kind(node) == EXPR_AS:
-        // expr as Type — type cast
+        // `expr cast Type`: whitelist only. The old behavior accepted every
+        // type pair and copied the bits, which is silent reinterpretation
+        // (`1.5 as int` returned 96), not a conversion.
         inner_ti := infer_expr(ast_a(node))
         type_node := ast_b(node)
         target_ti := res_type_node(type_node)
-        if get_type_kind(target_ti) == TYP_PTR:
-            inner_kind := get_type_kind(inner_ti)
+        if inner_ti < 0 || target_ti < 0:
+            return ti_error()
+        if inner_ti == TI_NEVER:
+            return target_ti
+        if inner_ti == target_ti:
+            return target_ti
+        inner_kind := get_type_kind(inner_ti)
+        target_kind := get_type_kind(target_ti)
+        // int <-> dex. The conversion is exact by construction; the generator
+        // emits I2F/F2I.
+        if inner_ti == TI_INT && target_ti == TI_DEX:
+            return TI_DEX
+        if inner_ti == TI_DEX && target_ti == TI_INT:
+            return TI_INT
+        // int <-> char. Temporary: the runtime value of char is the intern
+        // index, not a code point. Kept because match compares character
+        // literals through this conversion; see the 2026-10-27 cast plan.
+        if inner_ti == TI_INT && target_ti == TI_CHAR:
+            return TI_CHAR
+        if inner_ti == TI_CHAR && target_ti == TI_INT:
+            return TI_INT
+        // Pointer family. The cast itself is not the safety boundary: an
+        // external address may be formed anywhere, and the dereference check
+        // (TU03) requires `unsafe`. This keeps the existing pointer model.
+        if target_kind == TYP_PTR:
             asp : ., mut = 1
             if inner_kind == TYP_PTR:
                 asp = get_type_extra(inner_ti)
             else if inner_kind == TYP_REF:
                 asp = 0
+            else if inner_ti == TI_STR:
+                // alloc() returns a string buffer; viewing it as a pointer is
+                // the tracked-pointer path, not an external address.
+                asp = 0
+            else if inner_ti != TI_INT:
+                check_error(EC_TA_CAST, "cast from " + type_display(inner_ti) + " to " + type_display(target_ti) + " is not allowed", ast_line(node), ast_col(node))
+                return ti_error()
             return alloc_type(TYP_PTR, get_type_data(target_ti), asp)
-        return target_ti
+        check_error(EC_TA_CAST, "cast from " + type_display(inner_ti) + " to " + type_display(target_ti) + " is not allowed", ast_line(node), ast_col(node))
+        return ti_error()
     if ast_kind(node) == EXPR_STMT:
         infer_expr(ast_a(node))
         return TI_UNIT
@@ -5628,7 +5763,7 @@ fn infer_expr(node: int) -> int:
         // 元素类型分两趟记录。先逐个推断；元素推断可能向 g_gen_apply_data 追加数据，
         // 例如嵌套元组、泛型应用和泛型结构字面量的 g_gen_map 段。推断完再一次性连续落盘。
         // 在循环前取 data_start 边推边写会让前面的元素追加的数据顶开后续元素的位置，
-        // extra 和实际落点错位。例如 ((2,3),1) 的元素表会被读成内层元组的字段。
+        // extra 和实际位置错位。例如 ((2,3),1) 的元素表会被读成内层元组的字段。
         tis : string, mut = alloc(ec * 8)
         e : ., mut = 0
         loop:
@@ -5798,9 +5933,9 @@ fn infer_expr(node: int) -> int:
         // ── 2(a) 视图内建：同一个 64 位字的两种看法（零转换、零拷贝、零运行期动作）──
         //  `@ptr_of(s: string) -> int` · `@str_of(p: int) -> string`
         //  语义：不改那个字，只改它在本语言里的看法（原生 ELF 路径下 string 值 = 指针；
-        //  解释器路径下 string 值 = intern 索引，因此视图对两条腿都是恒等， 见 2(a) 计划 第 2.2 节bis/第 2.2 节ter）。
+        //  解释器路径下 string 值 = intern 索引，因此视图对两条路径都是恒等， 见 2(a) 计划 第 2.2 节bis/第 2.2 节ter）。
         //  安全（team-lead 裁 (ii)）：必须出现在 `unsafe` 块内；块外，因此报错并终止编译（不做软约束，
-        //  没有机械判据的约定会腐烂）。`g_unsafe_depth` 由 EXPR_UNSAFE 分支压栈维护。
+        //  没有自动检查的约定会失效）。`g_unsafe_depth` 由 EXPR_UNSAFE 分支压栈维护。
         //  未知名仍走文件末尾的 fail-closed（EC_N_UNDEFINED），不得忽略。
         if str_eq(name, "ptr_of") != 0 || str_eq(name, "str_of") != 0:
             if g_unsafe_depth == 0:

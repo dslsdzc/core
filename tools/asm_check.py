@@ -89,4 +89,4 @@ if __name__ == '__main__':
             print(e)
         sys.exit(1)
     else:
-        print("✅ 未发现问题")
+        print("通过：未发现问题")

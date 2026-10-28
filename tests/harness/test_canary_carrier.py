@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""判据载体化批（criteria-carrier）T1：canary 载体的**牙**——防「闸门自己也是静默判据」。
+"""判定依据文件化阶段（criteria-carrier）T1：canary 文件的**有效性用例**——防止检查本身也静默通过。
 
-被验对象：`tools/baseline/canary_check.sh`（闸门本体）+ `tools/baseline/canary_values.tsv`
+被验对象：`tools/baseline/canary_check.sh`（检查本体）+ `tools/baseline/canary_values.tsv`
 （锁定值单一真源）。背景：canary sha 与 `.ccr` 四条锁定值长期只在 docs/ 与 .superpowers/
-的文字里，零自动化载体（每个批次靠人/代理手跑引用）——与本仓已发生过一次的
+的文字里，零自动化文件（每个阶段靠人/代理手跑引用）——与本仓已发生过一次的
 `test_backend_bootstrap.py`「自称已挂 CI 而 run.sh 零命中」同类。
 
 三层（逐层独立可诊断）：
-  A 机械（无编译器、毫秒级）：run.sh **真挂**本载体与本测试；值表 5 条、sha 为 64 位小写
-    hex、集合与载体 spec **双向**相等。
+  A 机械（无编译器、毫秒级）：run.sh **真挂**本文件与本测试；值表 5 条、sha 为 64 位小写
+    hex、集合与文件 spec **双向**相等。
   B 合成自证（无编译器、毫秒级）：`canary_check.sh --selftest` ⇒ 必须 rc=0
     （S1 绿路可达 + S2–S6 五类必红：同尺寸改内容 / 改尺寸 / 缺产物 / 值表缩水 / 假期望
      + **S7 D1 确定性两向**：同文件⇒绿 / 异文件⇒红——2026-09-19 新增，见 `canary_check.sh` 档头 D1 契约）。
   C **真产物篡改**（需 build/corec）：采集（若 build/canary_artifacts/ 已在则复用 ⇒ 零额外
-    编译，因 run.sh 里载体先跑）→ `--verify-only` 必须**绿** → 翻一字节 → `--verify-only`
+    编译，因 run.sh 里文件先跑）→ `--verify-only` 必须**绿** → 翻一字节 → `--verify-only`
     必须**红**且**指名**该产物与「期望 vs 实际」；再验缺产物亦红。
 
-口径（照本仓纪律）：
+规则（照本仓纪律）：
   · C 层需要 compiler ⇒ 本地未构建时 `[SKIP]`（**显式打印**，不静默）；`--require-compiler`
     （CI 用；run.sh 的 selfhost-tests 首行即 build_selfhost）时 ⇒ 缺编译器 = **FAIL**。
-  · 判据不符时的唯一正确动作 = 停下上报，**不得**改值表对齐（换代纪律见计划 §6）。
+  · 判定依据不符时的唯一正确动作 = 停下上报，**不得**改值表对齐（换代纪律见计划 §6）。
 
 跑法：python3 tests/harness/test_canary_carrier.py [--require-compiler]
 """
@@ -39,9 +39,9 @@ VALUES = os.path.join(ROOT, "tools", "baseline", "canary_values.tsv")
 COREC = os.path.join(ROOT, "build", "corec")
 ARTIFACT_DIR = os.path.join(ROOT, "build", "canary_artifacts")
 
-# 载体 spec（`canary_check.sh` 的 SPEC_NAMES；两侧集合须**双向**相等 ⇒ 本常量随 spec 同步）
+# 文件 spec（`canary_check.sh` 的 SPEC_NAMES；两侧集合须**双向**相等 ⇒ 本常量随 spec 同步）
 SPEC_NAMES = ["canary_elf", "pa_ccr", "pa_static_ccr", "gt_ccr", "gt_static_ccr"]
-# 载体挂点（**可执行行**；注释行不算——「注释里自称挂」正是本判据要抓的形态）
+# 文件挂点（**可执行行**；注释行不算——「注释里自称挂」正是本判定依据要抓的形态）
 CARRIER_HOOK_RE = re.compile(r"^\s*bash\s+tools/baseline/canary_check\.sh\b")
 # 非空转下限：值表条数（防「值表被清空 ⇒ 空对空假绿」）
 MIN_VALUES = 5
@@ -93,14 +93,14 @@ def main() -> int:
         run_sh_text = fh.read()
 
     if not hooked_lines(run_sh_text, CARRIER_HOOK_RE):
-        fails.append("A1 run.sh **未真挂**载体（`bash tools/baseline/canary_check.sh` "
-                     "可执行行零命中）——闸门形同虚设")
+        fails.append("A1 run.sh **未真挂**文件（`bash tools/baseline/canary_check.sh` "
+                     "可执行行零命中）——检查形同虚设")
     else:
-        passes.append("A1 run.sh 真挂载体")
+        passes.append("A1 run.sh 真挂文件")
 
     self_rel = "tests/harness/test_canary_carrier.py"
     if not hooked_lines(run_sh_text, re.compile(r"^\s*python3\s+" + re.escape(self_rel) + r"\b")):
-        fails.append(f"A2 run.sh **未真挂**本测试（{self_rel}）——牙本身会静默")
+        fails.append(f"A2 run.sh **未真挂**本测试（{self_rel}）——有效性用例本身会静默")
     else:
         passes.append("A2 run.sh 真挂本测试")
 
@@ -124,7 +124,7 @@ def main() -> int:
     # ── B. 合成自证 ──
     r = run(["bash", CARRIER, "--selftest"])
     if r.returncode != 0:
-        fails.append(f"B --selftest rc={r.returncode}（期望 0）——闸门自证失败\n"
+        fails.append(f"B --selftest rc={r.returncode}（期望 0）——检查自证失败\n"
                      + "\n".join("    " + ln for ln in (r.stdout + r.stderr).splitlines()[-8:]))
     else:
         sub = (r.stdout + r.stderr).count("[PASS] selftest")
@@ -137,20 +137,20 @@ def main() -> int:
     if not os.path.exists(COREC):
         if args.require_compiler:
             fails.append("C 需要 build/corec（--require-compiler）而它不存在——"
-                         "fail-closed：不得静默跳过真牙腿")
+                         "fail-closed：不得静默跳过真实路径")
         else:
-            skipped.append("C 真产物篡改腿 [SKIP]：build/corec 不存在（本地未构建；"
-                           "CI selfhost-tests 首行 build_selfhost ⇒ 该腿必跑）")
+            skipped.append("C 真产物篡改路径 [SKIP]：build/corec 不存在（本地未构建；"
+                           "CI selfhost-tests 首行 build_selfhost ⇒ 该路径必跑）")
     else:
         # 复用条件：采集目录存在 **且比 build/corec 新**——否则是上一代二进制留下的陈货，
-        # 拿它做牙 = 假绿（CI 里 run.sh 先跑载体 ⇒ 恒新鲜，本守卫只防本地/乱序）。
+        # 拿它做有效性用例 = 虚假通过（CI 里 run.sh 先跑文件 ⇒ 恒新鲜，本守卫只防本地/乱序）。
         fresh = (os.path.isdir(ARTIFACT_DIR)
                  and os.path.exists(os.path.join(ARTIFACT_DIR, "pa.ccr"))
                  and os.path.getmtime(ARTIFACT_DIR) >= os.path.getmtime(COREC))
         if not fresh:
             rc = run(["bash", CARRIER]).returncode
             if rc != 0:
-                fails.append(f"C 采集（载体默认模式）rc={rc}——真判据未过 ⇒ 见上方载体输出")
+                fails.append(f"C 采集（文件默认模式）rc={rc}——真判定依据未过 ⇒ 见上方文件输出")
         if os.path.isdir(ARTIFACT_DIR):
             base = run(["bash", CARRIER, "--verify-only", ARTIFACT_DIR])
             if base.returncode != 0:
@@ -170,8 +170,8 @@ def main() -> int:
                     out2 = r2.stdout + r2.stderr
                     if r2.returncode == 0:
                         fails.append("C 篡改 pa.ccr 一字节后 --verify-only **仍绿** —— "
-                                     "闸门无牙（值不符未变红）")
-                    # 注意：载体渲染的是「期望(expected)= … 实际(actual)= …」——`expected` 与 `=`
+                                     "检查无效（值不符时未失败）")
+                    # 注意：文件渲染的是「期望(expected)= … 实际(actual)= …」——`expected` 与 `=`
                     # 之间**隔着 `)`**，故断言的实参必须是 `(expected)=`（写过 `expected=` 会恒不命中 ⇒
                     # 本断言恒假红；2026-09-16 C 层实跑抓到，见计划 §9 E14）。
                     elif ("pa_ccr" not in out2 or "(expected)=" not in out2
@@ -190,7 +190,7 @@ def main() -> int:
                         passes.append("C 缺产物 ⇒ 必红")
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)
-            # 缺 sha256sum 场景不可在 CI 内安全构造 ⇒ 以 B 层 S1–S6 覆盖判据函数面
+            # 缺 sha256sum 场景不可在 CI 内安全构造 ⇒ 以 B 层 S1–S6 覆盖判定依据函数面
 
     # ── 汇总 ──
     for s in skipped:
@@ -203,7 +203,7 @@ def main() -> int:
         print(f"[canary-carrier] FAIL — pass={len(passes)} fail={len(fails)} skip={len(skipped)}")
         return 1
     print(f"[canary-carrier] PASS — pass={len(passes)} skip={len(skipped)} "
-          f"（值表={os.path.relpath(VALUES, ROOT)} · 载体={os.path.relpath(CARRIER, ROOT)}）")
+          f"（值表={os.path.relpath(VALUES, ROOT)} · 文件={os.path.relpath(CARRIER, ROOT)}）")
     return 0
 
 

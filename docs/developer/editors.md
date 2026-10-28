@@ -18,7 +18,7 @@ corelsp 是 Core 语言的语言服务器，使用标准 LSP 协议，通过 std
 
 - 每次打开或编辑文件都会触发一次重新检查（全量同步），诊断也随之更新。
 - 文档有语法错误时，悬停和跳转可能返回空结果，因为语义查询使用最近一次成功检查的结果。
-- 前置条件：仓库根存在 `build/corelsp`。构建命令：`python3 build_selfhost_native.py`（与 build/corec、build/corearch 同批产出）。
+- 前置条件：仓库根存在 `build/corelsp`。构建命令：`python3 build_selfhost_native.py`（与 build/corec、build/corearch 同阶段产出）。
 
 ## Neovim（内置 LSP，nvim 0.10+）
 

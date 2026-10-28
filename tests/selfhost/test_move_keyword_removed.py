@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""`move` 关键字退役判据（TODO #2026-09-17-18）。
+"""`move` 关键字退役判定依据（TODO #2026-09-17-18）。
 
-判据：
+判定依据：
   M1 `move x` 作为表达式 ⇒ check rc≠0，诊断为未定义名 `move`。
   M2 `move x = 1` ⇒ check rc≠0，不能被当成合法 move 声明。
   M3 `move := 1` ⇒ check rc=0，拼写进入普通名字域。
@@ -54,7 +54,7 @@ def static_scan():
 
 def main():
     if not os.path.exists(COREC):
-        print("[FAIL] 缺 build/corec（本判据需先 build_selfhost）")
+        print("[FAIL] 缺 build/corec（本判定依据需先 build_selfhost）")
         return 1
     bad = []
     for name, src, want in CASES:

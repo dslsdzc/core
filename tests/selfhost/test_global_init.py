@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """File-scope global initializer semantics — dual path (interpreter + native ELF).
 
-R1 Task 4 判据（语言面收窄 §1.3 / R1 ②）：文件级全局的运行期初始化在两条路径上
+R1 Task 4 判定依据（语言面收窄 §1.3 / R1 ②）：文件级全局的运行期初始化在两条路径上
 语义一致——
   ① 聚合全局（`[T; N]`）无论有无初值都在运行期分配存储并写槽（存储持久）；
   ② 非常量初值的全局在运行期求值并写槽；
@@ -11,7 +11,7 @@ R1 Task 4 判据（语言面收窄 §1.3 / R1 ②）：文件级全局的运行�
 两路径都跑：`corec run`（解释器）与 `corec build --static` + 运行 ELF。
 
 注意：ELF 路径走 per-function cir 增量缓存（.core/cache/cir/），缓存键不含编译器
-身份（TODO #2026-09-10-1）——本脚本在开跑前清一次缓存，保证判据跑在当次构建的编译器上。
+身份（TODO #2026-09-10-1）——本脚本在开跑前清一次缓存，保证判定依据跑在当次构建的编译器上。
 """
 
 import os
@@ -65,7 +65,7 @@ CASES = [
         "a : [int;2] = [8,9]\nb : [int;2] = a\nfn main()->int:\n    return a[0]+b[1]\n",
         17,
     ),
-    # —— 以下为同一修复面（R1 ② 判据）的扩展 pin：非字面量初值的其它形态 + callee 侧
+    # —— 以下为同一修复面（R1 ② 判定依据）的扩展 pin：非字面量初值的其它形态 + callee 侧
     # 聚合访问（解释器外函数内联路径的聚合族 opcode；ELF 全局基址字段读写）。 ——
     (
         "struct_global_field_read",
@@ -106,9 +106,9 @@ CASES = [
 
 
 def clean_cache() -> None:
-    """ci 缓存键不含编译器身份（TODO #2026-09-10-1）——判据前清缓存，避免旧 IR 冒充新编译器。
+    """ci 缓存键不含编译器身份（TODO #2026-09-10-1）——判定依据前清缓存，避免旧 IR 冒充新编译器。
 
-    返回码必须检查（Task 4 评审 Minor）：清缓存失败 + 旧缓存 = 判据被静默污染
+    返回码必须检查（Task 4 评审 Minor）：清缓存失败 + 旧缓存 = 判定依据被静默污染
     （正是本项目大忌）——失败即报错退出，不许继续跑。
     """
     result = subprocess.run(

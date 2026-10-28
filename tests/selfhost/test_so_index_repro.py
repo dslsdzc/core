@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""第 4 批（TODO #2026-09-16-20/#2026-09-16-21/#2026-09-17-1/#2026-09-17-2）：`.so` 扩展索引的**可复现性 / 承重面 / 内存安全**判据。
+"""第 4 阶段（TODO #2026-09-16-20/#2026-09-16-21/#2026-09-17-1/#2026-09-17-2）：`.so` 扩展索引的**可复现性 / 承重面 / 内存安全**判定依据。
 
 被验对象：编译器解析 `import` 时读 `$HOME/.core/lib/<模块>/index` 的行为
 （`src/compiler/module.cr` 的原读点 + 侧表 + `find_gsym`/`find_so_fn` 回退）。
 
-口径（**夹具入仓 = 判据自己必须可复现**）：两态对拍所需的索引一律取
+规则（**夹具入仓 = 判定依据自己必须可复现**）：两态对拍所需的索引一律取
 `tests/fixtures/so_index/`（放进临时 HOME），**不得**用各机自备的 `$HOME` 索引。
 
-判据（逐条对应计划 §4）：
+判定依据（逐条对应计划 §4）：
   C1 = J1  正常档（含 io.cr 未声明的 `print_int`/`println_int`）⇒ 两态 `.ccr` **逐字节同**
-           （两条口径：`ccr` 与 `build --static`）
+           （两条规则：`ccr` 与 `build --static`）
   C2 = J2  **良性档**（每条名字都已在 io.cr 声明）⇒ 两态逐字节同（反例测试：证明
            「敏感性 = 索引存在性」已被消除，不只是「新名数量」）
   C3 = J3  **承重面**：调用索引独有名字 ⇒ 有索引 rc=0；**无索引必须响亮失败**
-           （rc=1 + `error[N06]`，**无产物**）——本批红线：查不到时**不得放行**
+           （rc=1 + `error[N06]`，**无产物**）——本次红线：查不到时**不得放行**
   C4 = J9  索引行数不再是行为分界：N=2/200/2000 三档 ⇒ 产物逐字节同 **且进程 rc 正常**
-           （不得 139/崩溃——内存破坏的判据不能只看产物：N=200 那次产物正常但堆已坏）
+           （不得 139/崩溃——内存破坏的判定依据不能只看产物：N=200 那次产物正常但堆已坏）
   C5 = J5  `env -u HOME`（unset）与空 HOME 目录 ⇒ 产物逐字节同（#83）
   C6 = J7  ELF 面（`--static`）跨两态逐字节同
   C7 = J4  静态：`src/` 内**零命中**硬编码家目录常量（#83）
@@ -92,7 +92,7 @@ def main() -> int:
         h_norm = make_home(os.path.join(tmp, "n"), fixture_index("io.index"))
         h_benign = make_home(os.path.join(tmp, "b"), fixture_index("io_benign.index"))
 
-        # ── C1 = J1 正常档：两条口径（ccr / build --static；后者的 .ccr 在 <out>.ccr） ──
+        # ── C1 = J1 正常档：两条规则（ccr / build --static；后者的 .ccr 在 <out>.ccr） ──
         for tag, verb, suffix in (("ccr", "ccr", ""), ("build --static", "build", ".ccr")):
             o_empty = os.path.join(tmp, "j1_empty_" + verb)
             o_idx = os.path.join(tmp, "j1_idx_" + verb)
@@ -171,7 +171,7 @@ def main() -> int:
             passes.append("C6/J7 ELF 跨两态逐字节同（发射面零泄漏）")
 
         # ── C7 = J4 静态：无硬编码家目录**字面量** ──
-        # 口径 = 「**字符串字面量**里的绝对家目录路径」（如 `"/home/<名>"`）——那是被当作值
+        # 规则 = 「**字符串字面量**里的绝对家目录路径」（如 `"/home/<名>"`）——那是被当作值
         # 使用的常量（原缺陷形态）。散文/注释里出现的 `/home/` 不算（实测：`ccr_io.cr:174`
         # 的 `live_end/home/flags` 是字段列表，宽正则误报过一次 ⇒ 本条按字面量判定）。
         pat = re.compile(r'"[^"\n]*/home/[A-Za-z0-9_]+[^"\n]*"')
@@ -188,7 +188,7 @@ def main() -> int:
         if hits:
             fails.append("C7/J4 硬编码家目录字面量命中：" + ", ".join(hits[:5]))
         else:
-            passes.append("C7/J4 src/ 零命中硬编码家目录字面量（#83 静态判据）")
+            passes.append("C7/J4 src/ 零命中硬编码家目录字面量（#83 静态判定依据）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

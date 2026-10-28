@@ -168,7 +168,7 @@ corearch 只看 `IR_BRANCH` 的 case 数量和 value 分布，不看模式种类
 | `s3 == 0` 且 `dest >= 0` | 无条件跳转 |
 | `dest == -1` 且没有 case 命中 | trap 或 `ud2` |
 
-密集的初始判据：`s3 >= 8` 且 `max(value) - min(value) + 1 <= 2 * s3`。阈值在 benchmark 后调整。
+密集的初始判定依据：`s3 >= 8` 且 `max(value) - min(value) + 1 <= 2 * s3`。阈值在 benchmark 后调整。
 
 跳转表布局：
 
@@ -228,7 +228,7 @@ HDFG 的 region 信息已经写入 `.ccr` 的 REG 段，corearch 可以直接读
 
 ## 实施清单
 
-阶段 1 和阶段 2 必须同批落地。阶段 1 单独切换 `.ccr` 和 corearch 时，`ir_gen` 还在发旧编码，`if` 和 `loop` 会被新后端误读，中间状态不能构建。
+阶段 1 和阶段 2 必须同阶段落地。阶段 1 单独切换 `.ccr` 和 corearch 时，`ir_gen` 还在发旧编码，`if` 和 `loop` 会被新后端误读，中间状态不能构建。
 
 | 阶段 | 文件 | 改动 | 验收 |
 |---|---|---|---|
@@ -252,7 +252,7 @@ HDFG 的 region 信息已经写入 `.ccr` 的 REG 段，corearch 可以直接读
 5. 16 路和 64 路整数 `match` 的基准不低于现有 if 链。64 路由 corearch 的二分实现达到约 6 次比较，corec 只生成一个多路节点。
 6. 合成字符分派基准：0 到 255 的字符值与 40 个 case 的分派，不低于现有线性链；密集 case 在跳转表落地后应明显低于线性链。`src/compiler/lexer.cr` 的改写是后续独立任务，不在本文实施范围。
 7. 编译时间和峰值内存不显著增加。决策树生成的复杂度为 O(n log n)，case 表大小与 arm 数线性相关。
-8. canary：ELF 和 `.ccr` 基准值会变化，更新 `tools/baseline/canary_values.tsv` 并在同一批记录原因。
+8. canary：ELF 和 `.ccr` 基准值会变化，更新 `tools/baseline/canary_values.tsv` 并在同一组记录原因。
 9. 语义覆盖：无 `_` 的 int/char/string match 报 `EC_TM_EXHAUST`；optional 裸值和装箱两种形态的结果与现有实现一致；char 的 match 值与当前 `'A' as int` 一致。
 
 ## 不包含
@@ -273,7 +273,7 @@ HDFG 的 region 信息已经写入 `.ccr` 的 REG 段，corearch 可以直接读
 2. optional 表示位。完整版把表示位纳入 Maranget 的列模型，作为“表示”伪列；第一版保留现有裸值和装箱特例链。依据是 Rust 的 niche optimization 在 MIR 里仍按 enum 处理，Maranget 的列模型可以扩展表示列。影响阶段 5 和 optional 测试。
 3. tuple 和 struct 模式。完整版补 parser 的 tuple 模式，补 checker 的 struct 字段存在性校验和 ident 绑定。依据是 Rust、Haskell、OCaml 和 SML 都把 tuple 与 struct 模式当作一等模式。影响阶段 4，文件包括 `parser.cr` 和 `checker.cr`。
 4. 字面量穷尽性。要求 `_` 或 irrefutable arm；缺少时 checker 报 `EC_TM_EXHAUST`。依据是 Rust 报 non-exhaustive patterns，Haskell 和 OCaml 也要求穷尽，Maranget 的 usefulness 算法把整数和字符串视为无限域。影响 checker，现有 match 需要扫一遍。
-5. 跳转表阈值。初始判据是 `s3 >= 8` 且 `max-min+1 <= 2*s3`，之后用 benchmark 调整。依据是 LLVM 的 switch lowering 按 case 密度在跳转表、位测试和二分之间选择。影响 corearch。
+5. 跳转表阈值。初始判定依据是 `s3 >= 8` 且 `max-min+1 <= 2*s3`，之后用 benchmark 调整。依据是 LLVM 的 switch lowering 按 case 密度在跳转表、位测试和二分之间选择。影响 corearch。
 6. 跳转表重定位。表项使用 32 位相对偏移，目标是静态 ELF；不支持 PIE 和动态链接。依据是 LLVM 的 PIC 跳转表普遍使用相对偏移。影响 corearch。
 7. bootstrap desugar 范围。覆盖 corec 源码实际使用的模式，不追求覆盖 parser 支持的全部模式。依据是 stage 0 只需要支持 bootstrap 源码。影响 bootstrap；lexer 重写前必须覆盖 int 和 char。
 8. `IR_JUMP`。保留，作为没有 case 的紧凑编码；语义上仍是统一决策节点的特例。依据是 LLVM 和 MIR 都保留无条件跳转 terminator。影响阶段 1 的改动面。

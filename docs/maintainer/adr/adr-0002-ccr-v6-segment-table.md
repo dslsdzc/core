@@ -12,7 +12,7 @@
 ## 决策
 
 - v6 使用段表架构：`.ccr` 按段组织（存在结构段 ENT、数据段、函数记录段等），段表构成格式结构。
-- ENT 存在结构段：声明存在哪些对象，供后续各段使用；loader 侧有 `entries_coexist` 上界校验等一致性检查（GC 批）。
+- ENT 存在结构段：声明存在哪些对象，供后续各段使用；loader 侧有 `entries_coexist` 上界校验等一致性检查（GC 阶段）。
 - REG 坐标化：REG 记录带 `kind`/`parent`/`enter`/`exit`/`first`/`last`；`root_region` span 派生函数边界。
 - SYM 归并：`vars` 并入函数记录声明区，`globals` 带 type。
 - 写读两端（`ccr_io.cr`）与格式 spec 同步演进。
@@ -25,4 +25,4 @@
 ## 关联
 
 - 文档：spec 2026-09-05-lattice-ir-v6-format.md；docs/maintainer/design/ir-op-semantics.md
-- 提交：88272207（GC 批 3 定向测试）等 v6 系列
+- 提交：88272207（GC 阶段 3 定向测试）等 v6 系列

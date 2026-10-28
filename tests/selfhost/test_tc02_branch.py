@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""TC02 收口：`if` 分支相容判定的**发散豁免**（P3，不对称）。
+"""TC02 处理：`if` 分支相容判定的**发散豁免**（P3，不对称）。
 
 背景（归因链 = `/tmp/fct1/tc02_attribution.md` / 设计 = `/tmp/fct2/tc02_minibatch.md`）：
 `EXPR_RETURN` 的推断 = **所返回值类型**（checker.cr 的 EXPR_RETURN 分支），故 `{ return 1; }`
 的块类型 = int；而 `if` 的值类型定义为 **then_ti**（infer_expr 的 EXPR_IF 合并点 `return then_ti`）。
 ⇒ 当 **else 支确定发散**（return 族收尾、不产出值）时，else 侧的「类型」是幻影 ⇒ 相容判定无对象。
 
-判据（P3 = 不对称）：
-  · else 支发散 ⇒ 不报（本批新增豁免；谓词 `stmt_diverges`，**只服务本判定点**）
+判定依据（P3 = 不对称）：
+  · else 支发散 ⇒ 不报（本次新增豁免；谓词 `stmt_diverges`，**只服务本判定点**）
   · **then 支发散 ⇒ 仍报 TC02**（then_ti 本身即幻影 = 模型面，保留真信号；见 tc02_then_return_kept）
   · 两侧皆不发散的真异型 ⇒ 仍报（tc02_true_mismatch_kept）
-  · 既有 NEVER 豁免（loop{} 收尾）与 TF01/TA02 面**零扰动**（各配钉子）
+  · 既有 NEVER 豁免（loop{} 收尾）与 TF01/TA02 面**零扰动**（各配固定用例）
   · TB01 真错（非级联）⇒ 仍报（负控；级联面见 TB01 归因报告 §2）
 
 用例只增不减（本文件 15 例 = 设计稿 §3 全表）。
@@ -65,7 +65,7 @@ CASES_OK = [
      "    return 0\n"),
 ]
 
-# ── 负控/钉子：期望**仍报**（码 + rc=1） ─────────────────────────────
+# ── 负控/固定用例：期望**仍报**（码 + rc=1） ─────────────────────────────
 CASES_DIAG = [
     ("tc02_then_return_kept",
      "fn main() -> int:\n    if 1 < 2:\n        return 1\n    else:\n    return 0\n", ["TC02"]),

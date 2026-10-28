@@ -1,6 +1,6 @@
-# 有缓存状态探针语料（#2026-09-15-5 批 T3：检查集合有缓存状态分支的实现方式）
+# 有缓存状态探针语料（#2026-09-15-5 阶段 T3：检查集合有缓存状态分支的实现方式）
 
-来源：#2026-09-15-5 批 T1 的固定路径探针矩阵（`/tmp/fct4/task1-report.md` 3.3 节，2026-09-15 实际运行并实拷入仓）。
+来源：#2026-09-15-5 阶段 T1 的固定路径探针矩阵（`/tmp/fct4/task1-report.md` 3.3 节，2026-09-15 实际运行并实拷入仓）。
 性质：不是编译器编译单元（不被 `tests/suite/`、`src/ci/run.sh`、`tools/baseline/probes_run.sh`
 的任何清单收集，那些都是非递归 glob）。它们是 `tools/baseline/warm_run.sh`（= `warm_leg.sh
 --with-corpus`）与 `tests/selfhost/test_warm_cache_gate.py` 的两态断言输入。
@@ -31,7 +31,7 @@
 
 ```bash
 bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now     # 当前二进制（定点层）
-bash tools/baseline/warm_run.sh /tmp/<pre-fix>/corec /tmp/warm_before   # pre-fix 时必然失败（说明判据能检出缺陷）
+bash tools/baseline/warm_run.sh /tmp/<pre-fix>/corec /tmp/warm_before   # pre-fix 时必然失败（说明判定依据能检出缺陷）
 ```
 
 判读：`WARM LEG DONE（…）：7 档 · 有缓存状态生效（≥1 真命中）档数 = N · FAIL=M`。

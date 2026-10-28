@@ -547,7 +547,7 @@ fn cir_read_snapshot(path: string) -> int:
     // NULL-8. The read EFAULT result is the safer guard.
     if nread != fsize:
         return -1
-    cell_store(g_cir_read_buf, -8, fsize + 1)  // 长度头 = fsize（str_len 口径同 read_file）
+    cell_store(g_cir_read_buf, -8, fsize + 1)  // 长度头 = fsize（str_len 计算方式与 read_file 相同）
     return fsize
 
 // Load a .cir cache file and restore DFG state.

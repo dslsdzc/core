@@ -4,6 +4,7 @@
 // Global compiler state
 g_source : string, mut
 g_source_file : int, mut    // current SourceManager FileId (-1 = none)
+g_line_base : int, mut      // first global line belongs to base + 1
 g_source_len : int, mut     // cached str_len(g_source), set in tokenize()
 g_pos : int, mut
 g_line : int, mut
@@ -140,7 +141,7 @@ fn lookup_keyword(s: string) -> int:
         "interface" => T_INTERFACE
         "type" => T_TYPE
         "mod" => T_MOD
-        "as" => T_AS
+        "cast" => T_CAST
         "auto" => T_AUTO
         "fileid" => T_FILEID
         "self" => T_SELF
@@ -281,12 +282,20 @@ fn str_to_scaled(s: string) -> int:
 fn token_start_offset(start_line: int, start_col: int) -> int:
     if g_source_file < 0:
         return 0
-    return sm_line_start(g_source_file, start_line) + start_col - 1
+    // Token lines are in the flat SourceManager line space; spans are file-local.
+    local_line := start_line - g_line_base
+    return sm_line_start(g_source_file, local_line) + start_col - 1
 
 fn write_tok_span(tp: int, lo: int, tlen: int):
+    // Token offsets are global byte offsets: the file's byte_base plus the local
+    // offset. Nothing reads them yet; the AST span migration is the first
+    // consumer. Before this, the offsets were file-local.
+    bb : ., mut = 0
+    if g_source_file >= 0 && g_source_file < g_sm_file_count:
+        bb = cell_load(g_sm_files, g_source_file * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
     cell_store(g_tokens, tp + OFF_TK_FILE, g_source_file)
-    cell_store(g_tokens, tp + OFF_TK_LO, lo)
-    cell_store(g_tokens, tp + OFF_TK_HI, lo + tlen)
+    cell_store(g_tokens, tp + OFF_TK_LO, bb + lo + 1)
+    cell_store(g_tokens, tp + OFF_TK_HI, bb + lo + tlen + 1)
 
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
@@ -499,12 +508,14 @@ fn skip_ws(src: string, pos: int, max_len: int) -> int:
 fn tokenize(file_id: int, layout_bypass: int):
     g_source = sm_file_text(file_id)
     g_source_file = file_id
+    g_line_base = sm_file_line_base(file_id)
     tokenize_impl(g_source, layout_bypass)
 
 // Source-only entry for rescans that do not carry a FileId. Spans are marked
 // unattributed (-1) rather than inheriting the previous file.
 fn tokenize_source(_src: string, layout_bypass: int):
     g_source_file = -1
+    g_line_base = 0
     tokenize_impl(_src, layout_bypass)
 
 fn tokenize_impl(_src: string, layout_bypass: int):
@@ -515,7 +526,7 @@ fn tokenize_impl(_src: string, layout_bypass: int):
     // run_frontend clears errors at the start of a session.
     _pos : ., mut = 0
     g_pos = 0
-    g_line = 1
+    g_line = g_line_base + 1
     g_col = 1
     // Reset layout bookkeeping. With bypass set, the indentation stack is neither
     // read nor written; only the counters are cleared.

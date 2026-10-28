@@ -1,14 +1,14 @@
-# bool 类 171 处签名统一（批 8）实施记录
+# bool 类 171 处签名统一（阶段 8）实施记录
 
 > 对应计划：[plans/2026-09-18-bool-signature-alignment.md](../plans/2026-09-18-bool-signature-alignment.md)
 
-日期：2026-09-18。工作区：`core-optdex-ws`，批 8 链。base：`db649d17`。
+日期：2026-09-18。工作区：`core-optdex-ws`，阶段 8 链。base：`db649d17`。
 
-裁定依据来自 team-lead：`bool` 类的 171 处先做。这批改动只改 helper 签名，不引入新语法，与 2(a) 新内置批相互独立。S2 的 `string` 与 `int` 桶等 2(a) 处理。检查要求是逐处记录、零行为变化、清单中 bool 桶归零、突变自证。
+裁定依据来自 team-lead：`bool` 类的 171 处先做。这阶段改动只改 helper 签名，不引入新语法，与 2(a) 新内置阶段相互独立。S2 的 `string` 与 `int` 桶等 2(a) 处理。检查要求是逐处记录、零行为变化、清单中 bool 桶归零、突变自证。
 
 ## 概述
 
-本记录覆盖批 8 的 bool 类 171 处签名统一工作。目标是消除 `ts_check` 第二实参从 bool 到 int 的隐式转换接缝，避免 bool 不再当作 int 之后自测计数失准。结论是 171 处调用点改为 `ts_check_b` 或 `ps_check_b`，bool 桶归零，清单从 239 点降到 68 点，`selftest-types` 和 `selftest-purity` 的输出与改前逐字节相同，`tests/selfhost/test_s1p_liveness.py` 已经接入 `selfhost-tests`。残桶 68 点仍然属于 `string` 与 `int`，留给 S2。
+本记录覆盖阶段 8 的 bool 类 171 处签名统一工作。目标是消除 `ts_check` 第二实参从 bool 到 int 的隐式转换接缝，避免 bool 不再当作 int 之后自测计数失准。结论是 171 处调用点改为 `ts_check_b` 或 `ps_check_b`，bool 桶归零，清单从 239 点降到 68 点，`selftest-types` 和 `selftest-purity` 的输出与改前逐字节相同，`tests/selfhost/test_s1p_liveness.py` 已经接入 `selfhost-tests`。残桶 68 点仍然属于 `string` 与 `int`，留给 S2。
 
 ## 改动
 
@@ -16,7 +16,7 @@
 
 自测和 bridge 通道的计数惯用式是 `fails = fails + ts_check(name, <谓词>, 1|0)`。`ts_check` 的第二和第三形参声明为 `int`，而第二实参本来就是 bool 表达式，也就是谓词。旧写法依靠 bool 隐式当作 int 的 0 或 1 参与 `!=` 比较，因此恰好得到正确结果。
 
-这正是 S1P 插模拟报告里的 `形参 int ← 实参 bool`，读数为 `p_ti=0 / a_ti=2`。它不是错误值，而是依靠隐式转换维持的接缝。一旦完成结束，bool 不再当作 int，见 S2 和 S3，这批调用点会大面积变成错误。失败信号是「自测数不准」，不是编译错误，因此属于第 1 类不报错问题。
+这正是 S1P 插模拟报告里的 `形参 int ← 实参 bool`，读数为 `p_ti=0 / a_ti=2`。它不是错误值，而是依靠隐式转换维持的接缝。一旦完成结束，bool 不再当作 int，见 S2 和 S3，这阶段调用点会大面积变成错误。失败信号是「自测数不准」，不是编译错误，因此属于第 1 类不报错问题。
 
 ### 方法
 
@@ -114,21 +114,21 @@ CORE_S1P=1 ./build/corec check src/compiler/main.cr | grep -E '^991[78] '
 2. 字面量实参面不在本检查覆盖内。171 处第二实参全是非字面量谓词表达式，本轮改写不影响字面量面。
 3. 方法调用面不在本点。`METHOD_GAP` 检查固定 `s.m(b)` 异型 0 插模拟。方法面待 S2 和 S3 扩大覆盖后再判。该不可达分支不得当作不可达代码删除。
 4. 清单归零不等于语义正确。bool 桶归零只说明这一类接缝已经消除，不能推出全部类型语义正确。
-5. `CIR_CACHE_VER` 没有提升。`type_selftest.cr` 和 `purity_selftest.cr` 两个文件的缓存条目会 miss 并重建，其余文件条目语义等价。身份检查仍然是后备。TODO #2026-09-18-16 指出指纹不含函数体，该事项与本批相关但未在本批处理。
+5. `CIR_CACHE_VER` 没有提升。`type_selftest.cr` 和 `purity_selftest.cr` 两个文件的缓存条目会 miss 并重建，其余文件条目语义等价。身份检查仍然是后备。TODO #2026-09-18-16 指出指纹不含函数体，该事项与本次相关但未在本批处理。
 6. 新增的 bool 实参调用点今后会被检查 ⑦ 拦住。这是预期行为。修法是使用 `_b` helper，不是放宽检查。
 
 ## 不包含
 
-本记录只覆盖 bool 类。`string` 与 `int` 的 68 点、2(a) 内置批和 S3 硬错均未改动。
+本记录只覆盖 bool 类。`string` 与 `int` 的 68 点、2(a) 内置阶段和 S3 硬错均未改动。
 
-本批不引入新语法，只改 helper 签名和调用点。
+本次不引入新语法，只改 helper 签名和调用点。
 
-本批不提升 `CIR_CACHE_VER`。
+本次不提升 `CIR_CACHE_VER`。
 
-本批不改变任何已接受程序的 IR、`.ccr` 或 ELF 语义。
+本次不改变任何已接受程序的 IR、`.ccr` 或 ELF 语义。
 
-本批不覆盖字面量实参面。
+本次不覆盖字面量实参面。
 
-本批不覆盖方法调用面。
+本次不覆盖方法调用面。
 
-本批不处理 TODO #2026-09-18-16 的指纹不含函数体问题。
+本次不处理 TODO #2026-09-18-16 的指纹不含函数体问题。

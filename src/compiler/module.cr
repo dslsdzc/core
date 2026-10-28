@@ -174,63 +174,36 @@ fn load_imports(dir_path: string) -> string:
     return content
 
 fn reg_fileid(fileid_str: string, path: string) -> int:
+    return reg_fileid_sm(fileid_str, path, -1)
+
+fn reg_fileid_sm(fileid_str: string, path: string, sm_id: int) -> int:
     fni := str_intern(fileid_str)
     fi : ., mut = 0
     loop:
         if fi >= g_file_count:
             break
-        if cell_load(g_files, fi * 16) == fni:
+        if cell_load(g_files, fi * 24) == fni:
+            if sm_id >= 0:
+                cell_store(g_files, fi * 24 + 16, sm_id)
             return fni
         fi = fi + 1
     grow_files(g_file_count + 1)
-    cell_store(g_files, g_file_count * 16, fni)
-    cell_store_str(g_files, g_file_count * 16 + 8, path)
+    cell_store(g_files, g_file_count * 24, fni)
+    cell_store_str(g_files, g_file_count * 24 + 8, path)
+    cell_store(g_files, g_file_count * 24 + 16, sm_id)
     g_file_count = g_file_count + 1
     return fni
 
-fn build_line_fileid():
-    g_line_count = 0
-    g_line_cap = 0
-    slen := str_len(g_source)
-    // Library id per segment: computed once per file, then copied to each
-    // source line. Visibility checks become a single array read per symbol.
-    seglibs := alloc((g_seg_count + 1) * 8)
-    si : ., mut = 0
+fn file_sm_id(fni: int) -> int:
+    fi : ., mut = 0
     loop:
-        if si >= g_seg_count:
-            break
-        sfni := cell_load(g_seg_fileids, si * 8)
-        cell_store(seglibs, si * 8, lib_lookup_path(file_path_by_fni(sfni)))
-        si = si + 1
-    seg_idx : ., mut = 0
-    grow_line_file(g_line_count + 1)
-    cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, 0))
-    cell_store(g_line_lib, g_line_count * 8, cell_load(seglibs, 0))
-    g_line_count = g_line_count + 1
-    pos : ., mut = 0
-    loop:
-        if pos >= slen:
-            break
-        if str_eq(get_char(g_source, pos), "\n") != 0:
-            next_start : ., mut = 0
-            next_fileid : ., mut = -1
-            if seg_idx + 1 < g_seg_count:
-                next_start = cell_load(g_seg_starts, (seg_idx + 1) * 8)
-                next_fileid = cell_load(g_seg_fileids, (seg_idx + 1) * 8)
-            if next_fileid >= 0 && pos + 1 >= next_start:
-                seg_idx = seg_idx + 1
-            grow_line_file(g_line_count + 1)
-            cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, seg_idx * 8))
-            cell_store(g_line_lib, g_line_count * 8, cell_load(seglibs, seg_idx * 8))
-            g_line_count = g_line_count + 1
-        pos = pos + 1
+        if fi >= g_file_count:
+            return -1
+        if cell_load(g_files, fi * 24) == fni:
+            return cell_load(g_files, fi * 24 + 16)
+        fi = fi + 1
+    return -1
 
-// Register functions from a .so extension index file.
-// Index format (one function per line):
-//   func_name: param_types [-> ret_type] [, tags...]
-// Examples:
-//   print: string, variadic, auto_str
-//   read_file: string -> string
 fn reg_so_funcs(index_content: string, so_name: string):
     sl := str_len(index_content)
     line_start : ., mut = 0
@@ -483,258 +456,222 @@ fn so_materialize(side_i: int) -> int:
     g_sym_count = si + 1
     return si
 
-fn import_path_seen(path: string) -> int:
+fn import_push(sm_id: int):
+    grow_import_sms(g_import_count + 1)
+    cell_store(g_import_sm, g_import_count * 8, sm_id)
+    g_import_count = g_import_count + 1
+
+fn import_known_fid(fni: int) -> int:
     i : ., mut = 0
     loop:
         if i >= g_mod_count:
             return 0
-        if str_eq(cell_load_str(g_mods, i * 24 + 16), path) != 0:
+        if cell_load(g_mods, i * 24 + 8) == fni:
             return 1
         i = i + 1
     return 0
 
-fn res_imports():
-    lib_export_reset()
-    g_file_count = 0
-    g_file_cap = 0
-    g_mod_count = 0
-    g_mod_cap = 0
-    g_seg_count = 0
-    g_seg_cap = 0
+fn import_add(path: string, fid_str: string, content: string, alias_str: string) -> int:
+    fni := str_intern(fid_str)
+    if fni == g_main_fni:
+        return -1
+    if import_known_fid(fni) != 0:
+        return -1
+    sm := sm_add_file(path, content)
+    reg_fileid_sm(fid_str, path, sm)
+    alias_ni : ., mut = fni
+    if str_len(alias_str) > 0:
+        alias_ni = str_intern(alias_str)
+    grow_mods(g_mod_count + 1)
+    cell_store(g_mods, g_mod_count * 24, alias_ni)
+    cell_store(g_mods, g_mod_count * 24 + 8, fni)
+    cell_store_str(g_mods, g_mod_count * 24 + 16, path)
+    g_mod_count = g_mod_count + 1
+    import_push(sm)
+    return sm
 
-    // First, collect _import.cr from the source directory and ancestors.
-    import_core_acc : ., mut = ""
-    // Also collect stdlib _import.cr (provides import fmt for stdlib files)
-    sic := load_imports("src/stdlib/")
-    if str_len(sic) > 0:
-        import_core_acc = sic + "\n"
-    search_dir : ., mut = g_source_dir
+// Scan the token stream most recently produced by tokenize() for import edges.
+// Resolution paths keep the historical base (main source dir + target roots).
+fn import_scan_tokens():
+    i : ., mut = 0
     loop:
-        ic := load_imports(search_dir)
-        if str_len(ic) > 0:
-            import_core_acc = ic + "\n" + import_core_acc
-        pd := parent_dir(search_dir)
-        if str_len(pd) == 0:
+        if i >= g_token_count:
             break
-        if str_eq(pd, search_dir) != 0:
-            break
-        search_dir = pd
-    // Record original source length before prepending _import.cr preamble.
-    // Used later for segment tracking when we strip the preamble.
-    real_main_len : ., mut = str_len(g_source)
-
-    if str_len(import_core_acc) > 0:
-        g_source = import_core_acc + "\n" + g_source
-        sm_reset()
-        combined_file := sm_add_virtual("<combined>", g_source)
-        tokenize(combined_file, 0)
-
-    // Determine main file's fileid
-    main_fileid_str : ., mut = get_fileid(g_source)
-    if str_len(main_fileid_str) == 0:
-        main_fileid_str = "main"
-    main_fni := reg_fileid(main_fileid_str, g_source_name)
-    main_len : ., mut = real_main_len  // original source length (without preamble)
-
-    // First segment: main source
-    grow_segs(g_seg_count + 1)
-    cell_store(g_seg_starts, g_seg_count * 8, 0)
-    cell_store(g_seg_fileids, g_seg_count * 8, main_fni)
-    g_seg_count = g_seg_count + 1
-
-    total_accumulated : ., mut = 0
-
-    // Multi-pass import resolution: keep scanning until no new imports found.
-    // This enables imports from within imported files (recursive imports).
-    loop:
-        pass_src : ., mut = ""
-        pass_bytes : ., mut = 0
-        any_new : ., mut = 0
-
-        i : ., mut = 0
-        loop:
-            if i >= g_token_count:
-                break
-            tk := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND)
-
-            if tk == T_IMPORT:
-                pos : ., mut = i + 1
-                is_project : ., mut = false
-                project_name : ., mut = ""
-                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT:
-                    is_project = true
-                    pos = pos + 1
-                    if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                        project_name = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
-                        pos = pos + 1
-                import_fileid : ., mut = ""
+        tk := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND)
+        if tk == T_IMPORT:
+            pos : ., mut = i + 1
+            is_project : ., mut = 0
+            project_name : ., mut = ""
+            if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT:
+                is_project = 1
+                pos = pos + 1
                 if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                    import_fileid = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                    project_name = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
                     pos = pos + 1
-                    // Handle :: segments: backend::x86_64 -> backend::x86_64
-                    loop:
-                        if pos + 1 < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP && cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                            import_fileid = import_fileid + "::" + istr_get(cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME))
-                            pos = pos + 2
-                        else:
-                            break
-                alias_str : ., mut = ""
-                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON_DECL:
-                    pos = pos + 1
-                    if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                        alias_str = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
-                        pos = pos + 1
-                path : ., mut = ""
-                content : ., mut = ""
-                // Skip import if it references the same file as the main source
-                // (prevents duplicate definitions when _import.cr imports the entry file)
-                if str_len(import_fileid) > 0 && str_eq(import_fileid, main_fileid_str) != 0:
-                    i = pos
-                    continue
-                if str_len(import_fileid) > 0:
-                    if is_project:
-                        proj_toml : ., mut = "src/" + project_name + "/Core.toml"
-                        ptc := read_file(proj_toml)
-                        if str_len(ptc) > 0:
-                            pn := extract_toml_name(ptc)
-                            if str_len(pn) > 0 && str_eq(pn, project_name) == 0:
-                                if g_silent_stdout == 0:
-                                    print("  warning: @")
-                                    print(project_name)
-                                    print(" toml name='")
-                                    print(pn)
-                                    println("' mismatch")
-                        path = "src/" + project_name + "/" + import_fileid + ".cr"
-                        content = module_get_source(path)
+            import_fileid : ., mut = ""
+            if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                import_fileid = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                pos = pos + 1
+                loop:
+                    if pos + 1 < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP && cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                        import_fileid = import_fileid + "::" + istr_get(cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME))
+                        pos = pos + 2
                     else:
-                        // Convert :: to / for subdirectory paths (e.g. backend::x86_64::instr -> backend/x86_64/instr)
-                        fs_path : ., mut = import_fileid
-                        pi : ., mut = 0
-                        loop:
-                            if pi >= str_len(fs_path):
-                                break
-                            if cell_load_byte(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && cell_load_byte(fs_path, pi+1) == 58:
-                                fs_path = str_sub(fs_path, 0, pi) + "/" + str_sub(fs_path, pi+2, str_len(fs_path)-pi-2)
-                            pi = pi + 1
-                        // Try .so extension index: $HOME/.core/lib/<name>/index
-                        // Loads metadata (tags). The .cr file still provides runtime implementation.
-                        // Do not fall back to a hard-coded developer home directory.
-                        // Reading another user's ~/.core/lib would change output based
-                        // on host state. When HOME is unset or the index is absent,
-                        // skip registration; a later lookup of an index-only name
-                        // still fails with Undefined/N06.
-                        // Use a nested if instead of `home_dir != "" && ...` because
-                        // the bootstrap-built corec evaluates both sides of &&.
-                        home_dir : ., mut = get_env("HOME")
-                        if str_len(home_dir) > 0:
-                            so_idx_path : ., mut = target_so_index_path(home_dir, fs_path)
-                            so_idx := read_file(so_idx_path)
-                            if str_len(so_idx) > 0:
-                                reg_so_funcs(so_idx, fs_path)
-                        // Search the target's import roots. The target owns the
-                        // directory order and the three-axis namespace; module.cr
-                        // only asks for root i and appends the import path.
-                        path = g_source_dir + fs_path + ".cr"
-                        content = module_get_source(path)
-                        ri : ., mut = 0
-                        loop:
-                            if str_len(content) > 0:
-                                break
-                            if ri >= target_import_root_count():
-                                break
-                            root := target_import_root(ri)
-                            if str_len(root) > 0:
-                                path = root + fs_path + ".cr"
-                                content = module_get_source(path)
-                            ri = ri + 1
-                        if str_len(content) == 0:
-                            path = fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
+                        break
+            alias_str : ., mut = ""
+            if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON_DECL:
+                pos = pos + 1
+                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                    alias_str = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                    pos = pos + 1
+            path : ., mut = ""
+            content : ., mut = ""
+            if str_len(import_fileid) > 0 && str_eq(import_fileid, istr_get(g_main_fni)) != 0:
+                i = pos
+                continue
+            if str_len(import_fileid) > 0:
+                if is_project != 0:
+                    proj_toml : ., mut = "src/" + project_name + "/Core.toml"
+                    ptc := read_file(proj_toml)
+                    if str_len(ptc) > 0:
+                        pn := extract_toml_name(ptc)
+                        if str_len(pn) > 0 && str_eq(pn, project_name) == 0:
                             if g_silent_stdout == 0:
-                                print("!! import fail: ")
-                                println(import_fileid)
+                                print("  warning: @")
+                                print(project_name)
+                                print(" toml name='")
+                                print(pn)
+                                println("' mismatch")
+                    path = "src/" + project_name + "/" + import_fileid + ".cr"
+                    content = module_get_source(path)
+                else:
+                    fs_path : ., mut = import_fileid
+                    pi : ., mut = 0
+                    loop:
+                        if pi >= str_len(fs_path):
+                            break
+                        if cell_load_byte(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && cell_load_byte(fs_path, pi+1) == 58:
+                            fs_path = str_sub(fs_path, 0, pi) + "/" + str_sub(fs_path, pi+2, str_len(fs_path)-pi-2)
+                        pi = pi + 1
+                    home_dir : ., mut = get_env("HOME")
+                    if str_len(home_dir) > 0:
+                        so_idx_path : ., mut = target_so_index_path(home_dir, fs_path)
+                        so_idx := read_file(so_idx_path)
+                        if str_len(so_idx) > 0:
+                            reg_so_funcs(so_idx, fs_path)
+                    path = g_source_dir + fs_path + ".cr"
+                    content = module_get_source(path)
+                    ri : ., mut = 0
+                    loop:
+                        if str_len(content) > 0:
+                            break
+                        if ri >= target_import_root_count():
+                            break
+                        root := target_import_root(ri)
+                        if str_len(root) > 0:
+                            path = root + fs_path + ".cr"
+                            content = module_get_source(path)
+                        ri = ri + 1
+                    if str_len(content) == 0:
+                        path = fs_path + ".cr"
+                        content = module_get_source(path)
+                    if str_len(content) == 0:
+                        if g_silent_stdout == 0:
+                            print("!! import fail: ")
+                            println(import_fileid)
                 if str_len(content) > 0:
-                    // File identity is the canonical path, not the imported
-                    // lexeme or the content hash. Importing the entry file is a
-                    // cycle; importing an already loaded sibling is a diamond and
-                    // is skipped.
+                    // The entry file is identified by its path, not by an
+                    // interned fileid: a file without a `fileid` declaration
+                    // falls back to the import lexeme, so a cycle back to the
+                    // entry would otherwise load a second copy of main.
                     if str_len(g_source_name) > 0 && str_eq(path, g_source_name) != 0:
                         add_error("import cycle: '" + import_fileid + "' resolves to the entry file")
-                        content = ""
-                    else if import_path_seen(path) != 0:
                         content = ""
                 if str_len(content) > 0:
                     // Dependency direction is a property of the import edge, not
                     // only of symbol lookup: reject the load itself so a library
                     // cannot pull in code from a layer it may not depend on.
-                    from_lib := lib_lookup_path(g_source_name)
-                    to_lib := lib_lookup_path(path)
+                    from_lib := sm_file_lib(g_source_file)
+                    to_lib := lib_for_path(path)
                     if lib_can_import(from_lib, to_lib) == 0:
                         add_error("cannot import '" + import_fileid + "' (" + lib_name(from_lib) + " -> " + lib_name(to_lib) + "): library dependency direction")
                         content = ""
                 if str_len(content) > 0:
-                    content_len := str_len(content)
                     loaded_fid : ., mut = get_fileid(content)
                     if str_len(loaded_fid) == 0:
                         loaded_fid = import_fileid
-                    loaded_fni := reg_fileid(loaded_fid, path)
-                    // Check if this file was already loaded (prevent duplicates)
-                    already_loaded : ., mut = 0
-                    mi : ., mut = 0
-                    loop:
-                        if mi >= g_mod_count:
-                            break
-                        if cell_load(g_mods, mi * 24 + 8) == loaded_fni:
-                            already_loaded = 1
-                            break
-                        mi = mi + 1
-                    if already_loaded != 0:
-                        i = pos
-                        continue
-                    if g_silent_stdout == 0:
-                        print("  -> ")
-                        println(path)
-                    any_new = 1
-                    seg_byte := main_len + total_accumulated + pass_bytes + 1
-                    grow_segs(g_seg_count + 1)
-                    cell_store(g_seg_starts, g_seg_count * 8, seg_byte)
-                    cell_store(g_seg_fileids, g_seg_count * 8, loaded_fni)
-                    g_seg_count = g_seg_count + 1
-                    pass_bytes = pass_bytes + 1 + content_len
-                    alias_ni : ., mut = -1
-                    if str_len(alias_str) > 0:
-                        alias_ni = str_intern(alias_str)
-                    else:
-                        alias_ni = loaded_fni
-                    grow_mods(g_mod_count + 1)
-                    cell_store(g_mods, g_mod_count * 24, alias_ni)
-                    cell_store(g_mods, g_mod_count * 24 + 8, loaded_fni)
-                    cell_store_str(g_mods, g_mod_count * 24 + 16, path)
-                    g_mod_count = g_mod_count + 1
-                    pass_src = pass_src + "\n" + content
-                i = pos
-                continue
-            i = i + 1
+                    if import_known_fid(str_intern(loaded_fid)) == 0:
+                        if g_silent_stdout == 0:
+                            print("  -> ")
+                            println(path)
+                        import_add(path, loaded_fid, content, alias_str)
+            i = pos
+            continue
+        i = i + 1
 
-        if any_new == 0:
+fn import_scan_text(path: string, text: string):
+    // Manifests occupy SourceManager lines only. They never enter g_import_sm,
+    // so they are never parsed as declarations, and they get no g_files row
+    // because fileids are program-visible identifiers. Diagnostics fall back to
+    // SourceManager line ranges when a line has no fileid (sm_for_line).
+    sm := sm_add_virtual(path, text)
+    tokenize(sm, 0)
+    import_scan_tokens()
+
+// Walk ancestors root-first so the resulting import order matches the old
+// prepended manifest order (outermost ancestor, ..., source dir, stdlib).
+fn import_scan_ancestors(dir: string):
+    pd := parent_dir(dir)
+    if str_len(pd) > 0 && str_eq(pd, dir) == 0:
+        import_scan_ancestors(pd)
+    ic := load_imports(dir)
+    if str_len(ic) > 0:
+        import_scan_text(dir + "_import.cr", ic)
+
+fn res_imports():
+    lib_export_reset()
+    g_mod_count = 0
+    g_mod_cap = 0
+    g_import_count = 0
+    g_import_cap = 0
+    g_file_count = 0
+    g_file_cap = 0
+    g_line_count = 0
+
+    // Main file was registered by the caller as SourceManager file 0.
+    g_main_sm = 0
+    main_fid : ., mut = get_fileid(g_source)
+    if str_len(main_fid) == 0:
+        main_fid = "main"
+    g_main_fni = reg_fileid_sm(main_fid, g_source_path, g_main_sm)
+    import_push(g_main_sm)
+
+    // Manifests contribute import edges only; they are never parsed as code.
+    import_scan_ancestors(g_source_dir)
+    sic := load_imports("src/stdlib/")
+    if str_len(sic) > 0:
+        import_scan_text("src/stdlib/_import.cr", sic)
+
+    // The static runtime is a real file but not an import module. Scan its
+    // edges before the main file, matching the old prepended order.
+    if g_prelude_sm >= 0:
+        tokenize(g_prelude_sm, 0)
+        import_scan_tokens()
+    // Main file edges next, then the recursive BFS.
+    tokenize(g_main_sm, 0)
+    import_scan_tokens()
+    idx : ., mut = 1
+    loop:
+        if idx >= g_import_count:
             break
+        sm := cell_load(g_import_sm, idx * 8)
+        tokenize(sm, 0)
+        import_scan_tokens()
+        idx = idx + 1
 
-        if str_len(pass_src) > 0:
-            g_source = g_source + pass_src
-            sm_reset()
-            combined_file := sm_add_virtual("<combined>", g_source)
-            tokenize(combined_file, 0)
-            total_accumulated = total_accumulated + pass_bytes
-
-    // Strip _import.cr preamble to prevent re-parsing import tokens as code.
-    // Import resolution already completed above; leaving the preamble in
-    // g_source causes the checker to emit spurious errors and may crash IR gen.
-    if str_len(import_core_acc) > 0:
-        skip := str_len(import_core_acc) + 1  // +1 for the "\n" separator
-        g_source = str_sub(g_source, skip, str_len(g_source) - skip)
-        sm_reset()
-        combined_file := sm_add_virtual("<combined>", g_source)
-        tokenize(combined_file, 0)
-
-    build_line_fileid()
+    g_source = sm_file_text(g_main_sm)
+    g_source_len = str_len(g_source)
+    g_source_file = g_main_sm
+    g_line_base = sm_file_line_base(g_main_sm)
+    // The flat line space is the SourceManager line space itself.
+    g_line_count = g_sm_line_count

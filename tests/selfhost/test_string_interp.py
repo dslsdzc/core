@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""字符串插值 `${...}`：**词法契约 + 展开语义**判据（自举前端；批 8 插队修复 + 展开）。
+"""字符串插值 `${...}`：**词法契约 + 展开语义**判定依据（自举前端；阶段 8 插队修复 + 展开）。
 
 **为什么有这一档**：本特性修复前**全域零覆盖**——`tests/` 与 `examples/` 里 `grep '\\${'` = **0 命中**，
-`src/` 唯一命中是 `src/lsp/analysis.cr:1024` 的注释 ⇒ 它烂掉约两个月没人知道（这条判据存在的理由）。
+`src/` 唯一命中是 `src/lsp/analysis.cr:1024` 的注释 ⇒ 它烂掉约两个月没人知道（这条判定依据存在的理由）。
 
 **修复前实测（词法根因）**：`lexer.cr` 插值分支**双推进**（skip 循环已到 `}` 之后，循环尾通用
 `_pos = _pos + 1` 又吃一字节）⇒ ① `}` 后首字符静默丢（`"A${7}B"` 取回值 = `A`）；② 若那正是收尾引号
 ⇒ 串吞到**行尾** ⇒ 同行 `;`/`}` 一并进串 ⇒ parser 停在嵌套态 ⇒ 顶层 `fn` **P21 级联**（实测单行 15 条，
 `}` 换行 0 条）。引入点 = `wqorlmrz`（2026-07-09，其父修订无 "Interpolation"）。
 
-**本批两步**：① **词法修复**（分支自行推进 + `continue` 收口，原文逐字进串值——即**修复前后一版是
-「原文保留」的静默空转**，该语义保留为本档的对照腿 / 突变腿）；② **展开实现**（维护者裁定 (b)）：
+**本次两步**：① **词法修复**（分支自行推进 + `continue` 处理，原文逐字进串值——即**修复前后一版是
+「原文保留」的静默空转**，该语义保留为本档的对照路径 / 突变路径）；② **展开实现**（维护者裁定 (b)）：
 lexer 把含洞字面量拆成 part（段 = T_STRING、洞 = T_INTERP，**洞内 `{}` 配平**、洞内字符串整体跳过），
 parser 串成 `seg + hole + seg` 链（**只连同一字面量的 part**），checker 按洞类型**就地改写**转换：
 `string` 恒等 · `int → int_str` · `bool → bool_str`（**不经 int**——遵「bool 不隐式转 int」裁定）·
 其它（`dex` 两表示 / `char` / 结构体…）⇒ **P028 硬错**；畸形插值（未闭合 / `${}` 空 / 洞内尾随垃圾）⇒ **P027 硬错**。
 
-**⚠ bootstrap 面分歧（已知、已登记）**：bootstrap lexer 仍按「原文逐字进串值」处理 `${...}`（不展开）
-⇒ 两前端对含插值源的语义**不同**（本档 D 组把该事实**记为事实**，不是相等判据）。
+**警告：bootstrap 面分歧（已知、已登记）**：bootstrap lexer 仍按「原文逐字进串值」处理 `${...}`（不展开）
+⇒ 两前端对含插值源的语义**不同**（本档 D 组把该事实**记为事实**，不是相等判定依据）。
 
 **突变自证（可复跑）**：`COREC_BIN=<展开前二进制> python3 tests/selfhost/test_string_interp.py`
-⇒ B 组按「原文保留」全红（= 判据命中目标）；`<修复前二进制>` ⇒ A/B 两组皆红。
+⇒ B 组按「原文保留」全红（= 判定依据命中目标）；`<修复前二进制>` ⇒ A/B 两组皆红。
 """
 
 import os
@@ -58,7 +58,7 @@ VALUES = [
 
 
 def build_run(lit, extra_prelude="", extra_body=""):
-    # ⚠ v4 迁移修复：`%s` **前不得有空格**——契约是「`extra_body` 自带缩进」（v3 形即
+    # 警告：v4 迁移修复：`%s` **前不得有空格**——契约是「`extra_body` 自带缩进」（v3 形即
     # `'%s'` 独占一行无缩进）。T6 迁移把它折成单行时误加了 4 空格 ⇒ `extra_body=""`（B 组
     # 主路径）生成 8 空格缩进的 `return 0` ⇒ `error[P02]: unexpected dedent at top level`。
     src = (PRELUDE + extra_prelude +
@@ -120,14 +120,14 @@ def main():
                 if os.path.exists(p):
                     os.unlink(p)
 
-    # B 展开语义（值判据）
+    # B 展开语义（值判定依据）
     for name, lit, want, note in VALUES:
         rc, val, p21, out = build_run(lit)
         print(f"[B {name}] 期望=[{want}] 实测=[{val}] build_rc={rc} P21={p21}  ({note})")
         expect(f"B.{name}.value", val == want, f"得 {val!r}（build_rc={rc}）")
 
     # B' 实参位 / let 初值（位置形态）
-    # ⚠ v4 迁移修复：载荷去 v3 语句分号（v4 语句尾 `;` ⇒ `Unexpected token in expression`）。
+    # 警告：v4 迁移修复：载荷去 v3 语句分号（v4 语句尾 `;` ⇒ `Unexpected token in expression`）。
     rc, val, p21, out = build_run("v=${n}", extra_body='    println(int_str(g(s)))\n')
     last = (val or "").splitlines()[-1] if val else None
     print(f"[B arg_position] 串作实参 g(s) ⇒ 末行={last}（整输出=[{val}]）build_rc={rc}")
@@ -189,7 +189,7 @@ def main():
         from corec.frontend.lexer import Lexer
         toks = Lexer('s := "x=${n}"\n').tokenize()
         lexeme = [t.lexeme for t in toks if getattr(t.type, "name", "") == "STRING_LIT"]
-        print(f"[D bootstrap 面] lexeme={lexeme}（**未展开**：本批只改自举前端；分歧已登记）")
+        print(f"[D bootstrap 面] lexeme={lexeme}（**未展开**：本次只改自举前端；分歧已登记）")
         expect("D.bootstrap_unexpanded_fact", lexeme == ["x=${n}"], f"得 {lexeme}")
     except Exception as e:  # noqa: BLE001
         expect("D.bootstrap_unexpanded_fact", False, f"bootstrap 导入失败：{e}")

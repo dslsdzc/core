@@ -29,7 +29,7 @@ Core 使用下列核心关键字：
 ```text
 fn mut return if else loop while for break continue
 true false struct enum extern impl match import pub
-go await unsafe flow yield interface type mod as
+go await unsafe flow yield interface type mod cast
 auto fileid self in none unit never dyn
 catch spec
 ```
@@ -336,7 +336,17 @@ fn identity(x: .):
 
 编译器可以从该实现得到参数与返回值的同型关系并自动泛化。
 
-结构体字段使用 `.` 时，裸结构体名出现在参数注解中（`fn get(b: Box)`）会为该字段位绑定函数级类型变量；调用点从实参实例化。
+结构体字段使用 `.` 时，该字段的类型由构造点确定：
+
+```core
+struct Event:
+    payload: .
+
+fn show(e: Event):
+    return e.payload
+```
+
+参数注解写裸结构体名 `Event` 会为该字段绑定函数级类型变量，调用点从实参实例化。
 
 ### 3.7 结构语义与物理布局分离
 
@@ -348,7 +358,7 @@ struct Node:
     next: Node?
 ```
 
-普通类型语法不要求 `Box`、`Rc`、`Arc`、`Owned`、`Heap` 等存储或所有权包装。
+普通类型语法不要求 `Rc`、`Arc`、`Owned`、`Heap` 等存储或所有权包装。
 
 ### 3.8 标签
 
@@ -488,12 +498,33 @@ expected type 已知时参数类型可以省略：
 f : fn(int) -> int = fn(x) => x * 2
 ```
 
-### 5.5 转换 `as`
+### 5.5 转换 `cast`
+
+`cast` 是显式转换运算符，写在表达式与目标类型之间。没有隐式数值转换。
 
 ```core
 x : int = 3
-d : dex = x as dex
-ptr : *int = addr as *int
+d : dex = x cast dex
+n : int = d cast int
+```
+
+允许的类型对：
+
+| 源类型 | 目标类型 | 语义 | 位置 |
+|---|---|---|---|
+| `T` | `T` | 恒等 | 任意位置 |
+| `int` | `dex` | 精确转换为十进制 | 任意位置 |
+| `dex` | `int` | 向零截断 | 任意位置 |
+| `int` | `*T` | 整数地址转指针 | 任意位置，解引用时检查 |
+| `*T` | `*U` | 指针重解释 | 任意位置，解引用时检查 |
+| `&T`、`&mut T` | `*T` | 引用转裸指针 | 任意位置，解引用时检查 |
+
+表外的组合是编译错误，报 `error[TA09]`。这包括 `int` 与 `bool` 互转、`int` 与 `string` 互转、`char` 参与的任何转换，以及枚举与整数互转。
+
+```core
+unsafe:
+    ptr : *int = addr cast *int
+    *ptr = 42
 ```
 
 ### 5.6 管道 `|>`
@@ -754,7 +785,7 @@ fn same(x: .):
 
 ```core
 unsafe:
-    ptr : *int = addr as *int
+    ptr : *int = addr cast *int
     *ptr = 42
 ```
 
@@ -806,7 +837,28 @@ impl Point:
         self.y += dy
 ```
 
-接收者形式：`self` / `&self` / `&mut self`。
+接收者形式只有 `self`、`&self`、`&mut self`，语义分别是按值接收、只读引用、可写引用。
+
+接收者不写类型。类型由外层的 `impl Type:` 绑定：
+
+```core
+struct Point:
+    x: int
+    y: int
+
+impl Point:
+    fn sum(self) -> int:
+        return self.x + self.y
+
+    fn reset(&mut self):
+        self.x = 0
+        self.y = 0
+
+    fn scaled(&self, k: int) -> int:
+        return (self.x + self.y) * k
+```
+
+`self: Point` 这种写法不接受，`self` 也不能出现在 impl 之外。接口里只写签名，实现的方法必须使用与接口相同的接收者形式：接口写 `&self`，实现也必须写 `&self`。
 
 ---
 
@@ -822,6 +874,18 @@ struct User:
 ```
 
 字段属于结构体 layout region，不使用逗号结束字段。
+
+字段类型写 `.` 时，类型由构造点决定，结构体名只表示一个族。这样的结构体作为返回值时省略返回型，由 `return` 推断：
+
+```core
+struct Event:
+    payload: .
+
+fn wrap(x: int):
+    return Event { payload = x }
+```
+
+写 `-> Event` 会与具体实例不匹配，诊断会提示省略返回型。
 
 ### 9.2 枚举
 
@@ -841,6 +905,8 @@ enum Message:
  | Data([char])
  | Closed
 ```
+
+payload 只有位置形式，字段名不写在括号里。`Text(s: string)` 不接受；需要多个字段时按顺序写出类型，匹配时按同样的顺序绑定：`Text(v) => ...`。
 
 ### 9.3 接口声明与实现
 
@@ -1275,7 +1341,7 @@ x := *p           // 解引用时由编译器验证可访问范围
 
 ```core
 unsafe:
-    ptr := addr as *int
+    ptr := addr cast *int
     *ptr = 42
 ```
 
@@ -1293,7 +1359,7 @@ unsafe:
 mmio := alloc_at(0x7fff0000, 4096, align(4096))
 ```
 
-`alloc_at(addr, size, align)` 将地址、大小和对齐作为一个可追踪的分配关系送入图中；之后的 provenance、offset、边界和生命周期继续由普通指针分析处理。它不是显式区域/回收语法。
+`alloc_at(addr, size, align)` 把地址、大小和对齐合并成一条可追踪的分配关系送入图中；之后的 provenance、offset、边界和生命周期继续由普通指针分析处理。它不是显式区域/回收语法。
 
 ---
 

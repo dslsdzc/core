@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""铁律 #2 机械执行：命令串中出现 git **调用** → 拒绝执行（exit 2）。
+"""硬性规则 #2 机械执行：命令串中出现 git **调用** → 拒绝执行（exit 2）。
 
 加固（2026-09-16，TODO #2026-09-11-7）：原实现只拦「整条命令以 git 开头」，
 `cd x && git …` / `bash -c 'git …'` / `… | git …` / `$(git …)` 全能绕过。
@@ -46,7 +46,7 @@ INNER_RE = re.compile(
 )
 
 MSG = (
-    "铁律 #2：全面使用 jj，禁止 git（任何位置的 git 调用都会被拦）。\n"
+    "硬性规则 #2：全面使用 jj，禁止 git（任何位置的 git 调用都会被拦）。\n"
     "改用 jj：jj status / jj log / jj describe / jj git push / jj bookmark …\n"
     "（本拦截由 .claude/hooks/block-git.py 执行；测试见 tests/harness/test_block_git.py）\n"
 )

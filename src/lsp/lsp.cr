@@ -83,26 +83,52 @@ fn lsp_json_escape_str(s: string) -> string:
 
 // One diagnostic as a JSON object. Convert 1-based positions to 0-based and use severity 1.
 fn lsp_diag_json(di: int) -> string:
-    ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
-    cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+    ln : ., mut = cell_load(g_diags, di * DIAG_REC_SIZE + 16)
+    cl : ., mut = cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+    smf := cell_load(g_diags, di * DIAG_REC_SIZE + 40)
+    slo := cell_load(g_diags, di * DIAG_REC_SIZE + 48)
     msg := load_str_ptr(g_diags, di * DIAG_REC_SIZE + 8)
-    // Diagnostics carry concatenated line coordinates. Convert them back to the
-    // owning file so imported files do not report lines past their own EOF.
-    off := analysis_line_offset(ln)
-    line0 : ., mut = ln - 1 - off
+    // Diagnostics carry a file-local span when one is available. For line-only
+    // diagnostics, convert the flat SourceManager line back to the owning file.
+    if smf >= 0:
+        ln = sm_location_line(smf, slo)
+        cl = sm_location_col(smf, slo)
+    else:
+        fni := cell_load(g_diags, di * DIAG_REC_SIZE + 32)
+        sm : ., mut = file_sm_id(fni)
+        if sm < 0:
+            sm = sm_for_line(ln)
+        if sm >= 0:
+            ln = ln - sm_file_line_base(sm)
+    line0 : ., mut = ln - 1
     if line0 < 0:
         line0 = 0
     col0 : ., mut = cl - 1
     if col0 < 0:
         col0 = 0
+    // End of the highlighted range. The span stores an exclusive end offset, so
+    // the last covered byte is hi - 1 and the end column is one past it. A
+    // zero-width span falls back to one character.
+    end_line0 : ., mut = line0
+    end_col0 : ., mut = col0 + 1
+    shi := cell_load(g_diags, di * DIAG_REC_SIZE + 56)
+    if smf >= 0 && shi > slo + 1:
+        el := sm_location_line(smf, shi - 1)
+        ec := sm_location_col(smf, shi - 1)
+        end_line0 = el - 1
+        if end_line0 < 0:
+            end_line0 = 0
+        end_col0 = ec
+        if end_col0 < 0:
+            end_col0 = 0
     out : string, mut = "{\"range\":{\"start\":{\"line\":"
     out = out + int_str(line0)
     out = out + ",\"character\":"
     out = out + int_str(col0)
     out = out + "},\"end\":{\"line\":"
-    out = out + int_str(line0)
+    out = out + int_str(end_line0)
     out = out + ",\"character\":"
-    out = out + int_str(col0 + 1)
+    out = out + int_str(end_col0)
     out = out + "}},\"severity\":1,\"message\":"
     out = out + lsp_json_escape_str(msg)
     out = out + "}"
@@ -150,8 +176,8 @@ fn lsp_publish_diags():
             loop:
                 if fi >= g_file_count:
                     break
-                if cell_load(g_files, fi * 16) == fni:
-                    fp := load_str_ptr(g_files, fi * 16 + 8)
+                if cell_load(g_files, fi * 24) == fni:
+                    fp := load_str_ptr(g_files, fi * 24 + 8)
                     if str_len(fp) > 0:
                         uri = "file://" + fp
                     break
@@ -178,6 +204,7 @@ fn lsp_check_file(path: string, src: string):
     g_source_dir = dirname(path)
     reset_frontend_state()
     sm_reset()
+    g_source_path = path
     source_file := sm_add_virtual(path, src)
     tokenize(source_file, 0)
     res_imports()
@@ -186,7 +213,11 @@ fn lsp_check_file(path: string, src: string):
     // 8}; analysis reads the path at offset 8.
     if g_file_count > 0:
         store_str_ptr(g_files, 8, path)
-    parse_all()
+    parse_all_files()
+    // Restore the open document's token stream. Position analysis (hover,
+    // definition, semantic tokens) works on the file the user is editing, not
+    // on whichever import happened to be parsed last.
+    tokenize(g_main_sm, 0)
     if g_diag_count > 0:
         // Parse diagnostics can leave the AST incomplete, so skip check_all.
         lsp_publish_diags()

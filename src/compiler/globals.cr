@@ -130,7 +130,7 @@ g_cir_rec_ids     : string, mut // 本窗口新 intern 的 id 序列（8B/条；
 g_cir_rec_count   : int, mut
 g_cir_rec_cap     : int, mut
 g_cir_rec_base    : int, mut   // g_str_count at window start; stored as the baseline witness
-g_cir_skip_journal : int, mut  // 隐藏 debug（仅判据用）：1 = 装载期跳过重放（突变自证）
+g_cir_skip_journal : int, mut  // 隐藏 debug（仅调试判断用）：1 = 装载期跳过重放（突变自证）
 
 // Optional runtime representation.
 // Some(1) and None use IR_MAKE_ENUM objects ([tag][payload...]), while a bare value
@@ -438,6 +438,22 @@ g_diags : string, mut
 g_diag_count : int, mut
 g_diag_cap : int, mut
 g_files : string, mut
+// Import graph: SourceManager ids in parse order (main first, then imports in
+// discovery order). Manifests are scanned for edges only and never enter here.
+g_import_sm : string, mut
+g_import_count : int, mut
+g_import_cap : int, mut
+g_main_sm : int, mut
+g_main_fni : int, mut
+g_source_path : string, mut
+// Static builds parse rt.cr before the main file. The prelude is a real
+// SourceManager file but has no fileid and is not an import module.
+g_prelude_src : string, mut
+g_prelude_path : string, mut
+g_prelude_sm : int, mut
+g_prelude_pending : int, mut
+// 1 = parse_all is continuing an already-reset multi-file parse.
+g_parse_multi_keep : int, mut
 g_file_count : int, mut
 g_file_cap : int, mut
 g_mods : string, mut
@@ -815,7 +831,6 @@ fn reset_frontend_state():
     // reused, so stale mappings must be cleared.
     g_purity_inst_count = 0
     g_df_state_finalized = 0   // state chain is rebuilt once per compilation
-    g_seg_count = 0
     g_line_count = 0
     g_unsafe_depth = 0
     g_alloc_pts_cap = 0

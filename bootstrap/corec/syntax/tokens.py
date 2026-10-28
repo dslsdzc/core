@@ -39,7 +39,7 @@ class TokenType(Enum):
     MOD = auto()
     IMPORT = auto()
     FILEID = auto()
-    AS = auto()
+    CAST = auto()
     AUTO = auto()
     UNSAFE = auto()
     SELF = auto()
@@ -86,7 +86,7 @@ class TokenType(Enum):
     # **互斥且穷尽** ⇒ parser 侧零前瞻。
     #   `:` 之后到该物理行行尾**无任何 token**（空白与注释不计，§2.3）⇒ COLON_BLOCK（region 开启）
     #   否则 ⇒ COLON_DECL（类型标注 / import 别名 / 字段 / 形参分隔符）
-    # ⚠ 行尾类型标注**不是合法文本**：lexer 必发 COLON_BLOCK，而该位置不是合法 region 头
+    # 警告：行尾类型标注**不是合法文本**：lexer 必发 COLON_BLOCK，而该位置不是合法 region 头
     #   ⇒ parser 必须响亮拒绝（§2.2），不得静默改判成声明。
     COLON_DECL = auto()
     COLON_BLOCK = auto()
@@ -101,7 +101,7 @@ class TokenType(Enum):
     AT = auto()
     QUESTION = auto()
     UNDERSCORE = auto()
-    # 批 6（裁-S7，bounded）：规约标注 sigil `#`（`#check(...)` / `#ensure(...)`）。
+    # 阶段 6（裁-S7，bounded）：规约标注 sigil `#`（`#check(...)` / `#ensure(...)`）。
     # bootstrap 侧只做「**接受并跳过**」（零语义）：能词法化、不报错、**不影响产物**；
     # **不**实现 VC/三态（完整 bootstrap 规约面登记后续）。对应 self-hosted 的 `T_HASH = 101`。
     HASH = auto()
@@ -121,8 +121,8 @@ class TokenType(Enum):
 # 出处 = 计划 §一.5 的三表机械差集（脚本算，非目测），逐条：
 #   去（bootstrap − v4，7）：`None` `Self` `Some` `ensures` `move` `requires` `result`
 #   加（v4 − bootstrap，6）：`catch` `dyn` `fail` `never` `none` `spec`
-# ⚠ 本表必须与自源 `src/compiler/lexer.cr` 的 `lookup_keyword` **逐元素相同**
-#   （判据 J-T1-2）。2026-10-24 实测两侧均为 39，差集为空；
+# 警告：本表必须与自源 `src/compiler/lexer.cr` 的 `lookup_keyword` **逐元素相同**
+#   （判定依据 J-T1-2）。2026-10-24 实测两侧均为 39，差集为空；
 #   实报走 `python3 tools/v4_frontend_probe.py keywords`。
 # 计数：40 − 7 + 6 = 39。
 KEYWORDS = {
@@ -151,7 +151,7 @@ KEYWORDS = {
     "mod": TokenType.MOD,
     "import": TokenType.IMPORT,
     "fileid": TokenType.FILEID,
-    "as": TokenType.AS,
+    "cast": TokenType.CAST,
     "unsafe": TokenType.UNSAFE,
     "self": TokenType.SELF,
     "auto": TokenType.AUTO,
