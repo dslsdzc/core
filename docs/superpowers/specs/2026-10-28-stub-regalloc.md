@@ -83,7 +83,7 @@ stub 没有调用点，不传 `call_at`。
 
 ## 测试
 
-`corec selftest-stub-regalloc` 运行 9 个用例：
+`corec selftest-stub-regalloc` 运行 13 个用例：
 
 1. 不相交区间复用同一寄存器。
 2. 共存区间需要不同寄存器。
@@ -94,8 +94,12 @@ stub 没有调用点，不传 `call_at`。
 7. 固定寄存器不在目标表被拒绝。
 8. 只读候选从首次使用开始。
 9. 两个共存候选固定到同一寄存器被拒绝。
+10. 驱逐成本最低的共存条目。
+11. 重算比写回 home 便宜时选择重算。
+12. 调用点驱逐 caller-saved，保留 callee-saved。
+13. 固定 caller-saved 条目跨调用点被拒绝。
 
-`tests/selfhost/test_stub_regalloc.py` 要求 9 个用例全部通过，并把 9 作为下限，防止用例表被删减。
+`tests/selfhost/test_stub_regalloc.py` 要求 13 个用例全部通过，并把 13 作为下限，防止用例表被删减。
 
 ## 验收
 

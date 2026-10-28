@@ -171,6 +171,67 @@ fn srs_pin_conflict() -> int:
     f = f + srs_expect("pin_conflict.rc", rc, SR_ERR_PIN_CONFLICT)
     return f
 
+fn srs_cag_evict_cheaper() -> int:
+    a := cag_new(3, 2)
+    a.reg(0, 10, CAG_REG_CALLEE)
+    a.reg(1, 11, CAG_REG_CALLEE)
+    a.cand(0, 0, 2)
+    a.cand(1, 0, 2)
+    a.cand(2, 0, 2)
+    a.context(0, 10, 10, -1, 1, 1)  // spill cost 200
+    a.context(1, 1, 1, -1, 1, 1)    // spill cost 2
+    a.context(2, 5, 1, -1, 1, 1)    // spill cost 10
+    a.allow_eviction(1)
+    rc := a.run()
+    f : ., mut = 0
+    f = f + srs_expect("cag_evict.rc", rc, CAG_OK)
+    f = f + srs_expect("cag_evict.cheap_spilled", srs_bool(a.spilled(1) >= 0), 1)
+    f = f + srs_expect("cag_evict.new_assigned", srs_bool(a.assigned(2) >= 0), 1)
+    return f
+
+fn srs_cag_remat() -> int:
+    a := cag_new(2, 1)
+    a.reg(0, 10, CAG_REG_CALLEE)
+    a.cand(0, 0, 1)
+    a.cand(1, 0, 1)
+    a.context(0, 10, 10, 1, 1, 1)  // spill 200, remat 1
+    a.context(1, 5, 1, -1, 1, 1)   // spill 10
+    a.allow_eviction(1)
+    rc := a.run()
+    f : ., mut = 0
+    f = f + srs_expect("cag_remat.rc", rc, CAG_OK)
+    f = f + srs_expect("cag_remat.no_register", a.assigned(0), -1)
+    f = f + srs_expect("cag_remat.flag", a.rematted(0), 1)
+    f = f + srs_expect("cag_remat.no_home", a.spilled(0), -1)
+    f = f + srs_expect("cag_remat.new_assigned", a.assigned(1), 10)
+    return f
+
+fn srs_cag_call_clobber() -> int:
+    a := cag_new(2, 2)
+    a.reg(0, 10, CAG_REG_CALLEE)
+    a.reg(1, 11, CAG_REG_CALLER)
+    a.cand(0, 0, 2)
+    a.cand(1, 0, 2)
+    a.call_at(1)
+    rc := a.run()
+    f : ., mut = 0
+    f = f + srs_expect("cag_call.rc", rc, CAG_OK)
+    f = f + srs_expect("cag_call.callee_kept", srs_bool(a.assigned(0) >= 0), 1)
+    f = f + srs_expect("cag_call.caller_evicted", a.assigned(1), -1)
+    f = f + srs_expect("cag_call.caller_home", srs_bool(a.spilled(1) >= 0), 1)
+    return f
+
+fn srs_cag_pin_call_clobber() -> int:
+    a := cag_new(1, 1)
+    a.reg(0, 10, CAG_REG_CALLER)
+    a.cand(0, 0, 2)
+    a.pin_entry(0, 10)
+    a.call_at(1)
+    rc := a.run()
+    f : ., mut = 0
+    f = f + srs_expect("cag_pin_call.rc", rc, CAG_ERR_CALL_CLOBBER)
+    return f
+
 fn stub_regalloc_selftest_run() -> int:
     g_srs_total = 0
     g_srs_fails = 0
@@ -184,6 +245,10 @@ fn stub_regalloc_selftest_run() -> int:
     srs_case("pin_not_in_file", srs_pin_not_in_file())
     srs_case("read_only_starts_at_use", srs_read_only_starts_at_use())
     srs_case("pin_conflict", srs_pin_conflict())
+    srs_case("cag_evict_cheaper", srs_cag_evict_cheaper())
+    srs_case("cag_remat", srs_cag_remat())
+    srs_case("cag_call_clobber", srs_cag_call_clobber())
+    srs_case("cag_pin_call_clobber", srs_cag_pin_call_clobber())
 
     print(int_str(g_srs_total - g_srs_fails))
     print("/")

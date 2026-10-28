@@ -27,7 +27,11 @@ COREC = BASE / "build" / "corec"
 #   6. two pins of one entry must agree
 #   7. a pin outside the target register file is rejected
 #   8. a read-only entry starts at its first use
-MIN_CASES = 9
+#   9. CAG evicts the cheapest coexisting entry
+#  10. CAG rematerialises when that is cheaper than a home write
+#  11. a call evicts caller-saved entries and keeps callee-saved
+#  12. a pinned caller-saved entry across a call is rejected
+MIN_CASES = 13
 
 
 def run_selftest():
