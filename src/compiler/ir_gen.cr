@@ -4698,6 +4698,7 @@ fn gen_expr(node: int) -> int:
         loop:
             if an < 0:
                 break
+            sg_alloc_set(m_base_t, m_base_u)
             arm_pat := ast_a(an)
             arm_body := ast_b(an)
             pat_kind : ., mut = -1
@@ -5068,7 +5069,6 @@ fn gen_expr(node: int) -> int:
             if is_ident_bind == 1:
                 // Irrefutable binding arm: the name is the scrutinee itself.
                 bind_local(ident_ni, match_val)
-            sg_alloc_set(m_base_t, m_base_u)
             body_val : ., mut = gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
             ad := sg_alloc_cur_total() - m_base_t
