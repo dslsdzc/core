@@ -1460,6 +1460,9 @@ gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
 // Arena global variable indices (set by elf_gen before emit_alloc_body calls)
 gv_current_arena : int, mut = -1
 gv_arena_cursors : int, mut = -1
+gv_class_base : int, mut = -1
+gv_class_cursor : int, mut = -1
+gv_class_limit : int, mut = -1
 gv_arena_sizes : int, mut = -1
 gv_arena_pool_data : int, mut = -1
 gv_arena_max_size : int, mut = -1
@@ -1573,11 +1576,17 @@ fn elf_gen(buf: string) -> int:
     // Arena global variable indices
     gv_current_arena = -1
     gv_arena_cursors = -1
+    gv_class_base = -1
+    gv_class_cursor = -1
+    gv_class_limit = -1
     gv_arena_sizes = -1
     gv_arena_pool_data = -1
     gv_arena_max_size = -1
     cur_ni := str_intern("g_current_arena")
     cur_ni2 := str_intern("g_arena_cursors")
+    cls_ni1 := str_intern("g_class_base")
+    cls_ni2 := str_intern("g_class_cursor")
+    cls_ni3 := str_intern("g_class_limit")
     cur_ni3 := str_intern("g_arena_sizes")
     cur_ni4 := str_intern("g_arena_pool_data")
     cur_ni5 := str_intern("g_arena_max_size")
@@ -1598,6 +1607,12 @@ fn elf_gen(buf: string) -> int:
             gv_current_arena = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni2:
             gv_arena_cursors = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == cls_ni1:
+            gv_class_base = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == cls_ni2:
+            gv_class_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == cls_ni3:
+            gv_class_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni3:
             gv_arena_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni4:
