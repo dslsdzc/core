@@ -106,14 +106,29 @@ fn lsp_diag_json(di: int) -> string:
     col0 : ., mut = cl - 1
     if col0 < 0:
         col0 = 0
+    // End of the highlighted range. The span stores an exclusive end offset, so
+    // the last covered byte is hi - 1 and the end column is one past it. A
+    // zero-width span falls back to one character.
+    end_line0 : ., mut = line0
+    end_col0 : ., mut = col0 + 1
+    shi := cell_load(g_diags, di * DIAG_REC_SIZE + 56)
+    if smf >= 0 && shi > slo + 1:
+        el := sm_location_line(smf, shi - 1)
+        ec := sm_location_col(smf, shi - 1)
+        end_line0 = el - 1
+        if end_line0 < 0:
+            end_line0 = 0
+        end_col0 = ec
+        if end_col0 < 0:
+            end_col0 = 0
     out : string, mut = "{\"range\":{\"start\":{\"line\":"
     out = out + int_str(line0)
     out = out + ",\"character\":"
     out = out + int_str(col0)
     out = out + "},\"end\":{\"line\":"
-    out = out + int_str(line0)
+    out = out + int_str(end_line0)
     out = out + ",\"character\":"
-    out = out + int_str(col0 + 1)
+    out = out + int_str(end_col0)
     out = out + "}},\"severity\":1,\"message\":"
     out = out + lsp_json_escape_str(msg)
     out = out + "}"
