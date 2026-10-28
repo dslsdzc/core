@@ -1,6 +1,6 @@
 # AST span 第一次实施记录
 
-> 状态：已回退
+> 状态：已实施（第二次尝试成功后保留）
 > 日期：2026-10-27
 > 关联：`docs/superpowers/plans/2026-10-27-ast-span.md`
 
@@ -47,3 +47,26 @@
 4. 每一步都能单独构建和回退。
 
 代价是中间阶段节点多 8 字节，收益是每一步都可验证，不会出现整棵树红掉的状态。
+
+## 第二次尝试（同日，成功）
+
+第一次失败的真正原因是 `ast_line` 的返回值变了，而不是 span 本身。第二次保留它的历史语义：返回全局行号，由 span 解码得到。四个按全局行号索引的消费者因此不用改。
+
+关键实现：
+
+| 位置 | 变化 |
+|---|---|
+| `dyn_arr.cr` | 节点 64 字节，`OFF_AS_SPAN` 存 `lo + hi × 2³²` |
+| `lexer.cr` | token 偏移是全局字节偏移加 1，0 表示无位置 |
+| `parser.cr` | `alloc_node` 的位置参数改成 `tok_lo` / `tok_hi`；函数节点的位置也改为字节偏移 |
+| `source.cr` | `ast_line`、`ast_col`、`ast_lo`、`ast_hi`，以及带缓存的 `sm_span_file` |
+| `lib_manager.cr` | `lib_of_node` 直接从 span 取所属文件 |
+
+修复的两个既有缺陷：
+
+1. `def_type_sym` 用位置为 0 的合成节点推导类型符号所属库，导致所有类型符号 owner = -1。`sym_visible` 把 owner < 0 当作可见，于是非 pub 库类型（例如 `Argv4`）在库外可见。改为直接用声明行号算 owner。
+2. `find_struct_by_name` 把解析器写入的源名当作唯一名查询。所属库修正后，用户结构体与库类型同名时解析到库里的那个。改为先按（源名，当前库）查。
+
+性能：`sm_span_file` 缓存上一次命中的文件，`lib_of_node` 改走 span。`check src/compiler` 冷缓存 44.9 秒，改造前 52.7 秒。
+
+验证：`check src/compiler` 通过；pub-visibility、pub-label、lib-manager、cast 12/12、struct-impl 14/14、import-graph 7/7、diag-gate 28/28、impl 8/8、enum-impl 5/5、iface-ops 73/73、hit-table 24/24、ccr-types 53/53、apx-conversion、s1p-liveness、field-inference 5/5；canary 5/5 不变。
