@@ -509,6 +509,13 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
     cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
 
+    // Static-peak arenas bypass size classes and use one bump cursor.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_static)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 5, 5, r1)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 0)
+    jstatic := cp
+    cp = cp + ea_jne8(buf, pos + cp, 0)
+
     // 4: aligned = align_up(size + 8, 8).
     cp = cp + ea_mov_rr(buf, pos + cp, r6, r0)
     cp = cp + ea_add_imm8(buf, pos + cp, r6, 15)
@@ -677,6 +684,57 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_lea_base_index8(buf, pos + cp, 1, r7, r6, 0)
     cp = cp + ea_mov_store(buf, pos + cp, 1, r0)
     cp = cp + ea_lea_base_index8(buf, pos + cp, 0, r7, r6, 8)
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 94)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 95)
+    cp = cp + 2
+    w8(buf, pos + cp, 195)
+    cp = cp + 1
+
+    // ── Static peak: one bump cursor, no class lookup. ──
+    static_path := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, r6, r0)
+    cp = cp + ea_add_imm8(buf, pos + cp, r6, 15)
+    cp = cp + ea_and_imm8(buf, pos + cp, r6, 248)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_cursors)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 5, 5, r1)
+    cp = cp + ea_mov_rr(buf, pos + cp, 7, 5)
+    cp = cp + ea_add_rr(buf, pos + cp, 7, r6)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_sizes)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 15, 15, r1)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 7, 15)
+    jstatic_ok := cp
+    cp = cp + ea_jbe8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 5)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 15)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
+    cp = cp + ea_ud2(buf, pos + cp)
+    static_ok := cp
+    w8(buf, pos + jstatic_ok + 1, (static_ok - (jstatic_ok + 2)) % 256)
+    w8(buf, pos + jstatic + 1, (static_path - (jstatic + 2)) % 256)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_cursors)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 7)
+    cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r3, 5, 8)
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, 7)
+    cp = cp + ea_lea_base_index8(buf, pos + cp, 1, r3, 5, 0)
+    cp = cp + ea_mov_store(buf, pos + cp, 1, r0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 1, r0)
+    w8(buf, pos + cp, 49)
+    w8(buf, pos + cp + 1, 192)
+    cp = cp + 2
+    w8(buf, pos + cp, 252)
+    cp = cp + 1
+    w8(buf, pos + cp, 243)
+    w8(buf, pos + cp + 1, 170)
+    cp = cp + 2
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 14)
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 94)
     cp = cp + 2
@@ -1789,6 +1847,7 @@ gv_current_arena : int, mut = -1
 gv_arena_cursors : int, mut = -1
 gv_arena_slot_cursor : int, mut = -1
 gv_arena_slot : int, mut = -1
+gv_arena_static : int, mut = -1
 gv_arena_slot_next : int, mut = -1
 gv_arena_slot_free : int, mut = -1
 gv_arena_slot_count : int, mut = -1
@@ -1917,6 +1976,7 @@ fn elf_gen(buf: string) -> int:
     gv_arena_cursors = -1
     gv_arena_slot_cursor = -1
     gv_arena_slot = -1
+    gv_arena_static = -1
     gv_arena_slot_next = -1
     gv_arena_slot_free = -1
     gv_arena_slot_count = -1
@@ -1937,6 +1997,7 @@ fn elf_gen(buf: string) -> int:
     cur_ni2 := str_intern("g_arena_cursors")
     slot_cur_ni := str_intern("g_arena_slot_cursor")
     slot_ni := str_intern("g_arena_slot")
+    static_ni := str_intern("g_arena_static")
     slot_next_ni := str_intern("g_arena_slot_next")
     slot_free_ni := str_intern("g_arena_slot_free")
     slot_count_ni := str_intern("g_arena_slot_count")
@@ -1974,6 +2035,8 @@ fn elf_gen(buf: string) -> int:
             gv_arena_slot_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_ni:
             gv_arena_slot = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == static_ni:
+            gv_arena_static = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_next_ni:
             gv_arena_slot_next = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_free_ni:

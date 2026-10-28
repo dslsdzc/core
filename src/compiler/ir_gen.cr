@@ -6,6 +6,7 @@
 
 // Subgraph-level arena tracking for compile-time size estimation
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
+g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
 g_sg_arena_var   : string, mut    // per-sg: IR var for arena ID
 g_sg_arena_var_cap : int, mut
@@ -145,6 +146,7 @@ fn make_slice_header(data_var: int, len_code: int, len_var: int) -> int:
     if elem < 0:
         elem = TI_INT
     hdr := new_ir_var("slice_arg", alloc_type(TYP_SLICE, elem, 0))
+    track_alloc_array(2)
     emit(IR_ALLOC_ARRAY, hdr, 2, 0, 0, 0)
     emit(IR_STORE_INDEX, -1, hdr, data_var, 0, 0)
     if len_var >= 0:
@@ -274,6 +276,9 @@ fn grow_sg_alloc(needed: int):
     nb := alloc(nc * 8)
     cell_copy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb)
     g_sg_alloc_total = nb
+    nb2 := alloc(nc * 8)
+    cell_copy(g_sg_alloc_unknown, g_sg_alloc_cap * 8, nb2)
+    g_sg_alloc_unknown = nb2
     g_sg_alloc_cap = nc
 
 fn grow_sg_arena_var(needed: int):
@@ -293,11 +298,20 @@ fn sg_alloc_push(kind: int):
     grow_sg_alloc(g_sg_count + 1)
     grow_sg_arena_var(g_sg_count + 1)
     cell_store(g_sg_alloc_total, g_sg_count * 8, 0)
+    cell_store(g_sg_alloc_unknown, g_sg_count * 8, 0)
     sg_push(kind)
 
 fn sg_alloc_pop():
     total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    unk := cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8)
     arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
+    if g_sg_count > 1:
+        pi := g_sg_count - 2
+        ptotal := cell_load(g_sg_alloc_total, pi * 8)
+        cell_store(g_sg_alloc_total, pi * 8, ptotal + total)
+        punk := cell_load(g_sg_alloc_unknown, pi * 8)
+        if unk != 0:
+            cell_store(g_sg_alloc_unknown, pi * 8, 1)
     sg_pop()
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
@@ -305,6 +319,33 @@ fn track_alloc_size(size: int):
     if g_sg_count > 0 && str_len(g_sg_alloc_total) > 0:
         prev := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
         cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, prev + size)
+
+fn track_alloc_unknown():
+    if g_sg_count > 0 && str_len(g_sg_alloc_unknown) > 0:
+        cell_store(g_sg_alloc_unknown, (g_sg_count - 1) * 8, 1)
+
+fn track_alloc_array(count: int):
+    if count > 0 && count < 100000:
+        track_alloc_size(count * 8 + 8)
+    else:
+        track_alloc_unknown()
+
+fn track_alloc_struct(name_ni: int):
+    si := find_struct_by_name(name_ni)
+    if si >= 0:
+        track_alloc_size(si_field_count(si) * 8 + 8)
+    else:
+        track_alloc_unknown()
+
+fn sg_peak_of_current() -> int:
+    if g_sg_count <= 0:
+        return 0
+    if cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8) != 0:
+        return -1
+    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    if total <= 0:
+        return 0
+    return total
 
 fn new_ir_var(name: string, type_idx: int) -> int:
     idx := g_ir_var_count
@@ -3517,6 +3558,7 @@ fn gen_expr(node: int) -> int:
             return -1
         // Allocate results array
         arr_var := new_ir_var("go_arr", TI_UNIT)
+        track_alloc_array(range_count)
         emit(IR_ALLOC_ARRAY, arr_var, range_count, 0, 0, 0)
         // Spawn each iteration
         if ast_kind(body) == EXPR_CALL:
@@ -4036,6 +4078,15 @@ fn gen_expr(node: int) -> int:
                     an3 = cell_load(arg_nodes, ai3 * 8)
                 emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3))
                 ai3 = ai3 + 1
+        if func_ni >= 0 && runtime_frontend_builtin_is_alloc(func_ni) != 0:
+            if ac >= 1:
+                an := cell_load(arg_nodes, 0)
+                if an >= 0 && ast_kind(an) == EXPR_INT:
+                    track_alloc_size(ast_int_val(an))
+                else:
+                    track_alloc_unknown()
+            else:
+                track_alloc_unknown()
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
         // the row on the call result lets a later match recover the payload form
@@ -4108,6 +4159,7 @@ fn gen_expr(node: int) -> int:
         then_val = force_if_thunk(then_val)
         if else_node >= 0 && then_val >= 0:
             result_var = new_ir_var("if_res", irv_type(then_val))
+            track_alloc_size(16)
             emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(then_val))
             if g_optrep_on != 0:
                 result_rep = new_ir_var("if_res_rep", TI_INT)
@@ -4123,6 +4175,7 @@ fn gen_expr(node: int) -> int:
             else_val = force_if_thunk(else_val)
             if result_var < 0 && else_val >= 0:
                 result_var = new_ir_var("if_res", irv_type(else_val))
+                track_alloc_size(16)
                 emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(else_val))
                 if g_optrep_on != 0:
                     result_rep = new_ir_var("if_res_rep", TI_INT)
@@ -4161,9 +4214,9 @@ fn gen_expr(node: int) -> int:
         gen_expr(ast_a(node))
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if peak != 0:
+            iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)  // arena reused per iteration
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
@@ -4198,9 +4251,9 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if peak != 0:
+            iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
@@ -4293,6 +4346,7 @@ fn gen_expr(node: int) -> int:
         // the body: an integer loop binds the index, a sequence loop binds the
         // loaded element.
         ivar := new_ir_var("for_i", TI_INT)
+        track_alloc_size(16)
         emit(IR_ALLOC, ivar, 0, 0, 0, TI_INT)
         emit(IR_STORE, -1, ivar, start_var, 0, 0)
         header_lbl := new_label()
@@ -4330,9 +4384,9 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if peak != 0:
+            iri_set_s1(arena_instr, peak)
         // Increment ivar and jump to header (arena reset runs on every path,
         // including the continue path, so per-iteration memory is reused)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
@@ -4362,6 +4416,7 @@ fn gen_expr(node: int) -> int:
         match_val = force_if_thunk(match_val)
         // Allocate a result variable for the match expression value
         result_var := new_ir_var("match_res", TI_INT)
+        track_alloc_size(16)
         emit(IR_ALLOC, result_var, 0, 0, 0, TI_INT)
         // The result slot gets a representation bit, defaulting to 1 (boxed).
         // Each arm sets it at its write point, so consumers (LET, return, unpack)
@@ -5048,6 +5103,7 @@ fn gen_expr(node: int) -> int:
                 if sz > 0:
                     // Array stride is a target fact; corearch reconstructs it from
                     // the allocation count. src2/src3 stay zero on the wire.
+                    track_alloc_array(sz)
                     emit(IR_ALLOC_ARRAY, var, sz, 0, 0, 0)
                     is_arr = 1
                     // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
@@ -5056,6 +5112,7 @@ fn gen_expr(node: int) -> int:
         // For dyn vars with initializer: skip allocation (value is packed below)
         if is_dyn_var == 0 || val_node < 0:
             if is_arr == 0:
+                track_alloc_size(16)
                 emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
         // Declared scalar/pointer locals keep their declared IR row even without
         // an initializer. Leaving them TI_UNIT made uninitialized `x : int` look
@@ -5292,6 +5349,7 @@ fn gen_expr(node: int) -> int:
                 if ka == TYP_ARRAY || ka == TYP_SLICE:
                     elem_ti_s = get_type_data(ati)
                 v = new_ir_var("slice", alloc_type(TYP_SLICE, elem_ti_s, 0))
+                track_alloc_array(2)
                 emit(IR_ALLOC_ARRAY, v, 2, 0, 0, 0)
                 emit(IR_STORE_INDEX, -1, v, data_var, 0, 0)
             // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
@@ -5380,6 +5438,7 @@ fn gen_expr(node: int) -> int:
         if si >= 0:
             name_ni = si_name(si)
         s := new_ir_var("struct", TI_UNIT)
+        track_alloc_struct(name_ni)
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0)
         fi : ., mut = 0
         fn2 : ., mut = ast_b(node)
@@ -5411,6 +5470,7 @@ fn gen_expr(node: int) -> int:
         // F5 契约（见 parser.cr 下标分支）：a=首 wrapper（连续）、b=元素个数；wrapper.a=元素值
         // 节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移直取相邻节点。
         v : ., mut = new_ir_var("arr", TI_UNIT)
+        track_alloc_unknown()
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0)
         elem_ti : ., mut = TI_INT
         // (A) T3：数组级元素可选性预扫，元素序在后的 Some/None 也必须影响
@@ -5489,9 +5549,9 @@ fn gen_expr(node: int) -> int:
         emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
         arena_instr := g_ir_instr_count - 1
         ret := gen_expr(ast_a(node))
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if peak != 0:
+            iri_set_s1(arena_instr, peak)
         sg_alloc_pop()
         return ret
     if ast_kind(node) == EXPR_AS:
@@ -5578,6 +5638,7 @@ fn gen_expr(node: int) -> int:
         ec : ., mut = ast_b(node)
         tv := new_ir_var("tuple", TI_INT)
         // Element stride is a target fact; corearch reconstructs it.
+        track_alloc_array(ec)
         emit(IR_ALLOC_ARRAY, tv, ec, 0, 0, 0)
         // Store each element at its offset
         e : ., mut = 0
@@ -5776,9 +5837,9 @@ fn ir_gen_func(fi: int):
     g_cur_ret_dex_opt = 0
 
     // Patch arena size and reset before return
-    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-    if total > 0:
-        iri_set_s1(arena_instr, total)
+    peak := sg_peak_of_current()
+    if peak != 0:
+        iri_set_s1(arena_instr, peak)
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
     // Add return at end if not already terminated（可达 = 后备 return；不可达 = 死码，
@@ -5999,6 +6060,7 @@ fn inject_global_inits():
                     cnt := agg_elem_count_of(ast_b(lnode))
                     if cnt > 0:
                         v = new_ir_var("ginit", TI_UNIT)
+                        track_alloc_array(cnt)
                         emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0)
                         irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt))
                 if v >= 0:

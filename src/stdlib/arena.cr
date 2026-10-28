@@ -25,6 +25,7 @@ ARENA_CLASS_COUNT : int = 26
 
 g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current slot per arena
 g_arena_slot : string, mut          // int[] — current slot id per arena
+g_arena_static : string, mut        // int[] — 1 when the arena uses a static peak
 g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
 g_arena_slot_free : int, mut = -1
 g_arena_slot_count : int, mut = 0
@@ -109,6 +110,17 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_slot, g_arena_cap * 8, nb4b)
     g_arena_slot = nb4b
+    // static peak flag
+    nb4c := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4c, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_static, g_arena_cap * 8, nb4c)
+    g_arena_static = nb4c
     // class base / cursor / limit
     cn := nc * ARENA_CLASS_COUNT * 8
     nb5 := alloc(cn)
@@ -194,7 +206,9 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_arena_count = 0
     g_arena_cap = 0
 
-fn arena_new() -> int, pub:
+fn arena_new_sized(peak: int) -> int, pub:
+    if peak > g_arena_max_size:
+        peak = 0
     ai : ., mut = -1
 
     // Try free list first
@@ -211,7 +225,12 @@ fn arena_new() -> int, pub:
 
     // Initialize slot
     cell_store(g_arena_cursors, ai * 8, 0)
-    cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
+    if peak > 0:
+        cell_store(g_arena_sizes, ai * 8, peak)
+        cell_store(g_arena_static, ai * 8, 1)
+    else:
+        cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
+        cell_store(g_arena_static, ai * 8, 0)
     cell_store(g_arena_parents, ai * 8, -1)
     sl : ., mut = g_arena_slot_free
     if sl >= 0:
@@ -242,6 +261,9 @@ fn arena_new() -> int, pub:
     // Activate
     g_current_arena = ai
     return ai
+
+fn arena_new() -> int, pub:
+    return arena_new_sized(0)
 
 fn arena_reset(ai: int), pub:
     if ai < 0 || ai >= g_arena_count:

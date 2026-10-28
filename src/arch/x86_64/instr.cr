@@ -2009,9 +2009,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_ARENA_NEW:
         do2 := g2_slot(d)
-        if s1 > 0:
-            // Scope actually allocates: create a fresh arena via arena_new().
-            ni_arena_new := str_intern("arena_new")
+        if s1 != 0:
+            // s1 > 0 is a static peak in bytes; s1 < 0 means the region has
+            // an unknown-size allocation and uses the dynamic arena.
+            ni_arena_new : ., mut = str_intern("arena_new")
+            if s1 > 0:
+                ni_arena_new = str_intern("arena_new_sized")
+                // mov rdi, s1
+                w8(buf, pos+cp, 72)
+                w8(buf, pos+cp+1, 199)
+                w8(buf, pos+cp+2, 199)
+                e2_w32(buf, pos+cp+3, s1)
+                cp = cp + 7
             grow_call_patch(g_x86_call_patch_count + 1)
             cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
             cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_new)
