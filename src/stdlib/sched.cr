@@ -22,7 +22,7 @@ fn sched_init(), pub:
         return
 
     // Initialize arena system (required by goroutine/chan)
-    arena_init(1048576, 65536)  // 1MB pool, 64KB chunks
+    arena_init(1048576, 131072)  // 1MB pool, 128KB chunks (25 * 4KB classes + large)
 
     // Initialize M workers (one per CPU)
     // For now: single-threaded (1 M, cooperative)

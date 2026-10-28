@@ -506,39 +506,19 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + jbe_found + 1, (class_found - (jbe_found + 2)) % 256)
     w8(buf, pos + jmp_loop + 1, (class_loop - (jmp_loop + 2)) % 256)
 
-    // 6: base and slice. Classes 0..18 use 2KB slices, 19..24 use 4KB,
-    // class 25 uses the slot remainder.
-    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 19)
-    jae_big := cp
-    cp = cp + ea_jae8(buf, pos + cp, 0)
+    // 6: base = slot_base + class * 4096; slice = 4096, or the slot
+    // remainder for class 25.
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
-    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 11)
-    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
-    cp = cp + ea_mov_imm32(buf, pos + cp, 14, 2048)
-    jmp_have1 := cp
-    cp = cp + ea_jmp8(buf, pos + cp, 0)
-    base_big := cp
-    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
-    jae_huge := cp
-    cp = cp + ea_jae8(buf, pos + cp, 0)
-    cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
-    cp = cp + ea_add_imm8(buf, pos + cp, r7, -19)
     cp = cp + ea_shl_imm8(buf, pos + cp, r7, 12)
     cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
-    cp = cp + ea_add_imm32(buf, pos + cp, r7, 38912)
     cp = cp + ea_mov_imm32(buf, pos + cp, 14, 4096)
-    jmp_have2 := cp
-    cp = cp + ea_jmp8(buf, pos + cp, 0)
-    base_huge := cp
-    cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
-    cp = cp + ea_add_imm32(buf, pos + cp, r7, 63488)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
+    jne_have := cp
+    cp = cp + ea_jne8(buf, pos + cp, 0)
     cp = cp + ea_mov_rr(buf, pos + cp, 14, r2)
     cp = cp + ea_sub_rr(buf, pos + cp, 14, r7)
     base_have := cp
-    w8(buf, pos + jae_big + 1, (base_big - (jae_big + 2)) % 256)
-    w8(buf, pos + jmp_have1 + 1, (base_have - (jmp_have1 + 2)) % 256)
-    w8(buf, pos + jae_huge + 1, (base_huge - (jae_huge + 2)) % 256)
-    w8(buf, pos + jmp_have2 + 1, (base_have - (jmp_have2 + 2)) % 256)
+    w8(buf, pos + jne_have + 1, (base_have - (jne_have + 2)) % 256)
 
     // 7: idx = arena * 26 + class; cursor = class_cursor[idx].
     cp = cp + ea_mov_rr(buf, pos + cp, 14, r1)

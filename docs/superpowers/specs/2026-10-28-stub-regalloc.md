@@ -124,10 +124,7 @@ arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超
 3. canary 5/5，值与接入前一致。
 4. `tests/selfhost/test_live_ranges.py` 通过。
 
-## 不包含
+## 已知差异
 
-1. Second-chance 在扫描结束后重试被溢出的条目；调用点驱逐的条目不参与重试，因为它们的 home 是调用失效的结果，不是放置失败。
-2. stub 编码器的 spill 装载和写回。当前 stub 有 9 个虚拟寄存器和 9 个物理
-   寄存器，不会溢出；home 槽路径还没有指令序列。
-3. 竞技场 size class 在 ELF 发射体中的实现。`arena.cr` 的 26 档元数据已经存在，
-   但 `emit_alloc_body` 仍然使用单游标 bump。
+1. 每个档位在自己的 slot 内只有一个 4KB 切片；切片用尽时 trap，不挂链申请新 slot。
+2. class 25 使用 slot 剩余空间。
