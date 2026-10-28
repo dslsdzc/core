@@ -429,6 +429,13 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_cmp_imm32(buf, pos + cp, 7, 67108864)
     j0 := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 7)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
     w8(buf, pos + j0 + 1, (cp - (j0 + 2)) % 256)
 
@@ -493,6 +500,14 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_cmp_rr(buf, pos + cp, r4, 7)
     j2 := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r6)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r7)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
     w8(buf, pos + j2 + 1, (cp - (j2 + 2)) % 256)
 
@@ -1571,6 +1586,10 @@ gv_arena_cursors : int, mut = -1
 gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
+gv_alloc_fail_request : int, mut = -1
+gv_alloc_fail_class : int, mut = -1
+gv_alloc_fail_cursor : int, mut = -1
+gv_alloc_fail_limit : int, mut = -1
 gv_arena_sizes : int, mut = -1
 gv_arena_pool_data : int, mut = -1
 gv_arena_max_size : int, mut = -1
@@ -1687,6 +1706,10 @@ fn elf_gen(buf: string) -> int:
     gv_class_base = -1
     gv_class_cursor = -1
     gv_class_limit = -1
+    gv_alloc_fail_request = -1
+    gv_alloc_fail_class = -1
+    gv_alloc_fail_cursor = -1
+    gv_alloc_fail_limit = -1
     gv_arena_sizes = -1
     gv_arena_pool_data = -1
     gv_arena_max_size = -1
@@ -1695,6 +1718,10 @@ fn elf_gen(buf: string) -> int:
     cls_ni1 := str_intern("g_class_base")
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
+    fail_ni1 := str_intern("g_alloc_fail_request")
+    fail_ni2 := str_intern("g_alloc_fail_class")
+    fail_ni3 := str_intern("g_alloc_fail_cursor")
+    fail_ni4 := str_intern("g_alloc_fail_limit")
     cur_ni3 := str_intern("g_arena_sizes")
     cur_ni4 := str_intern("g_arena_pool_data")
     cur_ni5 := str_intern("g_arena_max_size")
@@ -1721,6 +1748,14 @@ fn elf_gen(buf: string) -> int:
             gv_class_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni3:
             gv_class_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == fail_ni1:
+            gv_alloc_fail_request = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == fail_ni2:
+            gv_alloc_fail_class = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == fail_ni3:
+            gv_alloc_fail_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == fail_ni4:
+            gv_alloc_fail_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni3:
             gv_arena_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni4:
