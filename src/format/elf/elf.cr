@@ -551,6 +551,45 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     // 7: carve a new 4KB chunk from the current slot.
     chunk_alloc := cp
+    // Large objects (28KB..128KB) take the current slot tail. If the tail is
+    // too small, allocate a fresh slot first.
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
+    jne_not_large := cp
+    cp = cp + ea_jne8(buf, pos + cp, 0)
+    cp = cp + ea_cmp_imm32(buf, pos + cp, r6, 28672)
+    jbe_not_large2 := cp
+    cp = cp + ea_jbe32(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_max_size)
+    cp = cp + ea_cmp_rr(buf, pos + cp, r6, 5)
+    ja_cap_large := cp
+    cp = cp + ea_ja32(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 15, 15, r1)
+    cp = cp + ea_sub_rr(buf, pos + cp, 5, 15)
+    cp = cp + ea_cmp_rr(buf, pos + cp, r6, 5)
+    jbe_large_fit := cp
+    cp = cp + ea_jbe32(buf, pos + cp, 0)
+    jmp_slot_large := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+    large_fit := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
+    cp = cp + ea_add_rr(buf, pos + cp, r7, 15)
+    cp = cp + ea_mov_rr(buf, pos + cp, 5, r2)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_base)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 14, r7)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_limit)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 14, 5)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 14, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_max_size)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 5)
+    jmp_base_large := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+    not_large := cp
+    w8(buf, pos + jne_not_large + 1, (not_large - (jne_not_large + 2)) % 256)
+    w32(buf, pos + jbe_not_large2 + 2, not_large - (jbe_not_large2 + 6))
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
     cp = cp + ea_mov_load_index8(buf, pos + cp, r5, 15, r1)
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
@@ -642,11 +681,13 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
 
+    w32(buf, pos + ja_cap_large + 2, capacity_full - (ja_cap_large + 6))
     w32(buf, pos + jslot_bad + 2, capacity_full - (jslot_bad + 6))
     w32(buf, pos + jl_bump + 2, slot_bump - (jl_bump + 6))
     w32(buf, pos + jmp_have + 1, slot_have - (jmp_have + 5))
     w8(buf, pos + jae_cap + 1, (capacity_full - (jae_cap + 2)) % 256)
     w32(buf, pos + jmp_chunk + 1, chunk_alloc - (jmp_chunk + 5))
+    w32(buf, pos + jmp_slot_large + 1, slot_full - (jmp_slot_large + 5))
 
     class_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
@@ -659,6 +700,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
 
+    w32(buf, pos + jmp_base_large + 1, base_ok - (jmp_base_large + 5))
     alloc_ready := cp
     w32(buf, pos + jge_base + 2, base_ok - (jge_base + 6))
     w32(buf, pos + ja_slot + 2, slot_full - (ja_slot + 6))
