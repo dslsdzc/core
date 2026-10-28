@@ -324,6 +324,19 @@ fn ea_jne8(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos + 1, rel % 256)
     return 2
 
+fn ea_jae8(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 115)
+    w8(buf, pos + 1, rel % 256)
+    return 2
+
+fn ea_inc(buf: string, pos: int, dst: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 255)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 0, dst % 8)
+    return cp - pos
+
 
 
 
@@ -466,66 +479,95 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
     cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
 
-    // 4: aligned = align_up(size + 8, 8); class = min(aligned / 16, 25).
+    // 4: aligned = align_up(size + 8, 8).
     cp = cp + ea_mov_rr(buf, pos + cp, r6, r0)
     cp = cp + ea_add_imm8(buf, pos + cp, r6, 15)
     cp = cp + ea_and_imm8(buf, pos + cp, r6, 248)
-    cp = cp + ea_mov_rr(buf, pos + cp, r4, r6)
-    cp = cp + ea_shr_imm8(buf, pos + cp, r4, 4)
-    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
-    jc := cp
+
+    // 5: class scan over the 25-entry 1.25x table.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_class_sizes)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 15, 0)
+    class_loop := cp
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 15, 25)
+    jae_large := cp
+    cp = cp + ea_jae8(buf, pos + cp, 0)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 14, 15)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 6, 0)
+    jbe_found := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
-    cp = cp + ea_mov_imm32(buf, pos + cp, r4, 25)
-    w8(buf, pos + jc + 1, (cp - (jc + 2)) % 256)
-
-    // 5: idx = arena * 26 + class; base = slot_base + class * 1024.
-    // v5 is the forced spill: keep idx in its home slot.
-    cp = cp + ea_mov_rr(buf, pos + cp, 15, r1)
-    cp = cp + ea_imul_imm8(buf, pos + cp, 15, 15, 26)
-    cp = cp + ea_add_rr(buf, pos + cp, 15, r4)
-    cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_alloc_home_idx)
-    cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
-    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 10)
-    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
-
-    // 6: limit = base + 1024, except class 25 which uses slot_end.
-    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
-    jl := cp
-    cp = cp + ea_jne8(buf, pos + cp, 0)
-    cp = cp + ea_mov_rr(buf, pos + cp, 7, r2)
-    jmp_large := cp
+    cp = cp + ea_inc(buf, pos + cp, 15)
+    jmp_loop := cp
     cp = cp + ea_jmp8(buf, pos + cp, 0)
-    cp = cp + ea_mov_rr(buf, pos + cp, 7, r7)
-    cp = cp + ea_add_imm32(buf, pos + cp, 7, 1024)
-    w8(buf, pos + jl + 1, (cp - (jl + 2)) % 256)
-    w8(buf, pos + jmp_large + 1, (cp - (jmp_large + 2)) % 256)
+    class_large := cp
+    cp = cp + ea_mov_imm32(buf, pos + cp, 15, 25)
+    class_found := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, r4, 15)
+    w8(buf, pos + jae_large + 1, (class_large - (jae_large + 2)) % 256)
+    w8(buf, pos + jbe_found + 1, (class_found - (jbe_found + 2)) % 256)
+    w8(buf, pos + jmp_loop + 1, (class_loop - (jmp_loop + 2)) % 256)
 
-    // 7: slice = limit - base; cursor = class_cursor[idx].
-    cp = cp + ea_sub_rr(buf, pos + cp, 7, r7)
-    cp = cp + ea_mov_rr(buf, pos + cp, r4, r6)
+    // 6: base and slice. Classes 0..18 use 2KB slices, 19..24 use 4KB,
+    // class 25 uses the slot remainder.
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 19)
+    jae_big := cp
+    cp = cp + ea_jae8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
+    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 11)
+    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 14, 2048)
+    jmp_have1 := cp
+    cp = cp + ea_jmp8(buf, pos + cp, 0)
+    base_big := cp
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
+    jae_huge := cp
+    cp = cp + ea_jae8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
+    cp = cp + ea_add_imm8(buf, pos + cp, r7, -19)
+    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 12)
+    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
+    cp = cp + ea_add_imm32(buf, pos + cp, r7, 38912)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 14, 4096)
+    jmp_have2 := cp
+    cp = cp + ea_jmp8(buf, pos + cp, 0)
+    base_huge := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
+    cp = cp + ea_add_imm32(buf, pos + cp, r7, 63488)
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, r2)
+    cp = cp + ea_sub_rr(buf, pos + cp, 14, r7)
+    base_have := cp
+    w8(buf, pos + jae_big + 1, (base_big - (jae_big + 2)) % 256)
+    w8(buf, pos + jmp_have1 + 1, (base_have - (jmp_have1 + 2)) % 256)
+    w8(buf, pos + jae_huge + 1, (base_huge - (jae_huge + 2)) % 256)
+    w8(buf, pos + jmp_have2 + 1, (base_have - (jmp_have2 + 2)) % 256)
+
+    // 7: idx = arena * 26 + class; cursor = class_cursor[idx].
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, r1)
+    cp = cp + ea_imul_imm8(buf, pos + cp, 14, 14, 26)
+    cp = cp + ea_add_rr(buf, pos + cp, 14, r4)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 14, gv_alloc_home_idx)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_alloc_home_idx)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, 15)
-    cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
-    cp = cp + ea_add_rr(buf, pos + cp, r4, 0)
-    cp = cp + ea_cmp_rr(buf, pos + cp, r4, 7)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, 14)
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, r6)
+    cp = cp + ea_add_rr(buf, pos + cp, 15, 0)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 15, 14)
     j2 := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
     cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, r6)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, r7)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 14)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
     w8(buf, pos + j2 + 1, (cp - (j2 + 2)) % 256)
 
-    // 8: commit class_cursor[idx] = new.
+    // 8: commit class_cursor[idx] = new; save the old cursor.
+    cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_alloc_home_idx)
-    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, 15, r4)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, 14, 15)
 
     // 9: zero the data bytes and write the hidden length header.
     cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r7, r6, 8)
@@ -1610,6 +1652,7 @@ gv_arena_cursors : int, mut = -1
 gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
+gv_class_sizes : int, mut = -1
 gv_alloc_fail_request : int, mut = -1
 gv_alloc_fail_class : int, mut = -1
 gv_alloc_fail_cursor : int, mut = -1
@@ -1731,6 +1774,7 @@ fn elf_gen(buf: string) -> int:
     gv_class_base = -1
     gv_class_cursor = -1
     gv_class_limit = -1
+    gv_class_sizes = -1
     gv_alloc_fail_request = -1
     gv_alloc_fail_class = -1
     gv_alloc_fail_cursor = -1
@@ -1744,6 +1788,7 @@ fn elf_gen(buf: string) -> int:
     cls_ni1 := str_intern("g_class_base")
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
+    cls_sz_ni := str_intern("g_class_sizes")
     fail_ni1 := str_intern("g_alloc_fail_request")
     fail_ni2 := str_intern("g_alloc_fail_class")
     fail_ni3 := str_intern("g_alloc_fail_cursor")
@@ -1775,6 +1820,8 @@ fn elf_gen(buf: string) -> int:
             gv_class_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni3:
             gv_class_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == cls_sz_ni:
+            gv_class_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == fail_ni1:
             gv_alloc_fail_request = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == fail_ni2:

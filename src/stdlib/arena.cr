@@ -27,6 +27,7 @@ g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current s
 g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
+g_class_sizes : string, mut         // int[] — 25 class sizes, 1.25x steps
 
 // Allocation-failure witness. Written before the runtime trap; a core dump or a
 // debugger can read these four values.
@@ -134,6 +135,32 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_current_arena = -1
     g_arena_pool_data = alloc(pool_size)
     g_arena_max_size = arena_size
+    g_class_sizes = alloc(25 * 8)
+    cell_store(g_class_sizes, 0, 16)
+    cell_store(g_class_sizes, 8, 20)
+    cell_store(g_class_sizes, 16, 25)
+    cell_store(g_class_sizes, 24, 31)
+    cell_store(g_class_sizes, 32, 39)
+    cell_store(g_class_sizes, 40, 49)
+    cell_store(g_class_sizes, 48, 61)
+    cell_store(g_class_sizes, 56, 76)
+    cell_store(g_class_sizes, 64, 95)
+    cell_store(g_class_sizes, 72, 119)
+    cell_store(g_class_sizes, 80, 149)
+    cell_store(g_class_sizes, 88, 186)
+    cell_store(g_class_sizes, 96, 232)
+    cell_store(g_class_sizes, 104, 290)
+    cell_store(g_class_sizes, 112, 362)
+    cell_store(g_class_sizes, 120, 452)
+    cell_store(g_class_sizes, 128, 565)
+    cell_store(g_class_sizes, 136, 706)
+    cell_store(g_class_sizes, 144, 882)
+    cell_store(g_class_sizes, 152, 1102)
+    cell_store(g_class_sizes, 160, 1377)
+    cell_store(g_class_sizes, 168, 1721)
+    cell_store(g_class_sizes, 176, 2151)
+    cell_store(g_class_sizes, 184, 2689)
+    cell_store(g_class_sizes, 192, 3361)
     g_arena_free_list = -1
     g_arena_count = 0
     g_arena_cap = 0
