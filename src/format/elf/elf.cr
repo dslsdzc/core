@@ -329,6 +329,23 @@ fn ea_jae8(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos + 1, rel % 256)
     return 2
 
+fn ea_jge32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 141)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
+fn ea_ja32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 135)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
+fn ea_jmp32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 233)
+    e2_w32(buf, pos + 1, rel)
+    return 5
+
 fn ea_inc(buf: string, pos: int, dst: int) -> int:
     cp := pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
@@ -433,6 +450,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     r6 := a.assigned(6)
     r7 := a.assigned(7)
     r8 := a.assigned(8)
+    r14 := 14
+    r15 := 15
 
     cp : ., mut = 0
     fva := TEXT_BASE + pos
@@ -506,48 +525,84 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + jbe_found + 1, (class_found - (jbe_found + 2)) % 256)
     w8(buf, pos + jmp_loop + 1, (class_loop - (jmp_loop + 2)) % 256)
 
-    // 6: base = slot_base + class * 4096; slice = 4096, or the slot
-    // remainder for class 25.
-    cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
-    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 12)
-    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
-    cp = cp + ea_mov_imm32(buf, pos + cp, 14, 4096)
-    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
-    jne_have := cp
-    cp = cp + ea_jne8(buf, pos + cp, 0)
-    cp = cp + ea_mov_rr(buf, pos + cp, 14, r2)
-    cp = cp + ea_sub_rr(buf, pos + cp, 14, r7)
-    base_have := cp
-    w8(buf, pos + jne_have + 1, (base_have - (jne_have + 2)) % 256)
-
-    // 7: idx = arena * 26 + class; cursor = class_cursor[idx].
+    // 6: idx = arena * 26 + class; class_base[idx] is the current chunk.
     cp = cp + ea_mov_rr(buf, pos + cp, 14, r1)
     cp = cp + ea_imul_imm8(buf, pos + cp, 14, 14, 26)
     cp = cp + ea_add_rr(buf, pos + cp, 14, r4)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 14, gv_alloc_home_idx)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, 14)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_base)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, r7, 15, 14)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r7, 0)
+    jge_base := cp
+    cp = cp + ea_jge32(buf, pos + cp, 0)
+
+    // 7: carve a new 4KB chunk from the current slot.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, r5, 15, r1)
+    cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
+    cp = cp + ea_add_rr(buf, pos + cp, r7, r5)
+    cp = cp + ea_mov_rr(buf, pos + cp, r5, r7)
+    cp = cp + ea_add_imm32(buf, pos + cp, r5, 4096)
+    cp = cp + ea_cmp_rr(buf, pos + cp, r5, r2)
+    ja_slot := cp
+    cp = cp + ea_ja32(buf, pos + cp, 0)
+    cp = cp + ea_sub_rr(buf, pos + cp, r5, r3)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, r5)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_base)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r14, r7)
+    cp = cp + ea_mov_rr(buf, pos + cp, r5, r7)
+    cp = cp + ea_add_imm32(buf, pos + cp, r5, 4096)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_limit)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r14, r5)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r14, 0)
+
+    base_ok := cp
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_cursor)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 15, r14)
     cp = cp + ea_mov_rr(buf, pos + cp, 15, r6)
     cp = cp + ea_add_rr(buf, pos + cp, 15, 0)
-    cp = cp + ea_cmp_rr(buf, pos + cp, 15, 14)
-    j2 := cp
-    cp = cp + ea_jbe8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_class_limit)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 5, 5, r14)
+    cp = cp + ea_sub_rr(buf, pos + cp, 5, r7)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 15, 5)
+    ja_class := cp
+    cp = cp + ea_ja32(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_class_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 5, r14, 15)
+    cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
+    jmp_ready := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+
+    slot_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
     cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r7)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, 14)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r2)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
-    w8(buf, pos + j2 + 1, (cp - (j2 + 2)) % 256)
 
-    // 8: commit class_cursor[idx] = new; save the old cursor.
-    cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
-    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, 14, 15)
+    class_full := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 5)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
+    cp = cp + ea_ud2(buf, pos + cp)
+
+    alloc_ready := cp
+    w32(buf, pos + jge_base + 2, base_ok - (jge_base + 6))
+    w32(buf, pos + ja_slot + 2, slot_full - (ja_slot + 6))
+    w32(buf, pos + ja_class + 2, class_full - (ja_class + 6))
+    w32(buf, pos + jmp_ready + 1, alloc_ready - (jmp_ready + 5))
 
     // 9: zero the data bytes and write the hidden length header.
     cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r7, r6, 8)
@@ -1629,6 +1684,7 @@ gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
 // Arena global variable indices (set by elf_gen before emit_alloc_body calls)
 gv_current_arena : int, mut = -1
 gv_arena_cursors : int, mut = -1
+gv_arena_slot_cursor : int, mut = -1
 gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
@@ -1751,6 +1807,7 @@ fn elf_gen(buf: string) -> int:
     // Arena global variable indices
     gv_current_arena = -1
     gv_arena_cursors = -1
+    gv_arena_slot_cursor = -1
     gv_class_base = -1
     gv_class_cursor = -1
     gv_class_limit = -1
@@ -1765,6 +1822,7 @@ fn elf_gen(buf: string) -> int:
     gv_arena_max_size = -1
     cur_ni := str_intern("g_current_arena")
     cur_ni2 := str_intern("g_arena_cursors")
+    slot_cur_ni := str_intern("g_arena_slot_cursor")
     cls_ni1 := str_intern("g_class_base")
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
@@ -1794,6 +1852,8 @@ fn elf_gen(buf: string) -> int:
             gv_current_arena = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni2:
             gv_arena_cursors = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == slot_cur_ni:
+            gv_arena_slot_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni1:
             gv_class_base = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni2:
