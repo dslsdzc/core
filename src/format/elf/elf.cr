@@ -335,6 +335,12 @@ fn ea_jge32(buf: string, pos: int, rel: int) -> int:
     e2_w32(buf, pos + 2, rel)
     return 6
 
+fn ea_jae32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 131)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
 fn ea_ja32(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos, 15)
     w8(buf, pos + 1, 135)
@@ -678,6 +684,10 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos + cp + 1, 0)
     cp = cp + 5
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_count)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_pool_slots)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
+    jae_grow_fail := cp
+    cp = cp + ea_jae32(buf, pos + cp, 0)
     slot_have := cp
     w32(buf, pos + jb_have_slot + 2, slot_have - (jb_have_slot + 6))
     cp = cp + ea_mov_rr(buf, pos + cp, 15, 5)
@@ -724,6 +734,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 64)
     ja_multi_cap := cp
     cp = cp + ea_ja32(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_segment_count)
     grow_call_patch(g_x86_call_patch_count + 1)
     cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
     cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("arena_grow_pool"))
@@ -732,6 +743,9 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos + cp + 1, 0)
     cp = cp + 5
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_segment_count)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 15, 14)
+    jbe_grow_fail := cp
+    cp = cp + ea_jbe32(buf, pos + cp, 0)
     cp = cp + ea_add_imm8(buf, pos + cp, 15, -1)
     cp = cp + ea_mov_rr(buf, pos + cp, 14, 15)
     cp = cp + ea_shl_imm8(buf, pos + cp, 14, 6)
@@ -794,6 +808,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     w32(buf, pos + ja_cap_large + 2, large_multi - (ja_cap_large + 6))
     w32(buf, pos + ja_multi_cap + 2, capacity_full - (ja_multi_cap + 6))
+    w32(buf, pos + jae_grow_fail + 2, capacity_full - (jae_grow_fail + 6))
+    w32(buf, pos + jbe_grow_fail + 2, capacity_full - (jbe_grow_fail + 6))
     class_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)

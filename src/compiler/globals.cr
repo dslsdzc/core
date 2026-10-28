@@ -544,6 +544,7 @@ g_spec_cap : int, mut
 
 // Optimization levels and metadata (extensible key-value store)
 g_opt_level : int, mut     // 0=none, 1=regalloc, 2=stackshare, 3=cse
+g_arena_pool_limit_cfg : int, mut = 0
 g_opt_meta : string, mut   // metadata buffer for .ccr v3+
 g_opt_meta_count : int, mut
 g_opt_meta_cap : int, mut

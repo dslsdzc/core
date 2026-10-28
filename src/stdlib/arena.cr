@@ -1,3 +1,5 @@
+import io
+
 // Arena memory model — per-subgraph bump allocator.
 // Each subgraph (function/loop/for/unsafe) gets its own Arena.
 // alloc() checks g_current_arena and uses the arena chunk when set.
@@ -32,6 +34,9 @@ g_arena_slot_count : int, mut = 0
 g_arena_pool_slots : int, mut = 0
 g_segment_base : string, mut        // string[] — 1MB pool segments
 g_segment_count : int, mut = 0
+g_arena_pool_limit : int, mut = 1073741824
+g_segment_cap : int, mut = 0
+g_slot_next_cap : int, mut = 0
 g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
@@ -167,10 +172,14 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     if arena_size < 131072:
         arena_size = 131072
     g_current_arena = -1
-    // Pool segments are 1MB each and hold eight 128KB slots.
+    g_arena_pool_limit = pool_size
+    if g_arena_pool_limit < 67108864:
+        g_arena_pool_limit = 67108864
+    // Pool segments are 64MB each and hold sixty-four 1MB slots.
     arena_size = 1048576
     g_arena_max_size = arena_size
     g_segment_base = alloc(256 * 8)
+    g_segment_cap = 256
     g_segment_count = 1
     seg0 := alloc(67108864)
     g_arena_pool_data = seg0
@@ -203,6 +212,7 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     cell_store(g_class_sizes, 192, 3361)
     g_arena_pool_slots = 64
     g_arena_slot_next = alloc(2048 * 8)
+    g_slot_next_cap = 2048
     si : ., mut = 0
     loop:
         if si >= g_arena_pool_slots:
@@ -234,10 +244,32 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_arena_count = 0
     g_arena_cap = 0
 
+fn _arena_copy_cells(src: string, nbytes: int, dst: string):
+    i : ., mut = 0
+    loop:
+        if i >= nbytes:
+            break
+        cell_store(dst, i, cell_load(src, i))
+        i = i + 8
+
 fn arena_grow_pool():
-    if g_segment_count >= 32:
+    if g_arena_pool_limit > 0 && (g_segment_count + 1) * 67108864 > g_arena_pool_limit:
+        println("arena: pool limit exceeded")
         return
     saved := g_current_arena
+    g_current_arena = -1
+    if g_segment_count >= g_segment_cap:
+        nc := g_segment_cap * 2
+        nb := alloc(nc * 8)
+        _arena_copy_cells(g_segment_base, g_segment_cap * 8, nb)
+        g_segment_base = nb
+        g_segment_cap = nc
+    if (g_segment_count + 1) * 64 > g_slot_next_cap:
+        nc2 := g_slot_next_cap * 2
+        nb2 := alloc(nc2 * 8)
+        _arena_copy_cells(g_arena_slot_next, g_slot_next_cap * 8, nb2)
+        g_arena_slot_next = nb2
+        g_slot_next_cap = nc2
     g_current_arena = -1
     seg := alloc(67108864)
     cell_store(g_segment_base, g_segment_count * 8, seg)

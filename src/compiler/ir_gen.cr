@@ -5899,6 +5899,8 @@ fn ir_gen_func(fi: int):
 // need to be written at startup — unlike find_global_const_node which
 // only folds immutable constants at compile time).
 fn global_init_val(name_idx: int) -> int:
+    if g_arena_pool_limit_cfg > 0 && str_eq(istr_get(name_idx), "g_arena_pool_limit") != 0:
+        return g_arena_pool_limit_cfg
     i : ., mut = g_global_let_count - 1
     loop:
         if i < 0:
