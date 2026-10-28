@@ -81,6 +81,16 @@ stub 的上下文默认值：
 
 stub 没有调用点，不传 `call_at`。
 
+## ELF 发射体接入
+
+`src/format/elf/elf.cr` 的 `emit_alloc_body` 构造一个 30 条指令的 stub，交给
+`StubAllocator` 分配寄存器，再用 `assigned` 的结果生成字节。`mul` 需要的
+`rax/r10` 和 `rep stosb` 需要的 `rdi/rcx/rax` 通过 pin 固定；`base` 和 `cursor`
+固定在 `r11/r9`，避免被清零路径覆盖。
+
+arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超出上限都执行
+`ud2`，不返回 0。没有 arena 时的全局堆路径保留，用于 `arena_init` 之前的分配。
+
 ## 测试
 
 `corec selftest-stub-regalloc` 运行 13 个用例：
@@ -111,5 +121,7 @@ stub 没有调用点，不传 `call_at`。
 ## 不包含
 
 1. CAG 的 second-chance 变体。当前只实现成本感知驱逐。
-2. stub 编码器对 home 槽的装载和写回。核心已经返回 spill 槽，编码器接入时使用。
-3. IR 分配器的区域深度和使用次数上下文。接入后需要重新测量 canary。
+2. stub 编码器的 spill 装载和写回。当前 stub 有 9 个虚拟寄存器和 9 个物理
+   寄存器，不会溢出；home 槽路径还没有指令序列。
+3. 竞技场 size class 在 ELF 发射体中的实现。`arena.cr` 的 26 档元数据已经存在，
+   但 `emit_alloc_body` 仍然使用单游标 bump。
