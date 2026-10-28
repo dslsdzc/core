@@ -4262,7 +4262,7 @@ fn gen_expr(node: int) -> int:
         // Keep while loops on the same SG_LOOP protocol as loop/for: the
         // region owns the condition, body, back-edge, and exit label so sg_pop
         // can add the termination dependency and advance the state chain.
-        sg_push(SG_LOOP)
+        sg_alloc_push(SG_LOOP)
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
