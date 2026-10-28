@@ -34,16 +34,19 @@ bash tools/baseline/rebuild.sh /tmp/p6-baseline      # 产物：/tmp/p6-baseline
 
 | 二进制 | sha256 | 源修订 |
 |---|---|---|
-| `corec` | `4234b7a6254ad3b7a890268c462dbe3dbd269a991f0deaa12832e154dbe26265` | `7eb9669d`（v4 迁移 #183 合入 develop） |
-| `corearch` | `3786eb4a8a500158d22a0193b9174c2f4228b5c8d379a4d992ef920b28a9c421` | 同上 |
-| `corelsp` | `845ac0485f2fede878f18bdbacb49e9c24b62ddf4c3180e2b5d411e60467c0eb` | 同上 |
+| `corec` | `5fe3de891380c5909e6f5cefccac53781acbe1eccf4540f568988290467a6726` | `28483a42`（语言面与 AST span 批 #222 合入 develop） |
+| `corearch` | `e8b3e30b116c09200dfb9b2d023b0c1608f4f917e89b3f7dabf74ee6e295c542` | 同上 |
+| `corelsp` | `db51fdc7c420396152f363385174a96fed770af951339482cbb42376b62908e2` | 同上 |
 
-> `PINNED_REV` = `7eb9669d`（v4 迁移 #183 合入 develop 的提交），是首个 develop 历史内可达的
-> v4 基线。2026-10-11 曾固定到 `25e70197`，但那枚提交只存在于本地 jj 提交图；#183 以 squash
+> `PINNED_REV` = `28483a42`（语言面与 AST span 批 #222 合入 develop 的提交）。2026-10-28 换代：
+> 旧代 `7eb9669d` 早于 develop 的库可见性批，固定基线无法编译当前源，因此把 `PINNED_REV`
+> 重指到合入后的提交并同阶段重锁三个 sha。旧代的记录：
+> `7eb9669d` 是首个 develop 历史内可达的 v4 基线。2026-10-11 曾固定到 `25e70197`，但那枚提交只存在于本地 jj 提交图；#183 以 squash
 > 合入 develop 后，换人或换机无法检出该修订。2026-10-25 T7 收尾把 `PINNED_REV` 重指到
 > `7eb9669d`，并同阶段重锁三个 sha。
-> 换代自证（2026-10-25 实际运行）：从 `7eb9669d` 重建，三个 sha 与上表相同；快速验证返回 42；
-> `parity_run.sh` 实测 85 档，rc 分布 `49×0 / 36×1`。旧代 `25e70197` 的完整三 sha 保留在历史表。
+> 换代自证（2026-10-28 实际运行）：从 `28483a42` 重建，三个 sha 与上表相同；快速验证返回 42；
+> `parity_run.sh` 实测 89 档。上一代 `7eb9669d` 的自证（2026-10-25）：三个 sha 相同、快速验证 42、
+> parity 85 档，rc 分布 `49×0 / 36×1`。
 
 ## 允许清单历史（旧值不删，换代纪律 2；本表 = 历次换代清单）
 
@@ -52,7 +55,9 @@ bash tools/baseline/rebuild.sh /tmp/p6-baseline      # 产物：/tmp/p6-baseline
 | 初代 | `9bcb7083`（R2 P4 完成 / P4 Task 7） | `5d2b15ad746018619b01143cce400e6f3489ae72a962e12283a7afd3dcdb41e7` | `493dc490dfaed7774b46b74ccf1cfeca9fe5f61620e34229afb8991b1628a2a7` | `18b94bd955fa204accf0753095a28f6499871566254d846333a7496c99109d49` | P5 阶段的 pre-侧（P6 T0 1.4 节：与本方法产物逐字节 IDENTICAL ×3，允许清单自洽） |
 | 2 代 | `97f4394f`（R2 P6 终态） | `ae01de75…`（全值见本行原值注） | `228f82e9…` | `90eb19c6…` | 容量阶段 CAP 的 pre-侧；换代依据 = 换代纪律 1（下一组以本次完成为 pre-侧）；自证见 `cap-task1-report.md`。2026-10-11（T7）换代后降为历史代。旧全值保留记录：corec `ae01de7534ea8428e3e062fccbc5fef5d45abfc5d3dafb90b3c85e08f354cce2` · corearch `228f82e948cfaf8170ada982d80f1ebddfd3847e71cdf04ca4b42d9226373d2e` · corelsp `90eb19c6d3bd4e3234b4328d8b8f3284cca6d1644d3959bb83f07b7e71473032` |
 | 3 代 | `25e70197`（v4 迁移 T6 完成） | `701a319f52696e9b098eac03b0e85ecbd6514e8d2ad05c9c30f662f62e402cdc` | `bd6b1c6af5e64d20eca120e3188f05d02ee4a6f6de510516b19d47861f522e30` | `2c1da86fc5c0044fb059d8d759a20a6167be18645eea43101948594949703661` | v4 基线：首个可读 v4 形式的 pre-侧；换代依据 = v4 可读性硬约束（见“现行代”注）。自证（2026-10-11 实际运行）= 重建三个 sha 与上表相同 + 快速验证 42 + 与工作树自建二进制逐字节相同。2026-10-25 降为历史代（该修订不在 develop 历史内） |
-| 4 代（现行） | `7eb9669d`（v4 迁移 #183 合入 develop） | `4234b7a6…`（全值见上表） | `3786eb4a…`（全值见上表） | `845ac048…`（全值见上表） | v4 计划 T7 收尾：`25e70197` 不进入 develop 历史（#183 为 squash 合入），把 `PINNED_REV` 重指到 develop 可达的 v4 提交，并同阶段重锁三个 sha。自证（2026-10-25）= 三个 sha 与上表相同 + 快速验证 42 + parity 85 档（`49×0 / 36×1`） |
+| 4 代 | `7eb9669d`（v4 迁移 #183 合入 develop） | `4234b7a6…`（全值见上表） | `3786eb4a…`（全值见上表） | `845ac048…`（全值见上表） | v4 计划 T7 收尾：`25e70197` 不进入 develop 历史（#183 为 squash 合入），把 `PINNED_REV` 重指到 develop 可达的 v4 提交，并同阶段重锁三个 sha。自证（2026-10-25）= 三个 sha 与上表相同 + 快速验证 42 + parity 85 档（`49×0 / 36×1`） |
+
+| 5 代（现行） | `28483a42`（语言面与 AST span 批 #222 合入 develop） | `5fe3de89…`（全值见上表） | `e8b3e30b…`（全值见上表） | `db51fdc7…`（全值见上表） | #222 合入后换代：`cast`、`Self`、receiver 规则、64 字节 AST 节点与行表删除。自证（2026-10-28）= 三个 sha 与上表相同 + 快速验证 42 + parity 89 档 |
 
 ## 用法
 
