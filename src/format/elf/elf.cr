@@ -342,19 +342,20 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // The register assignment is computed by StubAllocator. Pins hold the
     // registers required by mul (rax/r10) and keep the base/cursor values out
     // of the registers that rep stosb writes (rdi/rcx/rax).
-    a := sr_new(30, 9, 9)
+    a := sr_new(30, 9, 7)
     a.reg(0, 8, CAG_REG_CALLEE)
     a.reg(1, 10, CAG_REG_CALLEE)
     a.reg(2, 0, CAG_REG_CALLEE)
     a.reg(3, 11, CAG_REG_CALLEE)
     a.reg(4, 9, CAG_REG_CALLEE)
-    a.reg(5, 1, CAG_REG_CALLEE)
     a.reg(6, 6, CAG_REG_CALLEE)
     a.reg(7, 2, CAG_REG_CALLEE)
-    a.reg(8, 7, CAG_REG_CALLEE)
 
-    // v0 size, v1 arena, v2 max_size, v3 base, v4 cursor, v5 limit,
-    // v6 aligned, v7 new cursor, v8 temporary.
+    // v0 size, v1 arena, v2 max_size, v3 base, v4 class, v5 index,
+    // v6 aligned, v7 new cursor, v8 unused. Seven registers: v5 spills.
+    a.read(0, 2)
+    a.read(0, 6)
+    a.read(0, 7)
     a.write(0, 0)
     a.pin(0, 0, 8)
     a.write(1, 1)
@@ -375,10 +376,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     a.read(9, 1)
     a.write(9, 4)
     a.pin(9, 4, 9)
-    a.pin(12, 5, 1)
     a.pin(12, 6, 6)
     a.pin(15, 7, 2)
-    a.pin(16, 8, 7)
     a.write(10, 8)
     a.read(11, 8)
     a.read(11, 1)
@@ -424,6 +423,15 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     cp : ., mut = 0
     fva := TEXT_BASE + pos
+
+    // Preserve the callee-saved scratch pair used for the home slot. Two pushes
+    // keep the stack 16-byte aligned for the heap_expand call.
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 86)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 87)
+    cp = cp + 2
 
     // 0: reject requests above 64MB.
     cp = cp + ea_cmp_imm32(buf, pos + cp, 7, 67108864)
@@ -471,9 +479,11 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + jc + 1, (cp - (jc + 2)) % 256)
 
     // 5: idx = arena * 26 + class; base = slot_base + class * 1024.
-    cp = cp + ea_mov_rr(buf, pos + cp, r5, r1)
-    cp = cp + ea_imul_imm8(buf, pos + cp, r5, r5, 26)
-    cp = cp + ea_add_rr(buf, pos + cp, r5, r4)
+    // v5 is the forced spill: keep idx in its home slot.
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, r1)
+    cp = cp + ea_imul_imm8(buf, pos + cp, 15, 15, 26)
+    cp = cp + ea_add_rr(buf, pos + cp, 15, r4)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_alloc_home_idx)
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
     cp = cp + ea_shl_imm8(buf, pos + cp, r7, 10)
     cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
@@ -494,7 +504,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_sub_rr(buf, pos + cp, 7, r7)
     cp = cp + ea_mov_rr(buf, pos + cp, r4, r6)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, r5)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_alloc_home_idx)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, 15)
     cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
     cp = cp + ea_add_rr(buf, pos + cp, r4, 0)
     cp = cp + ea_cmp_rr(buf, pos + cp, r4, 7)
@@ -513,7 +524,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     // 8: commit class_cursor[idx] = new.
     cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
-    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, r5, r4)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_alloc_home_idx)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, 15, r4)
 
     // 9: zero the data bytes and write the hidden length header.
     cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r7, r6, 8)
@@ -529,6 +541,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_lea_base_index8(buf, pos + cp, 1, r7, r6, 0)
     cp = cp + ea_mov_store(buf, pos + cp, 1, r0)
     cp = cp + ea_lea_base_index8(buf, pos + cp, 0, r7, r6, 8)
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 94)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 95)
+    cp = cp + 2
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
@@ -695,6 +713,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 2, 64)
     w8(buf, pos + cp + 3, 8)
     cp = cp + 4
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 94)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 95)
+    cp = cp + 2
     w8(buf, pos + cp, 195)
     cp = cp + 1
     return cp
@@ -1590,6 +1614,7 @@ gv_alloc_fail_request : int, mut = -1
 gv_alloc_fail_class : int, mut = -1
 gv_alloc_fail_cursor : int, mut = -1
 gv_alloc_fail_limit : int, mut = -1
+gv_alloc_home_idx : int, mut = -1
 gv_arena_sizes : int, mut = -1
 gv_arena_pool_data : int, mut = -1
 gv_arena_max_size : int, mut = -1
@@ -1710,6 +1735,7 @@ fn elf_gen(buf: string) -> int:
     gv_alloc_fail_class = -1
     gv_alloc_fail_cursor = -1
     gv_alloc_fail_limit = -1
+    gv_alloc_home_idx = -1
     gv_arena_sizes = -1
     gv_arena_pool_data = -1
     gv_arena_max_size = -1
@@ -1722,6 +1748,7 @@ fn elf_gen(buf: string) -> int:
     fail_ni2 := str_intern("g_alloc_fail_class")
     fail_ni3 := str_intern("g_alloc_fail_cursor")
     fail_ni4 := str_intern("g_alloc_fail_limit")
+    home_ni := str_intern("g_alloc_home_idx")
     cur_ni3 := str_intern("g_arena_sizes")
     cur_ni4 := str_intern("g_arena_pool_data")
     cur_ni5 := str_intern("g_arena_max_size")
@@ -1756,6 +1783,8 @@ fn elf_gen(buf: string) -> int:
             gv_alloc_fail_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == fail_ni4:
             gv_alloc_fail_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == home_ni:
+            gv_alloc_home_idx = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni3:
             gv_arena_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni4:

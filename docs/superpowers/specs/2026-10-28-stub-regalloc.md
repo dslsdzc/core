@@ -91,6 +91,11 @@ stub 没有调用点，不传 `call_at`。
 arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超出上限都执行
 `ud2`，不返回 0。没有 arena 时的全局堆路径保留，用于 `arena_init` 之前的分配。
 
+分配器 stub 有意只用七个物理寄存器，使 class 索引无法在定义点获得寄存器。
+`StubAllocator` 把它溢出到 `g_alloc_home_idx`，编码器在该值的两次使用前后
+插入 `mov [home]` / `mov home`。`r14` 和 `r15` 在入口保存，在两条返回路径上
+恢复，`push` 两次保持 `heap_expand` 调用前的 16 字节对齐。
+
 ## 测试
 
 `corec selftest-stub-regalloc` 运行 13 个用例：

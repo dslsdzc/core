@@ -35,6 +35,9 @@ g_alloc_fail_class : int, mut = -1
 g_alloc_fail_cursor : int, mut = 0
 g_alloc_fail_limit : int, mut = 0
 
+// Home slot for the spilled class-index value in the runtime allocator stub.
+g_alloc_home_idx : int, mut = 0
+
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return
