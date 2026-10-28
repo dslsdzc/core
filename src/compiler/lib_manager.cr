@@ -481,11 +481,10 @@ fn file_path_by_fni(fni: int) -> string:
     return ""
 
 fn lib_of_line(line: int) -> int:
-    if line <= 0 || line > g_line_count:
+    id := sm_for_line(line)
+    if id < 0:
         return -1
-    if (line - 1) * 8 + 8 > str_len(g_line_lib):
-        return -1
-    return cell_load(g_line_lib, (line - 1) * 8)
+    return sm_file_lib(id)
 
 fn lib_of_node(node: int) -> int:
     // The owning file comes from the byte span. Going through the line first

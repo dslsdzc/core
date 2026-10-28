@@ -2424,7 +2424,7 @@ fn collect_decls():
         fn_node := fi_ast_node(fi)
         fn_line := ast_line(fn_node)
         if fn_line > 0 && fn_line <= g_line_count:
-            fileid_ni := cell_load(g_line_fileid, (fn_line - 1) * 8)
+            fileid_ni := fileid_of_line(fn_line)
             if fileid_ni >= 0 && fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
                 grow_mod_funcs(g_mod_func_count + 1)
                 cell_store(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni)

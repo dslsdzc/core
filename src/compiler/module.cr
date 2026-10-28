@@ -204,36 +204,6 @@ fn file_sm_id(fni: int) -> int:
         fi = fi + 1
     return -1
 
-fn build_line_fileid():
-    // The flat line table is the SourceManager line space. Each file owns
-    // [line_base, line_base + line_count); no concatenated text is scanned.
-    g_line_count = 0
-    g_line_cap = 0
-    fi : ., mut = 0
-    while fi < g_file_count:
-        fni := cell_load(g_files, fi * 24)
-        sm := cell_load(g_files, fi * 24 + 16)
-        if sm >= 0 && sm < sm_file_count():
-            base := sm_file_line_base(sm)
-            cnt := sm_file_line_count(sm)
-            lib_id := sm_file_lib(sm)
-            // Manifest lines sit between registered files and have no fileid.
-            // Fill those rows explicitly so a stale cell cannot name a real file.
-            while g_line_count < base:
-                grow_line_file(g_line_count + 1)
-                cell_store(g_line_fileid, g_line_count * 8, -1)
-                cell_store(g_line_lib, g_line_count * 8, sm_file_lib(sm_for_line(g_line_count + 1)))
-                g_line_count = g_line_count + 1
-            l : ., mut = 0
-            while l < cnt:
-                grow_line_file(base + l + 1)
-                cell_store(g_line_fileid, (base + l) * 8, fni)
-                cell_store(g_line_lib, (base + l) * 8, lib_id)
-                if base + l + 1 > g_line_count:
-                    g_line_count = base + l + 1
-                l = l + 1
-        fi = fi + 1
-
 fn reg_so_funcs(index_content: string, so_name: string):
     sl := str_len(index_content)
     line_start : ., mut = 0
@@ -703,4 +673,5 @@ fn res_imports():
     g_source_len = str_len(g_source)
     g_source_file = g_main_sm
     g_line_base = sm_file_line_base(g_main_sm)
-    build_line_fileid()
+    // The flat line space is the SourceManager line space itself.
+    g_line_count = g_sm_line_count

@@ -93,11 +93,9 @@ fn pad_diag_num(num: int) -> string:
 
 // ─── diagnostics (g_diags) ─────────────────────────────────────
 
-// Line number to file id through g_line_fileid. -1 is out of range.
+// Line number to file id. -1 is out of range.
 fn diag_fileid_for_line(line: int) -> int:
-    if line >= 1 && line <= g_line_count:
-        return cell_load(g_line_fileid, (line - 1) * 8)
-    return -1
+    return fileid_of_line(line)
 
 fn print_diagnostics():
     if g_diag_count == 0:

@@ -15,7 +15,7 @@
 // - locals: g_syms is popped after check_all, so scan g_ast for the nearest
 //   EXPR_LET, EXPR_PARAM, or EXPR_FOR with the same name before the query.
 //
-// Cross-file: declaration line to g_line_fileid to the g_files path. Subtract the
+// Cross-file: declaration line to the owning file and its path. Subtract the
 // owning SourceManager line base to get the target file's own coordinates.
 //
 // String building uses literal-initialized accumulators. Do not name a variable
@@ -517,11 +517,11 @@ fn analysis_decl_tok(kw: int, name_ni: int) -> int:
                 return i + 1
         i = i + 1
 
-// 1-based line to file path through g_line_fileid and g_files; fall back to the main file.
+// 1-based line to the owning file and its path; fall back to the main file.
 fn analysis_path_for_line(ln1: int) -> string:
     fid : ., mut = -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
+        fid = fileid_of_line(ln1)
     if fid < 0 && g_file_count > 0:
         fid = cell_load(g_files, 0)
     i : ., mut = 0
@@ -540,12 +540,7 @@ fn analysis_path_for_line(ln1: int) -> string:
 // The main file has offset 0; imported files start after the files registered
 // before them.
 fn analysis_line_offset(ln1: int) -> int:
-    fid : ., mut = -1
-    if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
-    if fid < 0:
-        return 0
-    sm := file_sm_id(fid)
+    sm := sm_for_line(ln1)
     if sm < 0:
         return 0
     return sm_file_line_base(sm)
@@ -556,7 +551,7 @@ fn analysis_line_offset(ln1: int) -> int:
 fn analysis_def_json(ln1: int, cl1: int) -> string:
     fid := -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
+        fid = fileid_of_line(ln1)
     sm := file_sm_id(fid)
     txt : string, mut = g_source
     local_ln : ., mut = ln1

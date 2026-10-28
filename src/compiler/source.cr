@@ -166,6 +166,19 @@ fn sm_for_line(line: int) -> int:
         id = id + 1
     return -1
 
+// Owning file id (interned source name) for a global line. The line space is the
+// concatenation of per-file ranges, so no side table is needed.
+fn fileid_of_line(line: int) -> int:
+    id := sm_for_line(line)
+    if id < 0:
+        return -1
+    i : ., mut = 0
+    while i < g_file_count:
+        if cell_load(g_files, i * 24 + 16) == id:
+            return cell_load(g_files, i * 24)
+        i = i + 1
+    return -1
+
 fn sm_line_start(id: int, line: int) -> int:
     if id < 0 || id >= g_sm_file_count:
         return 0
@@ -278,8 +291,8 @@ fn sm_span_col(lo: int) -> int:
     return sm_location_col(id, lo - b)
 
 // AST position accessors. `ast_line` keeps the historical meaning: the global
-// flat line index, because diagnostics, g_line_lib and library ownership index
-// by it. The byte span is decoded per call.
+// flat line index, because diagnostics and library ownership index by it. The
+// byte span is decoded per call.
 fn ast_line(n: int) -> int:
     lo := ast_lo(n)
     if lo <= 0:

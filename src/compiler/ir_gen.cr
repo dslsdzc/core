@@ -5927,13 +5927,13 @@ fn global_seg_index(node: int) -> int:
     line := ast_line(node)
     if line <= 0 || line > g_line_count:
         return 0
-    fid := cell_load(g_line_fileid, (line - 1) * 8)
-    if fid < 0:
+    lo := ast_lo(node)
+    if lo <= 0:
         return 0
     // Import order replaces the retired byte segments: the main file is 0,
     // imported files follow in load order. global_seg_index feeds the reverse
     // module order in inject_global_inits.
-    sm := file_sm_id(fid)
+    sm := sm_span_file(lo - 1)
     if sm < 0:
         return 0
     si : ., mut = 1

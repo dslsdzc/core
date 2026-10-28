@@ -588,10 +588,7 @@ g_gen_apply_data_count : int, mut
 g_gen_apply_data_cap : int, mut
 
 // Module system globals
-g_line_fileid : string, mut
-g_line_lib : string, mut
 g_line_count : int, mut
-g_line_cap : int, mut
 g_source_dir : string, mut  // directory of the main source file (for _import.core lookup)
 
 // IR instruction opcodes

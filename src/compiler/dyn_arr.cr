@@ -1202,21 +1202,6 @@ fn str_load8(idx: int, ci: int) -> int:
         return 0
     return cell_load_byte(istr_get(idx), ci)
 
-fn grow_line_file(needed: int):
-    if needed < g_line_cap:
-        return
-    nc : ., mut = g_line_cap * 2
-    if nc < 128:
-        nc = 128
-    if nc < needed:
-        nc = needed + 128
-    nb := alloc(nc * 8)
-    cell_copy(g_line_fileid, g_line_cap * 8, nb)
-    g_line_fileid = nb
-    nb2 := alloc(nc * 8)
-    cell_copy(g_line_lib, g_line_cap * 8, nb2)
-    g_line_lib = nb2
-    g_line_cap = nc
 fn grow_gen_apply_data(needed: int):
     if needed < g_gen_apply_data_cap:
         return
