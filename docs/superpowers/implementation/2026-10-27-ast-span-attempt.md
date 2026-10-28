@@ -70,3 +70,18 @@
 性能：`sm_span_file` 缓存上一次命中的文件，`lib_of_node` 改走 span。`check src/compiler` 冷缓存 44.9 秒，改造前 52.7 秒。
 
 验证：`check src/compiler` 通过；pub-visibility、pub-label、lib-manager、cast 12/12、struct-impl 14/14、import-graph 7/7、diag-gate 28/28、impl 8/8、enum-impl 5/5、iface-ops 73/73、hit-table 24/24、ccr-types 53/53、apx-conversion、s1p-liveness、field-inference 5/5；canary 5/5 不变。
+
+## 全局行表删除（2026-10-28）
+
+`g_line_fileid`、`g_line_lib`、`build_line_fileid`、`grow_line_file` 已删除。
+
+| 原用途 | 新实现 |
+|---|---|
+| `diag_fileid_for_line` | `fileid_of_line`：先 `sm_for_line`，再查 `g_files` 中该 SourceManager id 的行 |
+| `lib_of_line` | `sm_file_lib(sm_for_line(line))` |
+| `ir_gen.global_seg_index` | `sm_span_file(ast_lo - 1)` |
+| LSP 行到路径、行偏移 | `fileid_of_line`、`sm_for_line` |
+
+`g_line_count` 现在只在 `res_imports` 末尾从 `g_sm_line_count` 赋值一次。`.ccr` 行号字段不变，仍存 `ast_line`，即全局行号。
+
+冷缓存 `check src/compiler` 44.2 秒。
