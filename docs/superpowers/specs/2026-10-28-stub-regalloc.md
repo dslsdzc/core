@@ -1,65 +1,111 @@
-# 运行时 stub 的寄存器分配模块
+# 运行时 stub 与编译器的共享 CAG 寄存器分配
 
-> 状态：已批准，待实施
+> 状态：已实施
 > 日期：2026-10-28
-> 关联：`docs/maintainer/design/regalloc-cache-mapping.md` · `docs/maintainer/design/regalloc-consistency.md` · `src/format/elf/elf.cr` 的 `emit_alloc_body`
+> 关联：`docs/maintainer/design/regalloc-cache-mapping.md` 第 5 节 · `docs/maintainer/design/regalloc-consistency.md` · `src/lattice/regalloc_cag.cr`
 
 ## 概述
 
-运行时 stub（分配器主体、堆扩展、trap 路径）现在用手写字节序列固定寄存器。寄存器分配没有独立表示，改动一处就要重排整段字节。本模块把 stub 的寄存器分配提取出来：stub 用虚拟寄存器写，分配器按存在区间给出物理寄存器，最后由目标编码器发射。
+编译器的 IR 寄存器分配和运行时 stub 的寄存器分配使用同一个 CAG 核心。区别只在候选构造：IR 分配器从变量和版本构造候选，stub 从指令读写集构造候选。位置扫描、共存判定、固定约束、溢出和驱逐都在核心里。
 
-分配策略与目标无关；目标只提供寄存器文件和指令模板。
+CAG 的定义以 `docs/maintainer/design/regalloc-cache-mapping.md` 第 5 节为准。本文只记录共享核心的接口、stub 的上下文默认值和接入状态。
 
-## 决定
+## 核心
 
-1. stub 用虚拟寄存器（`v0`…`vn`）书写，不直接写物理寄存器名。
-2. 每条 stub 指令声明读集、写集和固定约束。固定约束用于 ABI 位置，例如 syscall 参数、返回值、调用前必须持有的指针。
-3. 存在区间 = `[定义指令, 最后使用指令]`。共存 = 区间相交，与 `regalloc-cache-mapping.md` 的定义一致。
-4. 分配算法使用线性扫描。它是共存关系在直线代码上的特例，不进入语义本体；换成图着色不改变正确性。
-5. 溢出时使用 stub 自己的栈帧槽位（home），不借用调用者的栈。
-6. 目标描述表提供：寄存器列表、保留寄存器（栈指针、帧指针）、调用破坏寄存器、固定约束可用的寄存器。
-7. 第一份目标描述是 x86-64；同一模块可用于任何有寄存器的目标，只需新增描述表。
-
-## 接口
+文件：`src/lattice/regalloc_cag.cr`。
 
 ```text
-regfile = { regs: [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11], reserved: [rsp, rbp], clobbered_by_call: [...] }
-
-stub_instr = {
-    op:     模板编号,
-    reads:  [虚拟寄存器],
-    writes: [虚拟寄存器],
-    fixed:  [(虚拟寄存器, 物理寄存器)]   // 可选
-}
-
-alloc_stub(instrs, regfile) -> { assign: [虚拟寄存器 → 物理寄存器], spills: [槽位] }
+struct CagAllocator
+    cand(id, start, end)        // 闭区间
+    reg(k, phys, class)         // 物理寄存器编号和类别
+    context(id, uses, depth, remat_cost, store_cost, load_cost)
+    pin_entry(id, phys)         // 硬约束
+    call_at(at)                 // 调用点
+    allow_eviction(on)
+    run() -> int
+    assigned(id) / spilled(id) / rematted(id) / spills()
 ```
 
-目标编码器拿到 `assign` 后，把每条模板展开成字节。分配器不产生字节。
+分配规则：
 
-## 应用到分配器 stub
+```text
+spill_cost(e) = depth(e) * uses(e) * (store_cost(e) + load_cost(e))
+remat_cost(e) = 再生 e 的成本
+evict_cost(e) = min(spill_cost(e), remat_cost(e))
+```
 
-`emit_alloc_body` 改写成约 30 条抽象指令，覆盖：
+没有空闲寄存器时，如果启用驱逐，选择 `evict_cost` 最小的共存条目。新条目自身的成本不低于其它条目时，新条目成为驱逐对象。这是区间序 First Fit 的情形。
 
-1. 64MB 上限检查。
-2. 当前 Arena 检查与全局回退。
-3. 档位查表、档位游标读取。
-4. 档位内 bump 与 header 写入。
-5. slot 内切块、slot 链扩展。
-6. 失败见证写入与 `ud2`。
+调用点是缓存失效边界。调用点上，活跃且位于 caller-saved 寄存器的条目被驱逐；callee-saved 条目保留。跨调用点固定在 caller-saved 寄存器的条目是约束冲突。
 
-改写后，寄存器分配由模块完成，新增档位逻辑只需增加指令和读写集，不需要重排整段字节。
+错误值：
+
+| 值 | 含义 |
+|---|---|
+| 0 | 成功 |
+| -1 | 同一候选固定到两个寄存器 |
+| -2 | 固定寄存器不在目标寄存器表 |
+| -3 | 两个共存候选固定到同一寄存器 |
+| -4 | 固定候选跨调用点占用 caller-saved 寄存器 |
+
+## IR 分配器接入
+
+`src/arch/x86_64/regalloc.cr` 的阶段 4 调用 `CagAllocator`。阶段 1 到 3 保留：
+
+1. 检查控扫描，排除不能放进寄存器的类型。
+2. 回边探测和携带值扩窗。
+3. 候选构造，窗口为 `[first_ref, last_ref]` 加参数入口和携带值修正。
+
+阶段 4 传入 5 个 callee-saved 寄存器，不设置 pin，不启用驱逐。区域深度和使用次数尚未接入，因此 CAG 在 IR 分配器上退化为区间序 First Fit，和接入前行为一致。
+
+## stub 接入
+
+文件：`src/compiler/stub_regalloc.cr`。
+
+`StubAllocator` 从指令表构造每个虚拟寄存器的区间：
+
+- 读和写都扩展区间。
+- 只读虚拟寄存器的区间从首次使用开始。
+- 指令上的固定约束转换成 `CagAllocator.pin_entry`。
+
+stub 的上下文默认值：
+
+| 上下文 | 值 | 原因 |
+|---|---|---|
+| uses | 1 | 候选构造不统计使用次数 |
+| depth | 0 | 直线指令序列没有区域嵌套 |
+| remat_cost | -1 | 没有再生方法 |
+| store_cost / load_cost | 1 | 单位成本 |
+
+`depth = 0` 使溢出成本为 0，stub 不启用驱逐。寄存器不足时，新候选溢出到 home 槽。这保持区间序 First Fit 的行为。
+
+stub 没有调用点，不传 `call_at`。
+
+## 测试
+
+`corec selftest-stub-regalloc` 运行 9 个用例：
+
+1. 不相交区间复用同一寄存器。
+2. 共存区间需要不同寄存器。
+3. 寄存器耗尽时溢出，不失败。
+4. 两个溢出使用不同 home 槽。
+5. 固定寄存器不分配给共存条目。
+6. 同一候选固定到两个寄存器被拒绝。
+7. 固定寄存器不在目标表被拒绝。
+8. 只读候选从首次使用开始。
+9. 两个共存候选固定到同一寄存器被拒绝。
+
+`tests/selfhost/test_stub_regalloc.py` 要求 9 个用例全部通过，并把 9 作为下限，防止用例表被删减。
 
 ## 验收
 
-1. 分配器 stub 的抽象指令序列可读，寄存器名不出现。
-2. 同一序列在 x86-64 描述表下产生的字节与手写版本语义等价：分配、档位、slot 链、trap 全部通过现有测试。
-3. 溢出路径至少有一个用例（强制同时活跃虚拟寄存器数超过物理寄存器数）。
-4. canary 按 `REBUILD.md` 重锁并记录旧值。
-5. 目标描述表新增一个寄存器机（不必是真实硬件，可以是描述表级自测）时，分配器无需改动。
+1. `corec selftest-stub-regalloc` 9/9，返回 0。
+2. `corec check src/compiler` 通过。
+3. canary 5/5，值与接入前一致。
+4. `tests/selfhost/test_live_ranges.py` 通过。
 
 ## 不包含
 
-1. 替换编译器自身的 IR 寄存器分配（`src/arch/x86_64/regalloc.cr`）。
-2. 带分支的 stub 的全局分配（分配器 stub 是直线代码，加分支时先用区间分割）。
-3. 指令调度、指令选择。
+1. CAG 的 second-chance 变体。当前只实现成本感知驱逐。
+2. stub 编码器对 home 槽的装载和写回。核心已经返回 spill 槽，编码器接入时使用。
+3. IR 分配器的区域深度和使用次数上下文。接入后需要重新测量 canary。

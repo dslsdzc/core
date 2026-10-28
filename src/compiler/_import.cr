@@ -49,6 +49,7 @@ import dataflow
 import ccr_lower
 import ccr_io
 import ent_kernel
+import regalloc_cag
 import module
 import toml
 import project

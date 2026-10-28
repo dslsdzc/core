@@ -67,6 +67,7 @@ COREC_FILES = [
     'src/compiler/ccr_lower.cr',
     'src/compiler/ccr_io.cr',
     'src/lattice/ent_kernel.cr',
+    'src/lattice/regalloc_cag.cr',
     'src/compiler/module.cr',
     'src/stdlib/toml.cr',
     'src/stdlib/hotpatch.cr',

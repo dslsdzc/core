@@ -670,11 +670,7 @@ fn alloc_registers():
                 bi = bi + 1
 
         // ── 阶段 3：候选构建（窗口 = [first_ref,last_ref] + 上下文修正）──
-        var_reg : string, mut = alloc(vc * 8)  // 活跃集：函数内 var 到 reg 序 (0..4)
-        var_end : string, mut = alloc(vc * 8)  // 活跃集窗口终点（free 判断，
-                                              // 携带值扩窗后 ≠ live_last，须存）
         var_asg : string, mut = alloc(vc * 8)  // 终分配：函数内 var 到物理 reg
-        reg_occ : string, mut = alloc(MAX_REGS * 8)
         cand_st : string, mut = alloc(vc * 8)
         cand_en : string, mut = alloc(vc * 8)
         cand_lv : string, mut = alloc(vc * 8)
@@ -682,15 +678,7 @@ fn alloc_registers():
         loop:
             if lv >= vc:
                 break
-            cell_store(var_reg, lv * 8, -1)
-            cell_store(var_end, lv * 8, 0)
             cell_store(var_asg, lv * 8, -1)
-            lv = lv + 1
-        lv = 0
-        loop:
-            if lv >= MAX_REGS:
-                break
-            cell_store(reg_occ, lv * 8, -1)
             lv = lv + 1
         cc : ., mut = 0
         lv = 0
@@ -751,50 +739,34 @@ fn alloc_registers():
             cell_store(cand_lv, jj * 8, kl)
             ci2 = ci2 + 1
 
-        // ── 阶段 4：位置扫描 First Fit（同位置先 free 后分配）──
-        ci : ., mut = 0
-        p : ., mut = 0
+        // ── 阶段 4：上下文贪心（共享 CAG 核心）──
+        // 候选窗口已由阶段 3 的上下文修正确定；这里只做位置扫描。IR 分配器
+        // 没有 pin，也不启用驱逐：超过 5 个共存条目留在栈上，与既有行为一致。
+        // 区域深度和使用次数尚未接入，CAG 退化为区间序 First Fit
+        // （regalloc-cache-mapping.md 第 5 节：CFG 退化情形等于 First Fit）。
+        ca := cag_new(vc, MAX_REGS)
+        rk : ., mut = 0
         loop:
-            if p >= ic:
+            if rk >= MAX_REGS:
                 break
-            // 释放窗口终点已过的 var，归还寄存器。分配时把窗口终点记入 var_end；
-            // 携带值扩窗后它不等于 live_last。free 发生在末引用之后，同位置先 free
-            // 后分配，因此寄存器可以复用。
-            lv2 : ., mut = 0
-            loop:
-                if lv2 >= vc:
-                    break
-                rr := cell_load(var_reg, lv2 * 8)
-                if rr >= 0 && cell_load(var_end, lv2 * 8) < p:
-                    cell_store(var_reg, lv2 * 8, -1)
-                    cell_store(reg_occ, rr * 8, -1)
-                lv2 = lv2 + 1
-            // 分配起点等于 p 的候选。窗口终点为 p-1 的 var 已先释放，可以复用同一
-            // 寄存器；终点恰为 p 的 var 仍活跃于 p，不能释放。同指令的共存条目不得
-            // 使用同一寄存器。
-            loop:
-                if ci >= cc:
-                    break
-                if cell_load(cand_st, ci * 8) != p:
-                    break
-                lvv := cell_load(cand_lv, ci * 8)
-                eend := cell_load(cand_en, ci * 8)
-                ci = ci + 1
-                rj : ., mut = 0
-                tk : ., mut = -1
-                loop:
-                    if rj >= MAX_REGS:
-                        break
-                    if cell_load(reg_occ, rj * 8) < 0:
-                        tk = rj
-                        break
-                    rj = rj + 1
-                if tk >= 0:
-                    cell_store(var_reg, lvv * 8, tk)
-                    cell_store(var_end, lvv * 8, eend)
-                    cell_store(reg_occ, tk * 8, lvv)
-                    cell_store(var_asg, lvv * 8, cell_load(reg_phys, tk * 8))
-            p = p + 1
+            ca.reg(rk, cell_load(reg_phys, rk * 8), CAG_REG_CALLEE)
+            rk = rk + 1
+        rci : ., mut = 0
+        loop:
+            if rci >= cc:
+                break
+            lvv := cell_load(cand_lv, rci * 8)
+            ca.cand(lvv, cell_load(cand_st, rci * 8), cell_load(cand_en, rci * 8))
+            rci = rci + 1
+        ca.run()
+        lv = 0
+        loop:
+            if lv >= vc:
+                break
+            ra := ca.assigned(lv)
+            if ra >= 0:
+                cell_store(var_asg, lv * 8, ra)
+            lv = lv + 1
 
         // ── 阶段 5：终分配写 g_opt_meta ──
         // 块格式：ast.cr OPT_META_STRIDE = 64，头部 8 字节，数据不超过 56 字节。
