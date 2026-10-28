@@ -358,6 +358,19 @@ fn ea_jmp32(buf: string, pos: int, rel: int) -> int:
     e2_w32(buf, pos + 1, rel)
     return 5
 
+fn ea_dec(buf: string, pos: int, dst: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 255)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 1, dst % 8)
+    return cp - pos
+
+fn ea_jnz8(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 117)
+    w8(buf, pos + 1, rel % 256)
+    return 2
+
 fn ea_inc(buf: string, pos: int, dst: int) -> int:
     cp := pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
@@ -507,8 +520,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     jslot_bad := cp
     cp = cp + ea_jl32(buf, pos + cp, 0)
     cp = cp + ea_mov_rr(buf, pos + cp, 15, 5)
-    cp = cp + ea_shr_imm8(buf, pos + cp, 15, 3)
-    cp = cp + ea_and_imm8(buf, pos + cp, 5, 7)
+    cp = cp + ea_shr_imm8(buf, pos + cp, 15, 6)
+    cp = cp + ea_and_imm8(buf, pos + cp, 5, 63)
     cp = cp + ea_mov_rip_load(buf, pos + cp, r3, gv_segment_base)
     cp = cp + ea_mov_load_index8(buf, pos + cp, r3, r3, 15)
     cp = cp + ea_shl_imm8(buf, pos + cp, 5, 20)
@@ -702,13 +715,85 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
 
-    w32(buf, pos + ja_cap_large + 2, capacity_full - (ja_cap_large + 6))
+    // Objects above 1MB take N contiguous slots from a fresh segment.
+    large_multi := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r6)
+    cp = cp + ea_add_imm32(buf, pos + cp, 0, 1048575)
+    cp = cp + ea_shr_imm8(buf, pos + cp, 0, 20)
+    cp = cp + ea_mov_rr(buf, pos + cp, 5, 0)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 64)
+    ja_multi_cap := cp
+    cp = cp + ea_ja32(buf, pos + cp, 0)
+    grow_call_patch(g_x86_call_patch_count + 1)
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("arena_grow_pool"))
+    g_x86_call_patch_count = g_x86_call_patch_count + 1
+    w8(buf, pos + cp, 232)
+    e2_w32(buf, pos + cp + 1, 0)
+    cp = cp + 5
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_segment_count)
+    cp = cp + ea_add_imm8(buf, pos + cp, 15, -1)
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, 15)
+    cp = cp + ea_shl_imm8(buf, pos + cp, 14, 6)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, r3, gv_segment_base)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, r3, r3, 15)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_slot)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, r1)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_slot_next)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 2, 0, 14)
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, 14)
+    link_multi := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 15)
+    cp = cp + ea_add_imm8(buf, pos + cp, 0, 1)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 1)
+    jne_keep := cp
+    cp = cp + ea_jne8(buf, pos + cp, 0)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    keep_next := cp
+    w8(buf, pos + jne_keep + 1, (keep_next - (jne_keep + 2)) % 256)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 2, 15, 0)
+    cp = cp + ea_inc(buf, pos + cp, 15)
+    cp = cp + ea_dec(buf, pos + cp, 5)
+    jnz_link := cp
+    cp = cp + ea_jnz8(buf, pos + cp, 0)
+    w8(buf, pos + jnz_link + 1, (link_multi - (jnz_link + 2)) % 256)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_slot)
+    cp = cp + ea_mov_rr(buf, pos + cp, 2, 15)
+    cp = cp + ea_add_imm8(buf, pos + cp, 2, -1)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, r1, 2)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 1048576)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_slot_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 2, r1, 0)
+    cp = cp + ea_mov_store(buf, pos + cp, r3, r0)
+    cp = cp + ea_lea_base_disp8(buf, pos + cp, 7, r3, 8)
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, 7)
+    cp = cp + ea_mov_rr(buf, pos + cp, 1, r0)
+    w8(buf, pos + cp, 49)
+    w8(buf, pos + cp + 1, 192)
+    cp = cp + 2
+    w8(buf, pos + cp, 252)
+    cp = cp + 1
+    w8(buf, pos + cp, 243)
+    w8(buf, pos + cp + 1, 170)
+    cp = cp + 2
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 14)
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 94)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 95)
+    cp = cp + 2
+    w8(buf, pos + cp, 195)
+    cp = cp + 1
+
     w32(buf, pos + jslot_bad + 2, capacity_full - (jslot_bad + 6))
     w32(buf, pos + jl_bump + 2, slot_bump - (jl_bump + 6))
     w32(buf, pos + jmp_have + 1, slot_have - (jmp_have + 5))
     w32(buf, pos + jmp_chunk + 1, chunk_alloc - (jmp_chunk + 5))
     w32(buf, pos + jmp_slot_large + 1, slot_full - (jmp_slot_large + 5))
 
+    w32(buf, pos + ja_cap_large + 2, large_multi - (ja_cap_large + 6))
+    w32(buf, pos + ja_multi_cap + 2, capacity_full - (ja_multi_cap + 6))
     class_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
@@ -1910,6 +1995,7 @@ gv_arena_slot_free : int, mut = -1
 gv_arena_slot_count : int, mut = -1
 gv_arena_pool_slots : int, mut = -1
 gv_segment_base : int, mut = -1
+gv_segment_count : int, mut = -1
 gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
@@ -2041,6 +2127,7 @@ fn elf_gen(buf: string) -> int:
     gv_arena_slot_count = -1
     gv_arena_pool_slots = -1
     gv_segment_base = -1
+    gv_segment_count = -1
     gv_class_base = -1
     gv_class_cursor = -1
     gv_class_limit = -1
@@ -2064,6 +2151,7 @@ fn elf_gen(buf: string) -> int:
     slot_count_ni := str_intern("g_arena_slot_count")
     pool_slots_ni := str_intern("g_arena_pool_slots")
     seg_base_ni := str_intern("g_segment_base")
+    seg_count_ni := str_intern("g_segment_count")
     cls_ni1 := str_intern("g_class_base")
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
@@ -2110,6 +2198,8 @@ fn elf_gen(buf: string) -> int:
             gv_arena_pool_slots = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == seg_base_ni:
             gv_segment_base = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == seg_count_ni:
+            gv_segment_count = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni1:
             gv_class_base = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni2:

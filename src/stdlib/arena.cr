@@ -172,7 +172,7 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_arena_max_size = arena_size
     g_segment_base = alloc(256 * 8)
     g_segment_count = 1
-    seg0 := alloc(8388608)
+    seg0 := alloc(67108864)
     g_arena_pool_data = seg0
     cell_store(g_segment_base, 0, seg0)
     g_class_sizes = alloc(25 * 8)
@@ -201,7 +201,7 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     cell_store(g_class_sizes, 176, 2151)
     cell_store(g_class_sizes, 184, 2689)
     cell_store(g_class_sizes, 192, 3361)
-    g_arena_pool_slots = 8
+    g_arena_pool_slots = 64
     g_arena_slot_next = alloc(2048 * 8)
     si : ., mut = 0
     loop:
@@ -235,14 +235,14 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_arena_cap = 0
 
 fn arena_grow_pool():
-    if g_segment_count >= 256:
+    if g_segment_count >= 32:
         return
     saved := g_current_arena
     g_current_arena = -1
-    seg := alloc(8388608)
+    seg := alloc(67108864)
     cell_store(g_segment_base, g_segment_count * 8, seg)
     g_segment_count = g_segment_count + 1
-    g_arena_pool_slots = g_arena_pool_slots + 8
+    g_arena_pool_slots = g_arena_pool_slots + 64
     g_current_arena = saved
 
 fn arena_new_sized(peak: int) -> int, pub:
