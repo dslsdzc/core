@@ -440,6 +440,7 @@ fn alloc_registers():
         haz_i2f   : string, mut = alloc(vc * 8)   // IR_I2F s1（sd_cvt 内存源）
         haz_dyn   : string, mut = alloc(vc * 8)   // IR_DYN_*（16B 双槽布局）
         haz_dex   : string, mut = alloc(vc * 8)   // ti==TI_DEX/S 指令引用
+        var_uses  : string, mut = alloc(vc * 8)   // CAG use count per function-local var
         iz : ., mut = 0
         loop:
             if iz >= vc:
@@ -449,6 +450,7 @@ fn alloc_registers():
             cell_store(haz_i2f, iz * 8, 0)
             cell_store(haz_dyn, iz * 8, 0)
             cell_store(haz_dex, iz * 8, 0)
+            cell_store(var_uses, iz * 8, 0)
             iz = iz + 1
         ii : ., mut = 0
         loop:
@@ -461,10 +463,15 @@ fn alloc_registers():
             s2 := iri_s2(inst)
             if d >= vs && d < vs + vc:
                 dl := d - vs
+                cell_store(var_uses, dl * 8, cell_load(var_uses, dl * 8) + 1)
                 if op == IR_CONST:
                     cell_store(haz_const, dl * 8, 1)
                 if op == IR_DYN_PACK || op == IR_DYN_TAG || op == IR_DYN_VAL || op == IR_DYN_DISPATCH:
                     cell_store(haz_dyn, dl * 8, 1)
+            if s1 >= vs && s1 < vs + vc:
+                cell_store(var_uses, (s1 - vs) * 8, cell_load(var_uses, (s1 - vs) * 8) + 1)
+            if s2 >= vs && s2 < vs + vc:
+                cell_store(var_uses, (s2 - vs) * 8, cell_load(var_uses, (s2 - vs) * 8) + 1)
             if op == IR_REF && s1 >= vs && s1 < vs + vc:
                 cell_store(haz_ref, (s1 - vs) * 8, 1)
             if op == IR_I2F && s1 >= vs && s1 < vs + vc:
@@ -757,7 +764,14 @@ fn alloc_registers():
                 break
             lvv := cell_load(cand_lv, rci * 8)
             ca.cand(lvv, cell_load(cand_st, rci * 8), cell_load(cand_en, rci * 8))
+            us : ., mut = cell_load(var_uses, lvv * 8)
+            if us < 1:
+                us = 1
+            // Unit region depth: the IR candidate window is already the
+            // context-adjusted live interval. No remat method is available.
+            ca.context(lvv, us, 1, -1, 1, 1)
             rci = rci + 1
+        ca.allow_eviction(1)
         ca.run()
         lv = 0
         loop:
