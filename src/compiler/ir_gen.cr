@@ -3789,7 +3789,9 @@ fn gen_expr(node: int) -> int:
                     else if ast_int_val(fp0) == 0:
                         takes_self = 0
                 else:
-                    takes_self = 0
+                    // Not a declared function: a dyn dispatch carries the method
+                    // name, and the receiver is still the first argument.
+                    takes_self = 1
             if takes_self != 0:
                 // Method call: self is first arg
                 obj_node := ast_a(func_node)
