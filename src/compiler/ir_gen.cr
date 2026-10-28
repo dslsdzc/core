@@ -326,16 +326,31 @@ fn track_alloc_unknown():
 
 fn track_alloc_array(count: int):
     if count > 0 && count < 100000:
-        track_alloc_size(count * 8 + 16)
+        track_alloc_size(count * 8 + 8)
     else:
         track_alloc_unknown()
 
 fn track_alloc_struct(name_ni: int):
     si := find_struct_by_name(name_ni)
     if si >= 0:
-        track_alloc_size(si_field_count(si) * 8 + 16)
+        track_alloc_size(si_field_count(si) * 8 + 8)
     else:
         track_alloc_unknown()
+
+fn sg_alloc_cur_total() -> int:
+    if g_sg_count <= 0:
+        return 0
+    return cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+
+fn sg_alloc_cur_unknown() -> int:
+    if g_sg_count <= 0:
+        return 0
+    return cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8)
+
+fn sg_alloc_set(total: int, unknown: int):
+    if g_sg_count > 0:
+        cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, total)
+        cell_store(g_sg_alloc_unknown, (g_sg_count - 1) * 8, unknown)
 
 fn sg_peak_of_current() -> int:
     if g_sg_count <= 0:
@@ -4082,7 +4097,7 @@ fn gen_expr(node: int) -> int:
             if ac >= 1:
                 an := cell_load(arg_nodes, 0)
                 if an >= 0 && ast_kind(an) == EXPR_INT:
-                    track_alloc_size(ast_int_val(an) + 16)
+                    track_alloc_size(((ast_int_val(an) + 15) / 8) * 8)
                 else:
                     track_alloc_unknown()
             else:
@@ -4155,11 +4170,15 @@ fn gen_expr(node: int) -> int:
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
+        base_t := sg_alloc_cur_total()
+        base_u := sg_alloc_cur_unknown()
         then_val : ., mut = gen_expr(then_node)
         then_val = force_if_thunk(then_val)
+        then_t := sg_alloc_cur_total()
+        then_u := sg_alloc_cur_unknown()
+        sg_alloc_set(base_t, base_u)
         if else_node >= 0 && then_val >= 0:
             result_var = new_ir_var("if_res", irv_type(then_val))
-            track_alloc_size(16)
             emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(then_val))
             if g_optrep_on != 0:
                 result_rep = new_ir_var("if_res_rep", TI_INT)
@@ -4175,7 +4194,6 @@ fn gen_expr(node: int) -> int:
             else_val = force_if_thunk(else_val)
             if result_var < 0 && else_val >= 0:
                 result_var = new_ir_var("if_res", irv_type(else_val))
-                track_alloc_size(16)
                 emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(else_val))
                 if g_optrep_on != 0:
                     result_rep = new_ir_var("if_res_rep", TI_INT)
@@ -4186,6 +4204,16 @@ fn gen_expr(node: int) -> int:
                 if result_rep >= 0:
                     emit_rep_set(result_rep, rep_enc_of_expr(else_node, else_val))
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
+        other_t := sg_alloc_cur_total()
+        other_u := sg_alloc_cur_unknown()
+        td := then_t - base_t
+        ed := other_t - base_t
+        pk : ., mut = td
+        if ed > pk:
+            pk = ed
+        sg_alloc_set(base_t + pk, base_u)
+        if then_u != 0 || other_u != 0:
+            sg_alloc_set(base_t + pk, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
         sg_pop()
         return result_var
@@ -4346,7 +4374,6 @@ fn gen_expr(node: int) -> int:
         // the body: an integer loop binds the index, a sequence loop binds the
         // loaded element.
         ivar := new_ir_var("for_i", TI_INT)
-        track_alloc_size(16)
         emit(IR_ALLOC, ivar, 0, 0, 0, TI_INT)
         emit(IR_STORE, -1, ivar, start_var, 0, 0)
         header_lbl := new_label()
@@ -4416,7 +4443,6 @@ fn gen_expr(node: int) -> int:
         match_val = force_if_thunk(match_val)
         // Allocate a result variable for the match expression value
         result_var := new_ir_var("match_res", TI_INT)
-        track_alloc_size(16)
         emit(IR_ALLOC, result_var, 0, 0, 0, TI_INT)
         // The result slot gets a representation bit, defaulting to 1 (boxed).
         // Each arm sets it at its write point, so consumers (LET, return, unpack)
@@ -4663,6 +4689,10 @@ fn gen_expr(node: int) -> int:
             emit(IR_STORE, -1, fb1, fbz, 0, 0)
             match_first_var = new_ir_var("m_first", TI_INT)
             emit(IR_CALL, match_first_var, fb0, 2, str_intern("load8"), TI_INT)
+        m_base_t := sg_alloc_cur_total()
+        m_base_u := sg_alloc_cur_unknown()
+        m_peak : ., mut = 0
+        m_unk : ., mut = 0
         an : ., mut = first_arm
         arm_idx : ., mut = 0
         loop:
@@ -5038,8 +5068,15 @@ fn gen_expr(node: int) -> int:
             if is_ident_bind == 1:
                 // Irrefutable binding arm: the name is the scrutinee itself.
                 bind_local(ident_ni, match_val)
+            sg_alloc_set(m_base_t, m_base_u)
             body_val : ., mut = gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
+            ad := sg_alloc_cur_total() - m_base_t
+            if ad > m_peak:
+                m_peak = ad
+            if sg_alloc_cur_unknown() != 0:
+                m_unk = 1
+            sg_alloc_set(m_base_t, m_base_u)
             if body_val >= 0:
                 emit(IR_STORE, -1, result_var, body_val, 0, 0)
                 // 容量阶段 T2：结果槽表示位置位（同 LET/赋值的写入规则，解包点据此分派）
@@ -5051,6 +5088,9 @@ fn gen_expr(node: int) -> int:
                 emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
             arm_idx = arm_idx + 1
+        sg_alloc_set(m_base_t + m_peak, m_base_u)
+        if m_unk != 0:
+            sg_alloc_set(m_base_t + m_peak, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
         return result_var
 
@@ -5112,8 +5152,7 @@ fn gen_expr(node: int) -> int:
         // For dyn vars with initializer: skip allocation (value is packed below)
         if is_dyn_var == 0 || val_node < 0:
             if is_arr == 0:
-                track_alloc_size(16)
-                emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
+                    emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
         // Declared scalar/pointer locals keep their declared IR row even without
         // an initializer. Leaving them TI_UNIT made uninitialized `x : int` look
         // like an alloc byte buffer / pointer to later passes.
