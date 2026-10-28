@@ -18,6 +18,23 @@ g_current_arena : int, mut = -1
 g_arena_pool_data : string, mut
 g_arena_free_list : int, mut = -1
 
+// Size-class sub-regions (spec: docs/superpowers/specs/2026-10-28-arena-size-classes.md).
+// Each arena owns ARENA_CLASS_COUNT entries: 25 size classes plus the large-object
+// path. base/cursor/limit are offsets inside the class chunk; -1 means "no chunk".
+ARENA_CLASS_COUNT : int = 26
+
+g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current slot per arena
+g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
+g_class_cursor : string, mut        // int[] — class chunk used bytes
+g_class_limit : string, mut         // int[] — class chunk capacity
+
+// Allocation-failure witness. Written before the runtime trap; a core dump or a
+// debugger can read these four values.
+g_alloc_fail_request : int, mut = 0
+g_alloc_fail_class : int, mut = -1
+g_alloc_fail_cursor : int, mut = 0
+g_alloc_fail_limit : int, mut = 0
+
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return
@@ -61,6 +78,49 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_parents, g_arena_cap * 8, nb3)
     g_arena_parents = nb3
+    // slot cursor
+    nb4 := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_slot_cursor, g_arena_cap * 8, nb4)
+    g_arena_slot_cursor = nb4
+    // class base / cursor / limit
+    cn := nc * ARENA_CLASS_COUNT * 8
+    nb5 := alloc(cn)
+    zi = 0
+    loop:
+        if zi >= cn:
+            break
+        store8(nb5, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_class_base, g_arena_cap * ARENA_CLASS_COUNT * 8, nb5)
+    g_class_base = nb5
+    nb6 := alloc(cn)
+    zi = 0
+    loop:
+        if zi >= cn:
+            break
+        store8(nb6, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_class_cursor, g_arena_cap * ARENA_CLASS_COUNT * 8, nb6)
+    g_class_cursor = nb6
+    nb7 := alloc(cn)
+    zi = 0
+    loop:
+        if zi >= cn:
+            break
+        store8(nb7, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_class_limit, g_arena_cap * ARENA_CLASS_COUNT * 8, nb7)
+    g_class_limit = nb7
     g_arena_cap = nc
     g_current_arena = saved_arena
 
@@ -94,6 +154,16 @@ fn arena_new() -> int, pub:
     cell_store(g_arena_cursors, ai * 8, 0)
     cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
     cell_store(g_arena_parents, ai * 8, -1)
+    cell_store(g_arena_slot_cursor, ai * 8, 0)
+    // No class chunk is attached until the first allocation of that class.
+    ci : ., mut = 0
+    loop:
+        if ci >= ARENA_CLASS_COUNT:
+            break
+        cell_store(g_class_base, (ai * ARENA_CLASS_COUNT + ci) * 8, -1)
+        cell_store(g_class_cursor, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        cell_store(g_class_limit, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        ci = ci + 1
 
     // Set parent = previous current arena
     if g_current_arena >= 0:
@@ -109,6 +179,18 @@ fn arena_reset(ai: int), pub:
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
     parent := cell_load(g_arena_parents, ai * 8)
+
+    // Drop every class chunk and rewind the slot. The slot itself stays with the
+    // arena until it is reused from the free list.
+    cell_store(g_arena_slot_cursor, ai * 8, 0)
+    ci : ., mut = 0
+    loop:
+        if ci >= ARENA_CLASS_COUNT:
+            break
+        cell_store(g_class_base, (ai * ARENA_CLASS_COUNT + ci) * 8, -1)
+        cell_store(g_class_cursor, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        cell_store(g_class_limit, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        ci = ci + 1
 
     // Push to free list
     cell_store(g_arena_parents, ai * 8, g_arena_free_list)
