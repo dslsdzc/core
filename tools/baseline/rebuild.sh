@@ -33,12 +33,16 @@ set -euo pipefail
 # 不进入 develop 历史，换人或换机重建会失败。新修订可读 v4 形，冒烟步通过。
 # 旧代三 sha（25e70197）：corec `701a319f…` · corearch `bd6b1c6a…` · corelsp `2c1da86f…`
 #   （全值见 `REBUILD.md` 历史表）。
-PINNED_REV="7eb9669d"          # v4 迁移 #183 合入 develop 的提交（首枚 develop 可达的 v4 基线）
+# 换代（2026-10-28，语言面与 AST span 批 #222）：PINNED_REV 7eb9669d → **28483a42**。
+# 依据 = #222 以 squash 合入 develop；新修订可读 `cast`、`Self`、receiver 规则和 64 字节 AST 节点。
+# 旧代三 sha（7eb9669d）：corec 4234b7a6… · corearch 3786eb4a… · corelsp 845ac048…
+#   （全值见 REBUILD.md 历史表）。
+PINNED_REV="28483a42"
 WS_NAME="p6-baseline-build"    # 临时 workspace 名（收工 forget）
 
-WHITELIST_COREC="4234b7a6254ad3b7a890268c462dbe3dbd269a991f0deaa12832e154dbe26265"
-WHITELIST_COREARCH="3786eb4a8a500158d22a0193b9174c2f4228b5c8d379a4d992ef920b28a9c421"
-WHITELIST_CORELSP="845ac0485f2fede878f18bdbacb49e9c24b62ddf4c3180e2b5d411e60467c0eb"
+WHITELIST_COREC="5fe3de891380c5909e6f5cefccac53781acbe1eccf4540f568988290467a6726"
+WHITELIST_COREARCH="e8b3e30b116c09200dfb9b2d023b0c1608f4f917e89b3f7dabf74ee6e295c542"
+WHITELIST_CORELSP="db51fdc7c420396152f363385174a96fed770af951339482cbb42376b62908e2"
 
 usage() { echo "usage: bash tools/baseline/rebuild.sh <outdir>" >&2; exit 2; }
 [ $# -eq 1 ] || usage
