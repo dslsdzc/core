@@ -57,6 +57,7 @@ hit_engine_files = [
 kernel_files = [
     'src/lattice/ent_kernel.cr',
     'src/lattice/regalloc_cag.cr',
+    'src/lattice/stub_regalloc.cr',
 ]
 
 # ① 架构轴 x86_64：寄存器分配 CAG + 指令编码 + 字节尺寸单源（sizes.cr）
