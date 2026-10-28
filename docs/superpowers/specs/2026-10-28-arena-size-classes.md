@@ -54,16 +54,35 @@
 
 ## 布局
 
-每个 Arena 维护两组状态：
+每个 Arena 维护一份档位状态表，按 `ai * K + c` 索引，K = 26（25 个档位加大对象区）：
 
 | 状态 | 含义 |
 |---|---|
-| `class_cursor[c]` | 档位 c 的当前游标 |
-| `class_limit[c]` | 档位 c 的当前上限 |
-| `large_cursor` | 大对象的游标 |
-| `large_limit` | 大对象的上限 |
+| `class_base[ai * K + c]` | 档位 c 当前 chunk 在 Arena slot 内的起点 |
+| `class_cursor[ai * K + c]` | 档位 c 当前用到的偏移 |
+| `class_limit[ai * K + c]` | 档位 c 当前 chunk 的终点 |
 
-档位子区域从 Arena 的 chunk 链上切分：首次使用某档位时切一个 chunk，把 `class_cursor[c]` 指到 chunk 起点，`class_limit[c]` 指到终点。
+Arena slot 内部再切分：
+
+1. `slot_meta_cursor` 记录该 slot 已切出的字节数。
+2. 某档位第一次使用，或当前 chunk 用尽时，从 `slot_meta_cursor` 处切一个 chunk（默认 4KB，不超过 slot 余量），把 `class_base/cursor/limit` 指向它。
+3. slot 余量不足时，按现有 chunk 链逻辑向全局堆申请新 slot，链接后从新 slot 继续切。
+4. `arena_reset(ai)` 把 `slot_meta_cursor` 和全部 `class_*` 清 0，slot 归还 arena slot free list。
+
+状态规模：每个 Arena 26 × 3 = 78 个字，加上原来的三张表，约 640 字节。metadata 数组按需扩容。
+
+## 失败 trap
+
+失败时先把见证写入固定地址的四个全局，再执行 `ud2`（SIGILL）：
+
+| 全局 | 内容 |
+|---|---|
+| `g_alloc_fail_request` | 请求字节数 |
+| `g_alloc_fail_class` | 档位号（大对象为 25） |
+| `g_alloc_fail_cursor` | 失败时的游标 |
+| `g_alloc_fail_limit` | 失败时的上限 |
+
+不返回 0，不回退到全局堆。核心转储或调试器可以直接读这四个值。
 
 ## 失败语义
 
@@ -94,11 +113,11 @@ trap 后不返回任何值。解释器和 ELF 两条路径行为一致。
 
 ## 实施顺序
 
-1. 元数据：`arena.cr` 增加档位游标/上限数组和大对象游标；cap 按档位数扩展。
-2. 解释器：`interp.cr` 的 `alloc` 走档位路径；失败 trap。
-3. ELF 发射体：`elf.cr` 的 `emit_alloc_body` 增加档位查表与档位游标；失败 trap。
-4. 测试：档位取整、跨档位、chunk 扩展、失败 trap、冷/暖一致。
-5. canary：ELF 变化后按 `REBUILD.md` 重锁。
+1. 元数据（`src/stdlib/arena.cr`）：`class_base/cursor/limit` 三张表、`slot_meta_cursor`、四个 trap 见证全局；`arena_new/reset` 初始化与清零。
+2. 发射体（`src/format/elf/elf.cr`）：`emit_alloc_body` 增加档位查表、档位游标、slot 内切块、trap 路径；`emit_alloc_body_simple` 同步 trap 语义。
+3. 解释器：IR_ALLOC 调用的就是同一个运行时分配器，不需要单独改；用 `corec run` 覆盖验证。
+4. 测试：档位取整边界、跨档位、slot 余量不足换 slot、trap 见证、冷/暖一致。
+5. canary：ELF 与 `.ccr` 变化后按 `REBUILD.md` 重锁，记录旧值。
 
 ## 不包含
 
