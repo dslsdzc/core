@@ -7,7 +7,7 @@
 // Element sizes (bytes per element)
 // ============================================================
 ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
-ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
+ESZ_ASTNODE  : int = 64    // kind,a,b,c,int_val,type_val,data,span = 8×8
 ESZ_SYMENTRY : int = 56    // name,kind,type,node,owner,pub,mut = 7×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48    // opcode,dest,src1,src2,src3,type_kind = 6×8
@@ -33,8 +33,8 @@ OFF_AS_C : int = 24
 OFF_AS_INTVAL : int = 32
 OFF_AS_TYPEVAL : int = 40
 OFF_AS_DATA : int = 48
-OFF_AS_LINE : int = 56
-OFF_AS_COL : int = 64
+// Byte span packed into one cell: lo + hi * 2^32. Zero means "no position".
+OFF_AS_SPAN : int = 56
 
 // SymEntry field offsets
 OFF_SY_NAME : int = 0
@@ -564,10 +564,10 @@ fn ast_type_val(n: int) -> int:
     return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL)
 fn ast_data(n: int) -> int:
     return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA)
-fn ast_line(n: int) -> int:
-    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE)
-fn ast_col(n: int) -> int:
-    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_COL)
+fn ast_lo(n: int) -> int:
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_SPAN) % 4294967296
+fn ast_hi(n: int) -> int:
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_SPAN) / 4294967296
 
 fn ast_set_kind(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND, v)
@@ -583,10 +583,7 @@ fn ast_set_type_val(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL, v)
 fn ast_set_data(n: int, v: int):
     cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA, v)
-fn ast_set_line(n: int, v: int):
-    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE, v)
-fn ast_set_col(n: int, v: int):
-    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_COL, v)
+
 
 fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int:
     idx := g_ast_count
@@ -598,8 +595,13 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_INTVAL, iv)
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_TYPEVAL, tv)
     cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_DATA, d)
-    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_LINE, line)
-    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_COL, col)
+    slo : ., mut = line
+    if slo < 0:
+        slo = 0
+    shi : ., mut = col
+    if shi < 0:
+        shi = 0
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_SPAN, slo + shi * 4294967296)
     g_ast_count = idx + 1
     return idx
 

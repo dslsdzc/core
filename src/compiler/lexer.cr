@@ -294,8 +294,8 @@ fn write_tok_span(tp: int, lo: int, tlen: int):
     if g_source_file >= 0 && g_source_file < g_sm_file_count:
         bb = cell_load(g_sm_files, g_source_file * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
     cell_store(g_tokens, tp + OFF_TK_FILE, g_source_file)
-    cell_store(g_tokens, tp + OFF_TK_LO, bb + lo)
-    cell_store(g_tokens, tp + OFF_TK_HI, bb + lo + tlen)
+    cell_store(g_tokens, tp + OFF_TK_LO, bb + lo + 1)
+    cell_store(g_tokens, tp + OFF_TK_HI, bb + lo + tlen + 1)
 
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)

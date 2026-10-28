@@ -1602,12 +1602,13 @@ fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_coun
 // owning library is derived from its real declaration line (types have no
 // EXPR_* declaration node of their own).
 fn def_type_sym(name_idx: int, ti: int, line: int):
-    node : ., mut = -1
-    if line > 0:
-        node = alloc_node(EXPR_NONE, 0, 0, 0, 0, 0, 0, line, 1)
-    def_sym(name_idx, SYM_TYPE, ti, node)
+    def_sym(name_idx, SYM_TYPE, ti, -1)
     si := g_sym_count - 1
-    owner := lib_of_node(node)
+    // Types have no declaration node of their own. The owner comes straight from
+    // the declaration line; a synthetic node would have no span.
+    owner : ., mut = -1
+    if line > 0:
+        owner = lib_of_line(line)
     sym_set_owner(si, owner)
     type_pub : ., mut = 0
     if owner >= 0 && lib_export_find_kind(owner, name_idx, SYM_TYPE) >= 0:
@@ -1652,7 +1653,7 @@ fn bind_bare_generic_type(node: int, fi: int) -> int:
         // The language guardrail is four generic parameters per declaration.
         // Leave the node untouched; the field projection will fail closed.
         return node
-    ga := alloc_node(EXPR_GENERIC_APPLY, name_ni, -1, need, 0, 0, 0, ast_line(node), ast_col(node))
+    ga := alloc_node(EXPR_GENERIC_APPLY, name_ni, -1, need, 0, 0, 0, ast_lo(node), ast_hi(node))
     first_arg := g_ast_count
     gi : ., mut = 0
     loop:
@@ -1660,7 +1661,7 @@ fn bind_bare_generic_type(node: int, fi: int) -> int:
             break
         bname := str_intern("__bind" + int_str(g_infer_name_seq))
         g_infer_name_seq = g_infer_name_seq + 1
-        alloc_node(EXPR_IDENT, 0, 0, 0, bname, 0, 0, ast_line(node), ast_col(node))
+        alloc_node(EXPR_IDENT, 0, 0, 0, bname, 0, 0, ast_lo(node), ast_hi(node))
         fi_set_generic_name(fi, gc + gi, bname)
         gi = gi + 1
     fi_set_generic_count(fi, gc + need)
@@ -3219,6 +3220,15 @@ fn is_struct_generic(si: int, name_idx: int) -> bool:
 fn find_struct_by_name(name_idx: int) -> int:
     if g_cur_lib < 0:
         return find_struct(name_idx)
+    // The parser stores the source name, not the library-qualified unique name.
+    // Resolve source + current library first, otherwise a user declaration that
+    // shadows a library type falls through to the library's entry.
+    own := decl_map_find(name_idx, DECL_STRUCT, g_cur_lib)
+    if own >= 0:
+        uniq_own := cell_load(g_decl_map, own * 40 + 24)
+        so := find_struct(uniq_own)
+        if so >= 0:
+            return so
     rec := decl_map_find_unique(name_idx)
     if rec >= 0:
         if cell_load(g_decl_map, rec * 40 + 8) == DECL_STRUCT && cell_load(g_decl_map, rec * 40) != name_idx:
@@ -4056,8 +4066,8 @@ fn infer_call_args(first_arg: int):
 // bool 洞的转换节点：改写为 `bool_str(x)` 调用（`fmt.cr`）。抽成函数是为了让 `infer_expr` 的
 // 分支保持单行、便于审计（转换表：string 恒等 · int->int_str · bool->bool_str · 其它 P028）。
 fn interp_bool_node(node: int, inner: int) -> int:
-    callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("bool_str"), 0, 0, ast_line(node), ast_col(node))
-    wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node))
+    callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("bool_str"), 0, 0, ast_lo(node), ast_hi(node))
+    wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_lo(node), ast_hi(node))
     ast_set_kind(node, EXPR_CALL)
     ast_set_a(node, callee)
     ast_set_b(node, wrapper)
@@ -4336,8 +4346,8 @@ fn infer_expr(node: int) -> int:
             return interp_bool_node(node, inner)
         if hti == TI_INT:
             cname := "int_str"
-            callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(cname), 0, 0, ast_line(node), ast_col(node))
-            wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node))
+            callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(cname), 0, 0, ast_lo(node), ast_hi(node))
+            wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_lo(node), ast_hi(node))
             ast_set_kind(node, EXPR_CALL)
             ast_set_a(node, callee)
             ast_set_b(node, wrapper)

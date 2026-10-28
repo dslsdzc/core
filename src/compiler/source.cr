@@ -235,9 +235,17 @@ fn sm_span(file: int, lo: int, hi: int) -> Span:
 // Byte-offset axis. Files are registered in order and each owns
 // [byte_base, byte_base + len), so a global offset identifies its file by
 // binary search. Line and column are then derived from that file's line table.
+g_last_span_file : int, mut
+g_last_span_lo : int, mut
+g_last_span_hi : int, mut
+
 fn sm_span_file(lo: int) -> int:
     if lo < 0 || g_sm_file_count <= 0:
         return -1
+    // Consecutive lookups usually stay in one file (symbol visibility walks a
+    // single declaration body), so keep the last hit.
+    if lo >= g_last_span_lo && lo < g_last_span_hi:
+        return g_last_span_file
     li : ., mut = 0
     hi_i : ., mut = g_sm_file_count - 1
     while li <= hi_i:
@@ -249,6 +257,9 @@ fn sm_span_file(lo: int) -> int:
         else if lo >= e:
             li = mid + 1
         else:
+            g_last_span_file = mid
+            g_last_span_lo = b
+            g_last_span_hi = e
             return mid
     return -1
 
@@ -265,6 +276,30 @@ fn sm_span_col(lo: int) -> int:
         return 1
     b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
     return sm_location_col(id, lo - b)
+
+// AST position accessors. `ast_line` keeps the historical meaning: the global
+// flat line index, because diagnostics, g_line_lib and library ownership index
+// by it. The byte span is decoded per call.
+fn ast_line(n: int) -> int:
+    lo := ast_lo(n)
+    if lo <= 0:
+        return 0
+    id := sm_span_file(lo - 1)
+    if id < 0:
+        return 0
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    lb := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+    return lb + sm_location_line(id, lo - 1 - b)
+
+fn ast_col(n: int) -> int:
+    lo := ast_lo(n)
+    if lo <= 0:
+        return 0
+    id := sm_span_file(lo - 1)
+    if id < 0:
+        return 0
+    b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
+    return sm_location_col(id, lo - 1 - b)
 
 fn sm_selftest() -> int:
     sm_reset()
