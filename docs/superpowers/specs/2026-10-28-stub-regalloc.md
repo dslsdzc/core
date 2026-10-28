@@ -126,5 +126,5 @@ arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超
 
 ## 已知差异
 
-1. 每个档位在自己的 slot 内只有一个 4KB 切片；切片用尽时 trap，不挂链申请新 slot。
-2. class 25 使用 slot 剩余空间。
+1. pool 固定为 1MB，slot 为 128KB，共 8 个 slot。slot 链会在 pool 内扩展；pool 用尽时 trap，扩 pool 还没有实现。
+2. class 25 使用当前 slot 的剩余空间。

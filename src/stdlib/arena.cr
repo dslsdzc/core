@@ -24,6 +24,11 @@ g_arena_free_list : int, mut = -1
 ARENA_CLASS_COUNT : int = 26
 
 g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current slot per arena
+g_arena_slot : string, mut          // int[] — current slot id per arena
+g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
+g_arena_slot_free : int, mut = -1
+g_arena_slot_count : int, mut = 0
+g_arena_pool_slots : int, mut = 0
 g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
@@ -93,6 +98,17 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_slot_cursor, g_arena_cap * 8, nb4)
     g_arena_slot_cursor = nb4
+    // current slot id
+    nb4b := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4b, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_slot, g_arena_cap * 8, nb4b)
+    g_arena_slot = nb4b
     // class base / cursor / limit
     cn := nc * ARENA_CLASS_COUNT * 8
     nb5 := alloc(cn)
@@ -161,6 +177,16 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     cell_store(g_class_sizes, 176, 2151)
     cell_store(g_class_sizes, 184, 2689)
     cell_store(g_class_sizes, 192, 3361)
+    g_arena_pool_slots = pool_size / arena_size
+    g_arena_slot_next = alloc(g_arena_pool_slots * 8)
+    si : ., mut = 0
+    loop:
+        if si >= g_arena_pool_slots:
+            break
+        cell_store(g_arena_slot_next, si * 8, -1)
+        si = si + 1
+    g_arena_slot_free = -1
+    g_arena_slot_count = 0
     g_arena_free_list = -1
     g_arena_count = 0
     g_arena_cap = 0
@@ -184,6 +210,17 @@ fn arena_new() -> int, pub:
     cell_store(g_arena_cursors, ai * 8, 0)
     cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
     cell_store(g_arena_parents, ai * 8, -1)
+    sl : ., mut = g_arena_slot_free
+    if sl >= 0:
+        g_arena_slot_free = cell_load(g_arena_slot_next, sl * 8)
+    else:
+        sl = g_arena_slot_count
+        g_arena_slot_count = sl + 1
+        if sl >= g_arena_pool_slots:
+            sl = -1
+    cell_store(g_arena_slot, ai * 8, sl)
+    if sl >= 0:
+        cell_store(g_arena_slot_next, sl * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     // No class chunk is attached until the first allocation of that class.
     ci : ., mut = 0
@@ -210,8 +247,16 @@ fn arena_reset(ai: int), pub:
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
     parent := cell_load(g_arena_parents, ai * 8)
 
-    // Drop every class chunk and rewind the slot. The slot itself stays with the
-    // arena until it is reused from the free list.
+    // Return every slot in the arena chain to the pool free list.
+    sl : ., mut = cell_load(g_arena_slot, ai * 8)
+    loop:
+        if sl < 0:
+            break
+        nxt := cell_load(g_arena_slot_next, sl * 8)
+        cell_store(g_arena_slot_next, sl * 8, g_arena_slot_free)
+        g_arena_slot_free = sl
+        sl = nxt
+    cell_store(g_arena_slot, ai * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     ci : ., mut = 0
     loop:

@@ -488,9 +488,14 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     j1 := cp
     cp = cp + ea_jl32(buf, pos + cp, 0)
 
-    // 2: base = pool_data + arena * max_size.
+    // 2: base = pool_data + current_slot * max_size.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 5, 5, r1)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 0)
+    jslot_bad := cp
+    cp = cp + ea_jl32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
-    cp = cp + ea_mul(buf, pos + cp, r1)
+    cp = cp + ea_mul(buf, pos + cp, 5)
     cp = cp + ea_mov_rip_load(buf, pos + cp, r3, gv_arena_pool_data)
     cp = cp + ea_add_rr(buf, pos + cp, r3, r2)
 
@@ -537,6 +542,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_jge32(buf, pos + cp, 0)
 
     // 7: carve a new 4KB chunk from the current slot.
+    chunk_alloc := cp
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
     cp = cp + ea_mov_load_index8(buf, pos + cp, r5, 15, r1)
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
@@ -577,15 +583,62 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_jmp32(buf, pos + cp, 0)
 
     slot_full := cp
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_free)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 0)
+    jl_bump := cp
+    cp = cp + ea_jl32(buf, pos + cp, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_next)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 15, 15, 5)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_arena_slot_free)
+    jmp_have := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+    slot_bump := cp
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_count)
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, 5)
+    cp = cp + ea_inc(buf, pos + cp, 15)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_arena_slot_count)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_pool_slots)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
+    jae_cap := cp
+    cp = cp + ea_jae8(buf, pos + cp, 0)
+    slot_have := cp
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 14, 15, r1)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_next)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 14, 5)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 5, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 5)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_max_size)
+    cp = cp + ea_mul(buf, pos + cp, 5)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 3, gv_arena_pool_data)
+    cp = cp + ea_add_rr(buf, pos + cp, 3, 0)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_max_size)
+    cp = cp + ea_add_rr(buf, pos + cp, 2, 3)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
+    jmp_chunk := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+
+    capacity_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
     cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, r7)
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, 5)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, r2)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_pool_slots)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
+
+    w32(buf, pos + jslot_bad + 2, capacity_full - (jslot_bad + 6))
+    w32(buf, pos + jl_bump + 2, slot_bump - (jl_bump + 6))
+    w32(buf, pos + jmp_have + 1, slot_have - (jmp_have + 5))
+    w8(buf, pos + jae_cap + 1, (capacity_full - (jae_cap + 2)) % 256)
+    w32(buf, pos + jmp_chunk + 1, chunk_alloc - (jmp_chunk + 5))
 
     class_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
@@ -1685,6 +1738,11 @@ gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
 gv_current_arena : int, mut = -1
 gv_arena_cursors : int, mut = -1
 gv_arena_slot_cursor : int, mut = -1
+gv_arena_slot : int, mut = -1
+gv_arena_slot_next : int, mut = -1
+gv_arena_slot_free : int, mut = -1
+gv_arena_slot_count : int, mut = -1
+gv_arena_pool_slots : int, mut = -1
 gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
@@ -1808,6 +1866,11 @@ fn elf_gen(buf: string) -> int:
     gv_current_arena = -1
     gv_arena_cursors = -1
     gv_arena_slot_cursor = -1
+    gv_arena_slot = -1
+    gv_arena_slot_next = -1
+    gv_arena_slot_free = -1
+    gv_arena_slot_count = -1
+    gv_arena_pool_slots = -1
     gv_class_base = -1
     gv_class_cursor = -1
     gv_class_limit = -1
@@ -1823,6 +1886,11 @@ fn elf_gen(buf: string) -> int:
     cur_ni := str_intern("g_current_arena")
     cur_ni2 := str_intern("g_arena_cursors")
     slot_cur_ni := str_intern("g_arena_slot_cursor")
+    slot_ni := str_intern("g_arena_slot")
+    slot_next_ni := str_intern("g_arena_slot_next")
+    slot_free_ni := str_intern("g_arena_slot_free")
+    slot_count_ni := str_intern("g_arena_slot_count")
+    pool_slots_ni := str_intern("g_arena_pool_slots")
     cls_ni1 := str_intern("g_class_base")
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
@@ -1854,6 +1922,16 @@ fn elf_gen(buf: string) -> int:
             gv_arena_cursors = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_cur_ni:
             gv_arena_slot_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == slot_ni:
+            gv_arena_slot = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == slot_next_ni:
+            gv_arena_slot_next = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == slot_free_ni:
+            gv_arena_slot_free = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == slot_count_ni:
+            gv_arena_slot_count = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == pool_slots_ni:
+            gv_arena_pool_slots = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni1:
             gv_class_base = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_ni2:
