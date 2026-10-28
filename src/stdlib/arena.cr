@@ -34,6 +34,7 @@ g_class_base : string, mut          // int[] — class chunk start offset, [aren
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
 g_class_sizes : string, mut         // int[] — 25 class sizes, 1.25x steps
+g_class_lookup : string, mut        // int[] — aligned/16 -> class, 256 entries
 
 // Allocation-failure witness. Written before the runtime trap; a core dump or a
 // debugger can read these four values.
@@ -202,6 +203,25 @@ fn arena_init(pool_size: int, arena_size: int), pub:
         si = si + 1
     g_arena_slot_free = -1
     g_arena_slot_count = 0
+    g_class_lookup = alloc(256 * 8)
+    lb : ., mut = 0
+    loop:
+        if lb >= 256:
+            break
+        aligned_b := lb * 16
+        lc : ., mut = -1
+        lci : ., mut = 0
+        loop:
+            if lci >= 25:
+                break
+            if aligned_b <= cell_load(g_class_sizes, lci * 8):
+                lc = lci
+                break
+            lci = lci + 1
+        if lc < 0:
+            lc = 25
+        cell_store(g_class_lookup, lb * 8, lc)
+        lb = lb + 1
     g_arena_free_list = -1
     g_arena_count = 0
     g_arena_cap = 0

@@ -521,27 +521,22 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_add_imm8(buf, pos + cp, r6, 15)
     cp = cp + ea_and_imm8(buf, pos + cp, r6, 248)
 
-    // 5: class scan over the 25-entry 1.25x table.
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_class_sizes)
-    cp = cp + ea_mov_imm32(buf, pos + cp, 15, 0)
-    class_loop := cp
-    cp = cp + ea_cmp_imm8(buf, pos + cp, 15, 25)
-    jae_large := cp
-    cp = cp + ea_jae8(buf, pos + cp, 0)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 14, 15)
-    cp = cp + ea_cmp_rr(buf, pos + cp, 6, 0)
-    jbe_found := cp
-    cp = cp + ea_jbe8(buf, pos + cp, 0)
-    cp = cp + ea_inc(buf, pos + cp, 15)
-    jmp_loop := cp
-    cp = cp + ea_jmp8(buf, pos + cp, 0)
-    class_large := cp
+    // 5: class = lookup[min(aligned >> 4, 255)].
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, r6)
+    cp = cp + ea_shr_imm8(buf, pos + cp, 15, 4)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, 15, 255)
+    jbe_small := cp
+    cp = cp + ea_jbe32(buf, pos + cp, 0)
     cp = cp + ea_mov_imm32(buf, pos + cp, 15, 25)
-    class_found := cp
+    jmp_class_done := cp
+    cp = cp + ea_jmp32(buf, pos + cp, 0)
+    class_small := cp
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_class_lookup)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 15, 14, 15)
+    class_done := cp
     cp = cp + ea_mov_rr(buf, pos + cp, r4, 15)
-    w8(buf, pos + jae_large + 1, (class_large - (jae_large + 2)) % 256)
-    w8(buf, pos + jbe_found + 1, (class_found - (jbe_found + 2)) % 256)
-    w8(buf, pos + jmp_loop + 1, (class_loop - (jmp_loop + 2)) % 256)
+    w32(buf, pos + jbe_small + 2, class_small - (jbe_small + 6))
+    w32(buf, pos + jmp_class_done + 1, class_done - (jmp_class_done + 5))
 
     // 6: idx = arena * 26 + class; class_base[idx] is the current chunk.
     cp = cp + ea_mov_rr(buf, pos + cp, 14, r1)
@@ -1856,6 +1851,7 @@ gv_class_base : int, mut = -1
 gv_class_cursor : int, mut = -1
 gv_class_limit : int, mut = -1
 gv_class_sizes : int, mut = -1
+gv_class_lookup : int, mut = -1
 gv_alloc_fail_request : int, mut = -1
 gv_alloc_fail_class : int, mut = -1
 gv_alloc_fail_cursor : int, mut = -1
@@ -1985,6 +1981,7 @@ fn elf_gen(buf: string) -> int:
     gv_class_cursor = -1
     gv_class_limit = -1
     gv_class_sizes = -1
+    gv_class_lookup = -1
     gv_alloc_fail_request = -1
     gv_alloc_fail_class = -1
     gv_alloc_fail_cursor = -1
@@ -2006,6 +2003,7 @@ fn elf_gen(buf: string) -> int:
     cls_ni2 := str_intern("g_class_cursor")
     cls_ni3 := str_intern("g_class_limit")
     cls_sz_ni := str_intern("g_class_sizes")
+    cls_lk_ni := str_intern("g_class_lookup")
     fail_ni1 := str_intern("g_alloc_fail_request")
     fail_ni2 := str_intern("g_alloc_fail_class")
     fail_ni3 := str_intern("g_alloc_fail_cursor")
@@ -2053,6 +2051,8 @@ fn elf_gen(buf: string) -> int:
             gv_class_limit = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cls_sz_ni:
             gv_class_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == cls_lk_ni:
+            gv_class_lookup = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == fail_ni1:
             gv_alloc_fail_request = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == fail_ni2:
