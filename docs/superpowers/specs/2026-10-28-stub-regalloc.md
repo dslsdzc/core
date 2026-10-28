@@ -108,8 +108,9 @@ arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超
 11. 重算比写回 home 便宜时选择重算。
 12. 调用点驱逐 caller-saved，保留 callee-saved。
 13. 固定 caller-saved 条目跨调用点被拒绝。
+14. 被驱逐的条目在后续驱逐释放寄存器后获得第二次分配。
 
-`tests/selfhost/test_stub_regalloc.py` 要求 13 个用例全部通过，并把 13 作为下限，防止用例表被删减。
+`tests/selfhost/test_stub_regalloc.py` 要求 14 个用例全部通过，并把 14 作为下限，防止用例表被删减。
 
 ## 验收
 
@@ -120,7 +121,7 @@ arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超
 
 ## 不包含
 
-1. CAG 的 second-chance 变体。当前只实现成本感知驱逐。
+1. Second-chance 在扫描结束后重试被溢出的条目；调用点驱逐的条目不参与重试，因为它们的 home 是调用失效的结果，不是放置失败。
 2. stub 编码器的 spill 装载和写回。当前 stub 有 9 个虚拟寄存器和 9 个物理
    寄存器，不会溢出；home 槽路径还没有指令序列。
 3. 竞技场 size class 在 ELF 发射体中的实现。`arena.cr` 的 26 档元数据已经存在，

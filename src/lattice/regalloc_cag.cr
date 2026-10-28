@@ -49,6 +49,7 @@ struct CagAllocator:
     assign: string
     spill: string
     remat_flag: string
+    call_evicted: string
     order: string
     spill_count: int
     allow_evict: int
@@ -80,6 +81,7 @@ fn cag_new(count: int, reg_count: int) -> CagAllocator:
         assign = alloc(cap * 8),
         spill = alloc(cap * 8),
         remat_flag = alloc(cap * 8),
+        call_evicted = alloc(cap * 8),
         order = alloc(cap * 8),
         spill_count = 0,
         allow_evict = 0,
@@ -104,6 +106,7 @@ fn cag_new(count: int, reg_count: int) -> CagAllocator:
         cell_store(a.assign, i * 8, -1)
         cell_store(a.spill, i * 8, -1)
         cell_store(a.remat_flag, i * 8, 0)
+        cell_store(a.call_evicted, i * 8, 0)
         cell_store(a.order, i * 8, i)
         cell_store(a.calls, i * 8, -1)
         i = i + 1
@@ -268,6 +271,7 @@ impl CagAllocator:
                         if cell_load(self.pin, w * 8) >= 0:
                             self.error = CAG_ERR_CALL_CLOBBER
                             return self.error
+                        cell_store(self.call_evicted, w * 8, 1)
                         self.evict(w)
             w = w + 1
         return CAG_OK
@@ -338,6 +342,7 @@ impl CagAllocator:
             cell_store(self.assign, vi * 8, -1)
             cell_store(self.spill, vi * 8, -1)
             cell_store(self.remat_flag, vi * 8, 0)
+            cell_store(self.call_evicted, vi * 8, 0)
             cell_store(self.order, vi * 8, vi)
             vi = vi + 1
 
@@ -417,5 +422,20 @@ impl CagAllocator:
             if self.expire_calls(at) != CAG_OK:
                 return self.error
             call_i = call_i + 1
+
+        // Second chance: retry spilled entries once after the scan. A later
+        // eviction may have released a register. An evicted entry is spilled
+        // for its whole interval, so the retry is valid whenever the new
+        // holder's interval does not intersect it.
+        w : ., mut = 0
+        loop:
+            if w >= self.count:
+                break
+            if cell_load(self.assign, w * 8) < 0 && cell_load(self.spill, w * 8) >= 0 && cell_load(self.call_evicted, w * 8) == 0:
+                got := self.pick(w)
+                if got >= 0:
+                    cell_store(self.assign, w * 8, got)
+                    cell_store(self.spill, w * 8, -1)
+            w = w + 1
 
         return self.error

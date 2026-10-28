@@ -232,6 +232,25 @@ fn srs_cag_pin_call_clobber() -> int:
     f = f + srs_expect("cag_pin_call.rc", rc, CAG_ERR_CALL_CLOBBER)
     return f
 
+fn srs_cag_second_chance() -> int:
+    a := cag_new(3, 1)
+    a.reg(0, 10, CAG_REG_CALLEE)
+    a.cand(0, 0, 2)
+    a.cand(1, 0, 1)
+    a.cand(2, 2, 2)
+    a.context(0, 5, 1, -1, 1, 1)   // 5
+    a.context(1, 1, 1, -1, 0, 1)   // 1
+    a.context(2, 10, 1, -1, 1, 1)  // 10
+    a.allow_eviction(1)
+    rc := a.run()
+    f : ., mut = 0
+    f = f + srs_expect("cag_second.rc", rc, CAG_OK)
+    f = f + srs_expect("cag_second.evicted", srs_bool(a.spilled(0) >= 0), 1)
+    f = f + srs_expect("cag_second.retried", srs_bool(a.assigned(1) >= 0), 1)
+    f = f + srs_expect("cag_second.no_home", a.spilled(1), -1)
+    f = f + srs_expect("cag_second.new_assigned", srs_bool(a.assigned(2) >= 0), 1)
+    return f
+
 fn stub_regalloc_selftest_run() -> int:
     g_srs_total = 0
     g_srs_fails = 0
@@ -249,6 +268,7 @@ fn stub_regalloc_selftest_run() -> int:
     srs_case("cag_remat", srs_cag_remat())
     srs_case("cag_call_clobber", srs_cag_call_clobber())
     srs_case("cag_pin_call_clobber", srs_cag_pin_call_clobber())
+    srs_case("cag_second_chance", srs_cag_second_chance())
 
     print(int_str(g_srs_total - g_srs_fails))
     print("/")

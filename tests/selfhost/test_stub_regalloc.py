@@ -31,7 +31,8 @@ COREC = BASE / "build" / "corec"
 #  10. CAG rematerialises when that is cheaper than a home write
 #  11. a call evicts caller-saved entries and keeps callee-saved
 #  12. a pinned caller-saved entry across a call is rejected
-MIN_CASES = 13
+#  13. a spilled entry is retried after a later eviction frees a register
+MIN_CASES = 14
 
 
 def run_selftest():
