@@ -15,7 +15,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 两个核心性质：
 
 1. 无碎片，静态已知大小的分配路径保持纯 bump，零碎片
-2. 动态模式下工程可控的极低碎片，动态大小分配路径走分档子区域，浪费上限由 size class 表决定（档位越细上限越低：pow2 档约 50%，细分档约 12.5%）
+2. 动态模式下工程可控的极低碎片，动态大小分配路径走分档子区域，浪费上限由 size class 表决定（档位越细上限越低：pow2 档约 50%，细分档约 12.5%）。当前规格使用 1.25 倍步长、上限 20%，见 `docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
 长期运行服务的内存占用上限由并发区域数量决定，因此没有 GC 停顿。
 
@@ -91,7 +91,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 | 策略推导 | 大小预计算（IR 层） |
 
 实现要点（已实现）：
-- stdlib arena.cr 完整生命周期（init/new/reset）、动态元数据、free list、嵌套
+- stdlib arena.cr 完整生命周期（init/new/reset）、动态元数据、arena slot free list（复用整个 slot，不是对象级 free list）、嵌套
 - IR 子图绑定：函数/loop/for/unsafe 自动 arena lifecycle + 编译期大小预计算（ir_gen.cr）
 - ELF 后端双路径 alloc:arena 感知(`g_current_arena` 检查）+ 全局 bump 回退；mmap 堆扩展（BSS 用满后自动 mmap）
 - `emit_alloc_body` 零初始化 + 按需扩容
@@ -145,7 +145,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 
 设计阶段（M1-M3 推进，以计划为准）：
 - split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
-- size class 分档策略推导（动态路径碎片上界）
+- size class 分档策略：规格已定（`docs/superpowers/specs/2026-10-28-arena-size-classes.md`），待实施
 - 字节权限层使用（验证器侧）
 
 待解决问题：
