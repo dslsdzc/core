@@ -49,6 +49,8 @@ COREC_FILES = [
     'src/compiler/ccr_types.cr',
     'src/compiler/type_selftest.cr',
     'src/compiler/purity_selftest.cr',
+    'src/compiler/stub_regalloc.cr',
+    'src/compiler/stub_regalloc_selftest.cr',
     'src/compiler/opt.cr',
     'src/compiler/ptr_analysis.cr',
     'src/compiler/region_check.cr',

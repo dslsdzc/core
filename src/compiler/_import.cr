@@ -41,6 +41,8 @@ import ty_shadow
 import ccr_types
 import type_selftest
 import purity_selftest
+import stub_regalloc
+import stub_regalloc_selftest
 import diag
 import ir_gen
 import dataflow

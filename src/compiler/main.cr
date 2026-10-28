@@ -248,6 +248,7 @@ fn corec_main() -> int:
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
     cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)")
+    cli_cmd("selftest-stub-regalloc", "Run runtime-stub register allocation self tests")
     cli_cmd("selftest-source", "Run SourceManager self tests")
     cli_cmd("selftest-lib", "Run LibManager self tests")
     cli_flag("output", "o", "Output path")
@@ -435,6 +436,10 @@ fn corec_main() -> int:
     // === selftest-purity: effect-purity self tests with inline source and full frontend/IR ===
     if cli_eq(cmd, "selftest-purity"):
         return purity_selftest_run()
+
+    // === selftest-stub-regalloc: runtime-stub register assignment cases; no artifact ===
+    if cli_eq(cmd, "selftest-stub-regalloc"):
+        return stub_regalloc_selftest_run()
 
     // === selftest-source: SourceManager self tests; no source file, no artifact ===
     if cli_eq(cmd, "selftest-source"):
