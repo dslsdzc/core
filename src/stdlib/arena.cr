@@ -30,6 +30,8 @@ g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
 g_arena_slot_free : int, mut = -1
 g_arena_slot_count : int, mut = 0
 g_arena_pool_slots : int, mut = 0
+g_segment_base : string, mut        // string[] — 1MB pool segments
+g_segment_count : int, mut = 0
 g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
@@ -165,8 +167,14 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     if arena_size < 131072:
         arena_size = 131072
     g_current_arena = -1
-    g_arena_pool_data = alloc(pool_size)
+    // Pool segments are 1MB each and hold eight 128KB slots.
+    arena_size = 1048576
     g_arena_max_size = arena_size
+    g_segment_base = alloc(256 * 8)
+    g_segment_count = 1
+    seg0 := alloc(8388608)
+    g_arena_pool_data = seg0
+    cell_store(g_segment_base, 0, seg0)
     g_class_sizes = alloc(25 * 8)
     cell_store(g_class_sizes, 0, 16)
     cell_store(g_class_sizes, 8, 20)
@@ -193,8 +201,8 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     cell_store(g_class_sizes, 176, 2151)
     cell_store(g_class_sizes, 184, 2689)
     cell_store(g_class_sizes, 192, 3361)
-    g_arena_pool_slots = pool_size / arena_size
-    g_arena_slot_next = alloc(g_arena_pool_slots * 8)
+    g_arena_pool_slots = 8
+    g_arena_slot_next = alloc(2048 * 8)
     si : ., mut = 0
     loop:
         if si >= g_arena_pool_slots:
@@ -225,6 +233,17 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_arena_free_list = -1
     g_arena_count = 0
     g_arena_cap = 0
+
+fn arena_grow_pool():
+    if g_segment_count >= 256:
+        return
+    saved := g_current_arena
+    g_current_arena = -1
+    seg := alloc(8388608)
+    cell_store(g_segment_base, g_segment_count * 8, seg)
+    g_segment_count = g_segment_count + 1
+    g_arena_pool_slots = g_arena_pool_slots + 8
+    g_current_arena = saved
 
 fn arena_new_sized(peak: int) -> int, pub:
     if peak > g_arena_max_size:
@@ -258,6 +277,8 @@ fn arena_new_sized(peak: int) -> int, pub:
     else:
         sl = g_arena_slot_count
         g_arena_slot_count = sl + 1
+        if sl >= g_arena_pool_slots:
+            arena_grow_pool()
         if sl >= g_arena_pool_slots:
             sl = -1
     cell_store(g_arena_slot, ai * 8, sl)
