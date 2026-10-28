@@ -148,6 +148,9 @@ fn _grow_arena_meta(needed: int):
 
 fn arena_init(pool_size: int, arena_size: int), pub:
     // The backing pool outlives the caller's automatic function arena.
+    // The 25 class slices are 4KB each, so a slot must hold at least 100KB.
+    if arena_size < 131072:
+        arena_size = 131072
     g_current_arena = -1
     g_arena_pool_data = alloc(pool_size)
     g_arena_max_size = arena_size
@@ -280,6 +283,5 @@ fn arena_reset(ai: int), pub:
 fn arena_avail(ai: int) -> int, pub:
     if ai < 0 || ai >= g_arena_count:
         return 0
-    cursor := cell_load(g_arena_cursors, ai * 8)
-    limit := cell_load(g_arena_sizes, ai * 8)
-    return limit - cursor
+    used := cell_load(g_arena_slot_cursor, ai * 8)
+    return g_arena_max_size - used
