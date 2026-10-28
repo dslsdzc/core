@@ -292,10 +292,13 @@ fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
+    // REX.W + C7 /0 id: mov r64, sign-extended imm32. B8+rd with REX.W is
+    // mov r64, imm64 and would desynchronise the stream if only 4 bytes follow.
     cp := pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
-    w8(buf, cp, 184 + dst % 8)
+    w8(buf, cp, 199)
     cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 0, dst % 8)
     e2_w32(buf, cp, imm)
     cp = cp + 4
     return cp - pos
