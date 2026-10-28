@@ -88,13 +88,16 @@ stub 没有调用点，不传 `call_at`。
 `rax/r10` 和 `rep stosb` 需要的 `rdi/rcx/rax` 通过 pin 固定；`base` 和 `cursor`
 固定在 `r11/r9`，避免被清零路径覆盖。
 
-arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超出上限都执行
-`ud2`，不返回 0。没有 arena 时的全局堆路径保留，用于 `arena_init` 之前的分配。
+arena 路径是直线代码。请求超过 1TB、没有可用的 slot、游标超出上限都执行
+`ud2`，不返回 0。超过 64MB 的请求走独立 `mmap` extent，`arena_reset` 时 `munmap`。
+没有 arena 时的全局堆路径保留，用于 `arena_init` 之前的分配。
 
 分配器 stub 有意只用七个物理寄存器，使 class 索引无法在定义点获得寄存器。
 `StubAllocator` 把它溢出到 `g_alloc_home_idx`，编码器在该值的两次使用前后
-插入 `mov [home]` / `mov home`。`r14` 和 `r15` 在入口保存，在两条返回路径上
-恢复，`push` 两次保持 `heap_expand` 调用前的 16 字节对齐。
+插入 `mov [home]` / `mov home`。分配器把 `rbp` 当 scratch，所以 `rbp`、`r14`、
+`r15` 都在入口保存，在每条返回路径恢复；`push` 三次保持 `heap_expand` 调用前的
+16 字节对齐。`arena_grow_pool` 是普通编译代码，调用前后保存 `r8`、`r9`、`r10`、
+`r11` 四个 caller-saved 值。
 
 ## 测试
 
@@ -121,10 +124,14 @@ arena 路径是直线代码。请求超过 64MB、没有当前 arena、游标超
 
 1. `corec selftest-stub-regalloc` 9/9，返回 0。
 2. `corec check src/compiler` 通过。
-3. canary 5/5，值与接入前一致。
+3. canary：`ea_mov_imm32` 编码修复改变了 canary ELF；新值见
+   `tools/baseline/canary_values.tsv` 的重锁记录。
 4. `tests/selfhost/test_live_ranges.py` 通过。
 
 ## 已知差异
 
-1. pool 固定为 1MB，slot 为 128KB，共 8 个 slot。slot 链会在 pool 内扩展；pool 用尽时 trap，扩 pool 还没有实现。
-2. class 25 使用当前 slot 的剩余空间。
+1. pool 由 64MB segment 组成，每个 segment 64 个 1MB slot。上限由 `Core.toml`
+   的 `arena_pool_limit` 配置；超过上限时 `arena_grow_pool` 打印错误，分配器随后 trap。
+2. 档位 0 到 24 每次切 4KB 块；块用尽后再切一块。档位 25 使用当前 slot 的剩余
+   空间，用尽后切新 slot。
+3. 1MB 到 64MB 的请求取最新 segment 的连续 slot；超过 64MB 的请求走 mmap extent。

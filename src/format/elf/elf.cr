@@ -77,31 +77,54 @@ fn ea_mov_rip_store(buf: string, pos: int, src: int, gid: int) -> int:
     return cp - pos
 
 fn ea_mov_load(buf: string, pos: int, dst: int, base: int) -> int:
+    // A base whose low three bits are 5 (rbp/r13) cannot use mod=00: that
+    // encoding means RIP-relative or disp32 with no base. Use mod=01 with a
+    // zero displacement instead.
     cp := pos
+    md := 0
+    if base % 8 == 5:
+        md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
     w8(buf, cp, 139)
     cp = cp + 1
-    cp = cp + ea_modrm(buf, cp, 0, dst % 8, base % 8)
+    cp = cp + ea_modrm(buf, cp, md, dst % 8, base % 8)
+    if md == 1:
+        w8(buf, cp, 0)
+        cp = cp + 1
     return cp - pos
 
 fn ea_mov_load_index8(buf: string, pos: int, dst: int, base: int, index: int) -> int:
+    // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
     cp := pos
+    md := 0
+    if base % 8 == 5:
+        md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, index / 8, base / 8)
     w8(buf, cp, 139)
     cp = cp + 1
-    cp = cp + ea_modrm(buf, cp, 0, dst % 8, 4)
+    cp = cp + ea_modrm(buf, cp, md, dst % 8, 4)
     w8(buf, cp, 3 * 64 + (index % 8) * 8 + base % 8)
     cp = cp + 1
+    if md == 1:
+        w8(buf, cp, 0)
+        cp = cp + 1
     return cp - pos
 
 fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -> int:
+    // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
     cp := pos
+    md := 0
+    if base % 8 == 5:
+        md = 1
     cp = cp + ea_rex(buf, cp, 1, src / 8, index / 8, base / 8)
     w8(buf, cp, 137)
     cp = cp + 1
-    cp = cp + ea_modrm(buf, cp, 0, src % 8, 4)
+    cp = cp + ea_modrm(buf, cp, md, src % 8, 4)
     w8(buf, cp, 3 * 64 + (index % 8) * 8 + base % 8)
     cp = cp + 1
+    if md == 1:
+        w8(buf, cp, 0)
+        cp = cp + 1
     return cp - pos
 
 fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
@@ -331,6 +354,12 @@ fn ea_sub_rr(buf: string, pos: int, dst: int, src: int) -> int:
     cp = cp + ea_modrm(buf, cp, 3, src % 8, dst % 8)
     return cp - pos
 
+fn ea_jne32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 133)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
 fn ea_jne8(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos, 117)
     w8(buf, pos + 1, rel % 256)
@@ -411,13 +440,29 @@ fn ea_inc(buf: string, pos: int, dst: int) -> int:
 
 
 
+// The arena allocator body is only needed when the program links the arena
+// library. g_current_arena is registered by the static runtime even for
+// programs that never use arenas, so registration alone is not a signal.
+fn has_arena_runtime() -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        ni := cell_load(g_ir_func_name_idx, i * 8)
+        if str_eq(istr_get(ni), "arena_new") != 0:
+            return 1
+        if str_eq(istr_get(ni), "arena_init") != 0:
+            return 1
+        i = i + 1
+    return 0
+
 // Emit arena-aware dual-path allocator function body
 // Checks g_current_arena: if >=0 uses arena bump, otherwise global bump.
 // Returns bytes written.
 fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int:
     // When arena globals aren't registered (e.g. non-static builds), emit the
     // original simple bump allocator to avoid relying on unpatched rip-relatives.
-    if gv_current_arena < 0:
+    if gv_current_arena < 0 || has_arena_runtime() == 0:
         return emit_alloc_body_simple(buf, pos, bss_va, globals_size)
 
     // The arena path is straight-line code. Failure is a trap, never a return
@@ -432,8 +477,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     a.reg(2, 0, CAG_REG_CALLEE)
     a.reg(3, 11, CAG_REG_CALLEE)
     a.reg(4, 9, CAG_REG_CALLEE)
-    a.reg(6, 6, CAG_REG_CALLEE)
-    a.reg(7, 2, CAG_REG_CALLEE)
+    a.reg(5, 6, CAG_REG_CALLEE)
+    a.reg(6, 2, CAG_REG_CALLEE)
 
     // v0 size, v1 arena, v2 max_size, v3 base, v4 class, v5 index,
     // v6 aligned, v7 new cursor, v8 unused. Seven registers: v5 spills.
@@ -493,6 +538,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     a.read(28, 3)
     a.read(28, 4)
     if a.run() != SR_OK:
+        print("alloc stub: CAG failed: ")
+        println(int_str(a.error_code()))
         return emit_alloc_body_simple(buf, pos, bss_va, globals_size)
 
     r0 := a.assigned(0)
@@ -500,7 +547,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     r2 := a.assigned(2)
     r3 := a.assigned(3)
     r4 := a.assigned(4)
-    r5 := a.assigned(5)
+    r5 := 1  // v5 is spilled; rcx is the scratch register
     r6 := a.assigned(6)
     r7 := a.assigned(7)
     r8 := a.assigned(8)
@@ -510,8 +557,11 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp : ., mut = 0
     fva := TEXT_BASE + pos
 
-    // Preserve the callee-saved scratch pair used for the home slot. Two pushes
-    // keep the stack 16-byte aligned for the heap_expand call.
+    // Preserve the callee-saved registers the body uses: rbp is a scratch,
+    // and r14/r15 hold the home slot. Three pushes keep rsp 16-byte aligned
+    // for the heap_expand call (entry rsp is 8 mod 16).
+    w8(buf, pos + cp, 85)
+    cp = cp + 1
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 86)
     cp = cp + 2
@@ -568,7 +618,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_load_index8(buf, pos + cp, 5, 5, r1)
     cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 0)
     jstatic := cp
-    cp = cp + ea_jne8(buf, pos + cp, 0)
+    cp = cp + ea_jne32(buf, pos + cp, 0)
 
     // 4: aligned = align_up(size + 8, 8).
     cp = cp + ea_mov_rr(buf, pos + cp, r6, r0)
@@ -578,7 +628,10 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // 5: class = lookup[min(aligned >> 4, 255)].
     cp = cp + ea_mov_rr(buf, pos + cp, 15, r6)
     cp = cp + ea_shr_imm8(buf, pos + cp, 15, 4)
-    cp = cp + ea_cmp_imm8(buf, pos + cp, 15, 255)
+    // 255 must be compared as an unsigned 32-bit value. The imm8 form is
+    // sign-extended to -1, so the clamp branch would always be taken and the
+    // lookup index would run past the 256-entry table.
+    cp = cp + ea_cmp_imm32(buf, pos + cp, 15, 255)
     jbe_small := cp
     cp = cp + ea_jbe32(buf, pos + cp, 0)
     cp = cp + ea_mov_imm32(buf, pos + cp, 15, 25)
@@ -605,14 +658,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     // 7: carve a new 4KB chunk from the current slot.
     chunk_alloc := cp
-    // Large objects (28KB..128KB) take the current slot tail. If the tail is
-    // too small, allocate a fresh slot first.
+    // The large class takes the current slot tail. The fixed 4KB class chunk is
+    // too small for requests above the last class size (3361 bytes), so class 25
+    // never uses it.
     cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
     jne_not_large := cp
-    cp = cp + ea_jne8(buf, pos + cp, 0)
-    cp = cp + ea_cmp_imm32(buf, pos + cp, r6, 28672)
-    jbe_not_large2 := cp
-    cp = cp + ea_jbe32(buf, pos + cp, 0)
+    cp = cp + ea_jne32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_max_size)
     cp = cp + ea_cmp_rr(buf, pos + cp, r6, 5)
     ja_cap_large := cp
@@ -642,8 +693,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     jmp_base_large := cp
     cp = cp + ea_jmp32(buf, pos + cp, 0)
     not_large := cp
-    w8(buf, pos + jne_not_large + 1, (not_large - (jne_not_large + 2)) % 256)
-    w32(buf, pos + jbe_not_large2 + 2, not_large - (jbe_not_large2 + 6))
+    w32(buf, pos + jne_not_large + 2, not_large - (jne_not_large + 6))
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
     cp = cp + ea_mov_load_index8(buf, pos + cp, r5, 15, r1)
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r3)
@@ -699,7 +749,21 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
     jb_have_slot := cp
     cp = cp + ea_jb32(buf, pos + cp, 0)
-    grow_call := cp
+    // arena_grow_pool is ordinary compiled code, so the caller-saved values
+    // the allocator keeps live must be saved across the call. Four pushes keep
+    // rsp 16-byte aligned.
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 80)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 81)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 82)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 83)
+    cp = cp + 2
     grow_call_patch(g_x86_call_patch_count + 1)
     cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
     cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("arena_grow_pool"))
@@ -707,6 +771,18 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 232)
     e2_w32(buf, pos + cp + 1, 0)
     cp = cp + 5
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 91)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 90)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 89)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 88)
+    cp = cp + 2
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_count)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_pool_slots)
     cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
@@ -728,12 +804,17 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
     cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 0)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_max_size)
-    cp = cp + ea_mul(buf, pos + cp, 5)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 3, gv_arena_pool_data)
-    cp = cp + ea_add_rr(buf, pos + cp, 3, 0)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_max_size)
-    cp = cp + ea_add_rr(buf, pos + cp, 2, 3)
+    // slot base = segment_base[slot / 64] + (slot % 64) * 1MB.
+    // Use the virtual base/end registers (r3/r2), not their slot numbers.
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, 5)
+    cp = cp + ea_shr_imm8(buf, pos + cp, 15, 6)
+    cp = cp + ea_and_imm8(buf, pos + cp, 5, 63)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, r3, gv_segment_base)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, r3, r3, 15)
+    cp = cp + ea_shl_imm8(buf, pos + cp, 5, 20)
+    cp = cp + ea_add_rr(buf, pos + cp, r3, 5)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
+    cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
     jmp_chunk := cp
     cp = cp + ea_jmp32(buf, pos + cp, 0)
@@ -759,6 +840,21 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     ja_multi_cap := cp
     cp = cp + ea_ja32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_segment_count)
+    // arena_grow_pool is ordinary compiled code, so the caller-saved values
+    // the allocator keeps live must be saved across the call. Four pushes keep
+    // rsp 16-byte aligned.
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 80)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 81)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 82)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 83)
+    cp = cp + 2
     grow_call_patch(g_x86_call_patch_count + 1)
     cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
     cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("arena_grow_pool"))
@@ -766,6 +862,18 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 232)
     e2_w32(buf, pos + cp + 1, 0)
     cp = cp + 5
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 91)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 90)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 89)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 88)
+    cp = cp + 2
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_segment_count)
     cp = cp + ea_cmp_rr(buf, pos + cp, 15, 14)
     jbe_grow_fail := cp
@@ -821,6 +929,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 95)
     cp = cp + 2
+    w8(buf, pos + cp, 93)
+    cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
@@ -828,6 +938,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w32(buf, pos + jl_bump + 2, slot_bump - (jl_bump + 6))
     w32(buf, pos + jmp_have + 1, slot_have - (jmp_have + 5))
     w32(buf, pos + jmp_chunk + 1, chunk_alloc - (jmp_chunk + 5))
+    w32(buf, pos + jbe_large_fit + 2, large_fit - (jbe_large_fit + 6))
     w32(buf, pos + jmp_slot_large + 1, slot_full - (jmp_slot_large + 5))
 
     w32(buf, pos + ja_cap_large + 2, large_multi - (ja_cap_large + 6))
@@ -869,7 +980,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 1, 133)
     w8(buf, pos + cp + 2, 192)
     cp = cp + 3
-    cp = cp + ea_js32(buf, pos + cp, capacity_full - (pos + cp + 6))
+    cp = cp + ea_js32(buf, pos + cp, capacity_full - (cp + 6))
     cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_large_head)
     cp = cp + ea_mov_load_index8(buf, pos + cp, 2, 2, 14)
     cp = cp + ea_mov_store(buf, pos + cp, 0, 2)
@@ -884,26 +995,21 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 95)
     cp = cp + 2
+    w8(buf, pos + cp, 93)
+    cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
     w32(buf, pos + ja_multi_cap + 2, large_ext - (ja_multi_cap + 6))
-    class_full := cp
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
-    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
-    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -1)
-    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, 0)
-    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
-    cp = cp + ea_mov_rr(buf, pos + cp, 0, 5)
-    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
-    cp = cp + ea_ud2(buf, pos + cp)
 
     w32(buf, pos + jmp_base_large + 1, base_ok - (jmp_base_large + 5))
     alloc_ready := cp
     w32(buf, pos + jge_base + 2, base_ok - (jge_base + 6))
     w32(buf, pos + ja_slot + 2, slot_full - (ja_slot + 6))
-    w32(buf, pos + ja_class + 2, class_full - (ja_class + 6))
+    // A full class chunk or an exhausted large-object tail carves a new chunk
+    // from the slot. chunk_alloc falls through to slot_full when the tail is
+    // too small, so the allocation keeps making progress until the pool limit.
+    w32(buf, pos + ja_class + 2, chunk_alloc - (ja_class + 6))
     w32(buf, pos + jmp_ready + 1, alloc_ready - (jmp_ready + 5))
 
     // 9: zero the data bytes and write the hidden length header.
@@ -926,6 +1032,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 95)
     cp = cp + 2
+    w8(buf, pos + cp, 93)
+    cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
@@ -954,7 +1062,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_ud2(buf, pos + cp)
     static_ok := cp
     w8(buf, pos + jstatic_ok + 1, (static_ok - (jstatic_ok + 2)) % 256)
-    w8(buf, pos + jstatic + 1, (static_path - (jstatic + 2)) % 256)
+    w32(buf, pos + jstatic + 2, static_path - (jstatic + 6))
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_cursors)
     cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 7)
     cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r3, 5, 8)
@@ -977,6 +1085,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 95)
     cp = cp + 2
+    w8(buf, pos + cp, 93)
+    cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
@@ -1149,6 +1259,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 65)
     w8(buf, pos + cp + 1, 95)
     cp = cp + 2
+    w8(buf, pos + cp, 93)
+    cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
     return cp
@@ -2115,6 +2227,48 @@ g_alloc_gl_jmp_pos : int, mut = -1  // Part 1 jl .Lglobal displacement position 
 // src/os/linux/entry.cr. This file keeps the call sites and the shared global
 // declarations; the flat compilation unit resolves them once.
 
+// Resolve recorded forward-call patches to emitted function addresses. Run
+// once after the ordinary function bodies, and again after the allocator body
+// is re-emitted with the final BSS address: that re-emission writes fresh call
+// placeholders at the same buffer positions.
+fn patch_forward_calls(buf: string, cp: int):
+    cpi : ., mut = 0
+    loop:
+        if cpi >= g_x86_call_patch_count:
+            break
+        call_pos := cell_load(g_x86_call_patch_pos, cpi * 8)
+        fn_ni := cell_load(g_x86_call_patch_name, cpi * 8)
+        cfi2 : ., mut = 0
+        loop:
+            if cfi2 >= g_ir_func_count:
+                break
+            name_at := cell_load(g_ir_func_name_idx, cfi2 * 8)
+            if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0:
+                func_cp := cell_load(g_x86_func_cp, cfi2 * 8)
+                if func_cp > 0:
+                    rel := func_cp - (call_pos + 5)
+                    w32(buf, call_pos + 1, rel)
+                break
+            cfi2 = cfi2 + 1
+        // Fallback: search g_x86_func_offsets for builtins
+        if cfi2 >= g_ir_func_count:
+            bfi2 : ., mut = 0
+            loop:
+                if bfi2 >= g_x86_func_off_count:
+                    break
+                if str_eq(istr_get(cell_load(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0:
+                    func_off := cell_load(g_x86_func_offsets, bfi2*16+8)
+                    // Safety check: target must be within emitted code
+                    target_pos := 176 + func_off
+                    if target_pos > 0 && target_pos < cp:
+                        rel := target_pos - (call_pos + 5)
+                        w32(buf, call_pos + 1, rel)
+                    break
+                bfi2 = bfi2 + 1
+        cpi = cpi + 1
+    g_x86_call_patch_count = 0
+
+
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int:
     g_x86_big_exit_call_pos = -1
@@ -2826,43 +2980,10 @@ fn elf_gen(buf: string) -> int:
                 exi = exi + 1
 
     // ── Patch forward calls using actual cp positions ──
-    // Phase 3 stored cp at start of each function in g_x86_func_cp
-    // Must run after ALL code emitted (incl alloc + sched_call) so func_offsets are final
-    cpi : ., mut = 0
-    loop:
-        if cpi >= g_x86_call_patch_count:
-            break
-        call_pos := cell_load(g_x86_call_patch_pos, cpi * 8)
-        fn_ni := cell_load(g_x86_call_patch_name, cpi * 8)
-        cfi2 : ., mut = 0
-        loop:
-            if cfi2 >= g_ir_func_count:
-                break
-            name_at := cell_load(g_ir_func_name_idx, cfi2 * 8)
-            if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0:
-                func_cp := cell_load(g_x86_func_cp, cfi2 * 8)
-                if func_cp > 0:
-                    rel := func_cp - (call_pos + 5)
-                    w32(buf, call_pos + 1, rel)
-                break
-            cfi2 = cfi2 + 1
-        // Fallback: search g_x86_func_offsets for builtins
-        if cfi2 >= g_ir_func_count:
-            bfi2 : ., mut = 0
-            loop:
-                if bfi2 >= g_x86_func_off_count:
-                    break
-                if str_eq(istr_get(cell_load(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0:
-                    func_off := cell_load(g_x86_func_offsets, bfi2*16+8)
-                    // Safety check: target must be within emitted code
-                    target_pos := 176 + func_off
-                    if target_pos > 0 && target_pos < cp:
-                        rel := target_pos - (call_pos + 5)
-                        w32(buf, call_pos + 1, rel)
-                    break
-                bfi2 = bfi2 + 1
-        cpi = cpi + 1
-    g_x86_call_patch_count = 0
+    // Phase 3 stored cp at start of each function in g_x86_func_cp. The
+    // allocator body is re-emitted later; its call placeholders are resolved by
+    // a second call after that re-emission.
+    patch_forward_calls(buf, cp)
 
     // ── Patch function addresses (IR_FNADDR movabs placeholders) ──
     // Each placeholder is a movabs r10, imm64 at an absolute buffer position.
@@ -2999,6 +3120,9 @@ fn elf_gen(buf: string) -> int:
     if g_x86_emit_rt_stubs != 0 && g_curg_stub_start >= 0:
         curg_va := bss_va + 16 + globals_size - 8
         emit_curg_stubs(buf, g_curg_stub_start, curg_va)
+
+    // The re-emitted allocator body wrote fresh call placeholders.
+    patch_forward_calls(buf, cp)
 
     // Patch call to heap_expand inside alloc body (re-emit wrote placeholder offset 0)
     if g_heap_expand_call_pos >= 0:

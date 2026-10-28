@@ -6642,6 +6642,12 @@ fn ccr_set_raw_mode_from_source():
         // semantics are required for that table; user CLI programs are not
         // arithmetic kernels.
         g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("fn arena_init") != 0:
+        // The arena layer stores byte offsets, slot indexes, and class bounds in
+        // cells that the runtime allocator reads as raw machine words. Tagged
+        // integers would desynchronise the library from the allocator stub, so
+        // arena-backed programs use raw machine integers.
+        g_ccr_emit_raw_int = 1
     if ccr_source_dir_is_compiler() != 0:
         g_ccr_emit_raw_int = 1
 

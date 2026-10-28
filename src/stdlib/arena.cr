@@ -263,7 +263,7 @@ fn _arena_copy_cells(src: string, nbytes: int, dst: string):
         cell_store(dst, i, cell_load(src, i))
         i = i + 8
 
-fn arena_grow_pool():
+fn arena_grow_pool(), pub:
     if g_arena_pool_limit > 0 && (g_segment_count + 1) * 67108864 > g_arena_pool_limit:
         println("arena: pool limit exceeded")
         return
@@ -364,7 +364,7 @@ fn arena_reset(ai: int), pub:
             break
         lnxt := cell_load(lp, 0)
         lsz := cell_load(lp, 8)
-        // munmap skipped for parser probe
+        r1 := syscall3(11, lp, lsz, 0)
         lp = lnxt
     cell_store(g_arena_large_head, ai * 8, -1)
 
