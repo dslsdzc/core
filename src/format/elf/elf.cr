@@ -341,6 +341,12 @@ fn ea_ja32(buf: string, pos: int, rel: int) -> int:
     e2_w32(buf, pos + 2, rel)
     return 6
 
+fn ea_jbe32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 134)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
 fn ea_jmp32(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos, 233)
     e2_w32(buf, pos + 1, rel)
@@ -950,26 +956,70 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
         w8_signed(buf, pos+cp+3, rel2)
         cp = cp + 7
 
-    // mov r8, r11 (old ptr); add r11, rdi (bump); mov [rip + g_heap_ptr], r11
-    w8(buf, pos+cp, 77)
-    w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 216)
-    cp = cp + 3
-    w8(buf, pos+cp, 73)
-    w8(buf, pos+cp+1, 1)
-    w8(buf, pos+cp+2, 251)
-    cp = cp + 3
-    if gv_heap_ptr >= 0:
-        rip_hp_s2 := pos + cp + 3
-        w8(buf, pos+cp, 76)
-        w8(buf, pos+cp+1, 137)
-        w8(buf, pos+cp+2, 29)
-        e2_w32(buf, pos+cp+3, 0)
+    // Bounds check: new = heap_ptr + size. Expand once if needed; if the
+    // expanded heap still cannot hold the request, trap with a witness.
+    cp = cp + ea_mov_rr(buf, pos+cp, 8, 11)
+    cp = cp + ea_lea_base_index8(buf, pos+cp, 2, 11, 7, 0)
+    if gv_heap_end >= 0:
+        cp = cp + ea_lea_rip(buf, pos+cp, 1, gv_heap_end)
+    else:
+        rel_he_s := bss_va + 8 - (fva + cp + 7)
+        w8(buf, pos+cp, 72)
+        w8(buf, pos+cp+1, 141)
+        w8(buf, pos+cp+2, 13)
+        w8_signed(buf, pos+cp+3, rel_he_s)
         cp = cp + 7
-        grow_rip_patch(g_x86_rip_patch_count + 1)
-        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s2)
-        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 59)
+    w8(buf, pos+cp+2, 17)
+    cp = cp + 3
+    jbe_ok := cp
+    cp = cp + ea_jbe32(buf, pos+cp, 0)
+    g_heap_expand_call_pos = pos + cp
+    w8(buf, pos+cp, 232)
+    e2_w32(buf, pos+cp+1, 0)
+    cp = cp + 5
+    if gv_heap_ptr >= 0:
+        cp = cp + ea_mov_rip_load(buf, pos+cp, 11, gv_heap_ptr)
+    else:
+        rel_hp_s := bss_va - (fva + cp + 7)
+        w8(buf, pos+cp, 76)
+        w8(buf, pos+cp+1, 139)
+        w8(buf, pos+cp+2, 29)
+        w8_signed(buf, pos+cp+3, rel_hp_s)
+        cp = cp + 7
+    cp = cp + ea_mov_rr(buf, pos+cp, 8, 11)
+    cp = cp + ea_lea_base_index8(buf, pos+cp, 2, 11, 7, 0)
+    if gv_heap_end >= 0:
+        cp = cp + ea_lea_rip(buf, pos+cp, 1, gv_heap_end)
+    else:
+        rel_he_s2 := bss_va + 8 - (fva + cp + 7)
+        w8(buf, pos+cp, 72)
+        w8(buf, pos+cp+1, 141)
+        w8(buf, pos+cp+2, 13)
+        w8_signed(buf, pos+cp+3, rel_he_s2)
+        cp = cp + 7
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 59)
+    w8(buf, pos+cp+2, 17)
+    cp = cp + 3
+    jbe_ok2 := cp
+    cp = cp + ea_jbe32(buf, pos+cp, 0)
+    // fail witness: request, class = -1, cursor = heap_ptr, limit = heap_end
+    cp = cp + ea_mov_rip_store(buf, pos+cp, 9, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos+cp, 0, -1)
+    cp = cp + ea_mov_rip_store(buf, pos+cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rip_store(buf, pos+cp, 11, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_load(buf, pos+cp, 0, 1)
+    cp = cp + ea_mov_rip_store(buf, pos+cp, 0, gv_alloc_fail_limit)
+    cp = cp + ea_ud2(buf, pos+cp)
+    ok_s := cp
+    w32(buf, pos+jbe_ok+2, ok_s - (jbe_ok + 6))
+    w32(buf, pos+jbe_ok2+2, ok_s - (jbe_ok2 + 6))
+    // bump: r11 = r11 + rdi; store g_heap_ptr
+    cp = cp + ea_add_rr(buf, pos+cp, 11, 7)
+    if gv_heap_ptr >= 0:
+        cp = cp + ea_mov_rip_store(buf, pos+cp, 11, gv_heap_ptr)
     else:
         rel3 := bss_va - (fva + cp + 7)
         w8(buf, pos+cp, 76)
