@@ -252,6 +252,79 @@ fn ea_ud2(buf: string, pos: int) -> int:
     w8(buf, pos + 1, 11)
     return 2
 
+fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 193)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 5, dst % 8)
+    w8(buf, cp, imm % 256)
+    cp = cp + 1
+    return cp - pos
+
+fn ea_shl_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 193)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 4, dst % 8)
+    w8(buf, cp, imm % 256)
+    cp = cp + 1
+    return cp - pos
+
+fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, src / 8)
+    w8(buf, cp, 107)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, dst % 8, src % 8)
+    w8(buf, cp, imm % 256)
+    cp = cp + 1
+    return cp - pos
+
+fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 184 + dst % 8)
+    cp = cp + 1
+    e2_w32(buf, cp, imm)
+    cp = cp + 4
+    return cp - pos
+
+fn ea_cmp_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 131)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 7, dst % 8)
+    w8(buf, cp, imm % 256)
+    cp = cp + 1
+    return cp - pos
+
+fn ea_add_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 129)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 0, dst % 8)
+    e2_w32(buf, cp, imm)
+    cp = cp + 4
+    return cp - pos
+
+fn ea_sub_rr(buf: string, pos: int, dst: int, src: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
+    w8(buf, cp, 41)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, src % 8, dst % 8)
+    return cp - pos
+
+fn ea_jne8(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 117)
+    w8(buf, pos + 1, rel % 256)
+    return 2
+
+
 
 
 // Emit arena-aware dual-path allocator function body
@@ -275,10 +348,10 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     a.reg(2, 0, CAG_REG_CALLEE)
     a.reg(3, 11, CAG_REG_CALLEE)
     a.reg(4, 9, CAG_REG_CALLEE)
-    a.reg(5, 2, CAG_REG_CALLEE)
+    a.reg(5, 1, CAG_REG_CALLEE)
     a.reg(6, 6, CAG_REG_CALLEE)
-    a.reg(7, 7, CAG_REG_CALLEE)
-    a.reg(8, 1, CAG_REG_CALLEE)
+    a.reg(7, 2, CAG_REG_CALLEE)
+    a.reg(8, 7, CAG_REG_CALLEE)
 
     // v0 size, v1 arena, v2 max_size, v3 base, v4 cursor, v5 limit,
     // v6 aligned, v7 new cursor, v8 temporary.
@@ -302,6 +375,10 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     a.read(9, 1)
     a.write(9, 4)
     a.pin(9, 4, 9)
+    a.pin(12, 5, 1)
+    a.pin(12, 6, 6)
+    a.pin(15, 7, 2)
+    a.pin(16, 8, 7)
     a.write(10, 8)
     a.read(11, 8)
     a.read(11, 1)
@@ -370,30 +447,61 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_load(buf, pos + cp, r3, gv_arena_pool_data)
     cp = cp + ea_add_rr(buf, pos + cp, r3, r2)
 
-    // 3: cursor = cursors[arena], limit = sizes[arena].
-    cp = cp + ea_mov_rip_load(buf, pos + cp, r8, gv_arena_cursors)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, r4, r8, r1)
-    cp = cp + ea_mov_rip_load(buf, pos + cp, r8, gv_arena_sizes)
-    cp = cp + ea_mov_load_index8(buf, pos + cp, r5, r8, r1)
+    // 3: slot_end = slot_base + max_size.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
+    cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
 
-    // 4: aligned = align_up(size + 8, 8), new = cursor + aligned.
+    // 4: aligned = align_up(size + 8, 8); class = min(aligned / 16, 25).
     cp = cp + ea_mov_rr(buf, pos + cp, r6, r0)
     cp = cp + ea_add_imm8(buf, pos + cp, r6, 15)
     cp = cp + ea_and_imm8(buf, pos + cp, r6, 248)
+    cp = cp + ea_mov_rr(buf, pos + cp, r4, r6)
+    cp = cp + ea_shr_imm8(buf, pos + cp, r4, 4)
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
+    jc := cp
+    cp = cp + ea_jbe8(buf, pos + cp, 0)
+    cp = cp + ea_mov_imm32(buf, pos + cp, r4, 25)
+    w8(buf, pos + jc + 1, (cp - (jc + 2)) % 256)
+
+    // 5: idx = arena * 26 + class; base = slot_base + class * 1024.
+    cp = cp + ea_mov_rr(buf, pos + cp, r5, r1)
+    cp = cp + ea_imul_imm8(buf, pos + cp, r5, r5, 26)
+    cp = cp + ea_add_rr(buf, pos + cp, r5, r4)
     cp = cp + ea_mov_rr(buf, pos + cp, r7, r4)
-    cp = cp + ea_add_rr(buf, pos + cp, r7, r6)
-    cp = cp + ea_cmp_rr(buf, pos + cp, r7, r5)
+    cp = cp + ea_shl_imm8(buf, pos + cp, r7, 10)
+    cp = cp + ea_add_rr(buf, pos + cp, r7, r3)
+
+    // 6: limit = base + 1024, except class 25 which uses slot_end.
+    cp = cp + ea_cmp_imm8(buf, pos + cp, r4, 25)
+    jl := cp
+    cp = cp + ea_jne8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 7, r2)
+    jmp_large := cp
+    cp = cp + ea_jmp8(buf, pos + cp, 0)
+    cp = cp + ea_mov_rr(buf, pos + cp, 7, r7)
+    cp = cp + ea_add_imm32(buf, pos + cp, 7, 1024)
+    w8(buf, pos + jl + 1, (cp - (jl + 2)) % 256)
+    w8(buf, pos + jmp_large + 1, (cp - (jmp_large + 2)) % 256)
+
+    // 7: slice = limit - base; cursor = class_cursor[idx].
+    cp = cp + ea_sub_rr(buf, pos + cp, 7, r7)
+    cp = cp + ea_mov_rr(buf, pos + cp, r4, r6)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 0, 0, r5)
+    cp = cp + ea_mov_rr(buf, pos + cp, r6, 0)
+    cp = cp + ea_add_rr(buf, pos + cp, r4, 0)
+    cp = cp + ea_cmp_rr(buf, pos + cp, r4, 7)
     j2 := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
     cp = cp + ea_ud2(buf, pos + cp)
     w8(buf, pos + j2 + 1, (cp - (j2 + 2)) % 256)
 
-    // 5: commit cursors[arena] = new.
-    cp = cp + ea_mov_rip_load(buf, pos + cp, r8, gv_arena_cursors)
-    cp = cp + ea_mov_store_index8(buf, pos + cp, r8, r1, r7)
+    // 8: commit class_cursor[idx] = new.
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_class_cursor)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 0, r5, r4)
 
-    // 6: zero the data bytes and write the hidden length header.
-    cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r3, r4, 8)
+    // 9: zero the data bytes and write the hidden length header.
+    cp = cp + ea_lea_base_index8(buf, pos + cp, 7, r7, r6, 8)
     cp = cp + ea_mov_rr(buf, pos + cp, 1, r0)
     w8(buf, pos + cp, 49)
     w8(buf, pos + cp + 1, 192)
@@ -403,9 +511,9 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp, 243)
     w8(buf, pos + cp + 1, 170)
     cp = cp + 2
-    cp = cp + ea_lea_base_index8(buf, pos + cp, 1, r3, r4, 0)
+    cp = cp + ea_lea_base_index8(buf, pos + cp, 1, r7, r6, 0)
     cp = cp + ea_mov_store(buf, pos + cp, 1, r0)
-    cp = cp + ea_lea_base_index8(buf, pos + cp, 0, r3, r4, 8)
+    cp = cp + ea_lea_base_index8(buf, pos + cp, 0, r7, r6, 8)
     w8(buf, pos + cp, 195)
     cp = cp + 1
 
