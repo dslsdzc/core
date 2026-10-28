@@ -326,14 +326,14 @@ fn track_alloc_unknown():
 
 fn track_alloc_array(count: int):
     if count > 0 && count < 100000:
-        track_alloc_size(count * 8 + 8)
+        track_alloc_size(count * 8 + 16)
     else:
         track_alloc_unknown()
 
 fn track_alloc_struct(name_ni: int):
     si := find_struct_by_name(name_ni)
     if si >= 0:
-        track_alloc_size(si_field_count(si) * 8 + 8)
+        track_alloc_size(si_field_count(si) * 8 + 16)
     else:
         track_alloc_unknown()
 
@@ -4082,7 +4082,7 @@ fn gen_expr(node: int) -> int:
             if ac >= 1:
                 an := cell_load(arg_nodes, 0)
                 if an >= 0 && ast_kind(an) == EXPR_INT:
-                    track_alloc_size(ast_int_val(an))
+                    track_alloc_size(ast_int_val(an) + 16)
                 else:
                     track_alloc_unknown()
             else:
