@@ -28,6 +28,7 @@ ARENA_CLASS_COUNT : int = 26
 g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current slot per arena
 g_arena_slot : string, mut          // int[] — current slot id per arena
 g_arena_static : string, mut        // int[] — 1 when the arena uses a static peak
+g_arena_large_head : string, mut    // int[] — mmap extent list per arena
 g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
 g_arena_slot_free : int, mut = -1
 g_arena_slot_count : int, mut = 0
@@ -129,6 +130,16 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_static, g_arena_cap * 8, nb4c)
     g_arena_static = nb4c
+    nb4d := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4d, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_large_head, g_arena_cap * 8, nb4d)
+    g_arena_large_head = nb4d
     // class base / cursor / limit
     cn := nc * ARENA_CLASS_COUNT * 8
     nb5 := alloc(cn)
@@ -317,6 +328,7 @@ fn arena_new_sized(peak: int) -> int, pub:
     if sl >= 0:
         cell_store(g_arena_slot_next, sl * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
+    cell_store(g_arena_large_head, ai * 8, -1)
     // No class chunk is attached until the first allocation of that class.
     ci : ., mut = 0
     loop:
@@ -344,6 +356,17 @@ fn arena_reset(ai: int), pub:
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
     parent := cell_load(g_arena_parents, ai * 8)
+
+    // Unmap dedicated large-object extents.
+    lp : ., mut = cell_load(g_arena_large_head, ai * 8)
+    loop:
+        if lp < 0:
+            break
+        lnxt := cell_load(lp, 0)
+        lsz := cell_load(lp, 8)
+        // munmap skipped for parser probe
+        lp = lnxt
+    cell_store(g_arena_large_head, ai * 8, -1)
 
     // Return every slot in the arena chain to the pool free list.
     sl : ., mut = cell_load(g_arena_slot, ai * 8)

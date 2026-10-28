@@ -282,6 +282,15 @@ fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
     cp = cp + 1
     return cp - pos
 
+fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 184 + dst % 8)
+    cp = cp + 1
+    cell_store(buf, cp, imm)
+    cp = cp + 8
+    return cp - pos
+
 fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     cp := pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
@@ -371,6 +380,17 @@ fn ea_dec(buf: string, pos: int, dst: int) -> int:
     cp = cp + 1
     cp = cp + ea_modrm(buf, cp, 3, 1, dst % 8)
     return cp - pos
+
+fn ea_js32(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 15)
+    w8(buf, pos + 1, 136)
+    e2_w32(buf, pos + 2, rel)
+    return 6
+
+fn ea_jz8(buf: string, pos: int, rel: int) -> int:
+    w8(buf, pos, 116)
+    w8(buf, pos + 1, rel % 256)
+    return 2
 
 fn ea_jnz8(buf: string, pos: int, rel: int) -> int:
     w8(buf, pos, 117)
@@ -496,8 +516,9 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 1, 87)
     cp = cp + 2
 
-    // 0: reject requests above 64MB.
-    cp = cp + ea_cmp_imm32(buf, pos + cp, 7, 67108864)
+    // 0: reject requests above 1TB. Larger objects use mmap extents.
+    cp = cp + ea_mov_imm64(buf, pos + cp, 0, 1099511627776)
+    cp = cp + ea_cmp_rr(buf, pos + cp, 7, 0)
     j0 := cp
     cp = cp + ea_jbe8(buf, pos + cp, 0)
     cp = cp + ea_mov_rr(buf, pos + cp, 0, 7)
@@ -807,9 +828,63 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w32(buf, pos + jmp_slot_large + 1, slot_full - (jmp_slot_large + 5))
 
     w32(buf, pos + ja_cap_large + 2, large_multi - (ja_cap_large + 6))
-    w32(buf, pos + ja_multi_cap + 2, capacity_full - (ja_multi_cap + 6))
     w32(buf, pos + jae_grow_fail + 2, capacity_full - (jae_grow_fail + 6))
     w32(buf, pos + jbe_grow_fail + 2, capacity_full - (jbe_grow_fail + 6))
+    // Objects above 64MB get a dedicated mmap extent.
+    large_ext := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, 15, r6)
+    cp = cp + ea_add_imm8(buf, pos + cp, 15, 16)
+    cp = cp + ea_mov_rr(buf, pos + cp, 14, r1)
+    cp = cp + ea_mov_rr(buf, pos + cp, 6, 15)
+    cp = cp + ea_mov_rr(buf, pos + cp, 7, 0)
+    w8(buf, pos + cp, 49)
+    w8(buf, pos + cp + 1, 255)
+    cp = cp + 2
+    w8(buf, pos + cp, 186)
+    e2_w32(buf, pos + cp + 1, 3)
+    cp = cp + 5
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 186)
+    e2_w32(buf, pos + cp + 2, 16418)
+    cp = cp + 6
+    w8(buf, pos + cp, 73)
+    w8(buf, pos + cp + 1, 199)
+    w8(buf, pos + cp + 2, 192)
+    e2_w32(buf, pos + cp + 3, -1)
+    cp = cp + 7
+    w8(buf, pos + cp, 69)
+    w8(buf, pos + cp + 1, 49)
+    w8(buf, pos + cp + 2, 201)
+    cp = cp + 3
+    w8(buf, pos + cp, 184)
+    e2_w32(buf, pos + cp + 1, 9)
+    cp = cp + 5
+    w8(buf, pos + cp, 15)
+    w8(buf, pos + cp + 1, 5)
+    cp = cp + 2
+    w8(buf, pos + cp, 72)
+    w8(buf, pos + cp + 1, 133)
+    w8(buf, pos + cp + 2, 192)
+    cp = cp + 3
+    cp = cp + ea_js32(buf, pos + cp, capacity_full - (pos + cp + 6))
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_large_head)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 2, 2, 14)
+    cp = cp + ea_mov_store(buf, pos + cp, 0, 2)
+    cp = cp + ea_mov_store_disp8(buf, pos + cp, 0, 8, 15)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_large_head)
+    cp = cp + ea_mov_store_index8(buf, pos + cp, 2, 14, 0)
+    cp = cp + ea_mov_store_disp8(buf, pos + cp, 0, 16, r0)
+    cp = cp + ea_add_imm8(buf, pos + cp, 0, 24)
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 94)
+    cp = cp + 2
+    w8(buf, pos + cp, 65)
+    w8(buf, pos + cp + 1, 95)
+    cp = cp + 2
+    w8(buf, pos + cp, 195)
+    cp = cp + 1
+
+    w32(buf, pos + ja_multi_cap + 2, large_ext - (ja_multi_cap + 6))
     class_full := cp
     cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
@@ -2005,6 +2080,7 @@ gv_current_arena : int, mut = -1
 gv_arena_cursors : int, mut = -1
 gv_arena_slot_cursor : int, mut = -1
 gv_arena_slot : int, mut = -1
+gv_arena_large_head : int, mut = -1
 gv_arena_static : int, mut = -1
 gv_arena_slot_next : int, mut = -1
 gv_arena_slot_free : int, mut = -1
@@ -2137,6 +2213,7 @@ fn elf_gen(buf: string) -> int:
     gv_arena_cursors = -1
     gv_arena_slot_cursor = -1
     gv_arena_slot = -1
+    gv_arena_large_head = -1
     gv_arena_static = -1
     gv_arena_slot_next = -1
     gv_arena_slot_free = -1
@@ -2161,6 +2238,7 @@ fn elf_gen(buf: string) -> int:
     cur_ni2 := str_intern("g_arena_cursors")
     slot_cur_ni := str_intern("g_arena_slot_cursor")
     slot_ni := str_intern("g_arena_slot")
+    large_head_ni := str_intern("g_arena_large_head")
     static_ni := str_intern("g_arena_static")
     slot_next_ni := str_intern("g_arena_slot_next")
     slot_free_ni := str_intern("g_arena_slot_free")
@@ -2202,6 +2280,8 @@ fn elf_gen(buf: string) -> int:
             gv_arena_slot_cursor = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_ni:
             gv_arena_slot = cell_load(g_ir_globals, gvsi * 24 + 8)
+        if ni == large_head_ni:
+            gv_arena_large_head = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == static_ni:
             gv_arena_static = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == slot_next_ni:
