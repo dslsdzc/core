@@ -61,6 +61,40 @@ FAIL_SOURCES = [
 ]
 
 
+CHAIN_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+g_arena_slot : string, mut
+g_arena_slot_next : string, mut
+fn slot_of(ai: int) -> int:
+    return cell_load(g_arena_slot, ai * 8)
+fn next_of(sl: int) -> int:
+    return cell_load(g_arena_slot_next, sl * 8)
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new()
+    s0 := slot_of(a)
+    first := alloc(1044480)
+    second := alloc(1048568)
+    s1 := slot_of(a)
+    if s1 == s0:
+        return 1
+    // The blob links the new head to the old slot so arena_reset can walk
+    // both. The legacy body links the other way and is excluded from this
+    // check; the parity test still runs it for the other invariants.
+    if next_of(s1) != s0:
+        return 2
+    arena_reset(a)
+    if g_arena_free_list != s0:
+        return 3
+    if next_of(s0) != s1:
+        return 4
+    return 0
+"""
+
+
 def run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
@@ -146,6 +180,18 @@ def main() -> int:
                 print(f"FAIL blob {label} rc={new.returncode}, expected 132")
                 return 1
             print(f"PASS trap parity {label}")
+
+        chain = root / "arena_chain.cr"
+        chain.write_text(CHAIN_SRC, encoding="utf-8")
+        r, err = build_and_run(chain, root, "arena_chain", blob=True)
+        if err:
+            print(f"FAIL blob chain test: {err}")
+            return 1
+        if r.returncode != 0:
+            print(f"FAIL blob chain test rc={r.returncode}")
+            print(r.stdout)
+            return 1
+        print("PASS arena chain reset")
 
     print("PASS alloc arena parity")
     return 0
