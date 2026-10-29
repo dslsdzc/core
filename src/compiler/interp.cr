@@ -19,6 +19,9 @@ g_ir_vals : string, mut
 g_ir_vals_cap : int, mut
 g_interp_big : int, mut = 1
 g_interp_current_arena_var : int, mut = -1
+g_interp_suspend_var : int, mut = -1
+g_interp_ready_var : int, mut = -1
+g_interp_scalars_var : int, mut = -1
 g_interp_arena_active : int, mut = 0
 g_interp_scratch : int, mut = 0
 
@@ -53,6 +56,16 @@ fn ir_interp_find_func(name: string) -> int:
             break
         if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), name) != 0:
             return i
+        i = i + 1
+    return -1
+
+fn ir_interp_global_var(name: string) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_global_count:
+            break
+        if str_eq(istr_get(cell_load(g_ir_globals, i * 24)), name) != 0:
+            return cell_load(g_ir_globals, i * 24 + 8)
         i = i + 1
     return -1
 
@@ -375,8 +388,17 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
         if d >= 0 && s2 >= 1:
             sz := ir_interp_word(cell_load(g_ir_vals, s1 * 8))
             ca : ., mut = -1
+            suspend : ., mut = 0
+            ready : ., mut = 0
+            scalars_raw : ., mut = 0
             if g_interp_current_arena_var >= 0:
                 ca = ir_interp_word(cell_load(g_ir_vals, g_interp_current_arena_var * 8))
+            if g_interp_suspend_var >= 0:
+                suspend = ir_interp_word(cell_load(g_ir_vals, g_interp_suspend_var * 8))
+            if g_interp_ready_var >= 0:
+                ready = ir_interp_word(cell_load(g_ir_vals, g_interp_ready_var * 8))
+            if g_interp_scalars_var >= 0:
+                scalars_raw = cell_load(g_ir_vals, g_interp_scalars_var * 8)
             cfa := ir_interp_find_func("arena_alloc")
             p : ., mut = 0
             if g_interp_arena_active != 0:
@@ -385,13 +407,28 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                 hp := alloc(sz)
                 unsafe:
                     p = @ptr_of(hp)
-            else if ca >= 0 && cfa >= 0:
-                g_interp_arena_active = 1
-                p = ir_interp_run_fn(cfa, s1, 1)
-                g_interp_arena_active = 0
-                if g_interp_abort == 0 && p == 0:
+            else if cfa >= 0:
+                // The program has an arena body. Its native body rejects
+                // negative and >1TB requests before the suspend/current
+                // fallback; positive requests go to the global heap when no
+                // arena is active.
+                if sz < 0 || sz > 1099511627776:
                     println("interpreter error: arena allocation failed (pool limit or invalid size)")
                     g_interp_abort = -1
+                else if ca >= 0 && suspend == 0 && ready != 0 && scalars_raw != 0:
+                    g_interp_arena_active = 1
+                    p = ir_interp_run_fn(cfa, s1, 1)
+                    g_interp_arena_active = 0
+                    if g_interp_abort == 0 && p == 0:
+                        println("interpreter error: arena allocation failed (pool limit or invalid size)")
+                        g_interp_abort = -1
+                else:
+                    hp := alloc(sz)
+                    unsafe:
+                        p = @ptr_of(hp)
+                    if p == 0:
+                        println("interpreter error: arena allocation failed (global heap)")
+                        g_interp_abort = -1
             else if sz < 0 || sz > 67108864:
                 // Native alloc_simple returns 0 for these requests.
                 p = 0
@@ -1044,16 +1081,11 @@ fn ir_interpret() -> int:
     // Arena dispatch state: the global var slot and a scratch slot beyond the
     // program's var range. Both are reused by IR_ARENA_NEW/RESET and alloc().
     g_interp_scratch = g_ir_var_count
-    g_interp_current_arena_var = -1
+    g_interp_current_arena_var = ir_interp_global_var("g_current_arena")
+    g_interp_suspend_var = ir_interp_global_var("g_arena_suspend")
+    g_interp_ready_var = ir_interp_global_var("g_arena_scalars_ready")
+    g_interp_scalars_var = ir_interp_global_var("g_arena_scalars")
     g_interp_arena_active = 0
-    gi3 : ., mut = 0
-    loop:
-        if gi3 >= g_ir_global_count:
-            break
-        if str_eq(istr_get(cell_load(g_ir_globals, gi3 * 24)), "g_current_arena") != 0:
-            g_interp_current_arena_var = cell_load(g_ir_globals, gi3 * 24 + 8)
-            break
-        gi3 = gi3 + 1
     if g_interp_current_arena_var >= 0:
         // The ELF entry initializes this runtime global to -1 regardless of
         // the source initializer. Mirror it before the first alloc().

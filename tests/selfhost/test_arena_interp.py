@@ -41,6 +41,21 @@ fn main() -> int:
     p := alloc(1099511627777)
     return 0
 """,
+    "arena before new": """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn main() -> int:
+    a := alloc(67108865)
+    pa : ., mut = 0
+    unsafe:
+        pa = @ptr_of(a)
+    if pa == 0:
+        return 1
+    b := alloc(-1)
+    return 0
+""",
     "pool limit": """\
 import arena
 g_current_arena : int, mut = -1
@@ -62,6 +77,15 @@ NONARENA_SRC = """\
 fn main() -> int:
     a := alloc(-1)
     b := alloc(67108865)
+    pa : ., mut = 0
+    pb : ., mut = 0
+    unsafe:
+        pa = @ptr_of(a)
+        pb = @ptr_of(b)
+    if pa != 0:
+        return 1
+    if pb != 0:
+        return 2
     return 0
 """
 

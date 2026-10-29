@@ -155,9 +155,12 @@ class/slot 规则：
   `arena_new`。这与 native `instr.cr` 的分支一致，避免基础设施函数递归。
 - `IR_ARENA_RESET`：arena id 小于 0 时跳过；否则调用解释后的
   `arena_reset(id)`。
-- `alloc` builtin：若存在 `arena_alloc` 且 `g_current_arena >= 0`，调用它；
-  否则走宿主 `alloc`。调用期间 `g_interp_arena_active = 1`，`arena_alloc`
-  内部的元数据/池/extent `alloc` 不会递归回 arena。
+- `alloc` builtin：存在 `arena_alloc` 就按 arena body 语义处理。负值或
+  `>1TB` 直接报错；`g_current_arena >= 0` 且 suspend/ready/scalars 满足时
+  调用 `arena_alloc`；否则走宿主全局堆（不套 `alloc_simple` 的 64MiB 上限）。
+  完全没有 arena body 的程序才按 `alloc_simple` 返回 0（负值和 >64MiB）。
+  调用期间 `g_interp_arena_active = 1`，`arena_alloc` 内部的元数据/池/extent
+  `alloc` 不会递归回 arena。
 - 解释器新增 `cell_load`/`cell_store`、`load64`、`load_str_ptr`/
   `store_str_ptr`、`store8`、`syscall6` 的接线。`cell_load` 返回值按 tagged
   int 处理，指针类 builtin 保持 raw 字；每个 builtin 分支结束后 `return`，
