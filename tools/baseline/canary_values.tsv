@@ -578,6 +578,7 @@ gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bf
 # 3) trampoline 增加 rdx = 数据段末尾，作为初始 heap_end，避免堆末端越过
 #    PT_LOAD 的 1GiB P_MEMSZ。ELF 文件大小保持 61622B。
 # 4) `pa` 运行 rc=0；D1 5/5 PASS。
+# 实现提交：3c97b41006b6cf883501496493d7f55d9d6019d2
 # 旧值留痕（自本次起作废）：
 #   canary_elf d19de1f4363b8d2f7e35fe23b3f53a0f9db5648898fe94551c6c6c5522ad7972 61622
 #   pa_ccr 16eade32937ce339f343f96d1fa0420706fa1b4b4bd72e980b801b0370339388 97820

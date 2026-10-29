@@ -379,6 +379,8 @@ jj commit -m "docs: record allocator blob codegen"
 
 ## Execution notes (2026-10-29)
 
+Implementation commit: `3c97b41006b6cf883501496493d7f55d9d6019d2`.
+
 Deviations from the plan, with reasons:
 
 1. The Core body ABI is `alloc_simple(size, heap_start, heap_end)` and
