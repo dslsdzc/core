@@ -2165,7 +2165,8 @@
   - 2026-10-29 堆指针使用点：`rc_var_escapes`/`rc_value_has_release` 先取 reaching definitions，再按到达值检查 pts/标量寿命；循环内先写死再写活后循环外使用不再误报（`test_r18`）。pts 内容集仍是包含式，不是流敏感 points-to。
   - 2026-10-29 返回值与 out 参数摘要：`g_rc_ret_alias` 记录"返回哪个形参"，调用结果经 lazy thunk/force 链继续沿实参求值；`g_rc_out_pairs` 记录"源形参 j 可能经目标形参 i 写出"，调用点用 `rc_store_outlives` 比较目标实参与源实参的寿命，同区 out 参数不再保守误报；`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 接入摘要与直接检查（含全局结构体/数组字段）；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容，沿形参转发。覆盖 `test_p24`–`p32`、`r19`–`r24`。
   - 2026-10-29 FFI 边界：非 `unsafe` 域的 `IR_CALL_EXTERN` 传归还区指针实参报 B11；`g_rc_param_ffi` 把"形参转发给 extern"的约束沿包装函数传回调用点。覆盖 `test_p33`/`p34`/`r25`/`r26`。
-  - 保留登记（未实现/不完整，勿当已实现）：被返回的本地堆对象在当前源语言面无法表达（`alloc()` 结果类型不可作为函数返回型）；经 out 参数传递的 pointee 内容（`*dst = *pp`，目标为形参）保守跳过。
+  - 2026-10-29 pointee 内容经 out 参数：`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，调用点按目标寿命（`rc_dest_max_exit`）比较内容值；覆盖 `test_p35`/`p36`/`p37`/`r27`。
+  - 保留登记（未实现/不完整，勿当已实现）：被返回的本地堆对象在当前源语言面无法表达（`alloc()` 结果类型不可作为函数返回型）。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）
 

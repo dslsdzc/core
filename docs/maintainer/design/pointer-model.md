@@ -84,7 +84,7 @@ unsafe:
 - 类型门是 `TYP_PTR` 和 `TYP_REF` 的并集。当前实际生效的是 REF 一侧，因为 `&局部` 一律判为 REF，而 `&局部 as *T` 本身会触发 TF01。并集保留，PTR 一侧对 `alloc()` 和 FFI 派生值仍然有效。
 - 标量指针的到达定义：RegionCheck 为每个函数从 `IR_JUMP` 标签和 `IR_MATCH` CASE 目标构建 CFG，运行前向 may-reaching-definitions 数据流。在 use 点只评估真正到达的定义（分支/循环/PHI 按交汇），因此“if 两支都覆盖更早死定义”不会误报，嵌套条件拷贝也能递归追踪；循环第二次可能执行 0 次时仍会保留前一轮定义。实现见 `region_check.cr` 的 `rc_rd_*`。
 - 堆指针的使用点同样走到达定义：先取该 use 的 reaching definitions，再对每个到达值检查其 pts/标量寿命。pts 内容集本身仍是包含式（不是流敏感 points-to）。没有到达定义时（参数/全局/未知值）才回退到 `[EXIT, ni)` 重赋值清除。
-- 跨过程摘要：`g_rc_ret_alias` 记录函数返回哪个形参，调用结果沿 lazy thunk/force 链继续求值；`g_rc_out_pairs` 把"源形参 j 可能经目标形参 i 写出"传回调用点，调用点用 `rc_store_outlives` 比较目标实参与源实参寿命，同区 out 参数不误报；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容；`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 与 `IR_STORE`/`IR_STORE_PTR` 同样接入摘要。FFI 边界按 `unsafe` 处理：非 `unsafe` 域的 `IR_CALL_EXTERN` 只要实参是归还区指针就报 B11；形参经包装函数转发给 extern 时，摘要把同一约束传回调用点。被返回的本地堆对象在源语言面无法表达（`alloc()` 结果类型不可作为返回型）。
+- 跨过程摘要：`g_rc_ret_alias` 记录函数返回哪个形参，调用结果沿 lazy thunk/force 链继续求值；`g_rc_out_pairs` 把"源形参 j 可能经目标形参 i 写出"传回调用点，调用点用 `rc_store_outlives` 比较目标实参与源实参寿命，同区 out 参数不误报；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容；`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，按目标寿命比较。`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 与 `IR_STORE`/`IR_STORE_PTR` 同样接入摘要。FFI 边界按 `unsafe` 处理：非 `unsafe` 域的 `IR_CALL_EXTERN` 只要实参是归还区指针就报 B11；形参经包装函数转发给 extern 时，摘要把同一约束传回调用点。被返回的本地堆对象在源语言面无法表达（`alloc()` 结果类型不可作为返回型）。
 
 ## Pass 3：ProvenanceVerify
 

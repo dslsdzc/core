@@ -44,6 +44,9 @@ g_rc_param_content_escape : string, mut
 // Parameters forwarded to an extern call outside `unsafe`; callers must either
 // pass program-lifetime pointers or put the call in an unsafe block.
 g_rc_param_ffi : string, mut
+// Content counterpart of `g_rc_out_pairs`: the pointee content of parameter j
+// may be stored through parameter i (`*dst = *pp`).
+g_rc_content_out_pairs : string, mut
 g_rc_param_changed : int, mut
 
 // Recursion budget for value/definition traces. The trace follows compiler
@@ -996,6 +999,14 @@ fn rc_summary_store(fi: int, out: string, dest_var: int, val_var: int,
                 if rc_mask_has(g_rc_param_alias, dest_var * 2, i) != 0:
                     rc_mask_set(g_rc_out_pairs, fi * 128 + j * 2, i)
                 i = i + 1
+        if rc_mask_has(g_rc_param_content_alias, val_var * 2, j) != 0:
+            i : ., mut = 0
+            loop:
+                if i >= 64:
+                    break
+                if rc_mask_has(g_rc_param_alias, dest_var * 2, i) != 0:
+                    rc_mask_set(g_rc_content_out_pairs, fi * 128 + j * 2, i)
+                i = i + 1
         j = j + 1
 
 fn rc_alias_compute(fi: int):
@@ -1244,6 +1255,60 @@ fn rc_summary_content_escape(fi: int, arg: int, ni: int, nstart: int):
     rc_mask_or_from(g_rc_param_content_escape, fi * 2, g_rc_param_alias, arg * 2)
 
 // Update one function's summary. Returns 1 when the summary grew.
+// Propagate a callee content pair (source pointee -> destination parameter)
+// through the current function's own parameters.
+fn rc_summary_content_pair(fi: int, src_arg: int, dst_arg: int,
+                           ni: int, nstart: int):
+    if src_arg < 0 || dst_arg < 0:
+        return
+    if rc_mask_nonempty(g_rc_param_alias, dst_arg * 2) == 0:
+        return
+    if rc_is_param_var(fi, src_arg) != 0:
+        sp := src_arg - cell_load(g_ir_func_var_start, fi * 8)
+        d : ., mut = 0
+        loop:
+            if d >= 64:
+                return
+            if rc_mask_has(g_rc_param_alias, dst_arg * 2, d) != 0:
+                rc_mask_set(g_rc_content_out_pairs, fi * 128 + sp * 2, d)
+            d = d + 1
+        return
+    prod := cell_load(g_df_var_producer, src_arg * 8)
+    if prod < 0:
+        return
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+    if op != IR_REF || s1 < 0:
+        return
+    if rc_rd_any(s1, ni) == 0:
+        return
+    base := rc_rd_collect(s1, ni, 0)
+    dc := g_rc_rd_def_count
+    i : ., mut = 0
+    loop:
+        if i >= dc:
+            return
+        dn := cell_load(g_rc_rd_defs, (base + i) * 8)
+        dop := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_OPCODE)
+        ds1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
+        ds2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
+        if dop == IR_STORE && ds1 == s1:
+            if ds2 >= 0 && ds2 < g_ir_var_count:
+                x : ., mut = 0
+                loop:
+                    if x >= 64:
+                        break
+                    if rc_mask_has(g_rc_param_alias, ds2 * 2, x) != 0:
+                        d : ., mut = 0
+                        loop:
+                            if d >= 64:
+                                break
+                            if rc_mask_has(g_rc_param_alias, dst_arg * 2, d) != 0:
+                                rc_mask_set(g_rc_content_out_pairs, fi * 128 + x * 2, d)
+                            d = d + 1
+                    x = x + 1
+        i = i + 1
+
 fn rc_summary_func(fi: int) -> int:
     pc := cell_load(g_ir_func_param_count, fi * 8)
     if pc <= 0:
@@ -1332,6 +1397,21 @@ fn rc_summary_func(fi: int) -> int:
                         if arg >= 0 && arg < g_ir_var_count:
                             rc_mask_or_from(g_rc_param_ffi, fi * 2,
                                             g_rc_param_alias, arg * 2)
+                    if rc_mask_nonempty(g_rc_content_out_pairs, callee * 128 + j * 2) != 0:
+                        src := s1 + j
+                        if src >= 0 && src < g_ir_var_count:
+                            i : ., mut = 0
+                            loop:
+                                if i >= cpc || i >= 64:
+                                    break
+                                if rc_mask_has(g_rc_content_out_pairs, callee * 128 + j * 2, i) != 0:
+                                    di := s1 + i
+                                    if di >= 0 && di < g_ir_var_count:
+                                        if rc_is_param_var(fi, di) != 0:
+                                            rc_summary_content_pair(fi, src, di, ni, nstart)
+                                        else if rc_dest_is_local(di, ni, nstart, fi) == 0:
+                                            rc_summary_content_escape(fi, src, ni, nstart)
+                                i = i + 1
                     if rc_mask_nonempty(g_rc_out_pairs, callee * 128 + j * 2) != 0:
                         arg := s1 + j
                         if arg >= 0 && arg < g_ir_var_count:
@@ -1384,6 +1464,7 @@ fn rc_param_summaries():
     g_rc_param_content_alias = alloc(g_ir_var_count * 2 * 8)
     g_rc_param_content_escape = alloc(g_ir_func_count * 2 * 8)
     g_rc_param_ffi = alloc(g_ir_func_count * 2 * 8)
+    g_rc_content_out_pairs = alloc(g_ir_func_count * 128 * 8)
     i : ., mut = 0
     loop:
         if i >= g_ir_var_count * 2:
@@ -1404,6 +1485,7 @@ fn rc_param_summaries():
         if i >= g_ir_func_count * 128:
             break
         cell_store(g_rc_out_pairs, i * 8, 0)
+        cell_store(g_rc_content_out_pairs, i * 8, 0)
         i = i + 1
     fi : ., mut = 0
     loop:
@@ -1498,10 +1580,9 @@ fn rc_rd_defs_release(var: int, use_ni: int, lo: int, depth: int) -> int:
     return 0
 
 // Inspect the value held in a local slot that a `&slot` argument points to.
-// Region-local pointer values there die before program/global memory, so a
-// callee that loads and stores them into a global leaks.
-fn rc_slot_content_escapes(slot: int, at_node: int, nstart: int, fi: int,
-                           depth: int) -> int:
+// `dest` is the destination lifetime; -1 = program/function-level.
+fn rc_slot_content_outlives(slot: int, dest: int, at_node: int, nstart: int,
+                            fi: int, depth: int) -> int:
     if slot < 0 || depth > RC_MAX_DEPTH:
         return 0
     if rc_is_param_var(fi, slot) != 0 || rc_is_global_var(slot) != 0:
@@ -1520,20 +1601,20 @@ fn rc_slot_content_escapes(slot: int, at_node: int, nstart: int, fi: int,
         s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
         if op == IR_STORE && s1 == slot:
-            if s2 >= 0 && rc_value_has_release(s2, dn, nstart, 0) != 0:
+            if s2 >= 0 && rc_scalar_value_outlives_rd(s2, dn, dest, nstart, depth + 1) != 0:
                 return 1
         else if op == IR_PHI && d == slot:
-            if s1 >= 0 && rc_value_has_release(s1, dn, nstart, 0) != 0:
+            if s1 >= 0 && rc_scalar_value_outlives_rd(s1, dn, dest, nstart, depth + 1) != 0:
                 return 1
-            if s2 >= 0 && rc_value_has_release(s2, dn, nstart, 0) != 0:
+            if s2 >= 0 && rc_scalar_value_outlives_rd(s2, dn, dest, nstart, depth + 1) != 0:
                 return 1
         i = i + 1
     return 0
 
-// Does the pointee of `ptr_var` hold a region-local pointer? Used for the
-// `gp = *pp` summary relation.
-fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
-                              fi: int, depth: int) -> int:
+// Does the pointee content of `ptr_var` outlive `dest`? Used for `gp = *pp`
+// (dest = -1) and for content passed through out-parameters.
+fn rc_pointee_content_outlives(ptr_var: int, dest: int, at_node: int,
+                               nstart: int, fi: int, depth: int) -> int:
     if ptr_var < 0 || depth > RC_MAX_DEPTH:
         return 0
     if rc_is_global_var(ptr_var) != 0:
@@ -1543,8 +1624,10 @@ fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
         loop:
             if ai >= g_pa_alloc_count:
                 return 0
-            if pa_pts_has(ptr_var, ai) != 0 && rc_bit_exit(ai) >= 0:
-                return 1
+            if pa_pts_has(ptr_var, ai) != 0:
+                ex := rc_bit_exit(ai)
+                if ex >= 0 && (dest == -1 || dest > ex):
+                    return 1
             ai = ai + 1
         return 0
     if rc_rd_any(ptr_var, at_node) != 0:
@@ -1560,15 +1643,15 @@ fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
             s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
             s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
             if op == IR_REF && d == ptr_var:
-                if s1 >= 0 && rc_slot_content_escapes(s1, at_node, nstart, fi, depth + 1) != 0:
+                if s1 >= 0 && rc_slot_content_outlives(s1, dest, at_node, nstart, fi, depth + 1) != 0:
                     return 1
             else if op == IR_STORE && s1 == ptr_var:
-                if s2 >= 0 && rc_pointee_content_escapes(s2, dn, nstart, fi, depth + 1) != 0:
+                if s2 >= 0 && rc_pointee_content_outlives(s2, dest, dn, nstart, fi, depth + 1) != 0:
                     return 1
             else if op == IR_PHI && d == ptr_var:
-                if s1 >= 0 && rc_pointee_content_escapes(s1, dn, nstart, fi, depth + 1) != 0:
+                if s1 >= 0 && rc_pointee_content_outlives(s1, dest, dn, nstart, fi, depth + 1) != 0:
                     return 1
-                if s2 >= 0 && rc_pointee_content_escapes(s2, dn, nstart, fi, depth + 1) != 0:
+                if s2 >= 0 && rc_pointee_content_outlives(s2, dest, dn, nstart, fi, depth + 1) != 0:
                     return 1
             i = i + 1
         return 0
@@ -1577,11 +1660,15 @@ fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
         op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
         if op == IR_REF && s1 >= 0:
-            return rc_slot_content_escapes(s1, at_node, nstart, fi, depth + 1)
+            return rc_slot_content_outlives(s1, dest, at_node, nstart, fi, depth + 1)
         if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
             if s1 >= 0:
-                return rc_pointee_content_escapes(s1, prod, nstart, fi, depth + 1)
+                return rc_pointee_content_outlives(s1, dest, prod, nstart, fi, depth + 1)
     return 0
+
+fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
+                              fi: int, depth: int) -> int:
+    return rc_pointee_content_outlives(ptr_var, -1, at_node, nstart, fi, depth)
 
 fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int,
                  nstart: int, fi: int):
@@ -1626,6 +1713,23 @@ fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int,
                             if rc_store_outlives(di, arg, ni, nstart) != 0:
                                 check_error(EC_B_LIFETIME,
                                     "parameter escape: callee stores a region-local pointer",
+                                    0, 0)
+                i = i + 1
+        if rc_mask_nonempty(g_rc_content_out_pairs, callee * 128 + j * 2) != 0:
+            i : ., mut = 0
+            loop:
+                if i >= pc || i >= argc || i >= 64:
+                    break
+                if rc_mask_has(g_rc_content_out_pairs, callee * 128 + j * 2, i) != 0:
+                    di := first_arg + i
+                    if di >= 0 && di < g_ir_var_count && arg >= 0:
+                        if rc_is_param_var(fi, di) == 0:
+                            dest : ., mut = rc_dest_max_exit(di, ni, nstart)
+                            if dest == -2:
+                                dest = -1
+                            if rc_pointee_content_outlives(arg, dest, ni, nstart, fi, 0) != 0:
+                                check_error(EC_B_LIFETIME,
+                                    "parameter escape: callee leaks the pointee into an out-parameter",
                                     0, 0)
                 i = i + 1
         j = j + 1

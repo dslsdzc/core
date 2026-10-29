@@ -438,6 +438,31 @@ def test_p34_extern_argument_forwarded_through_wrapper():
     )
 
 
+def test_p35_pointee_content_through_out_parameter():
+    """P35 pointee 内容经 out 参数：`*dst = *pp`，dst 指向全局 ⇒ 报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        set(&gp, &p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
+def test_p36_pointee_content_out_parameter_transitive():
+    """P36 pointee 内容经转发：forward 转发 dst/pp，内容逃逸关系仍传回调用点。"""
+    assert_rejected(
+        "gp : &int, mut\nfn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn forward(dst: & &int, pp: & &int):\n    set(dst, pp)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        forward(&gp, &p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
+def test_p37_pointee_content_outer_slot():
+    """P37 外层槽接收内层内容：p/q 为函数级，循环内 p=&x，循环后 `*q = *p`
+    ⇒ q 比 x 长寿，报。"""
+    assert_rejected(
+        "fn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    q : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p = &x\n        i = i + 1\n    set(&q, &p)\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -578,6 +603,13 @@ def test_r26_extern_inside_unsafe_is_safe():
     )
 
 
+def test_r27_pointee_content_same_region_is_safe():
+    """R27 pointee 内容同区反向对照：dst 与内容同属循环区域 ⇒ 接受。"""
+    assert_accepted(
+        "fn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        q : ., mut = &seed\n        set(&q, &p)\n        if *q != 7:\n            return 1\n        i = i + 1\n    return 0\n"
+    )
+
+
 def test_r18_in_loop_safe_overwrite():
     """R18 堆指针到达定义：循环内先写死指针、再无条件写活指针，循环后解引用
     ⇒ 到达定义只有安全写入，不得保守误报。"""
@@ -700,6 +732,10 @@ if __name__ == "__main__":
         test_p34_extern_argument_forwarded_through_wrapper,
         test_r25_extern_global_argument_is_safe,
         test_r26_extern_inside_unsafe_is_safe,
+        test_p35_pointee_content_through_out_parameter,
+        test_p36_pointee_content_out_parameter_transitive,
+        test_p37_pointee_content_outer_slot,
+        test_r27_pointee_content_same_region_is_safe,
     ]
     failures = 0
     for test in tests:
