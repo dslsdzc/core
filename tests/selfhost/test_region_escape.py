@@ -392,6 +392,14 @@ def test_r14_parameter_target_is_function_lifetime():
     )
 
 
+def test_r15_all_branches_overwrite_dead_definition():
+    """R15 到达定义：`p := &x` 在 if 前，但 if 两支都覆盖成 `&seed`；返回的
+    到达定义只有两个安全分支，不得因更早的死定义误报。"""
+    assert_accepted(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        p : ., mut = &x\n        if cond == 1:\n            p = &seed\n        else:\n            p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
 def test_r12_scalar_function_level_return_is_clean():
     """R12 标量槽位反向对照：x 在函数级声明 ⇒ `return &x` 合法。"""
     assert_accepted(
@@ -472,6 +480,7 @@ if __name__ == "__main__":
         test_r12_scalar_function_level_return_is_clean,
         test_r13_global_target_is_program_lifetime,
         test_r14_parameter_target_is_function_lifetime,
+        test_r15_all_branches_overwrite_dead_definition,
     ]
     failures = 0
     for test in tests:
