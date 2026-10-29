@@ -322,6 +322,23 @@ def test_p20_loop_reassign_may_not_run():
     )
 
 
+def test_p21_parameter_escape_to_global():
+    """P21 参数逃逸：sink 把参数存入全局指针，调用方传入循环局部的 &x
+    ⇒ 调用点报 parameter escape。"""
+    assert_rejected(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        sink(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p22_parameter_escape_transitive():
+    """P22 传递参数逃逸：forward 调 sink，sink 存全局 ⇒ 调用链上仍报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn forward(p: &int):\n    sink(p)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        forward(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -389,6 +406,20 @@ def test_r14_parameter_target_is_function_lifetime():
     """R14 参数目标：参数槽位在本模型下是函数级，循环内 return 参数合法。"""
     assert_accepted(
         "fn make(p: &int) -> &int:\n    i : ., mut = 0\n    while i < 1:\n        return p\n    return p\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r16_parameter_stored_in_local_slot_is_safe():
+    """R16 参数只存入被调函数的本地槽位 ⇒ 调用结束即消失，不得报。"""
+    assert_accepted(
+        "fn sink(p: &int):\n    slot : ., mut = p\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        sink(&x)\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r17_function_level_argument_is_safe():
+    """R17 函数级实参：&x 不属归还区，调用方函数返回前仍有效 ⇒ 不得报。"""
+    assert_accepted(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn main() -> int:\n    x := 7\n    sink(&x)\n    return 0\n"
     )
 
 
@@ -481,6 +512,10 @@ if __name__ == "__main__":
         test_r13_global_target_is_program_lifetime,
         test_r14_parameter_target_is_function_lifetime,
         test_r15_all_branches_overwrite_dead_definition,
+        test_p21_parameter_escape_to_global,
+        test_p22_parameter_escape_transitive,
+        test_r16_parameter_stored_in_local_slot_is_safe,
+        test_r17_function_level_argument_is_safe,
     ]
     failures = 0
     for test in tests:

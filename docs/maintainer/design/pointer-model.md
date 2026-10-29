@@ -75,7 +75,7 @@ unsafe:
 1. 过期 DEREF（`IR_DEREF`），错误码 `B011`（`EC_B_LIFETIME`）。
 2. 返回值离开区域（`IR_RETURN`，`rc_return_escape`），错误码 `B010`（`EC_B_ESCAPE`）。错误信息见 `errors.md:245`，例子是 `return &x`。
 3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿最后写入与声明区追踪；条件/PHI 定义取所有可能分支的保守最大寿命。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
-4. 参数离开区域：把分配指针作为参数传给外部。该检查尚未实现；需要函数摘要，当前 `IR_CALL` 的 pts 为空。
+4. 参数离开区域（`IR_CALL`，`rc_call_check`）：按函数摘要判定。摘要标记可能被存入全局、另一个函数的指针参数或未知目标的参数；被调函数本地槽位/本地堆目标不计逃逸。摘要沿调用图传递（`rc_param_summaries` 固定点），调用点若实参指向归还区，报 `parameter escape`。外部/未知被调函数不建摘要。
 
 区域活性语义：
 
@@ -83,7 +83,7 @@ unsafe:
 - 只有出口归还内存的区域才是离开点。`SG_LOOP`、`SG_FOR` 和 `SG_UNSAFE` 在出口发射 `IR_ARENA_RESET`，后端 `src/arch/x86_64/instr.cr` 确实调用 `arena_new` 和 `arena_reset`。`SG_IF` 只做 `sg_push` 和 `sg_pop`，不建 arena，见 `ir_gen.cr:2414` 和 `ir_gen.cr:2437`。`SG_FUNC` 的 arena 在函数出口才重置，返回给调用者时仍然有效。分配点在 `if` 内时，沿父区域向上查找到真正归还内存的区域。
 - 类型门是 `TYP_PTR` 和 `TYP_REF` 的并集。当前实际生效的是 REF 一侧，因为 `&局部` 一律判为 REF，而 `&局部 as *T` 本身会触发 TF01。并集保留，PTR 一侧对 `alloc()` 和 FFI 派生值仍然有效。
 - 标量指针的到达定义：RegionCheck 为每个函数从 `IR_JUMP` 标签和 `IR_MATCH` CASE 目标构建 CFG，运行前向 may-reaching-definitions 数据流。在 use 点只评估真正到达的定义（分支/循环/PHI 按交汇），因此“if 两支都覆盖更早死定义”不会误报，嵌套条件拷贝也能递归追踪；循环第二次可能执行 0 次时仍会保留前一轮定义。实现见 `region_check.cr` 的 `rc_rd_*`。
-- 堆指针的 pts 仍是流不敏感并集。普通使用在 `[EXIT, ni)` 内检查重赋值；条件分支（`SG_IF`）或循环内的安全写入**不清除**，避免“条件写可能不执行”的假阴性。区域内 return 取分配点到 return 之间的**最后一次**写入，并按使用点判定写入值是否逃逸。已知不完整：当值是跨调用结果时 pts 为空，会被当作明确不离开区域而清除；参数/调用逃逸还需要函数摘要。
+- 堆指针的 pts 仍是流不敏感并集。普通使用在 `[EXIT, ni)` 内检查重赋值；条件分支（`SG_IF`）或循环内的安全写入**不清除**，避免“条件写可能不执行”的假阴性。区域内 return 取分配点到 return 之间的**最后一次**写入，并按使用点判定写入值是否逃逸。已知不完整：堆指针的 pts 仍是流不敏感并集，当值是跨调用结果时 pts 为空，会被当作明确不离开区域而清除。参数逃逸摘要覆盖全局/参数/未知目标与传递调用；`STORE_INDEX`/`STORE_FIELD` 目标、被返回的本地堆对象、外部函数不建摘要，属于后续精度项。
 
 ## Pass 3：ProvenanceVerify
 
