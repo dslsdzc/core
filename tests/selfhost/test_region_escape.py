@@ -432,6 +432,14 @@ def test_r17_function_level_argument_is_safe():
     )
 
 
+def test_r18_in_loop_safe_overwrite():
+    """R18 堆指针到达定义：循环内先写死指针、再无条件写活指针，循环后解引用
+    ⇒ 到达定义只有安全写入，不得保守误报。"""
+    assert_accepted(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        p = &seed\n        i = i + 1\n    return *p\n"
+    )
+
+
 def test_r15_all_branches_overwrite_dead_definition():
     """R15 到达定义：`p := &x` 在 if 前，但 if 两支都覆盖成 `&seed`；返回的
     到达定义只有两个安全分支，不得因更早的死定义误报。"""
@@ -526,6 +534,7 @@ if __name__ == "__main__":
         test_p23_direct_global_store_escape,
         test_r16_parameter_stored_in_local_slot_is_safe,
         test_r17_function_level_argument_is_safe,
+        test_r18_in_loop_safe_overwrite,
     ]
     failures = 0
     for test in tests:

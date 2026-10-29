@@ -1112,6 +1112,8 @@ fn rc_param_summaries():
 fn rc_value_has_release(val: int, at_node: int, lo: int, depth: int) -> int:
     if val < 0 || depth > 8:
         return 0
+    if rc_node_defines(at_node, val) == 0 && rc_rd_any(val, at_node) != 0:
+        return rc_rd_defs_release(val, at_node, lo, depth + 1)
     if pa_pts_empty(val) == 0:
         ai : ., mut = 0
         loop:
@@ -1121,8 +1123,6 @@ fn rc_value_has_release(val: int, at_node: int, lo: int, depth: int) -> int:
                 return 1
             ai = ai + 1
         return 0
-    if rc_node_defines(at_node, val) == 0 && rc_rd_any(val, at_node) != 0:
-        return rc_rd_defs_release(val, at_node, lo, depth + 1)
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg >= 0:
         return 1
@@ -1180,12 +1180,15 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
     ti := irv_type(ptr_var)
     if ti < 0 || (get_type_kind(ti) != TYP_PTR && get_type_kind(ti) != TYP_REF):
         return 0
+    lo := rc_func_nstart(ni)
+    // Reaching definitions make both heap and scalar pointer uses flow
+    // sensitive: evaluate the value(s) that actually reach this use instead of
+    // the flow-insensitive pts union / last-store heuristic.
+    if rc_rd_any(ptr_var, ni) != 0:
+        if rc_rd_defs_escape(ptr_var, ni, ni, lo, mode, 0) != 0:
+            return 1
+        return 0
     if pa_pts_empty(ptr_var) != 0:
-        lo := rc_func_nstart(ni)
-        if rc_rd_any(ptr_var, ni) != 0:
-            if rc_rd_defs_escape(ptr_var, ni, ni, lo, mode, 0) != 0:
-                return 1
-            return 0
         si := rc_last_store_before(ptr_var, lo, ni)
         if si >= 0:
             sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
