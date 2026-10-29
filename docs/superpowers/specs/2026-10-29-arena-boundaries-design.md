@@ -1,6 +1,6 @@
 # Arena 边界处理设计
 
-> 状态：部分实施（① 完成；② 保留 raw 门；③ 待实施）
+> 状态：② 完成（① 已完成；③ 待实施）
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-28-arena-size-classes.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
 
@@ -94,39 +94,44 @@ extent 的 `mmap` 返回负值时，当前跳到 `capacity_full`，见证值不�
 
 ## ② tagged-int arena
 
-### 原则
+### 表示
 
-arena 元数据数组继续用 `cell_store` / `cell_load` 存取。tagged 模式下这两个函数在边界上完成 tagged 与 raw 的转换，数组里保存的是 raw 值，stub 可以直接读写。
+arena 的元数据数组和标量缓冲区都保存 **raw 机器字**。库和 stub 读取同一份
+cell：
 
-需要转换的只有**标量全局**：
+- stub 直接按 raw 读写标量缓冲区和元数据数组。
+- 库的标量 getter 用 `load64` 按字面量偏移读取，setter 用 `cell_store` 按字面量
+  偏移写入。不能把变量偏移直接交给 `cell_load`/`cell_store`：这两个函数的
+  偏移会经过 big-int 运行时，在 arena 内部可能触发装箱并重入分配器。
+- 元数据数组用 `cell_store` / `cell_load` 存取；数组里是 raw 值，stub 直接读。
+- `g_current_arena` 保留一个普通全局镜像，供直接读取它的测试和旧程序使用。
 
-| 全局 | stub 读 | stub 写 |
-|---|---|---|
-| `g_current_arena` | untag | — |
-| `g_arena_max_size` | untag | — |
-| `g_arena_pool_slots` | untag | — |
-| `g_segment_count` | untag | — |
-| `g_arena_slot_count` | untag | tag |
-| `g_arena_slot_free` | untag | tag |
+### 初始化和 reset
 
-untag 用算术右移 1，tag 用左移 1。`g_alloc_fail_*` 和 `g_alloc_home_idx` 是 stub 内部诊断/暂存，保持 raw。
+- `g_arena_scalars_ready` 在标量缓冲区建立期间为 0；stub 看到 0 时走全局堆。
+- `g_arena_suspend` 在 `arena_init` 和 `arena_reset` 期间为 1；stub 看到非 0 时
+  走全局堆。这样 tagged 算术产生的 big-int 装箱不会进入半初始化或正在重置的
+  arena。
+- `arena_init` 分配标量缓冲区后立即把当前 arena 写成 -1，再继续分配元数据。
+- `arena_new_sized` 和 `arena_reset` 用 raw 当前 arena；reset 结束前不清除
+  suspend，避免最后一次 `cell_store` 重入。
+- mmap extent 的数量保存在 `g_arena_large_count`，reset 按 tagged 计数循环，
+  不把 raw 指针当整数比较。
 
-### 静态峰值参数
+### BigInt
 
-`IR_ARENA_NEW` 的 `s1` 是字节峰值，后端直接 `mov rdi, s1`。tagged 模式下 `arena_new_sized` 的参数是 tagged int，改为 `mov rdi, s1 * 2`。raw 模式保持原值。
+`bi_to_word_checked` 增加 tagged 小整数快速路径：偶数且在立即数范围内的值直接
+返回 `a / 2`，不再装箱。该路径用于所有 tagged 程序的 raw 偏移/长度转换，也
+避免 arena 元数据访问在内部触发分配。`src/runtime/bigint_blob.cr` 已用
+`tools/gen_bigint_blob.py` 重新生成。
+
+`IR_ARENA_NEW` 的静态峰值在 tagged 模式下乘 2；无 arena 哨兵用 -2（tagged -1）。
 
 ### 编译器策略
 
-删除 `ccr_set_raw_mode_from_source` 中 `fn arena_init` 触发 raw 的分支。arena 库按程序本来的模式编译。
-
-编译器自身仍因 `fn parse_expr` / `fn corearch_main` 使用 raw，不受影响。
-
-### 回归
-
-- tagged 程序（无 `import cli`）导入 arena：小对象、跨 4KB 块、2MB、100MB、1GB。
-- 同一程序使用 `int_str` 打印大于 2^32 的值，确认 BigInt 语义未被 arena 破坏。
-- `tests/suite/arena_test.cr` 保持 ALL PASS。
-- canary 四条 `.ccr` 和 ELF 不变（arena 未导入 canary）。
+删除 `ccr_set_raw_mode_from_source` 中 `fn arena_init` 触发 raw 的分支。arena
+库按程序本来的模式编译。编译器自身仍因 `fn parse_expr` / `fn corearch_main`
+使用 raw，不受影响。
 
 ## ③ 解释器 run 路径
 
@@ -174,11 +179,23 @@ untag 用算术右移 1，tag 用左移 1。`g_alloc_fail_*` 和 `g_alloc_home_i
 
 ### ② tagged-int arena
 
-未启用。stub 的标量 tag/untag 和指针 cell 路径已经写入源码，但 arena 库的
-tagged 标量比较仍会触发装箱值的错误路径：arena id 或 extent 指针会被当成
-boxed big-int 解引用。`ccr_set_raw_mode_from_source` 继续在源文件包含
-`fn arena_init` 时选择 raw。启用前需要先修 tagged 标量表示，或把全部标量
-改为 cell 访问。
+已完成。arena 库按程序本来的 tagged 模式编译；元数据和标量缓冲区保存 raw
+字，stub 直接读写。`ccr_set_raw_mode_from_source` 不再因 `fn arena_init`
+选择 raw。BigInt 语义保留：`tests/suite/arena_test.cr` 通过，
+`/tmp/tagbig2.cr` 在 arena 内打印并比较 2^32 和 2^64 的值，结果正确。
+
+回归结果：
+
+| 测试 | 结果 |
+|---|---|
+| `tests/suite/arena_test.cr` | ALL PASS |
+| `tests/suite/arena_boundary_test.cr` | 0 |
+| 2MB/100MB/1GB、跨 4KB 块、70 slot、静态峰值 | 0 |
+| `chunks`（2000×64B + 200×10000B） | 0 |
+| `many_slots` | 0 |
+| `tagbig2`（2^32/2^64 BigInt） | 0 |
+| `corec selftest-stub-regalloc` | 14/14 |
+| canary | 5/5（ELF 重锁为 `368f4ab0…`，53430 B） |
 
 ### ③ 解释器 run 路径
 

@@ -205,7 +205,7 @@
 #     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
-canary_elf	pa	911b617f1efc948b11fae65e65738d5bb3c43df7b72df8d9f5dfb40c36342d21	49334
+canary_elf	pa	368f4ab08e80c7c37d4fe562f7f730f5b94c98a47ae6d093dc49c3af81dfbed3	53430
 pa_ccr	pa.ccr	271d0c1b4491e9a39d9635503ed36c4220964a650b003602fe434f5c9d35be1d	97509
 pa_static_ccr	pa_st.bin.ccr	80c5c1219f6eaa0937a7faa6da1dfe83e19fad2496b11d40bbf26b45c3d24a28	97731
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
@@ -532,3 +532,16 @@ gt_static_ccr	gt_st.bin.ccr	2f099f987452a4a4420c799ea28703219d4c07f993d1d622b64e
 #   canary_elf a7035141526611a26b6ec5d34bffb7885fc9b917a9437e8e8f9e0991ec7825e5 49334
 # 新值：
 #   canary_elf 911b617f1efc948b11fae65e65738d5bb3c43df7b72df8d9f5dfb40c36342d21 49334
+
+# ── 「本次重锁 2026-10-29」tagged-int arena 完成（BigInt blob 换代）──
+# **性质 = 编译器身份位移 + BigInt 运行时快速路径，非 canary 语料回归**。
+# canary 语料 `tests/suite/ptr_arith.cr` 不导入 arena；四条 `.ccr` 逐字节不变
+# （97509 / 97731 / 131023 / 131245），D1 5/5 PASS，`pa` 运行 rc=0，ELF 尺寸
+# 49334B → 53430B。归因：`bi_to_word_checked` 增加 tagged 小整数快速路径，
+# 并重新生成 `src/runtime/bigint_blob.cr`（18336B → 19056B）；`src/format/elf/elf.cr`
+# 的 arena 标量/元数据路径也改变了 corearch 自身源码 ⇒ 目标 ELF 的布局和 intern
+# id 位移。arena 回归另见 `tests/suite/arena_test.cr`、`arena_boundary_test.cr`。
+# 旧值留痕（自本次起作废）：
+#   canary_elf 911b617f1efc948b11fae65e65738d5bb3c43df7b72df8d9f5dfb40c36342d21 49334
+# 新值：
+#   canary_elf 368f4ab08e80c7c37d4fe562f7f730f5b94c98a47ae6d093dc49c3af81dfbed3 53430

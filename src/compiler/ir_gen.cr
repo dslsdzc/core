@@ -6670,11 +6670,6 @@ fn ccr_set_raw_mode_from_source():
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:
         g_ccr_emit_raw_int = 1
-    if ccr_source_has_marker("fn arena_init") != 0:
-        // The arena runtime stores raw slot ids, byte offsets, and pointers in
-        // cells that the allocator stub reads as raw words. Until the tagged
-        // scalar path is complete, arena-backed programs use raw machine ints.
-        g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("import cli") != 0:
         // The CLI word-table layer intentionally stores raw string pointers via
         // cell_store/cell_load and views them back through @str_of. Legacy raw

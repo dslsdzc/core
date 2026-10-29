@@ -29,7 +29,11 @@ g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current s
 g_arena_slot : string, mut          // int[] — current slot id per arena
 g_arena_static : string, mut        // int[] — 1 when the arena uses a static peak
 g_arena_live : string, mut          // int[] — 1 while the arena id is allocated
+g_arena_scalars : string, mut       // raw scalar cells shared with the stub
+g_arena_scalars_ready : int, mut = 0 // 1 after the scalar buffer exists
+g_arena_suspend : int, mut = 0     // 1 while arena metadata is being rebuilt
 g_arena_large_head : string, mut    // string[] — mmap extent list per arena
+g_arena_large_count : string, mut   // int[] — extent count per arena
 g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
 g_arena_slot_free : int, mut = -1
 g_arena_slot_count : int, mut = 0
@@ -55,6 +59,51 @@ g_alloc_fail_limit : int, mut = 0
 // Home slot for the spilled class-index value in the runtime allocator stub.
 g_alloc_home_idx : int, mut = 0
 
+// Shared scalar cells. Both the allocator stub and the library see raw machine
+// words; the getter uses load64 and the setter uses cell_store.
+fn arena_scalar_get(off: int) -> int:
+    // load64 keeps the access raw: cell_load converts the offset through the
+    // big-int runtime, which can allocate and re-enter the arena.
+    if off == 0:
+        return load64(g_arena_scalars, 0)
+    if off == 8:
+        return load64(g_arena_scalars, 8)
+    if off == 16:
+        return load64(g_arena_scalars, 16)
+    if off == 24:
+        return load64(g_arena_scalars, 24)
+    if off == 32:
+        return load64(g_arena_scalars, 32)
+    if off == 40:
+        return load64(g_arena_scalars, 40)
+    return 0
+
+fn arena_scalar_set(off: int, val: int):
+    if off == 0:
+        cell_store(g_arena_scalars, 0, val)
+        return
+    if off == 8:
+        cell_store(g_arena_scalars, 8, val)
+        return
+    if off == 16:
+        cell_store(g_arena_scalars, 16, val)
+        return
+    if off == 24:
+        cell_store(g_arena_scalars, 24, val)
+        return
+    if off == 32:
+        cell_store(g_arena_scalars, 32, val)
+        return
+    if off == 40:
+        cell_store(g_arena_scalars, 40, val)
+        return
+
+// Keep the legacy current-arena global in sync for programs that read it
+// directly (the test suite redeclares it to check activation).
+fn arena_set_current(val: int):
+    arena_scalar_set(0, val)
+    g_current_arena = val
+
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return
@@ -63,8 +112,8 @@ fn _grow_arena_meta(needed: int):
         nc = 64
     if nc < needed:
         nc = needed + 64
-    saved_arena := g_current_arena
-    g_current_arena = -1
+    saved_arena := arena_scalar_get(0)
+    arena_set_current(-1)
     // cursors
     nb := alloc(nc * 8)
     zi : ., mut = 0
@@ -151,6 +200,16 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_large_head, g_arena_cap * 8, nb4d)
     g_arena_large_head = nb4d
+    nb4e := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4e, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_large_count, g_arena_cap * 8, nb4e)
+    g_arena_large_count = nb4e
     // class base / cursor / limit
     cn := nc * ARENA_CLASS_COUNT * 8
     nb5 := alloc(cn)
@@ -184,11 +243,14 @@ fn _grow_arena_meta(needed: int):
         _dyncpy(g_class_limit, g_arena_cap * ARENA_CLASS_COUNT * 8, nb7)
     g_class_limit = nb7
     g_arena_cap = nc
-    g_current_arena = saved_arena
+    arena_set_current(saved_arena)
 
 // ── Public API ──
 
 fn arena_init(pool_size: int, arena_size: int), pub:
+    // Metadata rebuilds allocate tagged big-int boxes. Those must go to the
+    // global heap, never into a half-built arena.
+    g_arena_suspend = 1
     // The backing pool outlives the caller's automatic function arena.
     // The 25 class slices are 4KB each, so a slot must hold at least 100KB.
     if arena_size < 131072:
@@ -197,9 +259,19 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     // arena is created before user code runs, so it can be live here. Resetting
     // the current arena is enough: the compiler creates at most one automatic
     // arena per active function.
-    prev_arena := g_current_arena
-    g_current_arena = -1
-    if prev_arena >= 0:
+    prev_arena : ., mut = 0
+    have_scalars := g_arena_scalars_ready
+    if have_scalars != 0:
+        prev_arena = arena_scalar_get(0)
+        arena_set_current(-1)
+    // alloc() returns a zero-filled block. Park the current arena on -1
+    // before any further allocation: tagged arithmetic in the rest of this
+    // function can allocate big-int boxes, and those must not enter the arena
+    // before its metadata arrays exist.
+    g_arena_scalars_ready = 0
+    g_arena_scalars = alloc(64)
+    arena_set_current(-1)
+    if have_scalars != 0 && prev_arena >= 0:
         arena_reset(prev_arena)
     g_arena_pool_limit = pool_size
     // A zero limit means "no limit"; only positive values below one segment
@@ -208,10 +280,10 @@ fn arena_init(pool_size: int, arena_size: int), pub:
         g_arena_pool_limit = 67108864
     // Pool segments are 64MB each and hold sixty-four 1MB slots.
     arena_size = 1048576
-    g_arena_max_size = arena_size
+    arena_scalar_set(8, arena_size)
     g_segment_base = alloc(256 * 8)
     g_segment_cap = 256
-    g_segment_count = 1
+    arena_scalar_set(24, 1)
     seg0 := alloc(67108864)
     g_arena_pool_data = seg0
     store_str_ptr(g_segment_base, 0, seg0)
@@ -241,17 +313,17 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     cell_store(g_class_sizes, 176, 2151)
     cell_store(g_class_sizes, 184, 2689)
     cell_store(g_class_sizes, 192, 3361)
-    g_arena_pool_slots = 64
+    arena_scalar_set(16, 64)
     g_arena_slot_next = alloc(2048 * 8)
     g_slot_next_cap = 2048
     si : ., mut = 0
     loop:
-        if si >= g_arena_pool_slots:
+        if si >= arena_scalar_get(16):
             break
         cell_store(g_arena_slot_next, si * 8, -1)
         si = si + 1
-    g_arena_slot_free = -1
-    g_arena_slot_count = 0
+    arena_scalar_set(40, -1)
+    arena_scalar_set(32, 0)
     g_class_lookup = alloc(256 * 8)
     lb : ., mut = 0
     loop:
@@ -273,6 +345,8 @@ fn arena_init(pool_size: int, arena_size: int), pub:
         lb = lb + 1
     g_arena_free_list = -1
     g_arena_count = 0
+    g_arena_scalars_ready = 1
+    g_arena_suspend = 0
     // Keep g_arena_cap: the metadata arrays are still allocated and all arenas
     // were retired above. Dropping the capacity would reallocate them zeroed and
     // leave stale ids (such as main's automatic arena) pointing at zero cells.
@@ -286,32 +360,32 @@ fn _arena_copy_cells(src: string, nbytes: int, dst: string):
         i = i + 8
 
 fn arena_grow_pool(), pub:
-    if g_arena_pool_limit > 0 && (g_segment_count + 1) * 67108864 > g_arena_pool_limit:
+    if g_arena_pool_limit > 0 && (arena_scalar_get(24) + 1) * 67108864 > g_arena_pool_limit:
         println("arena: pool limit exceeded")
         return
-    saved := g_current_arena
-    g_current_arena = -1
-    if g_segment_count >= g_segment_cap:
+    saved := arena_scalar_get(0)
+    arena_set_current(-1)
+    if arena_scalar_get(24) >= g_segment_cap:
         nc := g_segment_cap * 2
         nb := alloc(nc * 8)
         _arena_copy_cells(g_segment_base, g_segment_cap * 8, nb)
         g_segment_base = nb
         g_segment_cap = nc
-    if (g_segment_count + 1) * 64 > g_slot_next_cap:
+    if (arena_scalar_get(24) + 1) * 64 > g_slot_next_cap:
         nc2 := g_slot_next_cap * 2
         nb2 := alloc(nc2 * 8)
         _arena_copy_cells(g_arena_slot_next, g_slot_next_cap * 8, nb2)
         g_arena_slot_next = nb2
         g_slot_next_cap = nc2
-    g_current_arena = -1
+    arena_set_current(-1)
     seg := alloc(67108864)
-    store_str_ptr(g_segment_base, g_segment_count * 8, seg)
-    g_segment_count = g_segment_count + 1
-    g_arena_pool_slots = g_arena_pool_slots + 64
-    g_current_arena = saved
+    store_str_ptr(g_segment_base, arena_scalar_get(24) * 8, seg)
+    arena_scalar_set(24, arena_scalar_get(24) + 1)
+    arena_scalar_set(16, arena_scalar_get(16) + 64)
+    arena_set_current(saved)
 
 fn arena_new_sized(peak: int) -> int, pub:
-    if peak > g_arena_max_size:
+    if peak > arena_scalar_get(8):
         peak = 0
     ai : ., mut = -1
 
@@ -333,25 +407,26 @@ fn arena_new_sized(peak: int) -> int, pub:
         cell_store(g_arena_sizes, ai * 8, peak)
         cell_store(g_arena_static, ai * 8, 1)
     else:
-        cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
+        cell_store(g_arena_sizes, ai * 8, arena_scalar_get(8))
         cell_store(g_arena_static, ai * 8, 0)
     cell_store(g_arena_parents, ai * 8, -1)
     cell_store(g_arena_live, ai * 8, 1)
-    sl : ., mut = g_arena_slot_free
+    sl : ., mut = arena_scalar_get(40)
     if sl >= 0:
-        g_arena_slot_free = cell_load(g_arena_slot_next, sl * 8)
+        arena_scalar_set(40, cell_load(g_arena_slot_next, sl * 8))
     else:
-        sl = g_arena_slot_count
-        g_arena_slot_count = sl + 1
-        if sl >= g_arena_pool_slots:
+        sl = arena_scalar_get(32)
+        arena_scalar_set(32, sl + 1)
+        if sl >= arena_scalar_get(16):
             arena_grow_pool()
-        if sl >= g_arena_pool_slots:
+        if sl >= arena_scalar_get(16):
             sl = -1
     cell_store(g_arena_slot, ai * 8, sl)
     if sl >= 0:
         cell_store(g_arena_slot_next, sl * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     cell_store(g_arena_large_head, ai * 8, -1)
+    cell_store(g_arena_large_count, ai * 8, 0)
     // No class chunk is attached until the first allocation of that class.
     ci : ., mut = 0
     loop:
@@ -363,11 +438,11 @@ fn arena_new_sized(peak: int) -> int, pub:
         ci = ci + 1
 
     // Set parent = previous current arena
-    if g_current_arena >= 0:
-        cell_store(g_arena_parents, ai * 8, g_current_arena)
+    if arena_scalar_get(0) >= 0:
+        cell_store(g_arena_parents, ai * 8, arena_scalar_get(0))
 
     // Activate
-    g_current_arena = ai
+    arena_set_current(ai)
     return ai
 
 fn arena_new() -> int, pub:
@@ -380,23 +455,25 @@ fn arena_reset(ai: int), pub:
     if cell_load(g_arena_live, ai * 8) == 0:
         return
     cell_store(g_arena_live, ai * 8, 0)
+    g_arena_suspend = 1
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
     parent := cell_load(g_arena_parents, ai * 8)
 
-    // Unmap dedicated large-object extents.
-    lp : ., mut = load_str_ptr(g_arena_large_head, ai * 8)
+    // Unmap dedicated large-object extents. The count is a tagged int read
+    // through cell_load; the chain values are raw string pointers and are never
+    // compared as integers.
+    ln : ., mut = cell_load(g_arena_large_count, ai * 8)
     loop:
-        stop : ., mut = 0
-        unsafe:
-            if @ptr_of(lp) < 0:
-                stop = 1
-        if stop != 0:
+        if ln <= 0:
             break
+        lp := load_str_ptr(g_arena_large_head, ai * 8)
         lnxt := load_str_ptr(lp, 0)
         lsz := cell_load(lp, 8)
         r1 := syscall3(11, lp, lsz, 0)
-        lp = lnxt
+        store_str_ptr(g_arena_large_head, ai * 8, lnxt)
+        ln = ln - 1
+    cell_store(g_arena_large_count, ai * 8, 0)
     cell_store(g_arena_large_head, ai * 8, -1)
 
     // Return every slot in the arena chain to the pool free list.
@@ -405,8 +482,8 @@ fn arena_reset(ai: int), pub:
         if sl < 0:
             break
         nxt := cell_load(g_arena_slot_next, sl * 8)
-        cell_store(g_arena_slot_next, sl * 8, g_arena_slot_free)
-        g_arena_slot_free = sl
+        cell_store(g_arena_slot_next, sl * 8, arena_scalar_get(40))
+        arena_scalar_set(40, sl)
         sl = nxt
     cell_store(g_arena_slot, ai * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
@@ -423,14 +500,16 @@ fn arena_reset(ai: int), pub:
     cell_store(g_arena_parents, ai * 8, g_arena_free_list)
     g_arena_free_list = ai
 
-    // Restore parent
+    // Restore parent. Keep the allocator suspended until the scalar write is
+    // complete: cell_store itself can allocate a tagged box.
     if parent >= 0:
-        g_current_arena = parent
+        arena_set_current(parent)
     else:
-        g_current_arena = -1
+        arena_set_current(-1)
+    g_arena_suspend = 0
 
 fn arena_avail(ai: int) -> int, pub:
     if ai < 0 || ai >= g_arena_count:
         return 0
     used := cell_load(g_arena_slot_cursor, ai * 8)
-    return g_arena_max_size - used
+    return arena_scalar_get(8) - used
