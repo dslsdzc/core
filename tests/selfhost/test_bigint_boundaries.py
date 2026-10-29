@@ -201,6 +201,40 @@ def main() -> int:
                 print("extern big argument was not rejected")
                 return 1
 
+            # The linked .so .text must fit between the user code and the BSS
+            # page. Larger shims are rejected loudly; they must not silently
+            # overwrite the writable heap.
+            big_c = d / "big_shim.c"
+            big_so = d / "big_shim.so"
+            big_c.write_text(
+                'long big_inc(long x) { return x + 1; }\n'
+                '__asm__(".rept 12000\\n nop\\n .endr");\n',
+                encoding="utf-8")
+            r = run(["gcc", "-shared", "-fPIC", "-O2", str(big_c),
+                     "-o", str(big_so)])
+            if r.returncode != 0:
+                print("big shim build failed:\n" + r.stdout + r.stderr)
+                return 1
+            big_ccr = d / "big_extern.ccr"
+            big_exe = d / "big_extern"
+            r = run([str(COREC), "ccr", str(d / "extern.cr"),
+                     "-o", str(big_ccr)])
+            if r.returncode != 0:
+                print("big shim ccr failed:\n" + r.stdout + r.stderr)
+                return 1
+            r = run([str(COREARCH), str(big_ccr), "--big-int", "--elf",
+                     "--link", str(big_so), "--static", "-o", str(big_exe)])
+            text = r.stdout + r.stderr
+            if r.returncode == 0:
+                print("large .so was accepted; expected a loud rejection")
+                return 1
+            if "超过用户代码与 BSS 之间的间隙" not in text:
+                print("large .so rejection has no layout diagnostic:\n" + text)
+                return 1
+            if big_exe.exists():
+                print("large .so rejection left an output file")
+                return 1
+
     print("PASS bigint boundaries")
     return 0
 

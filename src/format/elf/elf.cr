@@ -1253,6 +1253,11 @@ fn align_up(val: int, align: int) -> int:
 
 // ── Global ──
 g_asm_code_size : int, mut
+// Final layout facts exported to the static linker (ld.cr). `bss_init` and the
+// BSS page are emitted after the code size is known, so ctx_emit_static must
+// use these values instead of recomputing them from g_user_size.
+g_elf_bss_va : int, mut
+g_elf_entry_off : int, mut
 g_elf_buf : string, mut
 
 // ── ELF64 struct layout offsets (used by elf2_hdr) ──
@@ -1412,6 +1417,8 @@ fn elf_gen(buf: string) -> int:
     g_x86_big_exit_call_pos = -1
     g_alloc_blob_start = -1
     g_alloc_blob_error = 0
+    g_elf_bss_va = 0
+    g_elf_entry_off = 0
     // Mark global variables for RIP-relative addressing
     gi : ., mut = 0
     loop:
@@ -2152,6 +2159,7 @@ fn elf_gen(buf: string) -> int:
     // total_code from Phase 2 underestimates; use actual cp for precise calculation.
     // +1 ensures BSS is on a different page from code.
     bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
+    g_elf_bss_va = bss_va
 
     // The allocator was emitted earlier with a provisional BSS address.
     // Re-emit it in place now that the final data-segment VA is known.
@@ -2265,6 +2273,7 @@ fn elf_gen(buf: string) -> int:
     // rep stosb. This stub becomes the new entry point; after
     // zeroing it jumps to the real _start.
     bss_init_cp := cp
+    g_elf_entry_off = bss_init_cp
     BSS_ZERO_SIZE : int = 131072  // 128 KB: covers all globals
 
     // lea rdi, [rip + rel]  -> rdi = bss_va

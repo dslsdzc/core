@@ -799,7 +799,17 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     user_out := hdr_sz
     so_out := hdr_sz + g_user_size
     total := so_out + g_so_sz
-    bss_page := 0x400000 + ((hdr_sz + g_user_size + 4095) / 4096) * 4096 + 4096
+    // Use the BSS page that elf_gen actually patched into the user code. It
+    // is computed before the 22-byte bss_init stub, so deriving it from the
+    // final file size can land one page too high.
+    if g_elf_bss_va <= 0 || g_elf_entry_off <= 0:
+        println("error: 静态链接缺少 ELF 布局信息")
+        return -1
+    bss_page := g_elf_bss_va
+    // The .so text has no separate PT_LOAD: it lives in the gap between the
+    // user code and the BSS page. Reject larger shims loudly instead of
+    // letting them overwrite the writable heap. Supporting arbitrary sizes
+    // needs a third PT_LOAD.
     if so_out + g_so_sz > bss_page - 0x400000:
         println("error: 静态链接的 .so 文本超过用户代码与 BSS 之间的间隙")
         return -1
@@ -878,7 +888,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     w16(buf,16,2)
     w16(buf,18,62)
     w32(buf,20,1)
-    cell_store(buf,24,0x400000 + user_out)  // entry = user code's _start
+    cell_store(buf,24,TEXT_BASE + g_elf_entry_off)  // entry = bss_init -> _start
     cell_store(buf,32,64)
     cell_store(buf,40,0)
     w16(buf,52,64)
