@@ -277,6 +277,33 @@ def test_p15_conditional_reassign_does_not_clear():
     )
 
 
+def test_p16_conditional_scalar_return_escapes():
+    """P16 条件标量定义：if 两支分别指向循环局部 x 与函数级 seed，最后一条
+    定义若是安全支，单条 last-store 追踪会漏报。全定义检查必须报 B10。"""
+    assert_rejected(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        if cond == 1:\n            p = &x\n        else:\n            p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p17_conditional_destination_outlives():
+    """P17 条件目标：slotp 的一支指向函数级 slot、另一支指向循环局部 slot；
+    存入循环局部 x 后，函数级分支必须触发 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp : ., mut = &slot\n    cond := 1\n    i : ., mut = 0\n    while i < 1:\n        local_seed := 0\n        local_slot : ., mut = &local_seed\n        x := 7\n        if cond == 1:\n            slotp = &slot\n        else:\n            slotp = &local_slot\n        *slotp = &x\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p18_conditional_scalar_store_outlives():
+    """P18 条件标量值：p 的一支是循环局部 x、另一支是函数级 seed；存入函数级
+    槽位必须报 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    p : ., mut = &seed\n    cond := 1\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        if cond == 1:\n            p = &x\n        else:\n            p = &seed\n        *slotp = p\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -329,6 +356,21 @@ def test_r6_store_of_live_pointer_stays_clean():
     """R6 存储逃逸反向对照：存入的指针仍活着 ⇒ 不得报（防存储检查「一律报」）。"""
     assert_accepted(
         "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        i = i + 1\n    k : ., mut = 1\n    k = k + 1\n    p = &seed\n    *slotp = p\n    return 0\n"
+    )
+
+
+def test_r13_global_target_is_program_lifetime():
+    """R13 全局目标：`&g` 是程序级寿命，循环内 return 合法；不得沿用 REF 节点
+    所在的循环区。"""
+    assert_accepted(
+        "g : int, mut = 7\nfn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        return &g\n    return &g\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r14_parameter_target_is_function_lifetime():
+    """R14 参数目标：参数槽位在本模型下是函数级，循环内 return 参数合法。"""
+    assert_accepted(
+        "fn make(p: &int) -> &int:\n    i : ., mut = 0\n    while i < 1:\n        return p\n    return p\nfn main() -> int:\n    return 0\n"
     )
 
 
@@ -393,6 +435,9 @@ if __name__ == "__main__":
         test_p13_scalar_store_outlives,
         test_p14_ref_destination_inside_loop,
         test_p15_conditional_reassign_does_not_clear,
+        test_p16_conditional_scalar_return_escapes,
+        test_p17_conditional_destination_outlives,
+        test_p18_conditional_scalar_store_outlives,
         test_r1_function_level_alloc_may_be_returned,
         test_r2_if_branch_alloc_is_not_released_at_branch_end,
         test_r3_reassign_to_live_pointer_after_loop,
@@ -405,6 +450,8 @@ if __name__ == "__main__":
         test_r10_store_live_into_function_level_slot,
         test_r11_store_loop_value_into_loop_slot,
         test_r12_scalar_function_level_return_is_clean,
+        test_r13_global_target_is_program_lifetime,
+        test_r14_parameter_target_is_function_lifetime,
     ]
     failures = 0
     for test in tests:

@@ -205,6 +205,18 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
 // Whether ptr_var holds a dead pointer at node ni. Address types are TYP_PTR and
 // TYP_REF; only the kind is checked. A non-address value is accepted because an
 // integer read through a dereference is ordinary data, not another pointer.
+fn rc_is_global_var(var: int) -> int:
+    if var < 0:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_global_count:
+            return 0
+        if cell_load(g_ir_globals, i * 24 + 8) == var:
+            return 1
+        i = i + 1
+    return 0
+
 fn rc_func_nstart(ni: int) -> int:
     sg : ., mut = subgraph_containing(ni)
     loop:
@@ -257,12 +269,17 @@ fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> in
     s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
     s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
     if op == IR_REF:
+        if rc_is_global_var(s1) != 0:
+            return -1
         decl := cell_load(g_df_var_producer, s1 * 8)
         if decl >= 0:
             dop := cell_load(g_df_nodes, decl * ESZ_DFNODE + OFF_DF_OPCODE)
             if dop == IR_ALLOC || dop == IR_ALLOC_STRUCT || dop == IR_ALLOC_ARRAY:
                 return rc_releasing_region(decl)
-        return rc_releasing_region(prod)
+        // A global or parameter has no local IR_ALLOC declaration. Its slot
+        // lives for the whole function/program, not for the region where `&`
+        // happens to be evaluated.
+        return -1
     if op == IR_ADDR_INDEX || op == IR_SLICE:
         return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
     if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
@@ -270,6 +287,69 @@ fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> in
     if op == IR_BINARY && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB):
         return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
     return -2
+
+fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int) -> int:
+    sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
+    if sg < 0:
+        return 0
+    ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    if ni >= ex:
+        return 1
+    if mode != 0 && rc_sg_is_ancestor(sg, subgraph_containing(ni)) != 0:
+        return 1
+    return 0
+
+// Conservative check across every definition of a scalar pointer variable.
+// A conditional/PHI definition cannot be represented by one last-store trace;
+// report if any possible definition escapes.
+fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int) -> int:
+    i : ., mut = lo
+    loop:
+        if i >= ni:
+            break
+        op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == ptr_var:
+            if rc_stack_value_escapes(s2, i, ni, lo, mode) != 0:
+                return 1
+        if op == IR_PHI && d == ptr_var:
+            if s1 >= 0 && rc_stack_value_escapes(s1, i, ni, lo, mode) != 0:
+                return 1
+            if s2 >= 0 && rc_stack_value_escapes(s2, i, ni, lo, mode) != 0:
+                return 1
+        i = i + 1
+    return 0
+
+fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int) -> int:
+    sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
+    if sg < 0:
+        return 0
+    vexit := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    if dest == -1 || dest > vexit:
+        return 1
+    return 0
+
+fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int) -> int:
+    i : ., mut = lo
+    loop:
+        if i >= use_ni:
+            break
+        op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == ptr_var:
+            if rc_stack_value_outlives(s2, i, dest, lo) != 0:
+                return 1
+        if op == IR_PHI && d == ptr_var:
+            if s1 >= 0 && rc_stack_value_outlives(s1, i, dest, lo) != 0:
+                return 1
+            if s2 >= 0 && rc_stack_value_outlives(s2, i, dest, lo) != 0:
+                return 1
+        i = i + 1
+    return 0
 
 fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
     if ptr_var < 0:
@@ -279,6 +359,12 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
         return 0
     if pa_pts_empty(ptr_var) != 0:
         lo := rc_func_nstart(ni)
+        si := rc_last_store_before(ptr_var, lo, ni)
+        if si >= 0:
+            sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
+            if rc_node_in_if(si) != 0 || sop == IR_PHI:
+                if rc_stack_any_escapes(ptr_var, ni, lo, mode) != 0:
+                    return 1
         sg := rc_stack_release_sg_rec(ptr_var, ni, lo, 0)
         if sg < 0:
             return 0
@@ -386,6 +472,57 @@ fn rc_dest_max_exit_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
         return max_exit
     si := rc_last_store_before(ptr_var, lo, use_ni)
     if si >= 0:
+        sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
+        if sop == IR_PHI:
+            ps1 := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S1)
+            ps2 := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
+            e1 := rc_dest_max_exit_rec(ps1, si, lo, depth + 1)
+            e2 := rc_dest_max_exit_rec(ps2, si, lo, depth + 1)
+            if e1 == -1 || e2 == -1:
+                return -1
+            if e1 == -2:
+                return e2
+            if e2 == -2:
+                return e1
+            if e1 > e2:
+                return e1
+            return e2
+        if rc_node_in_if(si) != 0:
+            // A conditional last store does not dominate the use. Take the
+            // maximum lifetime over every possible destination definition; a
+            // function-level branch (-1) wins.
+            max_def : ., mut = -2
+            j : ., mut = lo
+            loop:
+                if j >= si:
+                    break
+                op2 := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_OPCODE)
+                d2  := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_DEST)
+                q1 := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S1)
+                q2 := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S2)
+                if op2 == IR_STORE && q1 == ptr_var:
+                    ex2 := rc_dest_max_exit_rec(q2, j, lo, depth + 1)
+                    if ex2 == -1:
+                        return -1
+                    if ex2 > max_def:
+                        max_def = ex2
+                if op2 == IR_PHI && d2 == ptr_var:
+                    e1 := rc_dest_max_exit_rec(q1, j, lo, depth + 1)
+                    e2 := rc_dest_max_exit_rec(q2, j, lo, depth + 1)
+                    if e1 == -1 || e2 == -1:
+                        return -1
+                    if e1 > max_def:
+                        max_def = e1
+                    if e2 > max_def:
+                        max_def = e2
+                j = j + 1
+            val := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
+            single := rc_dest_max_exit_rec(val, si, lo, depth + 1)
+            if single == -1 || max_def == -1:
+                return -1
+            if max_def > single:
+                return max_def
+            return single
         val := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
         return rc_dest_max_exit_rec(val, si, lo, depth + 1)
     prod := cell_load(g_df_var_producer, ptr_var * 8)
@@ -395,12 +532,14 @@ fn rc_dest_max_exit_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
     s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
     s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
     if op == IR_REF:
+        if rc_is_global_var(s1) != 0:
+            return -1
         decl := cell_load(g_df_var_producer, s1 * 8)
         if decl >= 0:
             dop := cell_load(g_df_nodes, decl * ESZ_DFNODE + OFF_DF_OPCODE)
             if dop == IR_ALLOC || dop == IR_ALLOC_STRUCT || dop == IR_ALLOC_ARRAY:
                 return rc_node_exit(decl)
-        return rc_node_exit(prod)
+        return -1
     if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
         return rc_node_exit(prod)
     if op == IR_ADDR_INDEX || op == IR_SLICE:
@@ -430,11 +569,18 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
                     return 1
         ai = ai + 1
     if pa_pts_empty(val_var) != 0:
-        vsg := rc_stack_release_sg_rec(val_var, use_ni, rc_func_nstart(use_ni), 0)
+        lo := rc_func_nstart(use_ni)
+        vsg := rc_stack_release_sg_rec(val_var, use_ni, lo, 0)
         if vsg >= 0:
             vexit := cell_load(g_sgs, vsg * ESZ_SG + OFF_SG_EXIT)
             if dest == -1 || dest > vexit:
                 return 1
+        si := rc_last_store_before(val_var, lo, use_ni)
+        if si >= 0:
+            sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
+            if rc_node_in_if(si) != 0 || sop == IR_PHI:
+                if rc_stack_any_outlives(val_var, dest, use_ni, lo) != 0:
+                    return 1
     return 0
 
 // A stored pointer points to an allocation that is already dead or will die
@@ -450,17 +596,17 @@ fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
             "store escape: destination outlives the stored allocation",
             0, 0)
 
-fn region_check_func(nstart: int, ncount: int):
-    if g_ir_var_count > 0:
-        g_rc_last_store = alloc(g_ir_var_count * 8)
-        vi : ., mut = 0
-        loop:
-            if vi >= g_ir_var_count:
-                break
+fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int):
+    // Reset only this function's variable range. The map itself is allocated
+    // once per pass, not once per function; global/other-function entries stay
+    // at their initial -1.
+    vi : ., mut = vstart
+    loop:
+        if vi >= vstart + vcount:
+            break
+        if vi >= 0 && vi < g_ir_var_count:
             cell_store(g_rc_last_store, vi * 8, -1)
-            vi = vi + 1
-    else:
-        g_rc_last_store = ""
+        vi = vi + 1
     ni : ., mut = nstart
     loop:
         if ni >= nstart + ncount:
@@ -498,12 +644,25 @@ fn region_check_func(nstart: int, ncount: int):
         ni = ni + 1
 
 fn region_check_all():
-    // Safety pass; always runs.
+    // Safety pass; always runs. Allocate the reaching-definition map once for
+    // the whole pass; resetting it per function would be O(functions*vars).
+    if g_ir_var_count > 0:
+        g_rc_last_store = alloc(g_ir_var_count * 8)
+        vi : ., mut = 0
+        loop:
+            if vi >= g_ir_var_count:
+                break
+            cell_store(g_rc_last_store, vi * 8, -1)
+            vi = vi + 1
+    else:
+        g_rc_last_store = ""
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
             break
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
-        region_check_func(nstart, ncount)
+        vstart := cell_load(g_ir_func_var_start, fi * 8)
+        vcount := cell_load(g_ir_func_var_count, fi * 8)
+        region_check_func(nstart, ncount, vstart, vcount)
         fi = fi + 1
