@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Self-hosted BigInt pointer/word/FFI boundary gate (--big-int)."""
+"""Self-hosted BigInt pointer/word/FFI and static --link layout gate."""
 
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -133,6 +134,20 @@ def build_link(src: Path, ccr: Path, exe: Path, shim: Path) -> str:
     return ""
 
 
+def elf_layout(path: Path):
+    """Return (entry, PT_LOAD vaddrs) for the two-load user ELF."""
+    b = path.read_bytes()
+    entry = struct.unpack_from("<Q", b, 24)[0]
+    phoff = struct.unpack_from("<Q", b, 32)[0]
+    phnum = struct.unpack_from("<H", b, 56)[0]
+    loads = []
+    for i in range(phnum):
+        off = phoff + i * 56
+        if struct.unpack_from("<I", b, off)[0] == 1:
+            loads.append(struct.unpack_from("<Q", b, off + 16)[0])
+    return entry, loads
+
+
 def main() -> int:
     if not COREC.exists() or not COREARCH.exists():
         print("missing build/corec or build/corearch")
@@ -200,6 +215,66 @@ def main() -> int:
             if ebr.returncode == 0 or "machine-word range" not in (ebr.stdout + ebr.stderr):
                 print("extern big argument was not rejected")
                 return 1
+
+            # The static linker must keep the BSS page and entry that elf_gen
+            # patched into the user code. bss_init is emitted after bss_va, so
+            # images whose size is 1..22 bytes past a page used to move the
+            # linked BSS one page up and fault on the first global write.
+            pad_n = 3904
+            pad_src = d / "paged.cr"
+            pad_ccr = d / "paged.ccr"
+            pad_un = d / "paged_unlinked"
+            pad_ok = False
+            for _ in range(6):
+                pad_src.write_text(
+                    "extern fn big_inc(x: int) -> int\n"
+                    "g : int, mut = 5\n"
+                    "fn main() -> int:\n"
+                    "    s := \"" + ("a" * pad_n) + "\"\n"
+                    "    g = big_inc(g)\n"
+                    "    if g != 6:\n"
+                    "        return 1\n"
+                    "    if str_len(s) != " + str(pad_n) + ":\n"
+                    "        return 2\n"
+                    "    return 0\n",
+                    encoding="utf-8")
+                r = run([str(COREC), "ccr", str(pad_src), "-o", str(pad_ccr)])
+                if r.returncode != 0:
+                    print("paged ccr failed:\n" + r.stdout + r.stderr)
+                    return 1
+                r = run([str(COREARCH), str(pad_ccr), "--big-int", "--elf",
+                         "-o", str(pad_un)])
+                if r.returncode != 0:
+                    print("paged unlinked build failed:\n" + r.stdout + r.stderr)
+                    return 1
+                rem = pad_un.stat().st_size % 4096
+                if 1 <= rem <= 22:
+                    pad_ok = True
+                    break
+                pad_n += (1 - rem) % 4096
+                if pad_n < 1:
+                    pad_n += 4096
+            if not pad_ok:
+                print("could not hit a page-boundary image size")
+                return 1
+            pad_lk = d / "paged_linked"
+            err = build_link(pad_src, pad_ccr, pad_lk, shim)
+            if err:
+                print("paged linked build failed:\n" + err)
+                return 1
+            un_entry, un_loads = elf_layout(pad_un)
+            lk_entry, lk_loads = elf_layout(pad_lk)
+            if un_entry != lk_entry or un_loads != lk_loads:
+                print("linked layout differs: "
+                      f"entry {hex(un_entry)}/{hex(lk_entry)} "
+                      f"loads {[hex(x) for x in un_loads]}/"
+                      f"{[hex(x) for x in lk_loads]}")
+                return 1
+            r = run([str(pad_lk)])
+            if r.returncode != 0:
+                print(f"paged linked run failed: {r.returncode}")
+                return 1
+            print(f"PASS paged linked layout at size%4096={pad_un.stat().st_size % 4096}")
 
             # The linked .so .text must fit between the user code and the BSS
             # page. Larger shims are rejected loudly; they must not silently
