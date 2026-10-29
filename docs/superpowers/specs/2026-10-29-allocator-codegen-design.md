@@ -1,6 +1,6 @@
 # Allocator 代码生成设计
 
-> 状态：待批准
+> 状态：已实施（Core simple/arena blob 默认；旧 body 保留在 --alloc-legacy）
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-29-arena-boundaries-design.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
 
@@ -178,6 +178,48 @@ alloc_blob_global_off(i)
 - 2MB/100MB/1GB、chunks、many_slots、static_peak、tagged BigInt。
 - `corec selftest-stub-regalloc`、`corec check src/compiler`。
 - canary 5/5；ELF 变化按值表纪律重新锁定并记录归因。
+
+## 实施结果
+
+已落地：
+
+- `src/runtime/alloc_body.cr`：`alloc_simple`、`alloc_global`、`alloc_arena`、
+  `arena_get_slot`、`arena_slot_base`，全部 raw Core，不调用 `alloc`。
+- `tools/gen_alloc_blob.py`：Python bootstrap → `.o` → 字节 + 外部全局/调用
+  重定位表；拒绝未授权 `.bss` 全局、未授权外部调用、绝对/TLS/GOT 重定位。
+- `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 8816`，
+  `ALLOC_BLOB_SIMPLE_OFF = 2339`，`ALLOC_BLOB_ARENA_OFF = 4164`。
+- `src/format/elf/elf.cr`：16B trampoline、blob 拷贝、全局/调用重定位回填；
+  默认走 blob，`--alloc-legacy` 保留旧手写 body。
+- `globals_size` 改为按正 `gv` 条目计数，修复重复 `gv` 时 `heap_start` 落进
+  globals 区的重叠。
+- `emit_heap_expand` 的堆从 1GB 提升到 1.5GB，覆盖 arena 的 1GB 分配。
+- 失败见证仍写 `g_alloc_fail_*`；失败路径用 `syscall3(60,132,0,0)` 退出，
+  shell 退出码为 132。
+
+验证：
+
+| 测试 | 结果 |
+|---|---|
+| `test_alloc_blob_relocs.py` | PASS |
+| `test_alloc_simple_parity.py` | PASS（21 个尺寸） |
+| `test_alloc_simple_elf.py` | PASS（legacy 与 blob 两条 ELF） |
+| `test_alloc_arena_parity.py` | PASS（arena_test / arena_boundary_test） |
+| `test_alloc_llvm_parity.py` | PASS（203 行随机/边界序列 + 结构检查） |
+| `corec selftest-stub-regalloc` | 14/14 |
+| `corec check src/compiler` | ok |
+| canary | 5/5（ELF `d19de1f4…`，61622 B） |
+
+已知偏差：
+
+1. 大于 1MB 的 arena 对象走全局堆，不使用专用 mmap extent；`arena_reset` 不会
+   `munmap` 这些对象，也不产生 class `-2` 的 mmap 失败见证。原因是核心 body
+   不能通过 `syscall3`/`syscall4` 发六参数 `mmap`。后续加六参数 syscall 或
+   raw helper 后补齐。
+2. clang 差分覆盖 simple/global 路径；arena class/slot 路径仍以旧手写 body
+   作为行为参考（Task 4），独立 clang arena 模型未实现。
+3. 旧 `emit_alloc_body_legacy` / `emit_alloc_body_simple` 仍保留，仅
+   `--alloc-legacy` 可达。
 
 ## 风险
 

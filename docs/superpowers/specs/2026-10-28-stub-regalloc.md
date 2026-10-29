@@ -83,7 +83,8 @@ stub 没有调用点，不传 `call_at`。
 
 ## ELF 发射体接入
 
-`src/format/elf/elf.cr` 的 `emit_alloc_body` 构造一个 30 条指令的 stub，交给
+默认路径由 `src/runtime/alloc_body.cr` 编译出的 Core blob 承担；旧的
+`emit_alloc_body_legacy`（30 条指令的 stub）只在 `--alloc-legacy` 下可达。
 `StubAllocator` 分配寄存器，再用 `assigned` 的结果生成字节。`mul` 需要的
 `rax/r10` 和 `rep stosb` 需要的 `rdi/rcx/rax` 通过 pin 固定；`base` 和 `cursor`
 固定在 `r11/r9`，避免被清零路径覆盖。
