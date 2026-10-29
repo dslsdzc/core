@@ -167,6 +167,12 @@ class/slot 规则：
   不再落入用户函数查找。
 - 解释器启动时把 `g_current_arena` 显式初始化为 tagged -1，与 ELF entry 的
   `emit_start` 一致。
+- `IR_BINARY` 的 dex 分流按操作数类型触发，而不是只看结果槽：任一操作数为
+  `TI_DEX`/`TI_DEX_S` 时使用 raw 字运算，比较结果写 raw 0/1。`ir_gen` 已在
+  节点前完成 int→scaled 的转换，解释器不再二次 untag（`dex_scale_int` 依赖
+  原始除 2 去掉 BigInt tag）。
+- `arena_alloc` 的清零走 `_memzero`。解释器在 `ir_interp_call` 里用编译后的
+  循环执行它，不再逐节点解释 1MiB 的清零循环；native 编译同一函数。
 
 ### 回归
 
@@ -177,6 +183,10 @@ class/slot 规则：
 - `tests/selfhost/test_arena_interp.py` 覆盖上述套件、2MB/100MB parity，以及
   static 超限、`>1TB`、pool limit 三条失败路径；失败必须输出
   `arena allocation failed` 且返回非 0。
+- 同一套件检查 reset 复用后 1MiB 和 64B 分配仍然全零，并用 32 次 1MiB
+  分配在 30 秒内完成守住 `_memzero` 的快速路径。
+- `tests/selfhost/test_interp_float.py` 的 dex/int 混合用例在解释器与 native
+  下一致，并已挂到 selfhost CI。
 
 ## 实施状态
 

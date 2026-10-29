@@ -90,6 +90,70 @@ fn main() -> int:
 """
 
 
+ZERO_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+
+fn check_zero(p: string, n: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(p, i) != 0:
+            return 1
+        i = i + 8
+    return 0
+
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new()
+    if a < 0:
+        return 10
+    big := alloc(1048576)
+    if check_zero(big, 1048576) != 0:
+        return 11
+    cell_store(big, 0, 123)
+    cell_store(big, 1048576 - 8, 456)
+    small := alloc(64)
+    if check_zero(small, 64) != 0:
+        return 12
+    cell_store(small, 0, 789)
+    arena_reset(a)
+    b := arena_new()
+    if b != a:
+        return 13
+    big2 := alloc(1048576)
+    if check_zero(big2, 1048576) != 0:
+        return 14
+    small2 := alloc(64)
+    if check_zero(small2, 64) != 0:
+        return 15
+    arena_reset(b)
+    return 0
+"""
+
+PERF_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new()
+    i : ., mut = 0
+    loop:
+        if i >= 32:
+            break
+        p := alloc(1048576)
+        if p == 0:
+            return 1
+        i = i + 1
+    arena_reset(a)
+    return 0
+"""
+
 PARITY_SRC = """\
 import arena
 g_current_arena : int, mut = -1
@@ -118,6 +182,32 @@ fn main() -> int:
 def run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
+
+
+def run_pair(root: Path, name: str, source: str, *,
+             interp_timeout: int = 300, native_timeout: int = 120) -> int:
+    """Run one source under corec run and as a static ELF. Returns 0 on pass."""
+    interp = run([str(COREC), "run", source], timeout=interp_timeout)
+    if interp.returncode != 0:
+        print(f"FAIL interp {name} rc={interp.returncode}")
+        print(interp.stdout)
+        print(interp.stderr)
+        return 1
+    src = root / f"{name}.cr"
+    src.write_text(source, encoding="utf-8")
+    elf = root / name
+    build = run([str(COREC), "build", str(src), "--static", "-o", str(elf)])
+    if build.returncode != 0:
+        print(f"FAIL build {name}")
+        print(build.stdout)
+        print(build.stderr)
+        return 1
+    native = run([str(elf)], timeout=native_timeout)
+    if native.returncode != 0:
+        print(f"FAIL native {name} rc={native.returncode}")
+        return 1
+    print(f"PASS {name} (interp and native)")
+    return 0
 
 
 def main() -> int:
@@ -196,6 +286,17 @@ def main() -> int:
             print(f"FAIL native non-arena alloc rc={native.returncode}")
             return 1
         print("PASS non-arena alloc parity")
+
+        # Allocated cells are zero, including after reset reuses the slot.
+        if run_pair(root, "arena_zero_reuse", ZERO_SRC) != 0:
+            return 1
+
+        # 32 x 1MiB used to spend minutes in the interpreted per-cell zeroing
+        # loop. The 30s cap leaves a wide margin for slower CI hosts while
+        # still failing if the interpreter goes back to zeroing per node.
+        if run_pair(root, "arena_bulk_zero", PERF_SRC,
+                    interp_timeout=30) != 0:
+            return 1
 
         for idx, (label, source) in enumerate(FAIL_SOURCES.items()):
             r = run([str(COREC), "run", source])

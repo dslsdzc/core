@@ -532,13 +532,19 @@ fn _arena_slot_base(slot: int) -> string:
         return _arena_ptr(0)
     return _arena_ptr(_arena_word(seg) + (slot % 64) * 1048576)
 
-fn _arena_zero(p: string, n: int):
+// _memzero fills nbytes at buf with zero. The interpreter executes this loop
+// in compiled code (the per-node path is too slow for 1MiB slots); native
+// code compiles the loop here.
+fn _memzero(buf: string, nbytes: int):
     i : ., mut = 0
     loop:
-        if i >= n:
+        if i >= nbytes:
             break
-        cell_store(p, i, 0)
-        i = i + 8
+        store8(buf, i, 0)
+        i = i + 1
+
+fn _arena_zero(p: string, n: int):
+    _memzero(p, n)
 
 fn _arena_get_slot(ai: int, size: int) -> int:
     sf := arena_scalar_get(40)

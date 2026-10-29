@@ -228,9 +228,15 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
             cell_store(g_ir_vals, d * 8, interp_b2i(l >= r))
         return
 
-    if ti == TI_DEX || ti == TI_DEX_S:
-        // Dex slots are scaled machine integers (or binary64 bits, rejected at
-        // dispatch); keep their existing raw arithmetic.
+    lhs_dex := irv_type(s1) == TI_DEX || irv_type(s1) == TI_DEX_S
+    rhs_dex := irv_type(s2) == TI_DEX || irv_type(s2) == TI_DEX_S
+    if ti == TI_DEX || ti == TI_DEX_S || lhs_dex || rhs_dex:
+        // Native IR_BINARY uses the big-int path only when the result and both
+        // operands are TI_INT. Dex slots hold raw words (scaled ints for
+        // TI_DEX_S, binary64 bits for TI_DEX), and ir_gen inserts the
+        // int->scaled conversion before the node. Keep those words raw here and
+        // never untag them: dex_scale_int relies on the raw divide by 2 to
+        // strip the big-int tag.
         if s3 == 1:
             cell_store(g_ir_vals, d * 8, lv + rv)
         else if s3 == 2:
@@ -241,6 +247,18 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
             cell_store(g_ir_vals, d * 8, lv / rv)
         else if s3 == 5:
             cell_store(g_ir_vals, d * 8, lv % rv)
+        else if s3 == 6:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv == rv))
+        else if s3 == 7:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv != rv))
+        else if s3 == 8:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv < rv))
+        else if s3 == 9:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv > rv))
+        else if s3 == 10:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv <= rv))
+        else if s3 == 11:
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv >= rv))
         return
 
     if ti == TI_BOOL || irv_type(s1) == TI_BOOL || irv_type(s2) == TI_BOOL:
@@ -466,6 +484,24 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             unsafe:
                 bs3 = @str_of(bss)
             cell_store(bs3, pss, vss)
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
+    if ir_interp_name_is(fn_ni, "_memzero") != 0:
+        if s2 >= 2:
+            mzb := cell_load(g_ir_vals, s1 * 8)
+            mzn := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            mzs : ., mut = ""
+            unsafe:
+                mzs = @str_of(mzb)
+            // Compiled loop: the interpreter's own arena path calls this for
+            // every fresh cell block, so per-byte interpretation is too slow.
+            mi : ., mut = 0
+            loop:
+                if mi >= mzn:
+                    break
+                store8(mzs, mi, 0)
+                mi = mi + 1
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
         return

@@ -190,6 +190,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_suite_hygiene.py
     python3 tests/selfhost/test_move_keyword_removed.py  # TODO #2026-09-17-18：move 关键字退役（M1/M2 负控 + M3 名字域 + M4 静态清点）
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
+    python3 tests/selfhost/test_interp_float.py   # 解释器 dex/enum/pointer 回归（含 dex+int 混合运算）
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存规则）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）
     python3 tests/selfhost/test_cir_cache_narrow.py # 缓存膨胀阶段（`CIR_CACHE_VER 19→20`，plans/2026-09-17-cir-cache-bloat.md）：段粒度按函数收窄 + 边端点相对 id + 尾部基线见证 trailer——P1 结构性（大累计图语料里 tiny 条目 956B ≤ 4096B；非空转 = 最大条目 ≥10×，实测 60×）/ P2a·P2b 部分 rebuild（单函数编辑 ⇒ 其后条目 **fail-closed 重写** + 图段与冷跑逐段同）/ P2c 命中恢复保真（同源再跑 41/41 真命中 + 图段同冷——固定装载期链重建）/ P4 截断（**16 种长度** ⇒ rc=0 + 图段同冷 + 条目重建）= **5 例**；实测时长 ~3.5 min（含 41 函数夹具多次编译）
