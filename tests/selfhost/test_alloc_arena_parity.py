@@ -32,6 +32,8 @@ def build_and_run(src: Path, root: Path, tag: str, blob: bool):
     ccr_cmd = [str(COREC), "ccr"]
     if blob:
         ccr_cmd.append("--alloc-blob")
+    else:
+        ccr_cmd.append("--alloc-legacy")
     ccr_cmd += [str(src), "-o", str(ccr)]
     r = run(ccr_cmd)
     if r.returncode != 0:
@@ -39,6 +41,8 @@ def build_and_run(src: Path, root: Path, tag: str, blob: bool):
     arch_cmd = [str(COREARCH), str(ccr), "--static"]
     if blob:
         arch_cmd.append("--alloc-blob")
+    else:
+        arch_cmd.append("--alloc-legacy")
     arch_cmd += ["-o", str(elf)]
     r = run(arch_cmd)
     if r.returncode != 0:

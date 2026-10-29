@@ -6690,9 +6690,9 @@ fn ccr_set_raw_mode_from_source():
 
 fn ir_gen_all():
     ccr_set_raw_mode_from_source()
-    g_ccr_emit_alloc_blob = 0
-    if cli_has("alloc-blob") != 0:
-        g_ccr_emit_alloc_blob = 1
+    g_ccr_emit_alloc_blob = 1
+    if cli_has("alloc-legacy") != 0:
+        g_ccr_emit_alloc_blob = 0
     saved_lib := g_cur_lib
     g_ir_var_count = 0
     g_ir_instr_count = 0

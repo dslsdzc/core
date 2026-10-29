@@ -53,8 +53,8 @@ def main() -> int:
         if data.get("simple_off", -1) < 0:
             print(f"FAIL: no alloc_simple offset: {data}")
             return 1
-        if data.get("arena_off", -1) != -1:
-            print(f"FAIL: arena body unexpectedly present: {data}")
+        if data.get("arena_off", -1) < 0:
+            print(f"FAIL: arena body missing from the generated blob: {data}")
             return 1
 
         asm = BASE / "build" / "alloc_blob" / "alloc_body.s"

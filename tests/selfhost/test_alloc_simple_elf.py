@@ -51,7 +51,7 @@ def main() -> int:
             return 1
 
         r = run([str(COREARCH), str(ccr), "--static", "--raw-int",
-                 "-o", str(old)])
+                 "--alloc-legacy", "-o", str(old)])
         if r.returncode != 0:
             print("FAIL: legacy corearch")
             print(r.stdout)

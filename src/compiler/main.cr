@@ -257,6 +257,7 @@ fn corec_main() -> int:
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
     cli_flag_bool_debug("alloc-blob", "", "Debug: register the Core allocator blob globals")
+    cli_flag_bool_debug("alloc-legacy", "", "Debug: register globals for the legacy allocator")
     cli_flag_bool_debug("inject-cir-skip-journal", "", "Debug hook: skip .cir journal replay at load")
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
@@ -510,6 +511,9 @@ fn corec_main() -> int:
     // state here, before ir_gen_globals, because the hidden channels depend on
     // variable ordering.
     optrep_begin()
+    g_ccr_emit_alloc_blob = 1
+    if cli_has("alloc-legacy") != 0:
+        g_ccr_emit_alloc_blob = 0
     ir_gen_globals()
     // Incremental cache: ensure cache directory exists
     make_cir_cache_dir()
@@ -773,6 +777,8 @@ fn corec_main() -> int:
         cmd2 = cmd2 + " --raw-int"
     if g_ccr_emit_alloc_blob != 0:
         cmd2 = cmd2 + " --alloc-blob"
+    else:
+        cmd2 = cmd2 + " --alloc-legacy"
     self_path := get_arg(0)
     sl2 := str_len(self_path)
     if sl2 > 0:

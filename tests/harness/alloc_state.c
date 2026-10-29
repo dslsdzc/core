@@ -21,3 +21,9 @@ long heap_expand(void) {
     _g_g_heap_end = (char *)p + ALLOC_HEAP_SIZE;
     return 0;
 }
+
+/* The arena body is present in the same object; the simple parity harness does
+ * not call it. Provide the symbol so the whole object links. */
+long arena_grow_pool(void) {
+    return -1;
+}

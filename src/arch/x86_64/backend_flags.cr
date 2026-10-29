@@ -13,6 +13,7 @@ fn register_backend_flags():
     cli_flag_bool("big-int", "", "Arbitrary precision int semantics for user programs")
     cli_flag_bool("raw-int", "", "Force raw machine-int semantics (compiler/self-host builds)")
     cli_flag_bool_debug("alloc-blob", "", "Debug: use the Core allocator blob")
+    cli_flag_bool_debug("alloc-legacy", "", "Debug: use the legacy hand-written allocator")
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)")
     cli_flag_debug("hit-events-file", "", "Debug: inject text event stream file")
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool")
@@ -36,9 +37,9 @@ fn register_backend_flags():
 // program flags); the frontend passes --raw-int explicitly for compiler and
 // self-host artifacts. Ordinary user programs use tagged mathematical ints.
 fn backend_select_int_mode():
-    g_alloc_use_blob = 0
-    if cli_has("alloc-blob") != 0:
-        g_alloc_use_blob = 1
+    g_alloc_use_blob = 1
+    if cli_has("alloc-legacy") != 0:
+        g_alloc_use_blob = 0
     if cli_has("raw-int") != 0:
         g_x86_big_enabled = 0
     else:
