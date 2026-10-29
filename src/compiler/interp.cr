@@ -349,6 +349,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
     if ir_interp_name_is(fn_ni, "syscall3") != 0 || ir_interp_name_is(fn_ni, "syscall4") != 0 || ir_interp_name_is(fn_ni, "syscall6") != 0:
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
+        return
     if ir_interp_name_is(fn_ni, "cell_load") != 0:
         if d >= 0 && s2 >= 2:
             cb := cell_load(g_ir_vals, s1 * 8)
@@ -373,10 +374,6 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
     if ir_interp_name_is(fn_ni, "alloc") != 0:
         if d >= 0 && s2 >= 1:
             sz := ir_interp_word(cell_load(g_ir_vals, s1 * 8))
-            if sz < 0:
-                println("interpreter error: alloc negative size")
-                g_interp_abort = -1
-                return
             ca : ., mut = -1
             if g_interp_current_arena_var >= 0:
                 ca = ir_interp_word(cell_load(g_ir_vals, g_interp_current_arena_var * 8))
@@ -395,6 +392,9 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                 if g_interp_abort == 0 && p == 0:
                     println("interpreter error: arena allocation failed (pool limit or invalid size)")
                     g_interp_abort = -1
+            else if sz < 0 || sz > 67108864:
+                // Native alloc_simple returns 0 for these requests.
+                p = 0
             else:
                 hp := alloc(sz)
                 unsafe:
@@ -489,6 +489,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                 unsafe:
                     bs8 = @str_of(base8)
                 cell_store(g_ir_vals, d * 8, ir_interp_tag(cell_load_byte(bs8, idx8)))
+        return
     if x86_frontend_builtin_is_str_ptr_load(fn_name) != 0:
         if d >= 0 && s2 >= 2:
             b := cell_load(g_ir_vals, s1 * 8)

@@ -528,6 +528,8 @@ fn _arena_word(s: string) -> int:
 
 fn _arena_slot_base(slot: int) -> string:
     seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
+    if _arena_word(seg) == 0:
+        return _arena_ptr(0)
     return _arena_ptr(_arena_word(seg) + (slot % 64) * 1048576)
 
 fn _arena_zero(p: string, n: int):

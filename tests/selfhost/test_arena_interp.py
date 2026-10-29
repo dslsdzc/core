@@ -58,6 +58,14 @@ fn main() -> int:
 """,
 }
 
+NONARENA_SRC = """\
+fn main() -> int:
+    a := alloc(-1)
+    b := alloc(67108865)
+    return 0
+"""
+
+
 PARITY_SRC = """\
 import arena
 g_current_arena : int, mut = -1
@@ -141,7 +149,31 @@ def main() -> int:
             return 1
         print("PASS arena interp 2MB/100MB")
 
-        for label, source in FAIL_SOURCES.items():
+        # Non-arena alloc keeps native alloc_simple semantics: negative and
+        # above-64MiB requests return 0 instead of aborting.
+        non = root / "nonarena_alloc.cr"
+        non.write_text(NONARENA_SRC, encoding="utf-8")
+        interp = run([str(COREC), "run", NONARENA_SRC])
+        if interp.returncode != 0:
+            print(f"FAIL interp non-arena alloc rc={interp.returncode}")
+            print(interp.stdout)
+            print(interp.stderr)
+            return 1
+        elf = root / "nonarena_alloc"
+        build = run([str(COREC), "build", str(non), "--static",
+                     "-o", str(elf)])
+        if build.returncode != 0:
+            print("FAIL build non-arena alloc")
+            print(build.stdout)
+            print(build.stderr)
+            return 1
+        native = run([str(elf)], timeout=120)
+        if native.returncode != 0:
+            print(f"FAIL native non-arena alloc rc={native.returncode}")
+            return 1
+        print("PASS non-arena alloc parity")
+
+        for idx, (label, source) in enumerate(FAIL_SOURCES.items()):
             r = run([str(COREC), "run", source])
             if r.returncode == 0:
                 print(f"FAIL interpreter accepted {label}")
@@ -151,7 +183,21 @@ def main() -> int:
                 print(r.stdout)
                 print(r.stderr)
                 return 1
-            print(f"PASS arena interp trap {label}")
+            src = root / f"fail_{idx}.cr"
+            src.write_text(source, encoding="utf-8")
+            elf = root / f"fail_{idx}"
+            build = run([str(COREC), "build", str(src), "--static",
+                         "-o", str(elf)])
+            if build.returncode != 0:
+                print(f"FAIL native build {label}")
+                print(build.stdout)
+                print(build.stderr)
+                return 1
+            native = run([str(elf)], timeout=120)
+            if native.returncode not in (-4, 132):
+                print(f"FAIL native {label} rc={native.returncode}")
+                return 1
+            print(f"PASS arena trap {label} (interp and native)")
 
     print("PASS arena interpreter parity")
     return 0
