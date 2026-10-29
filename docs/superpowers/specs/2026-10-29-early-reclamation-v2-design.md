@@ -1,6 +1,6 @@
 # 区域 v2：自动提前回收（split / merge / share + IR 回收点）
 
-> 状态：V2.0、V2.1（含 V2.1b 后支配版）已实现（2026-10-30）；V2.2–V2.4 待实施
+> 状态：V2.0、V2.1（含 V2.1b 后支配版）、V2.2 窄切片已实现（2026-10-30）；V2.3–V2.4 待实施
 > 日期：2026-10-29
 > 关联：`docs/maintainer/design/region-model.md`、`docs/maintainer/adr/adr-0007-graph-anchored-regions.md`、`docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
@@ -66,6 +66,7 @@ v2 的优化只在以下条件全部成立时启用：
 - S 内新分配的字节进入子槽；S 内对父区域已有对象的引用不受影响。
 - 只有 S 内全部 allocation 都不逃逸 S 时，才允许 split。逃逸判定包括：S 外使用、存入 S 外目标、返回、作为参数传给可能保存它的被调函数、身份观察。身份观察包括 `@raw_int`、指针相等比较、`@ptr_of`、FFI 和 `unsafe`；`g_current_arena` 的可读值也视为可观察状态。
 - 有逃逸时保持 v1：S 使用父槽，不创建子槽。
+- 逃逸判定覆盖所有实际落入 S 子槽的 allocation，包括嵌套在非释放 IF 内的 allocation。嵌套 loop/for/unsafe 或已规划 split/merge 的 IF 拥有自己的字节，不由 S 的槽承担。
 - split 不改变 S 的类型、控制流或返回值；只改变分配落在哪个槽。
 
 ### 4.4 merge
@@ -83,6 +84,17 @@ v2 的优化只在以下条件全部成立时启用：
 - 指针字段、引用字段、含内部指针的聚合：不可拷贝，保持父槽，不 split。
 
 指针身份是硬门：如果逃逸值被 `@ptr_of`、指针相等比较、FFI 或 `unsafe` 观察，禁止 split，因为复制会改变身份。
+
+实现（2026-10-30，V2.2 窄切片）：
+
+- 只接受一个 `IR_ALLOC_ARRAY`，元素为 int/bool/char/dex，长度 1..64，且该分配在 IF 顶层直接 `IR_STORE` 到一个外层局部槽。
+- IF 内不得有 call/return/unsafe/非局部跳转；IF 不得位于 loop/for/unsafe 内。赋值分支必须无控制流地到达分支出口。
+- IF 子槽中的其他 allocation（包括嵌套非释放 IF 内的 allocation）必须留在 IF 内；任何一个逃逸就拒绝 merge。只有被选中的数组允许经复制逃逸到父槽。
+- 子数组只允许元素读（`IR_LOAD_INDEX`/`IR_LOAD_INDEX_VAR`）与元素写（`IR_STORE_INDEX`/`IR_STORE_INDEX_VAR`）。写入别的对象、形成切片、指针比较、取址或任何身份观察都拒绝；IF 外的使用必须经该外层槽。
+- 复制在**赋值分支的出口**执行：逐元素复制到父槽预分配的副本，再把外层槽重绑到副本。未走赋值分支的路径保留旧值，因此不需要汇合 phi。
+- 副本在 IF 入口按 plan 给出的元素数分配，大小计入父槽 peak；元素类型行在赋值分支出口补齐。
+- merge IF 不得位于 loop/for/unsafe 或已规划 split/merge 的 IF 内，保证副本只落在函数槽；否则副本可能随外层 IF 子槽 reset 而失效。
+- 子槽在 IF 汇合标签 reset；副本在父槽，活到父区域出口。
 
 ### 4.5 share
 

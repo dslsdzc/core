@@ -13,6 +13,9 @@ g_plan_clear_label : string, mut
 g_plan_clear_sg : string, mut
 g_plan_clear_count : int, mut
 g_plan_clear_cap : int, mut
+g_plan_merge : string, mut
+g_plan_merge_count : int, mut
+g_plan_merge_cap : int, mut
 g_plan_active : int, mut
 // Post-dominator sets for the current function (bitset rows, 63 lanes).
 g_rp_pdom : string, mut
@@ -59,6 +62,14 @@ fn region_plan_reset():
         i = i + 1
     g_plan_split_count = 0
     g_plan_clear_count = 0
+    g_plan_merge_count = 0
+    if g_plan_merge_cap > 0:
+        i : ., mut = 0
+        loop:
+            if i >= g_plan_merge_cap:
+                break
+            cell_store(g_plan_merge, i * 8, 0)
+            i = i + 1
 
 fn region_plan_mark_split(sg: int):
     if sg < 0:
@@ -67,6 +78,45 @@ fn region_plan_mark_split(sg: int):
     if cell_load(g_plan_split, sg * 8) == 0:
         cell_store(g_plan_split, sg * 8, 1)
         g_plan_split_count = g_plan_split_count + 1
+
+fn region_plan_grow_merge(n: int):
+    if n <= g_plan_merge_cap:
+        return
+    nc : ., mut = g_plan_merge_cap * 2
+    if nc < g_sg_count + 16:
+        nc = g_sg_count + 16
+    loop:
+        if nc >= n:
+            break
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        cell_store(nb, i * 8, 0)
+        i = i + 1
+    if g_plan_merge_cap > 0:
+        cell_copy(g_plan_merge, g_plan_merge_cap * 8, nb)
+    g_plan_merge = nb
+    g_plan_merge_cap = nc
+
+fn region_plan_mark_merge(sg: int, elem_count: int):
+    if sg < 0 || elem_count <= 0:
+        return
+    region_plan_grow_merge(sg + 1)
+    if cell_load(g_plan_merge, sg * 8) == 0:
+        cell_store(g_plan_merge, sg * 8, elem_count)
+        g_plan_merge_count = g_plan_merge_count + 1
+
+fn region_plan_is_merge(sg: int) -> int:
+    if sg < 0 || g_plan_merge_count <= 0 || sg >= g_plan_merge_cap:
+        return 0
+    return cell_load(g_plan_merge, sg * 8)
+
+// Element count of the parent copy for a merge IF (0 when not planned).
+fn region_plan_merge_len(sg: int) -> int:
+    return region_plan_is_merge(sg)
 
 fn region_plan_is_split(sg: int) -> int:
     if sg < 0:
@@ -129,7 +179,7 @@ fn region_plan_has_clear() -> int:
     return 0
 
 fn region_plan_has_plan() -> int:
-    if g_plan_split_count > 0 || g_plan_clear_count > 0:
+    if g_plan_split_count > 0 || g_plan_clear_count > 0 || g_plan_merge_count > 0:
         return 1
     return 0
 
@@ -318,8 +368,21 @@ fn rp_alloc_escapes(alloc_id: int, sg: int, nstart: int, ncount: int,
                     return 1
         ni = ni + 1
 
-// Returns 1 when the IF has at least one direct allocation and every direct
-// allocation stays inside.
+// True when the allocation is owned by a nested releasing region (loop, for,
+// unsafe, or an already planned split/merge IF). Such an allocation never lands
+// in the current IF's arena and its lifetime is handled by that region.
+fn rp_alloc_has_nested_release(an: int, sg: int) -> int:
+    csg : ., mut = subgraph_containing(an)
+    loop:
+        if csg < 0 || csg == sg:
+            return 0
+        if rc_sg_releases(csg) != 0:
+            return 1
+        csg = cell_load(g_sgs, csg * ESZ_SG + OFF_SG_PARENT)
+    return 0
+
+// Returns 1 when the IF has at least one direct allocation and every allocation
+// that lands in its arena stays inside.
 fn rp_if_eligible(sg: int, sg_start: int, sg_count: int,
                   nstart: int, ncount: int) -> int:
     found : ., mut = 0
@@ -329,10 +392,16 @@ fn rp_if_eligible(sg: int, sg_start: int, sg_count: int,
             return found
         an := cell_load(g_pa_alloc_nodes, ai * 8)
         aop := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
-        if (aop == IR_ALLOC_ARRAY || aop == IR_ALLOC_STRUCT) && subgraph_containing(an) == sg:
-            found = 1
-            if rp_alloc_escapes(ai, sg, nstart, ncount, sg_start, sg_count) != 0:
-                return 0
+        if aop == IR_ALLOC_ARRAY || aop == IR_ALLOC_STRUCT:
+            csg := subgraph_containing(an)
+            if csg == sg:
+                found = 1
+            // Nested non-releasing allocations land in this IF's arena too, so
+            // they must not escape this IF. A nested release owns its bytes.
+            if csg == sg || rc_sg_is_ancestor(sg, csg) != 0:
+                if rp_alloc_has_nested_release(an, sg) == 0:
+                    if rp_alloc_escapes(ai, sg, nstart, ncount, sg_start, sg_count) != 0:
+                        return 0
         ai = ai + 1
     return found
 
@@ -694,6 +763,256 @@ fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: 
         qn = qn + 1
     return -1
 
+fn rp_scalar_elem(ti: int) -> int:
+    if ti < 0 || ti >= g_type_count:
+        return 0
+    if get_type_kind(ti) != TYP_BASE:
+        return 0
+    d := get_type_data(ti)
+    if d == TY_INT || d == TY_BOOL || d == TY_CHAR || d == TY_DEX || d == TY_DEX_S:
+        return 1
+    return 0
+
+fn rp_if_merge_ancestors_ok(sg: int) -> int:
+    p : ., mut = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    loop:
+        if p < 0:
+            return 1
+        k := cell_load(g_sgs, p * ESZ_SG + OFF_SG_KIND)
+        if k == SG_FUNC:
+            return 1
+        if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
+            return 0
+        // The merge copy is allocated in the current slot. An enclosing IF arena
+        // would reset it at the outer merge while the rebound slot may live on.
+        if k == SG_IF && (region_plan_is_split(p) != 0 || region_plan_is_merge(p) != 0):
+            return 0
+        p = cell_load(g_sgs, p * ESZ_SG + OFF_SG_PARENT)
+
+// V2.2 narrow merge: exactly one direct constant-size scalar array is stored
+// directly into an outer local slot. Element reads and writes may reach the
+// child through any alias inside the IF; outside the IF they must go through
+// that slot. The copy runs at the end of the assigning branch and rebinds it.
+fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
+                        nstart: int, ncount: int) -> int:
+    // Flow-insensitive points-to cannot order uses across a loop backedge, so a
+    // merge IF inside a loop stays v1. Unsafe blocks are also identity-observable.
+    if rp_if_merge_ancestors_ok(sg) == 0:
+        return 0
+    alloc_count : ., mut = 0
+    an : ., mut = -1
+    ai_sel : ., mut = -1
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            break
+        an2 := cell_load(g_pa_alloc_nodes, ai * 8)
+        if subgraph_containing(an2) == sg:
+            aop := cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_OPCODE)
+            if aop != IR_ALLOC_ARRAY:
+                return 0
+            alloc_count = alloc_count + 1
+            an = an2
+            ai_sel = ai
+        ai = ai + 1
+    if alloc_count != 1 || an < 0:
+        return 0
+    // Every other allocation that lands in this IF's arena must stay inside;
+    // only the selected array is copied out to the parent slot.
+    ai = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            break
+        if ai != ai_sel:
+            an2 := cell_load(g_pa_alloc_nodes, ai * 8)
+            aop2 := cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_OPCODE)
+            if aop2 == IR_ALLOC_ARRAY || aop2 == IR_ALLOC_STRUCT:
+                csg2 := subgraph_containing(an2)
+                if csg2 == sg || rc_sg_is_ancestor(sg, csg2) != 0:
+                    if rp_alloc_has_nested_release(an2, sg) == 0:
+                        if rp_alloc_escapes(ai, sg, nstart, ncount, sg_start, sg_count) != 0:
+                            return 0
+        ai = ai + 1
+    alloc_dest := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    at := irv_type(alloc_dest)
+    if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
+        return 0
+    cnt := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    if cnt <= 0 || cnt > 64:
+        return 0
+    elem := get_type_data(at)
+    if rp_scalar_elem(elem) == 0:
+        return 0
+    // Exactly one store into an outer local slot.
+    dest : ., mut = -1
+    stores : ., mut = 0
+    ni : ., mut = sg_start
+    loop:
+        if ni >= sg_start + sg_count:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s2 == alloc_dest:
+            if subgraph_containing(ni) != sg:
+                return 0
+            dest = s1
+            stores = stores + 1
+        ni = ni + 1
+    if stores != 1 || dest < 0 || rc_is_global_var(dest) != 0:
+        return 0
+    prod := cell_load(g_df_var_producer, dest * 8)
+    if prod < 0:
+        return 0
+    if rc_sg_is_ancestor(sg, subgraph_containing(prod)) != 0:
+        return 0
+    // The outer slot must not be overwritten again inside the IF.
+    ni = sg_start
+    loop:
+        if ni >= sg_start + sg_count:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == dest && s2 != alloc_dest:
+            return 0
+        ni = ni + 1
+    // Precise use scan. For load/store-index the base is a use-through of the
+    // child array; the stored value is an escape if it names the child. Every
+    // other opcode that mentions the child is an observation and blocks.
+    ni = nstart
+    loop:
+        if ni >= nstart + ncount:
+            return cnt
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        dv := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        if ni > an:
+            base : ., mut = -1
+            value : ., mut = -1
+            extra : ., mut = 0
+            known : ., mut = 0
+            if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR:
+                // s2 is the index variable for the _VAR form; s3 is a literal
+                // index or element tag, never a pointer carrier.
+                base = s1
+                known = 1
+                if op == IR_LOAD_INDEX_VAR && s2 >= 0 && rp_var_may_point(s2) != 0 && pa_pts_has(s2, ai_sel) != 0:
+                    extra = 1
+            else if op == IR_STORE_INDEX:
+                base = s1
+                value = s2
+                known = 1
+            else if op == IR_STORE_INDEX_VAR:
+                base = s1
+                value = dv
+                known = 1
+                if s2 >= 0 && rp_var_may_point(s2) != 0 && pa_pts_has(s2, ai_sel) != 0:
+                    extra = 1
+            if known == 0:
+                if op == IR_STORE && s1 == dest && s2 == alloc_dest && subgraph_containing(ni) == sg:
+                    // The one bind of the child into the outer slot.
+                    ni = ni + 1
+                    continue
+                // Literal-only opcodes: their source fields are values, label
+                // ids, or type tags, not variable slots.
+                literal_only : ., mut = 0
+                if op == IR_CONST || op == IR_CONST_BIG || op == IR_LABEL || op == IR_JUMP || op == IR_ALLOC || op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_BOUNDS_CHECK:
+                    // Bounds checks carry only integer indices and lengths; the
+                    // array pointer is not an operand.
+                    literal_only = 1
+                if literal_only == 0:
+                    // IR_BINARY/IR_UNARY/IR_MATCH keep an operator or label
+                    // range in the high fields; check only the value slots.
+                    if op == IR_MATCH:
+                        if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
+                            return 0
+                    else if op == IR_BINARY:
+                        if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
+                            return 0
+                        if s2 >= 0 && rp_var_may_point(s2) != 0 && pa_pts_has(s2, ai_sel) != 0:
+                            return 0
+                    else if op == IR_UNARY:
+                        if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
+                            return 0
+                    else:
+                        if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
+                            return 0
+                        if s2 >= 0 && rp_var_may_point(s2) != 0 && pa_pts_has(s2, ai_sel) != 0:
+                            return 0
+                        if s3 >= 0 && rp_var_may_point(s3) != 0 && pa_pts_has(s3, ai_sel) != 0:
+                            return 0
+                        if dv >= 0 && rp_var_may_point(dv) != 0 && pa_pts_has(dv, ai_sel) != 0:
+                            return 0
+            else:
+                if extra != 0:
+                    return 0
+                if value >= 0 && rp_var_may_point(value) != 0 && pa_pts_has(value, ai_sel) != 0:
+                    return 0
+                if base >= 0 && rp_var_may_point(base) != 0 && pa_pts_has(base, ai_sel) != 0:
+                    if rc_sg_is_ancestor(sg, subgraph_containing(ni)) == 0 && base != dest:
+                        return 0
+        ni = ni + 1
+    return cnt
+
+// Materialize the V2.2 merge copy at the end of the assigning branch. The copy
+// allocation was emitted before the child arena, so it lives in the parent slot.
+// The child array is copied element by element and the outer slot is rebound
+// before the branch jumps to the merge label; the other path keeps the old value.
+fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
+                          range_start: int, range_end: int) -> int:
+    if copy_var < 0 || copy_instr < 0:
+        return 0
+    an : ., mut = -1
+    ni : ., mut = range_start
+    loop:
+        if ni >= range_end:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_ALLOC_ARRAY && subgraph_containing(ni) == sg:
+            an = ni
+            break
+        ni = ni + 1
+    if an < 0:
+        return 0
+    alloc_dest := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    at := irv_type(alloc_dest)
+    if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
+        return 0
+    cnt := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    elem := get_type_data(at)
+    if cnt <= 0 || cnt > 64 || rp_scalar_elem(elem) == 0:
+        return 0
+    dest : ., mut = -1
+    ni = range_start
+    loop:
+        if ni >= range_end:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s2 == alloc_dest && s1 >= 0:
+            dest = s1
+            break
+        ni = ni + 1
+    if dest < 0:
+        return 0
+    // The copy allocation was emitted with the planned element count and its
+    // size already charged to the parent arena; only the type row is patched.
+    irv_set_type(copy_var, alloc_type(TYP_ARRAY, elem, cnt))
+    i : ., mut = 0
+    loop:
+        if i >= cnt:
+            break
+        ev := new_ir_var("_merge_elem", elem)
+        emit(IR_LOAD_INDEX, ev, alloc_dest, 0, i, elem)
+        emit(IR_STORE_INDEX, -1, copy_var, ev, i, 0)
+        i = i + 1
+    emit(IR_STORE, -1, dest, copy_var, 0, 0)
+    return 1
+
 fn region_plan_analyze():
     region_plan_reset()
     // Phase B currently regenerates with ir_gen_all, which does not reproduce
@@ -736,6 +1055,10 @@ fn region_plan_analyze():
                             if rp_if_reads_var(sg_start, sg_count, cav) == 0:
                                 if rp_if_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
                                     region_plan_mark_split(sg)
+                                else:
+                                    mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount)
+                                    if mc > 0:
+                                        region_plan_mark_merge(sg, mc)
             sg = sg + 1
         fi = fi + 1
 

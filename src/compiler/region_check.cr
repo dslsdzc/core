@@ -93,7 +93,7 @@ fn rc_sg_releases(sg: int) -> int:
     k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
     if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
         return 1
-    if k == SG_IF && region_plan_is_split(sg) != 0:
+    if k == SG_IF && (region_plan_is_split(sg) != 0 || region_plan_is_merge(sg) != 0):
         return 1
     return 0
 

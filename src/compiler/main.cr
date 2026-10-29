@@ -697,6 +697,9 @@ fn corec_main() -> int:
             if region_plan_is_split(pi) != 0:
                 print("split ")
                 println(int_str(pi))
+            if region_plan_is_merge(pi) != 0:
+                print("merge ")
+                println(int_str(pi))
             pi = pi + 1
         ci : ., mut = 0
         loop:

@@ -131,6 +131,19 @@ NESTED_LOOP = """fn main() -> int:
     return x - 7
 """
 
+NESTED_ESCAPE = """fn main() -> int:
+    x : ., mut = [5, 6]
+    y : ., mut = 1
+    z : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        tmp := [1, 2]
+        total = tmp[0]
+        if z < 2:
+            x = [7, 8]
+    return x[0] + total - 8
+"""
+
 TWO_IFS = """fn main() -> int:
     x : ., mut = 1
     total : ., mut = 0
@@ -180,6 +193,13 @@ def test_p7_nested_loop_keeps_v1():
     assert_value(NESTED_LOOP, 0)
 
 
+def test_p9_nested_allocation_escape_keeps_v1():
+    # The nested IF has no arena of its own, so its bytes land in the outer IF
+    # arena. Rebinding `x` must therefore block the outer split.
+    assert_no_split(NESTED_ESCAPE)
+    assert_value(NESTED_ESCAPE, 0)
+
+
 def test_p8_no_plan_program_unchanged():
     src = "fn main() -> int:\n    return 7\n"
     assert_no_split(src)
@@ -196,6 +216,7 @@ if __name__ == "__main__":
         test_p6_unsafe_keeps_v1,
         test_p7_nested_loop_keeps_v1,
         test_p8_no_plan_program_unchanged,
+        test_p9_nested_allocation_escape_keeps_v1,
     ]
     failures = 0
     for test in tests:

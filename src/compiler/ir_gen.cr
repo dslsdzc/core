@@ -314,11 +314,14 @@ fn sg_alloc_pop_split():
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
 fn sg_alloc_pop():
-    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-    unk := cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8)
-    arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
-    if g_sg_count > 1:
-        pi := g_sg_count - 2
+    top := g_sg_count - 1
+    total := cell_load(g_sg_alloc_total, top * 8)
+    unk := cell_load(g_sg_alloc_unknown, top * 8)
+    arena_var := cell_load(g_sg_arena_var, top * 8)
+    // The parent is the SG's recorded parent, not `top - 1`: siblings may have
+    // been popped in between, so the high-water neighbor can be a closed slot.
+    pi := cell_load(g_sgs, top * ESZ_SG + OFF_SG_PARENT)
+    if pi >= 0:
         ptotal := cell_load(g_sg_alloc_total, pi * 8)
         cell_store(g_sg_alloc_total, pi * 8, ptotal + total)
         punk := cell_load(g_sg_alloc_unknown, pi * 8)
@@ -328,13 +331,13 @@ fn sg_alloc_pop():
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
 fn track_alloc_size(size: int):
-    if g_sg_count > 0 && str_len(g_sg_alloc_total) > 0:
-        prev := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-        cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, prev + size)
+    if g_cur_sg >= 0 && str_len(g_sg_alloc_total) > 0:
+        prev := cell_load(g_sg_alloc_total, g_cur_sg * 8)
+        cell_store(g_sg_alloc_total, g_cur_sg * 8, prev + size)
 
 fn track_alloc_unknown():
-    if g_sg_count > 0 && str_len(g_sg_alloc_unknown) > 0:
-        cell_store(g_sg_alloc_unknown, (g_sg_count - 1) * 8, 1)
+    if g_cur_sg >= 0 && str_len(g_sg_alloc_unknown) > 0:
+        cell_store(g_sg_alloc_unknown, g_cur_sg * 8, 1)
 
 fn track_alloc_array(count: int):
     if count > 0 && count < 100000:
@@ -350,26 +353,26 @@ fn track_alloc_struct(name_ni: int):
         track_alloc_unknown()
 
 fn sg_alloc_cur_total() -> int:
-    if g_sg_count <= 0:
+    if g_cur_sg < 0:
         return 0
-    return cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    return cell_load(g_sg_alloc_total, g_cur_sg * 8)
 
 fn sg_alloc_cur_unknown() -> int:
-    if g_sg_count <= 0:
+    if g_cur_sg < 0:
         return 0
-    return cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8)
+    return cell_load(g_sg_alloc_unknown, g_cur_sg * 8)
 
 fn sg_alloc_set(total: int, unknown: int):
-    if g_sg_count > 0:
-        cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, total)
-        cell_store(g_sg_alloc_unknown, (g_sg_count - 1) * 8, unknown)
+    if g_cur_sg >= 0:
+        cell_store(g_sg_alloc_total, g_cur_sg * 8, total)
+        cell_store(g_sg_alloc_unknown, g_cur_sg * 8, unknown)
 
 fn sg_peak_of_current() -> int:
-    if g_sg_count <= 0:
+    if g_cur_sg < 0:
         return 0
-    if cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8) != 0:
+    if cell_load(g_sg_alloc_unknown, g_cur_sg * 8) != 0:
         return -1
-    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    total := cell_load(g_sg_alloc_total, g_cur_sg * 8)
     if total <= 0:
         return 0
     return total
@@ -4209,8 +4212,25 @@ fn gen_expr(node: int) -> int:
         // after PointerAnalysis/RegionCheck and read only during Phase B.
         sg_idx := g_sg_count
         split := region_plan_is_split(sg_idx)
+        merge := region_plan_is_merge(sg_idx)
+        child : ., mut = split
+        if merge != 0:
+            child = 1
+        merge_copy_var : ., mut = -1
+        merge_copy_instr : ., mut = -1
+        merge_emitted : ., mut = 0
+        if merge != 0:
+            // Allocate the surviving copy in the parent arena before the child
+            // arena is created. The element count is already known from the
+            // plan, so the parent arena peak includes the copy. The element
+            // type row is patched at the assigning branch exit.
+            merge_cnt := region_plan_merge_len(sg_idx)
+            track_alloc_array(merge_cnt)
+            merge_copy_var = new_ir_var("_merge_copy", TI_UNIT)
+            emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
+            merge_copy_instr = g_ir_instr_count - 1
         arena_instr : ., mut = -1
-        if split != 0:
+        if child != 0:
             sg_alloc_push(SG_IF)
             arena_var := new_ir_var("_arena", TI_INT)
             cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
@@ -4236,6 +4256,7 @@ fn gen_expr(node: int) -> int:
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
+        then_body_start := g_ir_instr_count
         base_t := sg_alloc_cur_total()
         base_u := sg_alloc_cur_unknown()
         then_val : ., mut = gen_expr(then_node)
@@ -4253,9 +4274,15 @@ fn gen_expr(node: int) -> int:
             emit(IR_STORE, -1, result_var, then_val, 0, 0)
             if result_rep >= 0:
                 emit_rep_set(result_rep, rep_enc_of_expr(then_node, then_val))
+        if merge != 0:
+            // The copy runs at the end of the assigning branch: the false path
+            // never sees the child pointer, so no merge phi is needed.
+            if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, then_body_start, g_ir_instr_count) != 0:
+                merge_emitted = 1
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         if else_node >= 0:
             emit(IR_LABEL, -1, else_lbl, 0, 0, 0)
+            else_body_start := g_ir_instr_count
             else_val : ., mut = gen_expr(else_node)
             else_val = force_if_thunk(else_val)
             if result_var < 0 && else_val >= 0:
@@ -4269,6 +4296,9 @@ fn gen_expr(node: int) -> int:
                 emit(IR_STORE, -1, result_var, else_val, 0, 0)
                 if result_rep >= 0:
                     emit_rep_set(result_rep, rep_enc_of_expr(else_node, else_val))
+            if merge != 0:
+                if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, else_body_start, g_ir_instr_count) != 0:
+                    merge_emitted = 1
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         other_t := sg_alloc_cur_total()
         other_u := sg_alloc_cur_unknown()
@@ -4281,7 +4311,11 @@ fn gen_expr(node: int) -> int:
         if then_u != 0 || other_u != 0:
             sg_alloc_set(base_t + pk, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
-        if split != 0:
+        if child != 0:
+            if merge != 0 && merge_emitted == 0:
+                check_error(EC_B_LIFETIME,
+                    "merge copy plan could not be materialized",
+                    0, 0)
             peak := sg_alloc_cur_total()
             if g_no_auto_arena == 0 && peak != 0:
                 iri_set_s1(arena_instr, peak)
