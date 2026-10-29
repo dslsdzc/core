@@ -54,7 +54,7 @@ v2 的优化只在以下条件全部成立时启用：
 2. 回收点之后不存在指向该 allocation 的活指针变量。
 3. 回收点之后不存在把该 allocation 存入更长寿命目标的操作。
 4. 回收点不跨越 `unsafe` 边界；`unsafe` 域内的分配保持 v1 生命周期。
-5. 固定地址放置（`IR_ALLOC_AT`）不参与 split/early reset，生命周期仍是程序级。
+5. 固定地址放置（`IR_ALLOC_AT`）不参与 split/early clear，生命周期仍是程序级。
 
 条件 1–3 是 RegionCheck 的扩展；条件 4–5 是 plan 的硬门。
 
@@ -64,7 +64,7 @@ v2 的优化只在以下条件全部成立时启用：
 
 - S 的入口发射 `IR_ARENA_NEW`，S 的出口发射 `IR_ARENA_RESET`。
 - S 内新分配的字节进入子槽；S 内对父区域已有对象的引用不受影响。
-- 只有 S 内全部 allocation 都不逃逸 S 时，才允许 split。逃逸判定包括：S 外使用、存入 S 外目标、返回、作为参数传给可能保存它的被调函数、身份观察。
+- 只有 S 内全部 allocation 都不逃逸 S 时，才允许 split。逃逸判定包括：S 外使用、存入 S 外目标、返回、作为参数传给可能保存它的被调函数、身份观察。身份观察包括 `@raw_int`、指针相等比较、`@ptr_of`、FFI 和 `unsafe`；`g_current_arena` 的可读值也视为可观察状态。
 - 有逃逸时保持 v1：S 使用父槽，不创建子槽。
 - split 不改变 S 的类型、控制流或返回值；只改变分配落在哪个槽。
 
@@ -94,16 +94,21 @@ v2 的优化只在以下条件全部成立时启用：
 - 共享槽不复用于其它分配；reset 之后整个槽归还 slot 池。
 - 需要写入的消费者不进入 share；它们要么各自持有副本，要么保持父槽。
 
-### 4.6 提前回收点（early reset）
+### 4.6 提前回收点（early clear）
 
-`early_reset(S, Q)` 在槽 S 的生命周期内、区域出口之前，于程序点 Q 发射 `IR_ARENA_RESET`：
+采用 clear-and-keep，运行时性能优先。`early_clear(S, Q)` 在槽 S 的生命周期内、区域出口之前，于程序点 Q 发射 `IR_ARENA_CLEAR`：
 
+- 清空槽的 slot 游标、size class 的 base/cursor/limit，并 `munmap` 该槽的专用大对象 extent。
+- 槽 id 保持 live，current 不切回 parent；Q 之后的分配继续复用同一槽，从游标 0 重新 bump。
+- 区域出口仍发射 `IR_ARENA_RESET`，做最终 close：归还 slot、恢复 parent。
+- 不把 slot 放回 free list，因此不存在早 clear 与出口 close 之间的 arena id 复用；clear 幂等。
 - Q 必须后支配 S 内每个 allocation 的每个使用点。
 - Q 之后没有任何 S 的 allocation 是活的。
-- Q 位于基本块边界或标签处，保证所有路径都经过同一个 reset。
-- Q 之后 S 内仍可继续分配；reset 后的分配复用同一槽的游标。
-- 若 Q 之后还有 S 的 allocation 被使用，则不插入，保持 v1 出口 reset。
-- 循环体已有的出口 reset 保留；提前 reset 只在能减少同一迭代内峰值时插入，不替代出口 reset。
+- Q 位于基本块边界或标签处，保证所有路径都经过同一个 clear。
+- 若 Q 之后还有 S 的 allocation 被使用，则不插入，保持 v1 出口 close。
+- 循环体已有的出口 close 保留；提前 clear 只在能减少同一迭代内峰值时插入，不替代出口 close。
+
+性能理由：clear 不触碰 arena 池的 free list，不做 slot 申请/归还，不切换 current；只重置元数据并按需解映射大对象。Q 之后的分配仍在同一 1MB slot 内，cache 局部性最好。clear 前是否清零已用前缀由 V2.4 配置决定，默认关闭。
 
 ### 4.7 清零与复用
 
@@ -118,7 +123,8 @@ v2 的优化只在以下条件全部成立时启用：
 不新增回收 opcode。复用：
 
 - `IR_ARENA_NEW`：创建子槽。
-- `IR_ARENA_RESET`：出口 reset 或提前 reset。
+- `IR_ARENA_CLEAR`（opcode 56）：提前回收，清空游标/档位/大对象 extent，保留槽 id。
+- `IR_ARENA_RESET`：区域出口 close，归还 slot 并恢复 parent。
 - `IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` + `IR_STORE`/`IR_LOAD`：merge 的复制序列。
 
 新增编译期 plan 表（不进入 `.ccr`）：
@@ -126,7 +132,7 @@ v2 的优化只在以下条件全部成立时启用：
 | 表 | 含义 |
 |---|---|
 | `g_plan_split` | 每个 SG 一项：0 = 使用父槽，1 = 独立子槽 |
-| `g_plan_reset_label` | 每个函数/标签一项：该标签后是否发射提前 reset |
+| `g_plan_clear` | 扁平静态表，每项 = (函数, 标签, 槽变量)：该标签后发射提前 clear；同一标签可有多项 |
 | `g_plan_share` | 每个 SG 一项：0 = 不共享，1 = 只读共享 |
 | `g_plan_slot` | 每个 SG 的槽变量/父槽变量映射 |
 
@@ -136,9 +142,9 @@ plan 表只在编译期使用；`.ccr` 仍只携带 `IR_ARENA_NEW/RESET` 和 SG 
 
 V2.0 采用两阶段 IR 生成，避免在已建好的 DF 图上插入节点：
 
-1. **Phase A**：正常 `ir_gen_all`，但不发射 split/early reset；运行 PointerAnalysis、RegionCheck。
+1. **Phase A**：正常 `ir_gen_all`，但不发射 split/early clear；运行 PointerAnalysis、RegionCheck。
 2. **Plan**：`region_plan_analyze()` 读取 pts、RegionCheck 的 allocation 生命周期、BytePermission 的读写位、控制邻接上的后支配关系，填充 plan 表。
-3. **Phase B**：若 plan 非空，调用完整 `reset_ir_state()`，再跑 `ir_gen_all`；IR 生成在 SG 入口/出口和 plan 标签处读取 plan，发射 `IR_ARENA_NEW/RESET` 和 merge 复制序列。
+3. **Phase B**：若 plan 非空，调用完整 `reset_ir_state()`，再跑 `ir_gen_all`；IR 生成在 SG 入口/出口和 plan 标签处读取 plan，发射 `IR_ARENA_NEW`/`IR_ARENA_CLEAR`/`IR_ARENA_RESET` 和 merge 复制序列。
 4. Phase B 后重新运行四个 pass（ptr/region/byte/provenance），确认 plan 没有引入新的逃逸或越界。
 
 `reset_ir_state()` 必须重置：IR 变量/指令/函数/全局计数、DF 图、SG 计数和 SG 表、label 计数、case 表、pts/RegionCheck 缓存、plan 表。若 plan 为空，Phase B 跳过，编译成本与 v1 相同。
@@ -173,16 +179,17 @@ for each allocation a in S:
 if all allocations pass: split(S) = 1
 ```
 
-`used_outside_subtree` 用 allocation bit 的 pts 反查所有使用节点，判断使用节点是否在 S 的 SG 子树内。`stored_to_target_outliving` 复用 RegionCheck 的 `rc_store_outlives`，把 S 的 exit 作为边界。
+`used_outside_subtree` 用 allocation bit 的 pts 反查所有使用节点，判断使用节点是否在 S 的 SG 子树内。`stored_to_target_outliving` 复用 RegionCheck 的 `rc_store_outlives`，把 S 的 exit 作为边界；目标寿命未知（`rc_dest_max_exit` 返回 -2）一律视为逃逸，不得按“安全”放行。
 
-### 6.2 early reset
+### 6.2 early clear
 
 1. 对每个槽 S，收集 allocation 集合 A_S。
 2. 在 S 的控制邻接上做指针变量活跃性：变量 v 在节点 n 之后活跃，当且仅当存在一条从 n 出发的路径在 v 被重新定义前使用 v。
 3. allocation a 在 n 之后活跃 = 存在活跃变量 v 且 `pa_pts_has(v, a)`。
-4. 候选 Q = 基本块结束/label。若 Q 后支配 A_S 的每个使用点且 A_S 在 Q 后不活跃，则 Q 可回收。
-5. 选择最早的可回收 Q；若 Q 与区域出口重合，不插入（出口 reset 已足够）。
-6. 插入的 reset 使用 S 的槽变量；同一槽可以有多条 reset，reset 幂等。
+4. 候选 Q = 基本块结束/label。若 Q 后支配 A_S 的每个使用点且 A_S 在 Q 后不活跃，则 Q 可 clear。
+5. 目标寿命未知时一律不 clear；只有明确证明无活 allocation 才插入。
+6. 选择最早的可 clear Q；若 Q 与区域出口重合，不插入（出口 close 已足够）。
+7. 插入的 clear 使用 S 的槽变量；同一槽可以有多条 clear，clear 幂等。
 
 后支配用控制邻接的后向固定点计算；控制邻接由 HDFG 的 `IR_JUMP`/`IR_MATCH`/`IR_LABEL` 派生，`rc_ctl_prepare` 只是按函数缓存。
 
@@ -201,10 +208,11 @@ if all allocations pass: split(S) = 1
 | I1 | reset 之后没有对槽内字节的解引用或写入 | RegionCheck 扩展：按槽边界判定，不只看 SG exit |
 | I2 | 逃逸值在父槽有副本，且副本活到使用点 | merge 复制 + RegionCheck |
 | I3 | 共享槽对所有消费者只读 | BytePermission 写位 |
-| I4 | reset 只在无活 allocation 的点执行 | 活跃性 + 后支配 |
-| I5 | 身份被观察的值不 split、不复制 | plan 硬门 |
+| I4 | clear 只在无活 allocation 的点执行 | 活跃性 + 后支配 |
+| I5 | 身份被观察的值不 split、不复制；`@raw_int` 与 `g_current_arena` 计入身份观察 | plan 硬门 |
 | I6 | 固定地址和 unsafe 分配不参与 | plan 硬门 |
-| I7 | reset 幂等，slot 只归还一次 | 运行时 arena 现有 `g_arena_live` 检查 |
+| I7 | clear 幂等；slot 只在区域出口 close 时归还一次 | `arena_clear` 只重置元数据，`arena_reset` 保留 `g_arena_live` 检查 |
+| I8 | 非局部出口（return/break/continue）关闭仍 live 的子槽 | 出口边 cleanup |
 
 ## 八、实施阶段
 
@@ -215,11 +223,12 @@ if all allocations pass: split(S) = 1
 - 两阶段 IR 生成 + `region_plan_analyze`。
 - 验收：R2（if 内分配逃逸到 if 外）保持 v1，运行结果不变；新增“if 内分配不逃逸”用例，`IR_ARENA_NEW/RESET` 成对出现；canary 若因现有语料触发 split 而变化，逐项归因并按换代纪律更新值表，不得静默改判据。
 
-### V2.1 early reset
+### V2.1 early clear
 
 - 对 LOOP/FOR/FUNC 的槽做活跃性 + 后支配。
-- 只在基本块边界插入 reset。
-- 验收：构造长直线函数，前面分配死亡后 reset，slot 计数下降；有后续使用时 reset 不插入。
+- 只在基本块边界插入 `IR_ARENA_CLEAR`；区域出口仍 `IR_ARENA_RESET`。
+- 非局部出口（return/break/continue）为仍 live 的子槽插入 cleanup close；或将该候选排除。
+- 验收：构造长直线函数，前面分配死亡后 clear，同一槽后续分配复用；slot 计数不增加；有后续使用时 clear 不插入。
 
 ### V2.2 merge 复制
 
@@ -250,11 +259,15 @@ if all allocations pass: split(S) = 1
 1. **两阶段编译成本**：Phase B 使 IR 生成和四个 pass 各跑两次。若某个程序的 plan 非空，编译时间约翻倍；需要测量并设阈值。
 2. **merge 复制语义**：指针身份、别名、聚合内部指针是主要风险；V2.2 只做可拷贝类型。
 3. **share 的写检测**：BytePermission 当前按值/分配推断，跨函数只读证明可能不足；不足时不 share。
-4. **early reset 的后支配成本**：大函数上后支配固定点可能较慢；按函数缓存。
+4. **early clear 的后支配成本**：大函数上后支配固定点可能较慢；按函数缓存。
 5. **canary 换代**：任何实际 split/reset 都会改变 `.ccr`/ELF；需要按阶段更新值表，不能静默改判据。
 6. **并发**：每 G 独立 arena 不在本轮；split 只在单线程区域树上定义。
 
-## 十一、需要批准的决策
+## 十一、已定与待批决策
+
+已定（2026-10-29）：早回收采用 **clear-and-keep**。理由 = 运行时性能最优，且避免 arena id 在早回收与出口 close 之间被复用。V2.1 按此实现，不再把“提前 reset = 关闭槽”作为候选。
+
+待批：
 
 1. **Phase B 实现**：两阶段 IR 生成（推荐，先保证正确性）还是直接做 post-gen rewrite（编译成本低，但需要重建 DF 图和节点编号）。
 2. **merge 复制范围**：只做标量/字符串/POD 聚合（推荐），还是一开始就做含指针聚合的深拷贝。
