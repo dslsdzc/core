@@ -61,9 +61,12 @@ fn grow_alloc_pts(n: int):
         if nc > n:
             break
         nc = nc * 2
-    nb := alloc(nc * 8)
+    words := g_pts_words
+    if words <= 0:
+        words = 1
+    nb := alloc(nc * words * 8)
     if g_alloc_pts_cap > 0:
-        cell_copy(g_alloc_pts, g_alloc_pts_cap * 8, nb)
+        cell_copy(g_alloc_pts, g_alloc_pts_cap * words * 8, nb)
     g_alloc_pts = nb
     g_alloc_pts_cap = nc
 
@@ -83,30 +86,105 @@ fn grow_pa_alloc_nodes(n: int):
     g_pa_alloc_nodes = nb
     g_pa_alloc_nodes_cap = nc
 
-// Set a bit in a points-to bitmap.
-fn pa_set_bit(bitmap: int, bitpos: int) -> int:
-    // Build the mask by doubling; the language has no shift or bitwise operators.
+// ── Points-to sets ──
+// A set is a row of g_pts_words cells. Each cell uses 63 lanes, not 64: the
+// language has no unsigned int, so bit 63 would make the word negative and the
+// division-based mask tests ambiguous. The row width comes from the allocation
+// pre-scan, so allocation IDs are not capped. Masks are built by doubling and
+// unions walk the lanes of each word. The representation is hidden behind this
+// API so the rest of the passes never assume a single-word bitmap.
+fn pa_bit_mask(bit: int) -> int:
     mask : int, mut = 1
-    bi : ., mut = 0
+    i : ., mut = 0
     loop:
-        if bi >= bitpos:
+        if i >= bit:
             break
         mask = mask * 2
-        bi = bi + 1
-    return bitmap + mask  // set the bit by addition
+        i = i + 1
+    return mask
 
-// Check whether a bit is set.
-fn pa_has_bit(bitmap: int, bitpos: int) -> int:
-    mask : int, mut = 1
+fn pa_set_index(handle: int, alloc: int) -> int:
+    return (handle * g_pts_words + alloc / 63) * 8
+
+fn pa_pts_has(handle: int, alloc: int) -> int:
+    if handle < 0 || handle >= g_pts_cap || alloc < 0 || alloc >= g_pa_alloc_max:
+        return 0
+    m := pa_bit_mask(alloc % 63)
+    return (cell_load(g_pts, pa_set_index(handle, alloc)) / m) % 2
+
+fn pa_alloc_pts_has(handle: int, alloc: int) -> int:
+    if handle < 0 || handle >= g_alloc_pts_cap || alloc < 0 || alloc >= g_pa_alloc_max:
+        return 0
+    m := pa_bit_mask(alloc % 63)
+    return (cell_load(g_alloc_pts, pa_set_index(handle, alloc)) / m) % 2
+
+fn pa_pts_add(handle: int, alloc: int):
+    if handle < 0 || handle >= g_pts_cap || alloc < 0 || alloc >= g_pa_alloc_max:
+        return
+    idx := pa_set_index(handle, alloc)
+    m := pa_bit_mask(alloc % 63)
+    cur := cell_load(g_pts, idx)
+    if (cur / m) % 2 == 0:
+        cell_store(g_pts, idx, cur + m)
+
+fn pa_pts_clear(handle: int):
+    if handle < 0 || handle >= g_pts_cap:
+        return
+    w : ., mut = 0
+    loop:
+        if w >= g_pts_words:
+            break
+        cell_store(g_pts, (handle * g_pts_words + w) * 8, 0)
+        w = w + 1
+
+fn pa_pts_empty(handle: int) -> int:
+    if handle < 0 || handle >= g_pts_cap:
+        return 1
+    w : ., mut = 0
+    loop:
+        if w >= g_pts_words:
+            break
+        if cell_load(g_pts, (handle * g_pts_words + w) * 8) != 0:
+            return 0
+        w = w + 1
+    return 1
+
+// Merge one 63-lane cell from src into dst. Returns 1 when the cell changed.
+fn pa_cell_merge(db: string, di: int, sb: string, si: int) -> int:
+    a := cell_load(db, di * 8)
+    b := cell_load(sb, si * 8)
+    out : ., mut = a
+    changed : ., mut = 0
+    mask : ., mut = 1
     bi : ., mut = 0
     loop:
-        if bi >= bitpos:
+        if bi >= 63:
             break
+        if (b / mask) % 2 == 1 && (out / mask) % 2 == 0:
+            out = out + mask
+            changed = 1
         mask = mask * 2
         bi = bi + 1
-    return (bitmap / mask) % 2
+    if changed != 0:
+        cell_store(db, di * 8, out)
+    return changed
 
-// Merge src into dst and return 1 when dst changed.
+// Merge a whole set from `sb[sh]` into `db[dh]`. Both buffers use the same row
+// width; the caller passes the right global for var/alloc sets.
+fn pa_cross_merge(db: string, dh: int, sb: string, sh: int) -> int:
+    if dh < 0 || sh < 0:
+        return 0
+    changed : ., mut = 0
+    w : ., mut = 0
+    loop:
+        if w >= g_pts_words:
+            break
+        if pa_cell_merge(db, dh * g_pts_words + w, sb, sh * g_pts_words + w) != 0:
+            changed = 1
+        w = w + 1
+    return changed
+
+// Merge src_var into dst_var and return 1 when dst changed.
 fn pa_merge_pts(dst_var: int, src_var: int) -> int:
     if dst_var < 0 || src_var < 0:
         return 0
@@ -114,26 +192,7 @@ fn pa_merge_pts(dst_var: int, src_var: int) -> int:
         grow_pts(dst_var + 1)
     if g_pts_cap <= src_var:
         grow_pts(src_var + 1)
-    dst := cell_load(g_pts, dst_var * 8)
-    src := cell_load(g_pts, src_var * 8)
-    if src == 0:
-        return 0
-    // Union: start from dst and add src bits that are not set.
-    out_val : int, mut = dst
-    changed : int, mut = 0
-    mask : int, mut = 1
-    bi : ., mut = 0
-    loop:
-        if bi >= 64:
-            break
-        if (src / mask) % 2 == 1 && (out_val / mask) % 2 == 0:
-            out_val = out_val + mask
-            changed = 1
-        mask = mask * 2
-        bi = bi + 1
-    if changed != 0:
-        cell_store(g_pts, dst_var * 8, out_val)
-    return changed
+    return pa_cross_merge(g_pts, dst_var, g_pts, src_var)
 
 // Merge alloc_pts[alloc_seq] into pts[dst_var] and return 1 when changed.
 fn pa_merge_alloc_pts(dst_var: int, alloc_seq: int) -> int:
@@ -143,77 +202,42 @@ fn pa_merge_alloc_pts(dst_var: int, alloc_seq: int) -> int:
         grow_pts(dst_var + 1)
     if g_alloc_pts_cap <= alloc_seq:
         grow_alloc_pts(alloc_seq + 1)
-    src := cell_load(g_alloc_pts, alloc_seq * 8)
-    if src == 0:
-        return 0
-    prev : ., mut = cell_load(g_pts, dst_var * 8)
-    changed : int, mut = 0
-    mask : int, mut = 1
-    bi : ., mut = 0
-    loop:
-        if bi >= 64:
-            break
-        if (src / mask) % 2 == 1 && (prev / mask) % 2 == 0:
-            prev = pa_set_bit(prev, bi)
-            changed = 1
-        mask = mask * 2
-        bi = bi + 1
-    if changed != 0:
-        cell_store(g_pts, dst_var * 8, prev)
-    return changed
+    return pa_cross_merge(g_pts, dst_var, g_alloc_pts, alloc_seq)
 
 // Propagate pts[src_var] into alloc_pts[alloc_seq] and return 1 when changed.
 fn pa_store_to_alloc(alloc_seq: int, src_var: int) -> int:
-    src := cell_load(g_pts, src_var * 8)
-    if src == 0:
+    if alloc_seq < 0 || src_var < 0:
         return 0
-    grow_alloc_pts(alloc_seq + 1)
-    prev : ., mut = cell_load(g_alloc_pts, alloc_seq * 8)
-    changed : int, mut = 0
-    mask : int, mut = 1
-    bi : ., mut = 0
-    loop:
-        if bi >= 64:
-            break
-        if (src / mask) % 2 == 1 && (prev / mask) % 2 == 0:
-            prev = pa_set_bit(prev, bi)
-            changed = 1
-        mask = mask * 2
-        bi = bi + 1
-    if changed != 0:
-        cell_store(g_alloc_pts, alloc_seq * 8, prev)
-    return changed
+    if g_alloc_pts_cap <= alloc_seq:
+        grow_alloc_pts(alloc_seq + 1)
+    if g_pts_cap <= src_var:
+        grow_pts(src_var + 1)
+    return pa_cross_merge(g_alloc_pts, alloc_seq, g_pts, src_var)
 
 // Load rule: for each allocation in pts(p), add alloc_pts[alloc] to pts(r).
 fn pa_load(deref_node: int, dst_var: int, ptr_var: int) -> int:
-    changed : int, mut = 0
-    pts_ptr := cell_load(g_pts, ptr_var * 8)
-    mask : int, mut = 1
-    bi : ., mut = 0
+    changed : ., mut = 0
+    ai : ., mut = 0
     loop:
-        if bi >= 64:
+        if ai >= g_pa_alloc_count:
             break
-        if (pts_ptr / mask) % 2 == 1:
-            if pa_merge_alloc_pts(dst_var, bi) != 0:
+        if pa_pts_has(ptr_var, ai) != 0:
+            if pa_merge_alloc_pts(dst_var, ai) != 0:
                 changed = 1
-        mask = mask * 2
-        bi = bi + 1
+        ai = ai + 1
     return changed
 
 // Store rule: for each allocation in pts(p), add pts(v) to alloc_pts[alloc].
 fn pa_store(ptr_var: int, val_var: int) -> int:
-    changed : int, mut = 0
-    pts_ptr := cell_load(g_pts, ptr_var * 8)
-    mask : int, mut = 1
-    bi : ., mut = 0
+    changed : ., mut = 0
+    ai : ., mut = 0
     loop:
-        if bi >= 64:
+        if ai >= g_pa_alloc_count:
             break
-        if (pts_ptr / mask) % 2 == 1:
-            if pa_store_to_alloc(bi, val_var) != 0:
+        if pa_pts_has(ptr_var, ai) != 0:
+            if pa_store_to_alloc(ai, val_var) != 0:
                 changed = 1
-        mask = mask * 2
-        bi = bi + 1
+        ai = ai + 1
     return changed
 
 fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
@@ -225,21 +249,18 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
             break
         var_idx := vstart + vi
         grow_pts(var_idx + 1)
-        cell_store(g_pts, var_idx * 8, 0)
+        pa_pts_clear(var_idx)
         grow_offsets(var_idx + 1)
         cell_store(g_offsets, var_idx * 8, 0)
         vi = vi + 1
 
+    // Monotone set growth: each pass only adds allocation bits, so the
+    // fixed point terminates without an arbitrary iteration cap.
     changed : int, mut = 1
-    iter : ., mut = 0
     loop:
         if changed == 0:
             break
-        if iter >= 10:
-            break
-        // Bound the fixed-point iterations.
         changed = 0
-        iter = iter + 1
 
         ni : ., mut = nstart
         loop:
@@ -261,15 +282,15 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                 if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
                     // IR_ALLOC marks a scalar slot and is not tracked. Only heap
                     // allocations receive points-to bits.
-                    if cell_load(g_pts, d * 8) == 0:
+                    if pa_pts_empty(d) != 0:
                         // Give each allocation its own bit and record the mapping
-                        // from bit to DF node for size queries.
-                        if g_pa_alloc_count < 64:
-                            grow_pa_alloc_nodes(g_pa_alloc_count + 1)
-                            cell_store(g_pa_alloc_nodes, g_pa_alloc_count * 8, ni)
-                            cell_store(g_pts, d * 8, pa_set_bit(0, g_pa_alloc_count))
-                            g_pa_alloc_count = g_pa_alloc_count + 1
-                            changed = 1
+                        // from bit to DF node for size queries. The set width is
+                        // pre-scanned, so there is no 64-allocation cap.
+                        grow_pa_alloc_nodes(g_pa_alloc_count + 1)
+                        cell_store(g_pa_alloc_nodes, g_pa_alloc_count * 8, ni)
+                        pa_pts_add(d, g_pa_alloc_count)
+                        g_pa_alloc_count = g_pa_alloc_count + 1
+                        changed = 1
                     cell_store(g_offsets, d * 8, 0)
 
                 if op == IR_REF && s1 >= 0:
@@ -380,8 +401,38 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
 
             ni = ni + 1
 
+// Count allocation nodes before the fixed point so each points-to row has a
+// stable, sufficiently wide bitset. This removes the old 64-allocation cap.
+fn pa_count_allocs() -> int:
+    count : ., mut = 0
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
+        ni : ., mut = nstart
+        loop:
+            if ni >= nstart + ncount:
+                break
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            if (op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY) && pa_in_unsafe(ni) == 0:
+                count = count + 1
+            ni = ni + 1
+        fi = fi + 1
+    return count
+
 fn ptr_analysis_all():
     pa_prepare_unsafe()
+    g_pa_alloc_count = 0
+    g_pa_alloc_max = pa_count_allocs()
+    g_pts_words = (g_pa_alloc_max + 62) / 63
+    if g_pts_words < 1:
+        g_pts_words = 1
+    g_pts_cap = 0
+    g_pts_count = 0
+    g_alloc_pts_cap = 0
+    g_pa_alloc_nodes_cap = 0
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:

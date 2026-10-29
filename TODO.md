@@ -1511,7 +1511,7 @@
 - 状态：已完成（2026-10-24）：`T_MOVE`、`EXPR_MOVE`、六处消费者、`grammar/tokens.ebnf` 的 `'move'`、LSP 补全项和 B020-B022 错误码均已删除。负控见 `tests/selfhost/test_move_keyword_removed.py`。
 - 关联：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md` 第13节 I2 / 第16节 G8。
 
-### 2026-09-17-19. 注：注： （不报错·安全网失效）`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起不报错不追踪）+ 计数器从不复位（2026-09-17 并发模型规格 G3 裁定：先裁“pts 表示升级”；本条为必立的不报错缺陷）
+### 2026-09-17-19. 注：注： （不报错·安全网失效）`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起不报错不追踪）+ 计数器从不复位（2026-09-17 并发模型规格 G3 裁定：先裁“pts 表示升级”；本条为必立的不报错缺陷）——**2026-10-29 已修**
 
 - 现象（读码实核）：`src/compiler/ptr_analysis.cr:213` 的 `if g_pa_alloc_count < 64 {` ： 每个 `IR_ALLOC_STRUCT` / `IR_ALLOC_ARRAY` 节点按序取一位 pts 位号（`:216` `pa_set_bit(0, g_pa_alloc_count)`，位号写入 `g_pa_alloc_nodes`）；达到 64 后该分支恒假 ⇒ 第 65 个及其后的分配不登记（无映射表项、该 dst var 的 `pts` 不置位），且零诊断、零产物差异。
 - 后果链（读码推断，非本轮实测）：该分配的 pts 恒空 ⇒ 1 `region_check` 的 DEREF/返回逃逸检查走 `pts != 0` 分支（`region_check.cr:122-143`）⇒ 跳过；2 `provenance_verify` 的越界检查同样遍历 pts（`provenance_verify.cr:77-129`）⇒ 跳过，且运行期边界检查回填（`:117-129` 需 `runtime_targets == 1`）也不发生 ⇒ 安全网在该分配上不报错失效（形态 = 漏检，非错值）。
@@ -1519,7 +1519,12 @@
 - 判定：S（不报错）：安全网不报错失效属本仓最忌类；第二面附带非确定性（依赖编译序）。
 - 裁定（G3）：pts 表示升级（不选“接受退化”）。理由：G1 裁定“可观察语义含时间（预算等价）”⇒ 分析精度是预算可证明的前提；且本条本身即不报错缺陷。
 - 验收要求（修复时；RED 本轮未跑：只读规划轮零构建）：1 RED 实测：构造 >64 个分配的语料（第 65 个分配上带可被判定的越界/逃逸形态）+ ≤64 的同形对照 ⇒ 修复前应观测“对照有诊断 / ≥65 无诊断”的不报错差；2 表示升级：`pts` 由“单 int 64 位位图”改为可增长表示（或多字分摊），消除 `g_pa_alloc_count` 上限；3 计数器随 `reset_frontend_state` 复位（或明确限定为编译单元作用域）；4 回归：`check src/compiler` rc=0 + 三点 pass 既有检查（`tests/selfhost/test_pointer_safety.py` 等）逐项不变；5 ELF canary 按阶段约定重定（表示升级可能改动发射面时）。
-- 状态：登记，未修；RED 未跑（2026-09-17 只读规划轮：零构建、零源码改动）。
+- 状态：已修（2026-10-29）。
+  - `g_pts`/`g_alloc_pts` 改为按分配预扫描定宽的可增长位集（`g_pts_words`，行内 64 位 lane），分配数不再有 64 上限；`pa_pts_has`/`pa_pts_add`/`pa_pts_empty` 为唯一访问器。
+  - `g_pa_alloc_count`、`g_pa_alloc_max`、`g_pts_cap`、`g_alloc_pts_cap`、`g_pa_alloc_nodes_cap` 随 `reset_frontend_state` 复位；`ptr_analysis_all` 也重新预扫描，长驻进程不累计额度。
+  - 固定点不再有 `iter >= 10` 的静默上限；集合只增，按 `changed == 0` 终止。
+  - 检查：`tests/selfhost/test_region_escape.py::test_p10_more_than_64_allocations_are_tracked`（70 个字面量分配 + 第 71 个循环分配逃逸 ⇒ B11；旧实现漏检）。
+  - 回归：`test_region_escape` 22/22、`test_pointer_safety` PASS、`test_region_cfg` 22/22、`check src/compiler` ok、canary 5/5 且五条哈希不变。
 - 关联：并发模型规格 `docs/superpowers/specs/2026-09-17-concurrency-model-design.md` 第15.2节 步 1 / 第16节 G3 · `TODO #2026-09-17-1`（不报错内存类邻域，非同根因）。
 - 触发器（拟）：`g_pa_alloc_count ≥ 64`（= 既有上限本身）⇒ 本条升为修复阶段前置：该计数在编译器内已有，全语料/自源编译时打印即可观测（机械）。
 
@@ -2147,6 +2152,7 @@
 - 附带（已完整流程）：该档旧断言 `'B010' in out or 'error' in out` 的第一支从来没有内容，长期靠第二支命中 TF01（`&x` 当时是 `PTR`、返回型声明 `&int` ⇒ 返回型不符）而绿：是裁定二把它照出来的，不是改判弄坏的；该断言已由 PR #153 重定为“只断言真实成立的性质”（`&x` 与 `&int` 同 kind ⇒ 无 TF01/TA02），并在 docstring 内逐字保留原断言。
 - 6 同面第三形态（2026-09-20 收尾时新增）：返回点在区域“内”的逃逸仍漏检：`while i < 1 { arr := [7, 8]; return &arr[0]; }`（RETURN 节点在区内 ⇒ `ni < EXIT`）本判定形态看不见。修前同样漏（rc=0），非本次引入；本次的边界修复只覆盖“使用点在区域关闭之后”一格 ⇒ 不修、并入本条目作为同一面的第 6 项（与 1–5 同面：都是 escape/lifetime 的漏检与零覆盖形态；拆条会让“这个面到底多烂”看不出来）。
 - 状态（2026-09-20 收尾）：1–5 本次已修并落检查；6 与下段三条保留登记。
+  - 2026-10-29 续修：6（区域内 return）已修，`test_p8_return_inside_loop_escapes` 覆盖；`rc_store_escape` 的双边寿命比较已实现（目标区域比被存值长寿 ⇒ B11 `destination outlives`），`test_p11_store_outlives_destination` 覆盖；pts 位图升级为动态宽度，>64 分配已覆盖（见 `#2026-09-17-19`）。
   - 位置：`src/compiler/region_check.cr`（判定抽单源 `rc_var_dead` + 6 个分解函数，三份副本收敛为一份）；检查 `tests/selfhost/test_region_escape.py`（15 例，已挂 `src/ci/run.sh` 的 selfhost-tests）；文档 `pointer-model.md` 第五节（四点判定）同阶段对齐。
   - 三条根因：ⓐ 区间半开 `[NSTART, EXIT)` 被当闭区间用 ⇒ `ni > EXIT` 漏掉“使用点紧邻区域”格（`adr-0007` 记的判定式是 `cur_seq < exit_seq`，取非即 `>=`）；ⓑ 把“任何区域关闭”当内存归还点 ⇒ `SG_IF` 不建 arena、`SG_FUNC` 的 arena 在函数出口才重置 ⇒ `if x { arr := [..]; p = &arr[0]; } *p` 被误报 rc=1（执行级反证：把读点藏进一次调用后 build+run 得 rc=0，`*p` 仍是原值 ⇒ 内存根本没释放）；ⓒ `pts` 是流不敏感并集却被当事实用 ⇒ 循环后重赋值给活对象再解引用被误报（加重赋值清除：仅当区间内写入值明确不逃逸时才清除，任一写可能逃逸则保守照报）。
   - 1 收尾：`EC_B_ESCAPE`（渲染为 `B10`）现有 raise 点：返回逃逸改报 B10（按 `docs/developer/errors.md:245`“Reference to local escapes the function”归位；修前误用 B11 = 码位错配）。
@@ -2154,7 +2160,7 @@
   - 4 收尾：`SG_FUNC` 单点特例被“归还区域”谓词（出口发 `IR_ARENA_RESET` 者）一般化：函数级分配自然放行，不再依赖一句特判。
   - 5 收尾：判定值接回 `check_error`（B11）：该点从“连 raise 点都没有”变为可触发。
   - 检查读数（基线 = `84a4debe` vs `84a4debe`+本次，空缓存状态逐档）：65 档语料（`tests/suite` 36 + `tests/probes` 29）rc + 诊断码集 0 变化（修前基线 B010/B011 零命中 ⇒ 零新增诊断）；canary 5/5 值未变（无需更新基准值）；自举链 SUCCESS + 自源零 `error[B01x]`；与 S6 扩谓词正交已实测（`&x` → `TYP_REF` 路径：基线“仅 S6”时反例 rc=0，本次 rc=1 + 具体码 ⇒ 走的是修好的判定，非被放宽后绕过的另一条路）。S6 原在三处门各写一份的 `TYP_PTR ∪ TYP_REF` 放宽，本次收敛为 `rc_var_dead` 一处（三条检查同时保持放宽）。
-  - 保留登记（未实现/不完整，勿当已实现）：6 本条；传参逃逸 = 设计未实现（`region_check_func` 无 `IR_CALL` 分支，本文件全历史逐提交核过 = 零出现；完整语义需函数摘要，而 `ptr_analysis.cr` 的 CALL 分支是 `pts = 0`、头注声称的 summary propagation 未实现）；`rc_store_escape` 的双边 outlives 比较未实现（`ptr_var` 参数当前未用）；pts 流不敏感致重赋值类真阳性转漏检（值为跨调用结果时 pts 空 ⇒ 被当作“明确不逃逸”而清除）。
+  - 保留登记（未实现/不完整，勿当已实现）：传参逃逸 = 设计未实现（`region_check_func` 无 `IR_CALL` 分支；完整语义需函数摘要，而 `ptr_analysis.cr` 的 CALL 分支是 `pts = 0`、头注声称的 summary propagation 未实现）；pts 流不敏感致重赋值类真阳性转漏检（值为跨调用结果时 pts 空 ⇒ 被当作“明确不逃逸”而清除）。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）
 

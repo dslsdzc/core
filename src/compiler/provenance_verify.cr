@@ -150,19 +150,17 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 ni = ni + 1
                 continue
 
-            pts := cell_load(g_pts, s1 * 8)
             off := cell_load(g_offsets, s1 * 8)
             runtime_targets : ., mut = 0
             runtime_size : ., mut = 0
             runtime_base : ., mut = -1
 
             // Check each potential allocation target in the points-to set
-            mask : int, mut = 1
             bi : ., mut = 0
             loop:
-                if bi >= 64:
+                if bi >= g_pa_alloc_count:
                     break
-                if (pts / mask) % 2 != 0:
+                if pa_pts_has(s1, bi) != 0:
                     alloc_extent := get_alloc_extent(bi)
                     if alloc_extent >= 0 && off >= 0 && span > 0:
                         if span > alloc_extent || off > alloc_extent - span:
@@ -186,7 +184,6 @@ fn provenance_verify_func(nstart: int, ncount: int):
                         // Unknown allocation information leaves s2 and s3 unset. The
                         // encoder keeps a null trap for s3 = 0.
 
-                mask = mask * 2
                 bi = bi + 1
 
             // A constant offset plus a known span can be proven statically. A

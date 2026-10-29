@@ -1839,9 +1839,12 @@ fn grow_pts(n: int):
         if nc > n:
             break
         nc = nc * 2
-    nb := alloc(nc * 8)
+    words := g_pts_words
+    if words <= 0:
+        words = 1
+    nb := alloc(nc * words * 8)
     if g_pts_cap > 0:
-        cell_copy(g_pts, g_pts_cap * 8, nb)
+        cell_copy(g_pts, g_pts_cap * words * 8, nb)
     g_pts = nb
     g_pts_cap = nc
 

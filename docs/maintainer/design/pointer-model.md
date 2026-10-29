@@ -21,7 +21,7 @@ C 风格原始指针表达力强，但没有安全保障。Rust 用借用检查�
 | 术语 | 含义 |
 |---|---|
 | provenance | 指针的来源，即它出自哪个分配（ALLOC、ALLOC_STRUCT、ALLOC_ARRAY 等），沿 provenance 边追踪 |
-| points-to（pts） | 指针可能指向哪些分配块，用位图表示 |
+| points-to（pts） | 指针可能指向哪些分配块，用动态宽度位集表示 |
 | alloc content | 存入某个分配块的值集合，记为 `g_alloc_pts`，是 Store 和 Load 规则的中介 |
 | direct flow | 值沿 def-use 关系直接传递 |
 | pointer-induced flow | 值经 STORE_PTR 或 DEREF 间接传递，需要 pts 才能追踪 |
@@ -48,7 +48,7 @@ unsafe:
 
 ## Pass 1：PointerAnalysis
 
-算法是在数据流图上运行过程间 Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016），使用包含约束和过程间函数摘要。
+算法是在数据流图上运行**过程内** Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016）；`IR_CALL` 结果保守置空，过程间函数摘要尚未实现。
 
 | 规则 | 触发 | 动作 |
 |---|---|---|
@@ -56,15 +56,15 @@ unsafe:
 | Copy | LOAD、STORE 沿 def-use | 沿 def-use 关系传播 pts |
 | Store | STORE_PTR | 对每个 alloc 属于 ptr 的 pts，把 val 的 pts 并入 `g_alloc_pts[alloc]` |
 | Load | DEREF | dest 的 pts 并入每个 alloc 的 `g_alloc_pts[alloc]` |
-| Call | 调用 | 传播函数摘要，参数保守处理 |
+| Call | 调用 | 结果置空，参数不传播（函数摘要未实现） |
 
 实现要点：
 
-- pts 是位图，使用 `pa_set_bit` 等函数，`grow_pa_alloc_nodes` 动态扩容，不是逐对象列表。
+- pts 是**动态宽度位集**：分配预扫描决定每行的 64 位 lane 数（`g_pts_words`），`g_pts`/`g_alloc_pts` 按集合数扩容，不再有 64 个分配的硬上限。访问统一走 `pa_pts_has`/`pa_pts_add`/`pa_pts_empty`，不暴露位图布局。`grow_pa_alloc_nodes` 动态扩容。
 - alloc content 跟踪使用 `g_alloc_pts[alloc_id]` 记录存入该分配块的值集合。DEREF 读取它，这是 pointer-induced flow 的实现形式，不在图上物理加边。
 - `pa_in_unsafe` 使 `unsafe` 域内的指针不参与正常约束。
 
-分析按子图独立进行，函数摘要跨子图传播，不需要全程序统一求解。
+分析按函数独立进行；`IR_CALL` 结果保守置空，函数摘要尚未实现（TODO `#2026-09-17-20(b)`）。跨函数逃逸因此仍是已知缺口。
 
 ## Pass 2：RegionCheck
 
@@ -74,15 +74,15 @@ unsafe:
 
 1. 过期 DEREF（`IR_DEREF`），错误码 `B011`（`EC_B_LIFETIME`）。
 2. 返回值离开区域（`IR_RETURN`，`rc_return_escape`），错误码 `B010`（`EC_B_ESCAPE`）。错误信息见 `errors.md:245`，例子是 `return &x`。
-3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。
-4. 参数离开区域：把分配指针作为参数传给外部。该检查尚未实现。
+3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。
+4. 参数离开区域：把分配指针作为参数传给外部。该检查尚未实现；需要函数摘要，当前 `IR_CALL` 的 pts 为空。
 
 区域活性语义：
 
 - 区间是半开区间 `[OFF_SG_NSTART, OFF_SG_EXIT)`。`OFF_SG_EXIT` 由 `sg_pop()` 写成当时的 `g_df_node_count`，即区域关闭后第一个节点的下标，见 `dataflow.cr:78-82`。因此使用点在区域外等价于 `ni >= EXIT`。
 - 只有出口归还内存的区域才是离开点。`SG_LOOP`、`SG_FOR` 和 `SG_UNSAFE` 在出口发射 `IR_ARENA_RESET`，后端 `src/arch/x86_64/instr.cr` 确实调用 `arena_new` 和 `arena_reset`。`SG_IF` 只做 `sg_push` 和 `sg_pop`，不建 arena，见 `ir_gen.cr:2414` 和 `ir_gen.cr:2437`。`SG_FUNC` 的 arena 在函数出口才重置，返回给调用者时仍然有效。分配点在 `if` 内时，沿父区域向上查找到真正归还内存的区域。
 - 类型门是 `TYP_PTR` 和 `TYP_REF` 的并集。当前实际生效的是 REF 一侧，因为 `&局部` 一律判为 REF，而 `&局部 as *T` 本身会触发 TF01。并集保留，PTR 一侧对 `alloc()` 和 FFI 派生值仍然有效。
-- 重赋值清除：pts 是流不敏感并集。如果 `[EXIT, ni)` 内对该指针变量有重赋值，并且写入值本身不含已经离开区域的分配，那么并集失效，不报告。已知不完整：当值是跨调用结果时 pts 为空，会被当作明确不离开区域而清除，这类真阳性会漏检。原因是 pts 流不敏感。
+- 重赋值清除：pts 是流不敏感并集。普通使用在 `[EXIT, ni)` 内检查重赋值；区域内 return 取分配点到 return 之间的**最后一次**写入（前一次不安全写入被覆盖时不误报），并按使用点判定写入值是否逃逸。写入值本身含逃逸分配时才保留并集。已知不完整：当值是跨调用结果时 pts 为空，会被当作明确不离开区域而清除，这类真阳性会漏检。原因是 pts 流不敏感。
 
 ## Pass 3：ProvenanceVerify
 

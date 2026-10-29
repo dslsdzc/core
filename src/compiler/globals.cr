@@ -569,10 +569,16 @@ g_plugin_rtypes : string, mut
 g_plugin_rtype_count : int, mut
 g_plugin_rtype_cap : int, mut
 
-// Pointer analysis storage
+// Pointer analysis storage.
+// Each points-to set is a fixed-width bitset of `g_pts_words` 63-lane cells.
+// The width is derived from a pre-scan of all allocation nodes, so the analysis
+// is not limited to 64 allocations. `g_pts_cap`/`g_alloc_pts_cap` count sets,
+// not cells.
 g_pts : string, mut
 g_pts_count : int, mut
 g_pts_cap : int, mut
+g_pts_words : int, mut
+g_pa_alloc_max : int, mut
 g_offsets : string, mut
 g_offsets_count : int, mut
 g_offsets_cap : int, mut
@@ -835,4 +841,10 @@ fn reset_frontend_state():
     g_line_count = 0
     g_unsafe_depth = 0
     g_alloc_pts_cap = 0
+    g_pts_cap = 0
+    g_pts_count = 0
+    g_pts_words = 1
+    g_pa_alloc_max = 0
+    g_pa_alloc_count = 0
+    g_pa_alloc_nodes_cap = 0
     g_checker_current_fi = 0

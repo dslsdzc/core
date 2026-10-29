@@ -205,6 +205,43 @@ def test_p9_ref_typed_dangling_deref_is_b011():
     )
 
 
+def test_p8_return_inside_loop_escapes():
+    """P8 区域内 return：RETURN 节点在循环区内（ni < EXIT），但返回本身结束
+    了循环区域的生命周期 ⇒ 必须报 B10。修前 rc=0（判定只看 ni >= EXIT）。"""
+    assert_rejected(
+        "fn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        return &arr[0]\n    seed := 0\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p10_more_than_64_allocations_are_tracked():
+    """P10 第 65 个以后的分配也必须进入 pts。旧实现是单个 64 位位图，
+    `g_pa_alloc_count < 64` ⇒ 第 65 个分配起静默不登记，循环分配逃逸不报。
+    这里先放 70 个数组字面量，再让循环里的分配逃逸；动态宽度位集必须报 B11。"""
+    lines = ["fn main() -> int:"]
+    for i in range(70):
+        lines.append(f"    a{i} := [{i}, {i + 1}]")
+    lines.append("    seed := 0")
+    lines.append("    p : ., mut = &seed")
+    lines.append("    i : ., mut = 0")
+    lines.append("    while i < 1:")
+    lines.append("        arr := [700, 701]")
+    lines.append("        p = &arr[0]")
+    lines.append("        i = i + 1")
+    lines.append("    return *p")
+    assert_rejected("\n".join(lines) + "\n", "error[B11]", "dangling pointer")
+
+
+def test_p11_store_outlives_destination():
+    """P11 存储逃逸的双边寿命判定：值在 store 时还活着（在循环区内），但目标
+    是函数级槽位 ⇒ 循环结束后目标仍持有已死指针。修前只查「值在 store 时已死」，
+    本形态 rc=0；现在必须报 B11 的 destination outlives 分支。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -260,6 +297,36 @@ def test_r6_store_of_live_pointer_stays_clean():
     )
 
 
+def test_r10_store_live_into_function_level_slot():
+    """R10 存储逃逸反向对照：函数级值存入函数级槽位 ⇒ 两者同寿命，不得报。"""
+    assert_accepted(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        *slotp = &seed\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r11_store_loop_value_into_loop_slot():
+    """R11 存储逃逸反向对照：循环内槽位与循环内值同属循环区 ⇒ 不得报。"""
+    assert_accepted(
+        "fn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        seed := 0\n        slot : ., mut = &seed\n        slotp := &slot\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r8_return_inside_loop_of_function_alloc_is_clean():
+    """R8 区域内 return 的反向对照：被返回的是函数级分配 ⇒ 不属任何归还区，
+    循环内 return 仍合法。"""
+    assert_accepted(
+        "fn make() -> &int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        return &seed\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r9_reassign_before_return_clears():
+    """R9 区域内 return 的重赋值清除：先写循环局部指针、再改指活对象后返回
+    ⇒ 不得误报。"""
+    assert_accepted(
+        "fn make() -> &int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
 def test_r7_loop_without_heap_alloc_stays_clean():
     """R7 无堆分配面：循环内只有标量槽（IR_ALLOC 不参与 pts）⇒ 不得报。"""
     assert_accepted(
@@ -276,7 +343,10 @@ if __name__ == "__main__":
         test_p5_alloc_inside_if_inside_loop_escapes_loop,
         test_p6_reassign_to_another_dead_pointer_still_reports,
         test_p7_build_face_is_hard_error_with_zero_artifact,
+        test_p8_return_inside_loop_escapes,
         test_p9_ref_typed_dangling_deref_is_b011,
+        test_p10_more_than_64_allocations_are_tracked,
+        test_p11_store_outlives_destination,
         test_r1_function_level_alloc_may_be_returned,
         test_r2_if_branch_alloc_is_not_released_at_branch_end,
         test_r3_reassign_to_live_pointer_after_loop,
@@ -284,6 +354,10 @@ if __name__ == "__main__":
         test_r5_deref_loaded_int_is_not_pointer_escape,
         test_r6_store_of_live_pointer_stays_clean,
         test_r7_loop_without_heap_alloc_stays_clean,
+        test_r8_return_inside_loop_of_function_alloc_is_clean,
+        test_r9_reassign_before_return_clears,
+        test_r10_store_live_into_function_level_slot,
+        test_r11_store_loop_value_into_loop_slot,
     ]
     failures = 0
     for test in tests:

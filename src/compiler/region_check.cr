@@ -52,6 +52,18 @@ fn rc_releasing_region(alloc_node: int) -> int:
             return sg
         sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
 
+// Whether `anc` is `sg` itself or one of its ancestors. Region membership is
+// read from the SG tree, not inferred from node index ranges: a return inside a
+// nested region is still inside every enclosing releasing region.
+fn rc_sg_is_ancestor(anc: int, sg: int) -> int:
+    cur : ., mut = sg
+    loop:
+        if cur < 0:
+            return 0
+        if cur == anc:
+            return 1
+        cur = cell_load(g_sgs, cur * ESZ_SG + OFF_SG_PARENT)
+
 // Release node for allocation bit bi, mapped through g_pa_alloc_nodes to a DF
 // node. Returns the EXIT ordinal, or -1 when no region releases the allocation.
 fn rc_bit_exit(bi: int) -> int:
@@ -61,26 +73,37 @@ fn rc_bit_exit(bi: int) -> int:
         return -1
     return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
 
-fn rc_bit_dead(bi: int, ni: int) -> int:
-    ex := rc_bit_exit(bi)
-    if ex < 0:
+// Escape judgment for one allocation bit. mode 0 = ordinary use at or after
+// the releasing region's exit. mode 1 = return: a return inside the releasing
+// region also ends the allocation's lifetime for the caller, even though the
+// RETURN node is before EXIT.
+fn rc_bit_escapes(bi: int, ni: int, mode: int) -> int:
+    alloc_node := cell_load(g_pa_alloc_nodes, bi * 8)
+    sg := rc_releasing_region(alloc_node)
+    if sg < 0:
         return 0
-    if ni < ex:
-        return 0
-    return 1
+    ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    if ni >= ex:
+        return 1
+    if mode != 0:
+        ret_sg := subgraph_containing(ni)
+        if rc_sg_is_ancestor(sg, ret_sg) != 0:
+            return 1
+    return 0
 
-// Whether any allocation in pts is dead at node ni. This is a pure check; reassignment clearing is separate.
-fn rc_pts_dead(pts: int, ni: int) -> int:
-    mask : int, mut = 1
-    bi : ., mut = 0
+// Whether any allocation in pts escapes at node ni. Pure set query; the
+// variable-level reassignment clearing lives in rc_var_escapes.
+fn rc_pts_escapes(pts: int, ni: int, mode: int) -> int:
+    if pts < 0:
+        return 0
+    ai : ., mut = 0
     loop:
-        if bi >= 64:
+        if ai >= g_pa_alloc_count:
             break
-        if (pts / mask) % 2 == 1:
-            if rc_bit_dead(bi, ni) != 0:
+        if pa_pts_has(pts, ai) != 0:
+            if rc_bit_escapes(ai, ni, mode) != 0:
                 return 1
-        mask = mask * 2
-        bi = bi + 1
+        ai = ai + 1
     return 0
 
 // Reassignment clearing. pts is a flow-insensitive union. A reassignment in
@@ -93,7 +116,51 @@ fn rc_pts_dead(pts: int, ni: int) -> int:
 // Known gap: a value returned from a call has empty pts because ptr_analysis
 // does not propagate call summaries. Such a value is treated as safe and a true
 // positive is missed. The cause is the flow-insensitive pts model.
-fn rc_reassign_clears(ptr_var: int, lo: int, hi: int) -> int:
+// `use_ni` is the node whose escape query matters, not the write node. A write
+// inside the same releasing region stores a value that is still live at the
+// write but escapes at the later use; checking deadness at the write node
+// would clear that true positive.
+fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) -> int:
+    if mode != 0:
+        // A return inside the releasing region is dominated by the last write
+        // before the return. Keep the last store/phi only; an earlier unsafe
+        // write that is overwritten does not make the returned value escape.
+        last_kind : ., mut = 0
+        last_s1 : ., mut = -1
+        last_s2 : ., mut = -1
+        i : ., mut = lo
+        loop:
+            if i >= hi:
+                break
+            op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
+            d  := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
+            s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
+            s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
+            if op == IR_STORE && s1 == ptr_var:
+                last_kind = 1
+                last_s1 = -1
+                last_s2 = s2
+            if op == IR_PHI && d == ptr_var:
+                last_kind = 2
+                last_s1 = s1
+                last_s2 = s2
+            i = i + 1
+        if last_kind == 1:
+            if last_s2 < 0:
+                return 0
+            if rc_pts_escapes(last_s2, use_ni, mode) != 0:
+                return 0
+            return 1
+        if last_kind == 2:
+            if last_s1 < 0 || last_s2 < 0:
+                return 0
+            if rc_pts_escapes(last_s1, use_ni, mode) != 0:
+                return 0
+            if rc_pts_escapes(last_s2, use_ni, mode) != 0:
+                return 0
+            return 1
+        return 0
+
     saw_safe : int, mut = 0
     i : ., mut = lo
     loop:
@@ -106,15 +173,15 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int) -> int:
         if op == IR_STORE && s1 == ptr_var:
             if s2 < 0:
                 return 0
-            if rc_pts_dead(cell_load(g_pts, s2 * 8), i) != 0:
+            if rc_pts_escapes(s2, use_ni, mode) != 0:
                 return 0
             saw_safe = 1
         if op == IR_PHI && d == ptr_var:
             if s1 < 0 || s2 < 0:
                 return 0
-            if rc_pts_dead(cell_load(g_pts, s1 * 8), i) != 0:
+            if rc_pts_escapes(s1, use_ni, mode) != 0:
                 return 0
-            if rc_pts_dead(cell_load(g_pts, s2 * 8), i) != 0:
+            if rc_pts_escapes(s2, use_ni, mode) != 0:
                 return 0
             saw_safe = 1
         i = i + 1
@@ -123,48 +190,144 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int) -> int:
 // Whether ptr_var holds a dead pointer at node ni. Address types are TYP_PTR and
 // TYP_REF; only the kind is checked. A non-address value is accepted because an
 // integer read through a dereference is ordinary data, not another pointer.
-fn rc_var_dead(ptr_var: int, ni: int) -> int:
+fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
     if ptr_var < 0:
         return 0
     ti := irv_type(ptr_var)
     if ti < 0 || (get_type_kind(ti) != TYP_PTR && get_type_kind(ti) != TYP_REF):
         return 0
-    pts := cell_load(g_pts, ptr_var * 8)
-    if pts == 0:
+    if pa_pts_empty(ptr_var) != 0:
         return 0
-    mask : int, mut = 1
-    bi : ., mut = 0
+    ai : ., mut = 0
     loop:
-        if bi >= 64:
+        if ai >= g_pa_alloc_count:
             break
-        if (pts / mask) % 2 == 1:
-            ex := rc_bit_exit(bi)
-            if ex >= 0 && ni >= ex:
-                if rc_reassign_clears(ptr_var, ex, ni) == 0:
+        if pa_pts_has(ptr_var, ai) != 0:
+            if rc_bit_escapes(ai, ni, mode) != 0:
+                // Ordinary uses clear reassignments after the region exit.
+                // A return inside the region must also inspect writes between
+                // the allocation and the return.
+                lo := rc_bit_exit(ai)
+                if mode != 0 && ni < lo:
+                    lo = cell_load(g_pa_alloc_nodes, ai * 8)
+                    if lo < 0:
+                        lo = 0
+                if lo < 0:
+                    lo = 0
+                if rc_reassign_clears(ptr_var, lo, ni, ni, mode) == 0:
                     return 1
-        mask = mask * 2
-        bi = bi + 1
+        ai = ai + 1
     return 0
+
+fn rc_var_dead(ptr_var: int, ni: int) -> int:
+    return rc_var_escapes(ptr_var, ni, 0)
 
 // A returned pointer points to an allocation in an exited subgraph. The
 // diagnostic is B010 EC_B_ESCAPE. Function-level allocations pass because
 // rc_releasing_region finds no releasing region for them.
 fn rc_return_escape(ni: int, s1: int):
-    if rc_var_dead(s1, ni) != 0:
+    if rc_var_escapes(s1, ni, 1) != 0:
         check_error(EC_B_ESCAPE,
             "region escape: returning pointer to exited subgraph allocation",
             0, 0)
 
-// A stored pointer points to an allocation in an exited subgraph, so the stored
-// reference would dangle. The check reports EC_B_LIFETIME. The previous body
-// discarded the result, so the check could never fire; it is now connected like
-// the DEREF and return checks.
-// ptr_var is unused because the outlives comparison on the destination side is
-// not implemented.
-fn rc_store_escape(ni: int, ptr_var: int, val_var: int):
+// The destination's lifetime. -1 = function-level (never released before
+// return), -2 = unknown, >=0 = the nearest releasing region's EXIT. A non-empty
+// pts set describes a heap destination; otherwise the most recent store to the
+// pointer variable before the use supplies the value whose pointee is the
+// destination. This covers `slotp := &slot` without modelling every stack slot
+// as an allocation. The walk is bounded because a pointer can be defined from
+// itself through a loop phi.
+fn rc_node_exit(node_seq: int) -> int:
+    sg := rc_releasing_region(node_seq)
+    if sg < 0:
+        return -1
+    return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+
+fn rc_last_store_before(ptr_var: int, lo: int, hi: int) -> int:
+    i : ., mut = hi - 1
+    loop:
+        if i < lo:
+            return -1
+        op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
+        if op == IR_STORE && s1 == ptr_var:
+            return i
+        i = i - 1
+    return -1
+
+fn rc_dest_max_exit_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
+    if ptr_var < 0 || depth > 8:
+        return -2
+    if pa_pts_empty(ptr_var) == 0:
+        max_exit : ., mut = -2
+        seen : ., mut = 0
+        ai : ., mut = 0
+        loop:
+            if ai >= g_pa_alloc_count:
+                break
+            if pa_pts_has(ptr_var, ai) != 0:
+                seen = 1
+                ex := rc_bit_exit(ai)
+                if ex < 0:
+                    return -1
+                if ex > max_exit:
+                    max_exit = ex
+            ai = ai + 1
+        if seen == 0:
+            return -2
+        return max_exit
+    si := rc_last_store_before(ptr_var, lo, use_ni)
+    if si >= 0:
+        val := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
+        return rc_dest_max_exit_rec(val, si, lo, depth + 1)
+    prod := cell_load(g_df_var_producer, ptr_var * 8)
+    if prod < 0:
+        return -2
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+    s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+    if op == IR_REF || op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
+        return rc_node_exit(prod)
+    if op == IR_ADDR_INDEX || op == IR_SLICE:
+        return rc_dest_max_exit_rec(s1, use_ni, lo, depth + 1)
+    if op == IR_BINARY && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB):
+        return rc_dest_max_exit_rec(s1, use_ni, lo, depth + 1)
+    return -2
+
+fn rc_dest_max_exit(ptr_var: int, use_ni: int, lo: int) -> int:
+    return rc_dest_max_exit_rec(ptr_var, use_ni, lo, 0)
+
+// Storing a value into a destination that outlives the value creates a
+// dangling reference once the value's region exits, even while the value is
+// still alive at the store node. This is the missing half of the store check.
+fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
+    dest := rc_dest_max_exit(ptr_var, use_ni, lo)
+    if dest == -2:
+        return 0
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            break
+        if pa_pts_has(val_var, ai) != 0:
+            vexit := rc_bit_exit(ai)
+            if vexit >= 0:
+                if dest == -1 || dest > vexit:
+                    return 1
+        ai = ai + 1
+    return 0
+
+// A stored pointer points to an allocation that is already dead or will die
+// before the destination. Both cases report EC_B_LIFETIME; the messages keep
+// the two causes distinguishable.
+fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
     if rc_var_dead(val_var, ni) != 0:
         check_error(EC_B_LIFETIME,
             "store escape: storing pointer to exited subgraph allocation",
+            0, 0)
+    else if rc_store_outlives(ptr_var, val_var, ni, nstart) != 0:
+        check_error(EC_B_LIFETIME,
+            "store escape: destination outlives the stored allocation",
             0, 0)
 
 fn region_check_func(nstart: int, ncount: int):
@@ -193,7 +356,7 @@ fn region_check_func(nstart: int, ncount: int):
 
         // Interprocedural escape through a store.
         if op == IR_STORE_PTR:
-            rc_store_escape(ni, s1, s2)
+            rc_store_escape(ni, s1, s2, nstart)
 
         ni = ni + 1
 
