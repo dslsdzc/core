@@ -102,7 +102,7 @@ jj commit -m "alloc: add blob generator with global and call relocations"
 - Test: `tests/selfhost/test_alloc_simple_parity.py`
 
 **Interfaces:**
-- Produces: `fn alloc_simple(size: int, heap_start: string) -> string` in `src/runtime/alloc_body.cr`.
+- Produces: `fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string` in `src/runtime/alloc_body.cr`.
 - Produces: generator output `src/runtime/alloc_blob.cr` with a valid `ALLOC_BLOB_SIMPLE_OFF`.
 - Consumes: existing globals `g_heap_ptr`, `g_heap_end`; external `heap_expand`.
 
@@ -208,7 +208,7 @@ jj commit -m "alloc: wire the Core simple allocator blob behind --alloc-blob"
 - Test: `tests/selfhost/test_alloc_arena_parity.py`
 
 **Interfaces:**
-- Produces: `fn alloc_arena(size: int, heap_start: string) -> string`.
+- Produces: `fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string`.
 - Produces: `ALLOC_BLOB_ARENA_OFF`.
 - Consumes: all arena globals listed in the design, `arena_grow_pool`.
 

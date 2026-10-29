@@ -43,7 +43,7 @@ g_segment_count : int, mut = 0
 g_arena_pool_limit : int, mut = 1073741824
 g_segment_cap : int, mut = 0
 g_slot_next_cap : int, mut = 0
-g_class_base : string, mut          // int[] — class chunk start offset, [arena * K + class]
+g_class_base : string, mut          // int[] — class chunk absolute address, [arena * K + class]
 g_class_cursor : string, mut        // int[] — class chunk used bytes
 g_class_limit : string, mut         // int[] — class chunk capacity
 g_class_sizes : string, mut         // int[] — 25 class sizes, 1.25x steps

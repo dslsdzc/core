@@ -119,7 +119,7 @@ def compile_source(source: Path) -> bytes:
     asm = X86_64StackAsmGen(module, runtime_only=True).generate()
 
     tmp = BASE / "build" / "alloc_blob"
-    tmp.mkdir(exist_ok=True)
+    tmp.mkdir(parents=True, exist_ok=True)
     asm_path = tmp / "alloc_body.s"
     obj_path = tmp / "alloc_body.o"
     asm_path.write_text(asm + "\n", encoding="utf-8")
@@ -269,10 +269,14 @@ def build_blob(obj_data: bytes):
                 raise SystemExit(
                     f"local .data symbol {sym['name']!r} is not allowed "
                     "in the allocator blob")
-    if elf.has_section(".rela.data") and elf.section(".rela.data")["size"] > 0:
-        raise SystemExit(".rela.data is not supported in the allocator blob")
-    if elf.has_section(".rela.rodata") and elf.section(".rela.rodata")["size"] > 0:
-        raise SystemExit(".rela.rodata is not supported in the allocator blob")
+    for sec in elf.sections:
+        if not sec["name"].startswith(".rela."):
+            continue
+        if sec["name"] == ".rela.text":
+            continue
+        if sec["size"] > 0:
+            raise SystemExit(
+                f"{sec['name']} is not supported in the allocator blob")
 
     # Zero the dead .data copy of the external globals.
     if data:
@@ -302,11 +306,13 @@ def build_blob(obj_data: bytes):
     if "alloc_arena" not in func_offsets:
         raise SystemExit("alloc_arena is missing from the allocator blob")
 
-    sec_base = {
-        text_idx: 0,
-        elf.by_name[".rodata"]: ro_base,
-        elf.by_name[".data"]: data_base,
-    }
+    sec_base = {text_idx: 0}
+    ro_idx = elf.by_name.get(".rodata")
+    if ro_idx is not None:
+        sec_base[ro_idx] = ro_base
+    data_idx = elf.by_name.get(".data")
+    if data_idx is not None:
+        sec_base[data_idx] = data_base
     bss_index = elf.by_name.get(".bss")
     groups = {
         GROUP_SIMPLE: {"globals": [], "calls": []},
@@ -341,6 +347,12 @@ def build_blob(obj_data: bytes):
             add_grouped("calls", name, r_offset)
             struct.pack_into("<i", blob, r_offset, 0)
             continue
+        if sym["shndx"] == elf.by_name.get(".data"):
+            gname = normalize_global(sym["name"])
+            if not sym["name"] or gname not in EXTERNAL_GLOBALS:
+                raise SystemExit(
+                    f"local .data symbol {sym['name']!r} is not allowed "
+                    "in the allocator blob")
         gname = normalize_global(sym["name"])
         if gname in EXTERNAL_GLOBALS:
             if r_type not in (2, 4):

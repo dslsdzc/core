@@ -57,8 +57,8 @@ src/runtime/alloc_blob.cr        （字节 + 符号表 + 重定位表）
 
 新增 `src/runtime/alloc_body.cr`，只包含：
 
-- `fn alloc_simple(size: int, heap_start: string) -> string`
-- `fn alloc_arena(size: int, heap_start: string) -> string`
+- `fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string`
+- `fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string`
 
 约束：
 
@@ -199,9 +199,10 @@ alloc_blob_global_off(i)
 - `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 9184`，
   `ALLOC_BLOB_SIMPLE_OFF = 2409`，`ALLOC_BLOB_ARENA_OFF = 4248`。
 - `src/format/elf/elf.cr`：trampoline、blob 拷贝、分组重定位回填；
-  默认走 blob，`--alloc-legacy` 保留旧手写 body。`has_arena_runtime` 同时
-  检查 `arena_new`/`arena_init` 和 `g_arena_scalars`/`g_arena_slot`/
-  `g_arena_slot_cursor`，避免用户同名函数误选 arena body。
+  默认走 blob，`--alloc-legacy` 保留旧手写 body。`has_arena_runtime` 以
+  arena.cr 内部探针全局（`g_arena_scalars`/`g_arena_slot`/
+  `g_arena_slot_cursor`）为信号：任一存在就选中 arena body，缺任何全局
+  则硬失败。函数名不再作为信号，避免用户同名 `arena_new` 误选。
 - class 元数据保存绝对地址（`slot_base + offset`），不再保存 slot 相对偏移；
   否则 arena 切换 slot 后，旧 class chunk 会在新 slot 上别名。
 - `arena_get_slot` 的 free-list 和 bump 两条路径都会把新 slot 链入当前

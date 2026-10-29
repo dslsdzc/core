@@ -7,6 +7,8 @@ import io
 g_current_arena : int, mut = -1
 g_arena_pool_data : string, mut
 g_arena_free_list : int, mut = -1
+g_arena_slot : string, mut
+g_arena_slot_next : string, mut
 
 fn addr(s: string) -> int:
     v : ., mut = 0
@@ -19,6 +21,12 @@ fn in_range(p: int, start: string, n: int) -> int:
     if p >= s && p < s + n:
         return 1
     return 0
+
+fn slot_of(ai: int) -> int:
+    return cell_load(g_arena_slot, ai * 8)
+
+fn slot_next(sl: int) -> int:
+    return cell_load(g_arena_slot_next, sl * 8)
 
 fn test_class_chunk_slot_alias() -> int:
     arena_init(67108864, 65536)
@@ -49,8 +57,17 @@ fn test_free_list_slot_link() -> int:
     b := arena_new()
     if b < 0:
         return 21
+    b_slot := slot_of(b)
     arena_reset(b)
     p32 := alloc(32)
+    new_slot := slot_of(a)
+    // The popped slot must become the arena's current slot and be linked
+    // ahead of the previous head. On the buggy path this stays at the old
+    // slot, and the next allocation carves over `fill`.
+    if new_slot != b_slot:
+        return 25
+    if slot_next(new_slot) == new_slot:
+        return 26
     next := alloc(56)
     np := addr(next)
     // The buggy path returns the old slot's freed class chunk, which aliases
@@ -61,6 +78,8 @@ fn test_free_list_slot_link() -> int:
         return 23
     if in_range(np, small, 16) != 0:
         return 24
+    if addr(p32) == addr(next):
+        return 27
     arena_reset(a)
     return 0
 

@@ -142,6 +142,29 @@ def main() -> int:
             print(r.stderr)
             return 1
 
+        # One probe global is enough to select the arena body. The missing
+        # globals must then fail the build, not fall back to the simple body.
+        partial2 = root / "partial2.cr"
+        partial2.write_text(
+            "g_arena_scalars : string, mut\n"
+            "fn arena_new() -> int:\n"
+            "    return 0\n"
+            "fn main() -> int:\n"
+            "    p := alloc(16)\n"
+            "    return 0\n",
+            encoding="utf-8",
+        )
+        r = run([str(COREC), "build", str(partial2), "--static",
+                 "-o", str(root / "partial2")])
+        if r.returncode == 0:
+            print("FAIL: a single probe global fell back to the simple body")
+            return 1
+        if "alloc blob: missing global" not in (r.stdout + r.stderr):
+            print("FAIL: single-probe case failed without a diagnostic")
+            print(r.stdout)
+            print(r.stderr)
+            return 1
+
     print("PASS alloc simple ELF")
     return 0
 

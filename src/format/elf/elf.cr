@@ -496,29 +496,24 @@ fn ea_inc(buf: string, pos: int, dst: int) -> int:
 // The arena allocator body is only needed when the program links the arena
 // library. The function-name check alone can collide with user code, so also
 // require the internal globals that the arena body reads.
+fn has_arena_probe_global() -> int:
+    // These three globals are declared by arena.cr, not by the unconditional
+    // runtime registration. Any one of them is enough to treat the program as
+    // arena-aware; the selected arena body then fails hard if the rest of the
+    // arena globals are missing.
+    if find_global_by_name("g_arena_scalars") >= 0:
+        return 1
+    if find_global_by_name("g_arena_slot") >= 0:
+        return 1
+    if find_global_by_name("g_arena_slot_cursor") >= 0:
+        return 1
+    return 0
+
 fn has_arena_runtime() -> int:
-    found_fn := 0
-    i : ., mut = 0
-    loop:
-        if i >= g_ir_func_count:
-            break
-        ni := cell_load(g_ir_func_name_idx, i * 8)
-        if str_eq(istr_get(ni), "arena_new") != 0:
-            found_fn = 1
-            break
-        if str_eq(istr_get(ni), "arena_init") != 0:
-            found_fn = 1
-            break
-        i = i + 1
-    if found_fn == 0:
-        return 0
-    if find_global_by_name("g_arena_scalars") < 0:
-        return 0
-    if find_global_by_name("g_arena_slot") < 0:
-        return 0
-    if find_global_by_name("g_arena_slot_cursor") < 0:
-        return 0
-    return 1
+    // Function names alone are not a signal: user code can define arena_new
+    // or arena_init without the runtime. The probe globals are declared by
+    // arena.cr and are not part of the unconditional runtime registration.
+    return has_arena_probe_global()
 
 fn alloc_blob_group() -> int:
     if has_arena_runtime() != 0:
@@ -544,7 +539,9 @@ fn find_alloc_blob_func(name: string) -> int:
             p := cell_load(g_x86_func_cp, i * 8)
             if p > 0:
                 return p
-            break
+            // The name exists but has no emitted code. Falling back to the
+            // Phase-2 estimated offset would call an unrelated address.
+            return -1
         i = i + 1
     i = 0
     loop:

@@ -256,7 +256,7 @@ fn corec_main() -> int:
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
-    cli_flag_bool_debug("alloc-blob", "", "Debug: register the Core allocator blob globals")
+    cli_flag_bool_debug("alloc-blob", "", "Debug: accepted for compatibility (blob is the default)")
     cli_flag_bool_debug("alloc-legacy", "", "Debug: register globals for the legacy allocator")
     cli_flag_bool_debug("inject-cir-skip-journal", "", "Debug hook: skip .cir journal replay at load")
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")

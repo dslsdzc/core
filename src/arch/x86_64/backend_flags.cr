@@ -12,7 +12,7 @@ fn register_backend_flags():
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0)")
     cli_flag_bool("big-int", "", "Arbitrary precision int semantics for user programs")
     cli_flag_bool("raw-int", "", "Force raw machine-int semantics (compiler/self-host builds)")
-    cli_flag_bool_debug("alloc-blob", "", "Debug: use the Core allocator blob")
+    cli_flag_bool_debug("alloc-blob", "", "Debug: accepted for compatibility (blob is the default)")
     cli_flag_bool_debug("alloc-legacy", "", "Debug: use the legacy hand-written allocator")
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)")
     cli_flag_debug("hit-events-file", "", "Debug: inject text event stream file")
