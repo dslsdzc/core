@@ -11,6 +11,8 @@ COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
 
 VALID = r"""
+import rawbuf
+
 fn main() -> int:
     buf := alloc(32)
     cell_store(buf, 0, 42)
@@ -22,8 +24,8 @@ fn main() -> int:
     if cell_load(buf, 8) != x:
         return 2
 
-    store8(buf, 16, 65)
-    if load8(buf, 16) != 65:
+    rawWrite8(buf, 16, 65)
+    if rawRead8(buf, 16) != 65:
         return 3
 
     pid := syscall3(39, 0, 0, 0)
