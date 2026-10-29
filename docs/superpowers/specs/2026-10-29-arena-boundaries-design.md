@@ -227,7 +227,8 @@ class/slot 规则：
 ### ③ 解释器 run 路径
 
 已完成。实现提交：`31a27491f0ef`；后续修正：`194b9523fc67`（dex/int
-混合运算按操作数分流，`arena_alloc` 清零改走 `_memzero` 的编译循环）。
+混合运算按操作数分流，`arena_alloc` 清零改走 `_memzero` 的编译循环）和
+`fbb1e97c7c91`（dex 移位、`_memzero` 作用域、class-25 清零点测试）。
 `arena_alloc`、`IR_ARENA_NEW`/`IR_ARENA_RESET`、`alloc`/cell/pointer builtin
 和解释器启动时的 `g_current_arena` 初始化已接线；
 `tests/selfhost/test_arena_interp.py` 覆盖 arena 套件、2MB/100MB、清零复用、
