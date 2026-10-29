@@ -511,9 +511,6 @@ fn corec_main() -> int:
     // state here, before ir_gen_globals, because the hidden channels depend on
     // variable ordering.
     optrep_begin()
-    g_ccr_emit_alloc_blob = 1
-    if cli_has("alloc-legacy") != 0:
-        g_ccr_emit_alloc_blob = 0
     ir_gen_globals()
     // Incremental cache: ensure cache directory exists
     make_cir_cache_dir()
@@ -775,9 +772,7 @@ fn corec_main() -> int:
     // compiler/self-host artifacts keep raw machine ints.
     if g_ccr_emit_raw_int != 0:
         cmd2 = cmd2 + " --raw-int"
-    if g_ccr_emit_alloc_blob != 0:
-        cmd2 = cmd2 + " --alloc-blob"
-    else:
+    if cli_has("alloc-legacy") != 0:
         cmd2 = cmd2 + " --alloc-legacy"
     self_path := get_arg(0)
     sl2 := str_len(self_path)

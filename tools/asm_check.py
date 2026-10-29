@@ -57,7 +57,7 @@ def check_asm(path):
         if 'pop rbp' in line_s:
             f['has_pop'] = True
         # `leave` is `mov rsp, rbp; pop rbp` in one instruction.
-        if re.search(r'\bleave\b', line_s):
+        if re.search(r'^\s*leave\b', line_s):
             f['has_add'] = f['sub_rsp']
             f['has_pop'] = True
 

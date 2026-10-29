@@ -185,41 +185,79 @@ alloc_blob_global_off(i)
 
 - `src/runtime/alloc_body.cr`：`alloc_simple`、`alloc_global`、`alloc_arena`、
   `arena_get_slot`、`arena_slot_base`，全部 raw Core，不调用 `alloc`。
+- ABI 从两个参数扩展为三个：`rdi = size`、`rsi = heap_start`、
+  `rdx = heap_end`。trampoline 先 `movabs rsi, heap_start`、再
+  `movabs rdx, bss_va + 1GiB`，然后跳到选中的 body。这样初始堆不会越过
+  数据段 `PT_LOAD` 的 `P_MEMSZ`。
 - `tools/gen_alloc_blob.py`：Python bootstrap → `.o` → 字节 + 外部全局/调用
-  重定位表；拒绝未授权 `.bss` 全局、未授权外部调用、绝对/TLS/GOT 重定位。
-- `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 8816`，
-  `ALLOC_BLOB_SIMPLE_OFF = 2339`，`ALLOC_BLOB_ARENA_OFF = 4164`。
-- `src/format/elf/elf.cr`：16B trampoline、blob 拷贝、全局/调用重定位回填；
-  默认走 blob，`--alloc-legacy` 保留旧手写 body。
+  重定位表；拒绝未授权顶层全局、带初值的 allocator 全局、本地 `.data`
+  符号、未授权外部调用、绝对/TLS/GOT 重定位和非空 `.rela.data`/
+  `.rela.rodata`。生成器支持 `--check`，CI 用它防止 `alloc_blob.cr` 过期。
+- 重定位按入口分组：`alloc_simple` 可达的进 simple 组，`alloc_arena` 可达
+  的进 arena 组，共享 helper 同时进入两组。`elf_gen` 只回填选中组；选中
+  组里缺全局或调用时设置错误并让 `elf_gen` 返回 -1，不再打印后继续。
+- `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 9184`，
+  `ALLOC_BLOB_SIMPLE_OFF = 2409`，`ALLOC_BLOB_ARENA_OFF = 4248`。
+- `src/format/elf/elf.cr`：trampoline、blob 拷贝、分组重定位回填；
+  默认走 blob，`--alloc-legacy` 保留旧手写 body。`has_arena_runtime` 同时
+  检查 `arena_new`/`arena_init` 和 `g_arena_scalars`/`g_arena_slot`/
+  `g_arena_slot_cursor`，避免用户同名函数误选 arena body。
+- class 元数据保存绝对地址（`slot_base + offset`），不再保存 slot 相对偏移；
+  否则 arena 切换 slot 后，旧 class chunk 会在新 slot 上别名。
+- `arena_get_slot` 的 free-list 和 bump 两条路径都会把新 slot 链入当前
+  arena、更新 `g_arena_slot[ai]` 并清零 cursor。
+- static arena 的 `>1MB` 请求在 static 分支内按 `cur + aligned > limit`
+  trap；只有 dynamic arena 的 `>1MB` 请求才回退到全局堆。
 - `globals_size` 改为按正 `gv` 条目计数，修复重复 `gv` 时 `heap_start` 落进
   globals 区的重叠。
 - `emit_heap_expand` 的堆从 1GB 提升到 1.5GB，覆盖 arena 的 1GB 分配。
 - 失败见证仍写 `g_alloc_fail_*`；失败路径用 `syscall3(60,132,0,0)` 退出，
-  shell 退出码为 132。
+  shell 退出码为 132。legacy body 仍用 `ud2`，Python 的 subprocess 看到
+  `-4`，两者都按 trap 处理。
 
 验证：
 
 | 测试 | 结果 |
 |---|---|
-| `test_alloc_blob_relocs.py` | PASS |
+| `tools/gen_alloc_blob.py --check` | PASS |
+| `test_alloc_blob_relocs.py` | PASS（分组、拒绝、stale check） |
 | `test_alloc_simple_parity.py` | PASS（21 个尺寸） |
-| `test_alloc_simple_elf.py` | PASS（legacy 与 blob 两条 ELF） |
-| `test_alloc_arena_parity.py` | PASS（arena_test / arena_boundary_test） |
-| `test_alloc_llvm_parity.py` | PASS（203 行随机/边界序列 + 结构检查） |
+| `test_alloc_simple_elf.py` | PASS（legacy/blob、同名函数、缺全局 fail-closed） |
+| `test_alloc_arena_parity.py` | PASS（arena_test / boundary / alloc_regress / 3 个 trap） |
+| `test_alloc_llvm_parity.py` | PASS（203 行 × 12 的真实序列 + 结构检查） |
 | `corec selftest-stub-regalloc` | 14/14 |
 | `corec check src/compiler` | ok |
-| canary | 5/5（ELF `d19de1f4…`，61622 B） |
+| canary | 5/5（ELF `8fba3fe5…`，61622 B） |
 
 已知偏差：
 
-1. 大于 1MB 的 arena 对象走全局堆，不使用专用 mmap extent；`arena_reset` 不会
-   `munmap` 这些对象，也不产生 class `-2` 的 mmap 失败见证。原因是核心 body
-   不能通过 `syscall3`/`syscall4` 发六参数 `mmap`。后续加六参数 syscall 或
-   raw helper 后补齐。
-2. clang 差分覆盖 simple/global 路径；arena class/slot 路径仍以旧手写 body
-   作为行为参考（Task 4），独立 clang arena 模型未实现。
+1. 大于 1MB 的 dynamic arena 对象走全局堆，不使用专用 mmap extent；
+   `arena_reset` 不会 `munmap` 这些对象，也不产生 class `-2` 的 mmap 失败
+   见证。原因是核心 body 不能通过 `syscall3`/`syscall4` 发六参数 `mmap`。
+   后续加六参数 syscall 或 raw helper 后补齐。
+2. clang 差分覆盖 simple/global 路径；arena class/slot 路径以旧手写 body
+   作为行为参考，并用 `tests/suite/arena_alloc_regress.cr` 锁住 slot 别名
+   和 free-list 链接。独立 clang arena 模型未实现。
 3. 旧 `emit_alloc_body_legacy` / `emit_alloc_body_simple` 仍保留，仅
    `--alloc-legacy` 可达。
+4. `g_alloc_fail_*` 四条全局现在对每条程序登记，保证新旧 allocator 的失败
+   见证都有真实 BSS 槽。四条 `.ccr` 因此比上一版各少 60B；这是显式裁定，
+   不是语料漂移。未使用的 `g_alloc_home_idx` 不再登记。
+5. `--alloc-blob` 仍是接受的调试旗标，但默认已经是 blob；有效开关是
+   `--alloc-legacy`。
+
+## 风险
+
+1. 受限 Core 子集可能不支持全部语法。先做 simple body，确认 bootstrap 能编译
+   再扩到 arena。
+2. Core 循环清零大块内存比 `rep stosb` 慢。大块已有 `madvise` 快路径，
+   失败时回退到字节循环；性能优化另开任务。
+3. 外部全局名必须和 `g_ir_globals` 完全一致。生成器和 `elf_gen` 在名字
+   找不到时失败，不能静默跳过。
+4. Python bootstrap 的栈对齐不保证 16 字节。body 不调用 SSE 代码；如果以后
+   调用 C 参考或 `memcpy`，需要先修对齐。
+5. canary 会因代码布局变化再次位移；只按编译器身份位移重新锁定。`.ccr`
+   的变化必须能归因到 allocator 元数据，不能混入无关语料变化。
 
 ## 风险
 

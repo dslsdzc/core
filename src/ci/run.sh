@@ -379,8 +379,14 @@ case "$CI_JOB_NAME" in
     # 负控 = 6 类仍拒（string/bool/array/slice/ref_type/struct，check 面 rc=1 + TF07 + 文案含 or pointer）+ 既有 dex/int 仍受；
     # **负控只写 check 面**：TF07 是 build-scope 豁免码 ⇒ 「build 面零产物」在本次恒假（豁免未撤，撤条归 (甲) 刀 4）。
     python3 tests/selfhost/test_raw_int_ptr.py
-    # Allocator blob: clang reference parity, frame balance, recursive-alloc
-    # guard, and ELF trampoline shape. Skips only when clang is absent.
+    # Allocator blob: generator relocations, simple/arena parity, ELF wiring,
+    # trap paths, stale-blob check, and clang reference parity. The clang-based
+    # tests skip only when clang is absent.
+    python3 tools/gen_alloc_blob.py --check
+    python3 tests/selfhost/test_alloc_blob_relocs.py
+    python3 tests/selfhost/test_alloc_simple_parity.py
+    python3 tests/selfhost/test_alloc_simple_elf.py
+    python3 tests/selfhost/test_alloc_arena_parity.py
     python3 tests/selfhost/test_alloc_llvm_parity.py
     ;;
 

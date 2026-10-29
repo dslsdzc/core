@@ -494,19 +494,35 @@ fn ea_inc(buf: string, pos: int, dst: int) -> int:
 
 
 // The arena allocator body is only needed when the program links the arena
-// library. g_current_arena is registered by the static runtime even for
-// programs that never use arenas, so registration alone is not a signal.
+// library. The function-name check alone can collide with user code, so also
+// require the internal globals that the arena body reads.
 fn has_arena_runtime() -> int:
+    found_fn := 0
     i : ., mut = 0
     loop:
         if i >= g_ir_func_count:
             break
         ni := cell_load(g_ir_func_name_idx, i * 8)
         if str_eq(istr_get(ni), "arena_new") != 0:
-            return 1
+            found_fn = 1
+            break
         if str_eq(istr_get(ni), "arena_init") != 0:
-            return 1
+            found_fn = 1
+            break
         i = i + 1
+    if found_fn == 0:
+        return 0
+    if find_global_by_name("g_arena_scalars") < 0:
+        return 0
+    if find_global_by_name("g_arena_slot") < 0:
+        return 0
+    if find_global_by_name("g_arena_slot_cursor") < 0:
+        return 0
+    return 1
+
+fn alloc_blob_group() -> int:
+    if has_arena_runtime() != 0:
+        return 1
     return 0
 
 fn find_global_by_name(name: string) -> int:
@@ -528,7 +544,7 @@ fn find_alloc_blob_func(name: string) -> int:
             p := cell_load(g_x86_func_cp, i * 8)
             if p > 0:
                 return p
-            return -1
+            break
         i = i + 1
     i = 0
     loop:
@@ -539,18 +555,26 @@ fn find_alloc_blob_func(name: string) -> int:
         i = i + 1
     return -1
 
-fn patch_alloc_blob_calls(buf: string):
+fn patch_alloc_blob_calls(buf: string, heap_expand_start: int):
     if g_alloc_blob_start < 0:
         return
+    group := alloc_blob_group()
     i : ., mut = 0
     loop:
-        if i >= alloc_blob_call_count():
+        if i >= alloc_blob_call_count(group):
             break
-        name := alloc_blob_call_name(i)
-        off := alloc_blob_call_off(i)
-        target := find_alloc_blob_func(name)
+        name := alloc_blob_call_name(group, i)
+        off := alloc_blob_call_off(group, i)
+        target : ., mut = -1
+        if str_eq(name, "heap_expand") != 0:
+            // heap_expand is emitted by this backend, not by user code. A
+            // user function with the same name must not capture the blob call.
+            target = heap_expand_start
+        else:
+            target = find_alloc_blob_func(name)
         if target < 0:
-            println("alloc blob: unresolved call " + name)
+            println("error: alloc blob: unresolved call " + name)
+            g_alloc_blob_error = 1
         else:
             w32(buf, g_alloc_blob_start + off, target - (g_alloc_blob_start + off + 4))
         i = i + 1
@@ -558,15 +582,17 @@ fn patch_alloc_blob_calls(buf: string):
 fn patch_alloc_blob_globals(buf: string, bss_va: int):
     if g_alloc_blob_start < 0:
         return
+    group := alloc_blob_group()
     i : ., mut = 0
     loop:
-        if i >= alloc_blob_global_count():
+        if i >= alloc_blob_global_count(group):
             break
-        name := alloc_blob_global_name(i)
-        off := alloc_blob_global_off(i)
+        name := alloc_blob_global_name(group, i)
+        off := alloc_blob_global_off(group, i)
         gv := find_global_by_name(name)
         if gv < 0:
-            println("alloc blob: missing global " + name)
+            println("error: alloc blob: missing global " + name)
+            g_alloc_blob_error = 1
         else:
             goff0 := cell_load(g_x86_global_off, gv * 8)
             // target is a virtual address; the call site is a buffer offset.
@@ -578,9 +604,11 @@ fn patch_alloc_blob_globals(buf: string, bss_va: int):
 fn emit_alloc_blob_body(buf: string, pos: int, bss_va: int,
                         globals_size: int, body_off: int) -> int:
     cp : ., mut = 0
+    rsi_pos := cp
     cp = cp + ea_mov_imm64(buf, pos + cp, 6, 0)
-    imm_pos := pos + 2
-    jmp_pos := pos + cp
+    rdx_pos := cp
+    cp = cp + ea_mov_imm64(buf, pos + cp, 2, 0)
+    jmp_pos := cp
     cp = cp + ea_jmp32(buf, pos + cp, 0)
     blob_start := pos + ((cp + 15) / 16) * 16
     blob := alloc_blob_bytes()
@@ -591,9 +619,12 @@ fn emit_alloc_blob_body(buf: string, pos: int, bss_va: int,
         store8(buf, blob_start + bi, load8(blob, bi))
         bi = bi + 1
     body_start := blob_start + body_off
-    w32(buf, jmp_pos + 1, body_start - (jmp_pos + 5))
+    w32(buf, pos + jmp_pos + 1, body_start - (pos + jmp_pos + 5))
     heap_start_va := bss_va + 16 + globals_size
-    cell_store(buf, imm_pos, heap_start_va)
+    // The writable data segment is mapped for 1 GiB starting at bss_va.
+    heap_end_va := bss_va + 1073741824
+    cell_store(buf, pos + rsi_pos + 2, heap_start_va)
+    cell_store(buf, pos + rdx_pos + 2, heap_end_va)
     g_alloc_blob_start = blob_start
     return (blob_start - pos) + ALLOC_BLOB_SIZE
 
@@ -604,6 +635,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
             body_off = ALLOC_BLOB_ARENA_OFF
         if body_off >= 0:
             return emit_alloc_blob_body(buf, pos, bss_va, globals_size, body_off)
+        println("error: alloc blob: selected body is missing")
+        g_alloc_blob_error = 1
     return emit_alloc_body_legacy(buf, pos, bss_va, globals_size)
 
 // Emit arena-aware dual-path allocator function body
@@ -2470,7 +2503,9 @@ fn patch_forward_calls(buf: string, cp: int):
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int:
     g_x86_big_exit_call_pos = -1
+    g_heap_expand_call_pos = -1
     g_alloc_blob_start = -1
+    g_alloc_blob_error = 0
     // Mark global variables for RIP-relative addressing
     gi : ., mut = 0
     loop:
@@ -3343,7 +3378,7 @@ fn elf_gen(buf: string) -> int:
 
     // The re-emitted allocator body wrote fresh call placeholders.
     patch_forward_calls(buf, cp)
-    patch_alloc_blob_calls(buf)
+    patch_alloc_blob_calls(buf, heap_expand_start)
 
     // Patch call to heap_expand inside the legacy alloc body. The blob body
     // resolves its calls through patch_alloc_blob_calls above.
@@ -3495,4 +3530,6 @@ fn elf_gen(buf: string) -> int:
     cell_store(buf, data_phdr_base + P_VADDR, bss_va)
     cell_store(buf, data_phdr_base + P_PADDR, bss_va)
     g_asm_code_size = total_sz
+    if g_alloc_blob_error != 0:
+        return -1
     return total_sz

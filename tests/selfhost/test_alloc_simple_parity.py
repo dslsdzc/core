@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,9 @@ CLANG = "clang"
 
 
 def main() -> int:
+    if shutil.which(CLANG) is None:
+        print("SKIP alloc simple parity: clang not installed")
+        return 0
     for path in (GEN, BODY, STATE, REF):
         if not path.exists():
             print(f"FAIL: missing {path}")
@@ -55,6 +59,15 @@ def main() -> int:
             return 1
         if data.get("arena_off", -1) < 0:
             print(f"FAIL: arena body missing from the generated blob: {data}")
+            return 1
+        if "g_heap_ptr" not in data.get("simple_globals", []):
+            print(f"FAIL: simple group misses g_heap_ptr: {data}")
+            return 1
+        if "g_arena_scalars" in data.get("simple_globals", []):
+            print(f"FAIL: simple group contains an arena global: {data}")
+            return 1
+        if "g_arena_scalars" not in data.get("arena_globals", []):
+            print(f"FAIL: arena group misses g_arena_scalars: {data}")
             return 1
 
         asm = BASE / "build" / "alloc_blob" / "alloc_body.s"

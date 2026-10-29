@@ -12,29 +12,32 @@
 extern char *_g_g_heap_ptr;
 extern char *_g_g_heap_end;
 extern long heap_expand(void);
-extern char *alloc_simple(long size, char *heap_start);
+extern char *alloc_simple(long size, char *heap_start, char *heap_end);
 
 static char *ref_alloc(long size, char *heap_start) {
     if (size < 0 || size > MAX_REQUEST)
         return NULL;
     long aligned = (size + 15) / 8 * 8;
+    long need = aligned;
+    if (aligned >= 4096)
+        need = ((aligned + 4095) / 4096) * 4096;
     char *hp = _g_g_heap_ptr;
     if (hp == NULL) {
         hp = heap_start;
         _g_g_heap_ptr = hp;
         _g_g_heap_end = heap_start + HEAP_SIZE;
     }
-    char *newp = hp + aligned;
+    char *newp = hp + need;
     if (newp > _g_g_heap_end) {
         if (heap_expand() != 0)
             return NULL;
         hp = _g_g_heap_ptr;
-        newp = hp + aligned;
+        newp = hp + need;
         if (newp > _g_g_heap_end)
             return NULL;
     }
     _g_g_heap_ptr = newp;
-    memset(hp, 0, (size_t)aligned);
+    memset(hp, 0, (size_t)need);
     *(long *)hp = size;
     return hp + 8;
 }
@@ -42,7 +45,7 @@ static char *ref_alloc(long size, char *heap_start) {
 static int check_one(long size, char *heap_start) {
     _g_g_heap_ptr = NULL;
     _g_g_heap_end = NULL;
-    char *a = alloc_simple(size, heap_start);
+    char *a = alloc_simple(size, heap_start, heap_start + HEAP_SIZE);
     long a_off = a ? (long)(a - heap_start) : -1;
     long a_hdr = a ? *(long *)(a - 8) : -1;
     unsigned char a_first = (a && size > 0) ? (unsigned char)a[0] : 0;

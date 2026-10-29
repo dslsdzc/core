@@ -59,7 +59,8 @@ fn main() -> int:
     if r != 0:
         return r
 
-    // Three dedicated mmap extents in one arena.
+    // Three large objects in one arena. The blob allocator routes these to
+    // the global heap; the legacy body uses dedicated mmap extents.
     big := arena_new()
     p0 := alloc(104857600)
     p1 := alloc(104857600)

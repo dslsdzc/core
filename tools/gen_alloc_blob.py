@@ -2,10 +2,15 @@
 """Generate the raw allocator blob from a restricted Core source.
 
 The allocator body is compiled with the Python bootstrap in raw-int mode.
-Internal PC-relative relocations are resolved here.  References to the
+Internal PC-relative relocations are resolved here. References to the
 allocator's BSS globals and calls to heap_expand/arena_grow_pool are emitted
 as relocation tables; corearch fills them in after the final BSS layout is
 known.
+
+Relocations are grouped by the entry body that can reach them. A program
+without arena imports patches only the simple group, so the arena-only globals
+do not have to exist. A relocation that is unreachable from either entry is a
+generator error.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ from corec.frontend.type_checker import TypeChecker
 from corec.ir.symbol_table import SymbolKind
 from corec.syntax.ast import BaseType, LetDecl
 
-# Globals the body may read or write.  The blob does not carry .bss; every
+# Globals the body may read or write. The blob does not carry .bss; every
 # symbol in this list is patched to the target program's BSS slot.
 EXTERNAL_GLOBALS = {
     "g_heap_ptr",
@@ -49,20 +54,19 @@ EXTERNAL_GLOBALS = {
     "g_class_cursor",
     "g_class_limit",
     "g_class_lookup",
-    "g_class_sizes",
-    "g_arena_large_head",
-    "g_arena_large_count",
     "g_alloc_fail_request",
     "g_alloc_fail_class",
     "g_alloc_fail_cursor",
     "g_alloc_fail_limit",
-    "g_alloc_home_idx",
 }
 
 EXTERNAL_CALLS = {
     "heap_expand",
     "arena_grow_pool",
 }
+
+GROUP_SIMPLE = 0
+GROUP_ARENA = 1
 
 CELL_HELPERS = """
 fn cell_load(buf: string, pos: int) -> int:
@@ -87,11 +91,15 @@ def compile_source(source: Path) -> bytes:
     src = CELL_HELPERS + source.read_text(encoding="utf-8")
     ast = Parser(Lexer(src).tokenize()).parse_compilation_unit()
     for decl in ast.declarations:
-        if isinstance(decl, LetDecl) and not decl.values:
+        if isinstance(decl, LetDecl):
             for name in decl.names:
                 if name not in EXTERNAL_GLOBALS:
                     raise SystemExit(
                         f"external global {name!r} is not in the allocator allowlist")
+            if decl.values:
+                raise SystemExit(
+                    "allocator globals must be zero-initialized; "
+                    f"{decl.names[0]!r} has an initializer")
     resolver = NameResolver()
     original_declare = resolver._declare_builtins
 
@@ -147,10 +155,15 @@ class Elf:
             s["name"] = strtab[s["name_off"]:end].decode("ascii")
         self.by_name = {s["name"]: i for i, s in enumerate(self.sections)}
 
+    def has_section(self, name: str) -> bool:
+        return name in self.by_name
+
     def section(self, name: str) -> dict:
         return self.sections[self.by_name[name]]
 
     def section_data(self, name: str) -> bytes:
+        if name not in self.by_name:
+            return b""
         s = self.section(name)
         return self.data[s["offset"]:s["offset"] + s["size"]]
 
@@ -169,6 +182,8 @@ class Elf:
         return out
 
     def rela(self, name: str):
+        if name not in self.by_name:
+            return []
         sec = self.section(name)
         out = []
         for off in range(sec["offset"], sec["offset"] + sec["size"], 24):
@@ -187,6 +202,43 @@ def normalize_global(name: str) -> str:
     return name
 
 
+def function_symbols(elf: Elf, syms: list[dict]) -> list[tuple[int, str]]:
+    text_idx = elf.by_name[".text"]
+    out = []
+    for sym in syms:
+        if sym["shndx"] != text_idx or not sym["name"]:
+            continue
+        if sym["name"].startswith("_g_"):
+            continue
+        if (sym["info"] >> 4) != 1:  # STB_GLOBAL
+            continue
+        out.append((sym["value"], sym["name"]))
+    out.sort()
+    return out
+
+
+def enclosing_function(funcs: list[tuple[int, str]], off: int) -> str:
+    found = ""
+    for value, name in funcs:
+        if value <= off:
+            found = name
+        else:
+            break
+    return found
+
+
+def reachable_functions(edges: dict[str, set[str]], start: str) -> set[str]:
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        name = stack.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        stack.extend(edges.get(name, ()))
+    return seen
+
+
 def build_blob(obj_data: bytes):
     elf = Elf(obj_data)
     text = elf.section_data(".text")
@@ -202,16 +254,82 @@ def build_blob(obj_data: bytes):
     blob[data_base:data_base + len(data)] = data
 
     syms = elf.symbols()
+    text_idx = elf.by_name[".text"]
+    funcs = function_symbols(elf, syms)
+    func_offsets = {name: value for value, name in funcs}
+
+    # The bootstrap places zero-initialized globals in .data. Every symbol in
+    # that section must be an allowlisted external global whose real storage
+    # is the target program's BSS. Any local .data object would be copied into
+    # the read-only code segment and patched by ignored .rela.data entries.
+    for sym in syms:
+        if sym["shndx"] == elf.by_name.get(".data") and sym["name"]:
+            gname = normalize_global(sym["name"])
+            if gname not in EXTERNAL_GLOBALS:
+                raise SystemExit(
+                    f"local .data symbol {sym['name']!r} is not allowed "
+                    "in the allocator blob")
+    if elf.has_section(".rela.data") and elf.section(".rela.data")["size"] > 0:
+        raise SystemExit(".rela.data is not supported in the allocator blob")
+    if elf.has_section(".rela.rodata") and elf.section(".rela.rodata")["size"] > 0:
+        raise SystemExit(".rela.rodata is not supported in the allocator blob")
+
+    # Zero the dead .data copy of the external globals.
+    if data:
+        blob[data_base:data_base + len(data)] = bytes(len(data))
+
+    relocs = elf.rela(".rela.text")
+
+    # Call graph over internal .text symbols, used to decide which entry body
+    # reaches each relocation.
+    edges: dict[str, set[str]] = {}
+    for r_offset, sym_idx, _r_type, _addend in relocs:
+        sym = syms[sym_idx]
+        if sym["shndx"] != text_idx:
+            continue
+        callee = sym["name"]
+        if callee not in func_offsets:
+            continue
+        caller = enclosing_function(funcs, r_offset)
+        if not caller:
+            raise SystemExit(f"relocation at {r_offset:#x} has no enclosing function")
+        edges.setdefault(caller, set()).add(callee)
+
+    simple_reach = reachable_functions(edges, "alloc_simple")
+    arena_reach = reachable_functions(edges, "alloc_arena")
+    if "alloc_simple" not in func_offsets:
+        raise SystemExit("alloc_simple is missing from the allocator blob")
+    if "alloc_arena" not in func_offsets:
+        raise SystemExit("alloc_arena is missing from the allocator blob")
+
     sec_base = {
-        elf.by_name[".text"]: 0,
+        text_idx: 0,
         elf.by_name[".rodata"]: ro_base,
         elf.by_name[".data"]: data_base,
     }
     bss_index = elf.by_name.get(".bss")
-    calls = []
-    globals_ = []
+    groups = {
+        GROUP_SIMPLE: {"globals": [], "calls": []},
+        GROUP_ARENA: {"globals": [], "calls": []},
+    }
 
-    for r_offset, sym_idx, r_type, addend in elf.rela(".rela.text"):
+    def add_grouped(kind: str, name: str, off: int):
+        caller = enclosing_function(funcs, off)
+        if not caller:
+            raise SystemExit(f"relocation at {off:#x} has no enclosing function")
+        hit = False
+        if caller in simple_reach:
+            groups[GROUP_SIMPLE][kind].append({"name": name, "off": off})
+            hit = True
+        if caller in arena_reach:
+            groups[GROUP_ARENA][kind].append({"name": name, "off": off})
+            hit = True
+        if not hit:
+            raise SystemExit(
+                f"relocation {name!r} at {off:#x} in {caller} is unreachable "
+                "from alloc_simple and alloc_arena")
+
+    for r_offset, sym_idx, r_type, addend in relocs:
         sym = syms[sym_idx]
         if sym["shndx"] == 0:
             name = sym["name"]
@@ -220,17 +338,14 @@ def build_blob(obj_data: bytes):
                     f"external call {name!r} is not in the allocator allowlist")
             if r_type not in (2, 4):
                 raise SystemExit(f"unexpected call relocation type {r_type}")
-            calls.append({"name": name, "off": r_offset})
+            add_grouped("calls", name, r_offset)
             struct.pack_into("<i", blob, r_offset, 0)
             continue
         gname = normalize_global(sym["name"])
         if gname in EXTERNAL_GLOBALS:
-            # The bootstrap may place a zero-initialized global in .data.
-            # Its blob copy is dead; the relocation is patched to the target
-            # program's BSS slot.
             if r_type not in (2, 4):
                 raise SystemExit(f"unexpected global relocation type {r_type}")
-            globals_.append({"name": gname, "off": r_offset})
+            add_grouped("globals", gname, r_offset)
             struct.pack_into("<i", blob, r_offset, 0)
             continue
         if bss_index is not None and sym["shndx"] == bss_index:
@@ -251,16 +366,37 @@ def build_blob(obj_data: bytes):
         else:
             raise SystemExit(f"unknown relocation type {r_type} at {r_offset:#x}")
 
-    funcs = {}
-    for sym in syms:
-        if sym["shndx"] == elf.by_name[".text"] and sym["name"]:
-            funcs[sym["name"]] = sym["value"]
-
-    return bytes(blob), funcs, calls, globals_
+    return bytes(blob), func_offsets, groups
 
 
-def emit_core(blob: bytes, funcs: dict[str, int],
-              calls: list[dict], globals_: list[dict], source: Path) -> str:
+def emit_reloc_table(lines: list[str], kind: str, groups: dict) -> None:
+    key = kind + "s"
+    lines.append(f"fn alloc_blob_{kind}_count(group: int) -> int:")
+    for g in (GROUP_SIMPLE, GROUP_ARENA):
+        lines.append(f"    if group == {g}:")
+        lines.append(f"        return {len(groups[g][key])}")
+    lines.append("    return 0")
+    lines.append("")
+    lines.append(f"fn alloc_blob_{kind}_name(group: int, i: int) -> string:")
+    for g in (GROUP_SIMPLE, GROUP_ARENA):
+        lines.append(f"    if group == {g}:")
+        for i, entry in enumerate(groups[g][key]):
+            lines.append(f"        if i == {i}:")
+            lines.append(f'            return "{entry["name"]}"')
+    lines.append('    return ""')
+    lines.append("")
+    lines.append(f"fn alloc_blob_{kind}_off(group: int, i: int) -> int:")
+    for g in (GROUP_SIMPLE, GROUP_ARENA):
+        lines.append(f"    if group == {g}:")
+        for i, entry in enumerate(groups[g][key]):
+            lines.append(f"        if i == {i}:")
+            lines.append(f"            return {entry['off']}")
+    lines.append("    return -1")
+    lines.append("")
+
+
+def emit_core(blob: bytes, funcs: dict[str, int], groups: dict,
+              source: Path) -> str:
     simple_off = funcs.get("alloc_simple", -1)
     arena_off = funcs.get("alloc_arena", -1)
     lines = []
@@ -310,37 +446,29 @@ def emit_core(blob: bytes, funcs: dict[str, int],
     lines.append("    store8(out, n, 0)")
     lines.append("    return out")
     lines.append("")
-    lines.append("fn alloc_blob_call_count() -> int:")
-    lines.append(f"    return {len(calls)}")
-    lines.append("")
-    lines.append("fn alloc_blob_call_name(i: int) -> string:")
-    for i, call in enumerate(calls):
-        lines.append(f"    if i == {i}:")
-        lines.append(f'        return "{call["name"]}"')
-    lines.append('    return ""')
-    lines.append("")
-    lines.append("fn alloc_blob_call_off(i: int) -> int:")
-    for i, call in enumerate(calls):
-        lines.append(f"    if i == {i}:")
-        lines.append(f"        return {call['off']}")
-    lines.append("    return -1")
-    lines.append("")
-    lines.append("fn alloc_blob_global_count() -> int:")
-    lines.append(f"    return {len(globals_)}")
-    lines.append("")
-    lines.append("fn alloc_blob_global_name(i: int) -> string:")
-    for i, gl in enumerate(globals_):
-        lines.append(f"    if i == {i}:")
-        lines.append(f'        return "{gl["name"]}"')
-    lines.append('    return ""')
-    lines.append("")
-    lines.append("fn alloc_blob_global_off(i: int) -> int:")
-    for i, gl in enumerate(globals_):
-        lines.append(f"    if i == {i}:")
-        lines.append(f"        return {gl['off']}")
-    lines.append("    return -1")
-    lines.append("")
+    emit_reloc_table(lines, "call", groups)
+    emit_reloc_table(lines, "global", groups)
     return "\n".join(lines)
+
+
+def generate(source: Path) -> tuple[str, dict]:
+    obj = compile_source(source)
+    blob, funcs, groups = build_blob(obj)
+    try:
+        source_label = source.resolve().relative_to(BASE)
+    except ValueError:
+        source_label = source
+    text = emit_core(blob, funcs, groups, source_label)
+    summary = {
+        "blob_size": len(blob),
+        "simple_off": funcs.get("alloc_simple", -1),
+        "arena_off": funcs.get("alloc_arena", -1),
+        "simple_globals": [g["name"] for g in groups[GROUP_SIMPLE]["globals"]],
+        "arena_globals": [g["name"] for g in groups[GROUP_ARENA]["globals"]],
+        "simple_calls": [c["name"] for c in groups[GROUP_SIMPLE]["calls"]],
+        "arena_calls": [c["name"] for c in groups[GROUP_ARENA]["calls"]],
+    }
+    return text, summary
 
 
 def main() -> int:
@@ -348,32 +476,33 @@ def main() -> int:
     ap.add_argument("--source", default=str(BASE / "src" / "runtime" / "alloc_body.cr"))
     ap.add_argument("--out", default=str(BASE / "src" / "runtime" / "alloc_blob.cr"))
     ap.add_argument("--summary-json", default="")
+    ap.add_argument("--check", action="store_true",
+                    help="fail if --out does not match the generated blob")
     args = ap.parse_args()
 
     source = Path(args.source)
     if not source.exists():
         raise SystemExit(f"source does not exist: {source}")
-    obj = compile_source(source)
-    blob, funcs, calls, globals_ = build_blob(obj)
+    text, summary = generate(source)
     out = Path(args.out)
-    try:
-        source_label = source.resolve().relative_to(BASE)
-    except ValueError:
-        source_label = source
-    out.write_text(
-        emit_core(blob, funcs, calls, globals_, source_label), encoding="utf-8")
-    summary = {
-        "blob_size": len(blob),
-        "simple_off": funcs.get("alloc_simple", -1),
-        "arena_off": funcs.get("alloc_arena", -1),
-        "globals": [g["name"] for g in globals_],
-        "calls": [c["name"] for c in calls],
-    }
+    if args.check:
+        if not out.exists():
+            print(f"FAIL: {out} does not exist")
+            return 1
+        if out.read_text(encoding="utf-8") != text:
+            print(f"FAIL: {out} is stale; run tools/gen_alloc_blob.py")
+            return 1
+        print(f"up to date: {out} ({summary['blob_size']} bytes)")
+    else:
+        out.write_text(text, encoding="utf-8")
+        print(f"wrote {out} ({summary['blob_size']} bytes, "
+              f"{len(summary['simple_globals'])} simple globals, "
+              f"{len(summary['arena_globals'])} arena globals, "
+              f"{len(summary['simple_calls'])} simple calls, "
+              f"{len(summary['arena_calls'])} arena calls)")
     if args.summary_json:
         Path(args.summary_json).write_text(
             json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {out} ({len(blob)} bytes, "
-          f"{len(globals_)} globals, {len(calls)} calls)")
     return 0
 
 

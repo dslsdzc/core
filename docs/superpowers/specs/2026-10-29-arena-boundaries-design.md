@@ -32,26 +32,22 @@
 
 `g_arena_live` 与其它元数据一起扩容和清零。
 
-### 多个 mmap extent
+### 大对象路径
 
-`g_arena_large_head[ai]` 已经维护单链表。`arena_reset` 逐个 `munmap` 并清空头指针。新增测试在同一 arena 中分配三个大于 64MB 的对象，验证：
+`g_arena_large_head[ai]` 仍由库的 `arena_reset` 维护；旧的手写 allocator
+会在 >64MB 时创建专用 mmap extent，并在 reset 时 `munmap`。Core allocator
+blob 不能通过 `syscall3`/`syscall4` 发六参数 `mmap`，因此当前实现把
+`>1MB` 的 arena 请求交给全局 bump 堆：
 
-- 三个对象地址不同。
-- 首尾字节可写可读。
-- reset 后 `strace` 看到三次 `munmap`。
+- 全局堆的初始范围是数据段内 1GiB，`heap_end` 由 trampoline 以第三个
+  参数传入，不会越过 `PT_LOAD` 的 `P_MEMSZ`。
+- 全局堆耗尽时调用 `heap_expand`，由既有函数 mmap 新区域。
+- `arena_reset` 不会 `munmap` 这些对象，class `-2` 的 mmap 失败见证不会
+  产生；失败仍写 `g_alloc_fail_*` 并以退出码 132 结束。
 
-### mmap 失败见证
-
-extent 的 `mmap` 返回负值时，当前跳到 `capacity_full`，见证值不适合区分失败原因。改为写入：
-
-| 全局 | 值 |
-|---|---|
-| `g_alloc_fail_request` | 请求字节数 |
-| `g_alloc_fail_class` | -2（extent mmap 失败） |
-| `g_alloc_fail_cursor` | 当前 `g_arena_large_head[ai]` |
-| `g_alloc_fail_limit` | 0 |
-
-然后 `ud2`。
+专用 extent 和六参数 syscall 是后续工作；在它们落地前，行为以
+`docs/superpowers/specs/2026-10-29-allocator-codegen-design.md` 的
+“已知偏差”为准。
 
 ### 大小临界值
 
@@ -66,8 +62,8 @@ extent 的 `mmap` 返回负值时，当前跳到 `capacity_full`，见证值不�
 | 4089 | 查表 clamp |
 | 4096 | class 25 尾部 |
 | 1MB - 8 | class 25 尾部 |
-| 1MB | 连续 slot |
-| 1MB + 8 | 连续 slot |
+| 1MB | class 25 尾部 |
+| 1MB + 8 | 全局堆（blob）或连续 slot（legacy） |
 | 64MB - 8 | 64 个连续 slot |
 | 64MB | mmap extent |
 | 64MB + 1 | mmap extent |

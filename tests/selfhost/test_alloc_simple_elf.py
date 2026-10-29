@@ -91,6 +91,57 @@ def main() -> int:
             print(f"FAIL: corec-built blob ELF rc={rb.returncode}")
             return 1
 
+        # A user function named arena_new without the arena runtime globals
+        # must not select the arena body.
+        collision = root / "collision.cr"
+        collision.write_text(
+            "fn arena_new() -> int:\n"
+            "    return 0\n"
+            "fn main() -> int:\n"
+            "    p := alloc(16)\n"
+            "    return 0\n",
+            encoding="utf-8",
+        )
+        collision_out = root / "collision"
+        r = run([str(COREC), "build", str(collision), "--static",
+                 "-o", str(collision_out)])
+        if r.returncode != 0:
+            print("FAIL: user arena_new selected the arena body")
+            print(r.stdout)
+            print(r.stderr)
+            return 1
+        rc = run([str(collision_out)])
+        if rc.returncode != 0:
+            print(f"FAIL: user arena_new program rc={rc.returncode}")
+            return 1
+
+        # Arena function names plus some arena globals but not the full set
+        # must fail closed instead of leaving RIP displacements at zero.
+        partial = root / "partial.cr"
+        partial.write_text(
+            "g_arena_scalars : string, mut\n"
+            "g_arena_slot : string, mut\n"
+            "g_arena_slot_cursor : string, mut\n"
+            "fn arena_new() -> int:\n"
+            "    return 0\n"
+            "fn arena_init(pool: int, size: int):\n"
+            "    return\n"
+            "fn main() -> int:\n"
+            "    p := alloc(16)\n"
+            "    return 0\n",
+            encoding="utf-8",
+        )
+        r = run([str(COREC), "build", str(partial), "--static",
+                 "-o", str(root / "partial")])
+        if r.returncode == 0:
+            print("FAIL: partial arena globals were accepted")
+            return 1
+        if "alloc blob: missing global" not in (r.stdout + r.stderr):
+            print("FAIL: partial arena globals failed without a diagnostic")
+            print(r.stdout)
+            print(r.stderr)
+            return 1
+
     print("PASS alloc simple ELF")
     return 0
 

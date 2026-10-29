@@ -205,9 +205,9 @@
 #     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
-canary_elf	pa	d19de1f4363b8d2f7e35fe23b3f53a0f9db5648898fe94551c6c6c5522ad7972	61622
-pa_ccr	pa.ccr	16eade32937ce339f343f96d1fa0420706fa1b4b4bd72e980b801b0370339388	97820
-pa_static_ccr	pa_st.bin.ccr	ff7ff3d17cb7c9277d112f301c9e8b0e577109b171e5fe315259e8a85bc94803	98042
+canary_elf	pa	8fba3fe55029877dd31e368820d530963fa2f7a47317764a4d5585ce79365f4c	61622
+pa_ccr	pa.ccr	a61ed937b10855d527c539877340fae200496db658bbf5c1922570bf8cd5e798	97760
+pa_static_ccr	pa_st.bin.ccr	770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73eb1caff71d59	97982
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -227,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	ff7ff3d17cb7c9277d112f301c9e8b0e577109b171e5fe315259
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	396684576e53b5e951b2c037ff541c60d6ed14ff36bf674144d790ae5f8fb3ee	131334
-gt_static_ccr	gt_st.bin.ccr	0e7c475c5e0a3aeb63c6a0cf4592ece9432c7f81ba9393996d6e7d54aa7d59f9	131556
+gt_ccr	gt.ccr	19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438	131274
+gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89	131496
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -566,3 +566,27 @@ gt_static_ccr	gt_st.bin.ccr	0e7c475c5e0a3aeb63c6a0cf4592ece9432c7f81ba9393996d6e
 #   pa_static_ccr ff7ff3d17cb7c9277d112f301c9e8b0e577109b171e5fe315259e8a85bc94803 98042
 #   gt_ccr 396684576e53b5e951b2c037ff541c60d6ed14ff36bf674144d790ae5f8fb3ee 131334
 #   gt_static_ccr 0e7c475c5e0a3aeb63c6a0cf4592ece9432c7f81ba9393996d6e7d54aa7d59f9 131556
+
+# ── 「本次重锁 2026-10-29 第二次」Allocator blob 分组重定位与 harness 修订 ──
+# **性质 = 编译器代码生成修订，非 canary 语料回归**。
+# 1) allocator body 的 class 元数据改为绝对地址，free-list 弹出 slot 时补链，
+#    static arena 的 >1MB 请求改为 trap；这三项修复不改变 `pa` 的 rc（0）。
+# 2) blob 生成器按 simple/arena 入口分组重定位，普通程序不再为未选中的
+#    arena body 打印缺失全局。`g_alloc_fail_*` 四条在每条程序都登记，
+#    供新旧 allocator 的失败见证使用；未使用的 `g_alloc_home_idx` 不再登记。
+#    四条 `.ccr` 因此比上一版各少 60B，这是显式裁定的变更，不是语料漂移。
+# 3) trampoline 增加 rdx = 数据段末尾，作为初始 heap_end，避免堆末端越过
+#    PT_LOAD 的 1GiB P_MEMSZ。ELF 文件大小保持 61622B。
+# 4) `pa` 运行 rc=0；D1 5/5 PASS。
+# 旧值留痕（自本次起作废）：
+#   canary_elf d19de1f4363b8d2f7e35fe23b3f53a0f9db5648898fe94551c6c6c5522ad7972 61622
+#   pa_ccr 16eade32937ce339f343f96d1fa0420706fa1b4b4bd72e980b801b0370339388 97820
+#   pa_static_ccr ff7ff3d17cb7c9277d112f301c9e8b0e577109b171e5fe315259e8a85bc94803 98042
+#   gt_ccr 396684576e53b5e951b2c037ff541c60d6ed14ff36bf674144d790ae5f8fb3ee 131334
+#   gt_static_ccr 0e7c475c5e0a3aeb63c6a0cf4592ece9432c7f81ba9393996d6e7d54aa7d59f9 131556
+# 新值：
+#   canary_elf 8fba3fe55029877dd31e368820d530963fa2f7a47317764a4d5585ce79365f4c 61622
+#   pa_ccr a61ed937b10855d527c539877340fae200496db658bbf5c1922570bf8cd5e798 97760
+#   pa_static_ccr 770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73eb1caff71d59 97982
+#   gt_ccr 19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438 131274
+#   gt_static_ccr 605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89 131496

@@ -18,6 +18,46 @@ COREARCH = BASE / "build" / "corearch"
 SOURCES = [
     BASE / "tests" / "suite" / "arena_test.cr",
     BASE / "tests" / "suite" / "arena_boundary_test.cr",
+    BASE / "tests" / "suite" / "arena_alloc_regress.cr",
+]
+
+FAIL_SOURCES = [
+    (
+        "static overflow",
+        "import arena\n"
+        "g_current_arena : int, mut = -1\n"
+        "g_arena_pool_data : string, mut\n"
+        "g_arena_free_list : int, mut = -1\n"
+        "fn main() -> int:\n"
+        "    arena_init(1048576, 65536)\n"
+        "    a := arena_new_sized(1048576)\n"
+        "    p := alloc(2097152)\n"
+        "    return 0\n",
+    ),
+    (
+        "above 1TB",
+        "import arena\n"
+        "g_current_arena : int, mut = -1\n"
+        "g_arena_pool_data : string, mut\n"
+        "g_arena_free_list : int, mut = -1\n"
+        "fn main() -> int:\n"
+        "    arena_init(1048576, 65536)\n"
+        "    a := arena_new()\n"
+        "    p := alloc(1099511627777)\n"
+        "    return 0\n",
+    ),
+    (
+        "negative size",
+        "import arena\n"
+        "g_current_arena : int, mut = -1\n"
+        "g_arena_pool_data : string, mut\n"
+        "g_arena_free_list : int, mut = -1\n"
+        "fn main() -> int:\n"
+        "    arena_init(1048576, 65536)\n"
+        "    a := arena_new()\n"
+        "    p := alloc(-1)\n"
+        "    return 0\n",
+    ),
 ]
 
 
@@ -85,6 +125,28 @@ def main() -> int:
                 print(f"FAIL blob path not selected for {src}")
                 return 1
             print(f"PASS arena parity {src.name}")
+
+        for label, source in FAIL_SOURCES:
+            src = root / (label.replace(" ", "_") + ".cr")
+            src.write_text(source, encoding="utf-8")
+            old, err = build_and_run(src, root, label.replace(" ", "_") + "_old",
+                                     blob=False)
+            if err:
+                print(f"FAIL legacy {label}: {err}")
+                return 1
+            new, err = build_and_run(src, root, label.replace(" ", "_") + "_new",
+                                     blob=True)
+            if err:
+                print(f"FAIL blob {label}: {err}")
+                return 1
+            if old.returncode not in (-4, 132):
+                print(f"FAIL legacy {label} rc={old.returncode}, expected trap")
+                return 1
+            if new.returncode != 132:
+                print(f"FAIL blob {label} rc={new.returncode}, expected 132")
+                return 1
+            print(f"PASS trap parity {label}")
+
     print("PASS alloc arena parity")
     return 0
 

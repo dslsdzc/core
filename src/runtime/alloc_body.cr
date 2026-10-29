@@ -1,6 +1,9 @@
 // Raw allocator bodies. Compiled by tools/gen_alloc_blob.py with raw-int
 // semantics; the blob generator supplies cell_load/cell_store and patches the
 // globals listed in EXTERNAL_GLOBALS.
+//
+// ABI: rdi = size, rsi = heap_start, rdx = heap_end (the end of the writable
+// data segment). The trampoline in elf.cr supplies the last two values.
 
 g_heap_ptr : string, mut
 g_heap_end : string, mut
@@ -32,10 +35,12 @@ fn alloc_fail(size: int, cls: int, cursor: int, limit: int) -> string:
 fn zero_alloc(p: string, n: int):
     addr := alloc_uword(p)
     // Large page-aligned regions come from a fresh anonymous mapping. Ask the
-    // kernel to drop the pages instead of writing every byte from Core.
+    // kernel to drop the pages instead of writing every byte from Core. If the
+    // hint fails, fall through to the byte loop so the block is still zeroed.
     if n >= 4096 && addr % 4096 == 0:
-        syscall3(28, addr, n, 4)
-        return
+        r := syscall3(28, addr, n, 4)
+        if r == 0:
+            return
     i : ., mut = 0
     loop:
         if i >= n:
@@ -43,7 +48,8 @@ fn zero_alloc(p: string, n: int):
         store8(p, i, 0)
         i = i + 1
 
-fn alloc_global(size: int, aligned: int, heap_start: string) -> string:
+fn alloc_global(size: int, aligned: int, heap_start: string,
+                heap_end: string) -> string:
     need : ., mut = aligned
     if aligned >= 4096:
         need = ((aligned + 4095) / 4096) * 4096
@@ -52,7 +58,7 @@ fn alloc_global(size: int, aligned: int, heap_start: string) -> string:
     he_raw : ., mut = alloc_uword(g_heap_end)
     if hp_raw == 0:
         hp_raw = alloc_uword(heap_start)
-        he_raw = hp_raw + 1073741824
+        he_raw = alloc_uword(heap_end)
         g_heap_ptr = alloc_ptr(hp_raw)
         g_heap_end = alloc_ptr(he_raw)
     if need >= 4096:
@@ -73,13 +79,13 @@ fn alloc_global(size: int, aligned: int, heap_start: string) -> string:
     cell_store(p, 0, size)
     return alloc_ptr(hp_raw + 8)
 
-fn alloc_simple(size: int, heap_start: string) -> string:
+fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string:
     if size < 0:
         return alloc_ptr(0)
     if size > 67108864:
         return alloc_ptr(0)
     aligned := (size + 15) / 8 * 8
-    return alloc_global(size, aligned, heap_start)
+    return alloc_global(size, aligned, heap_start, heap_end)
 
 g_arena_scalars : string, mut
 g_arena_scalars_ready : int, mut
@@ -125,37 +131,38 @@ fn arena_get_slot(ai: int, size: int) -> int:
             return arena_fail_slot(size, count, pool)
         slot = count
         cell_store(g_arena_scalars, 32, count + 1)
-        old := cell_load(g_arena_slot, ai * 8)
-        if old >= 0:
-            cell_store(g_arena_slot_next, slot * 8, old)
-        else:
-            cell_store(g_arena_slot_next, slot * 8, -1)
-        cell_store(g_arena_slot, ai * 8, slot)
+    // Both the free-list and bump paths must link the new slot into this
+    // arena's chain and make it current. arena_reset walks that chain to
+    // return slots, so a missing link leaks the slot and lets the next
+    // allocation reuse the old slot's cursor.
+    old := cell_load(g_arena_slot, ai * 8)
+    if old >= 0:
+        cell_store(g_arena_slot_next, slot * 8, old)
+    else:
+        cell_store(g_arena_slot_next, slot * 8, -1)
+    cell_store(g_arena_slot, ai * 8, slot)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     return slot
 
-fn alloc_arena(size: int, heap_start: string) -> string:
+fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if size < 0:
-        return alloc_ptr(0)
+        return alloc_fail(size, -1, 0, 0)
     if size > 1099511627776:
         return alloc_fail(size, -1, 0, 0)
     aligned := (size + 15) / 8 * 8
     if g_arena_suspend != 0 || g_arena_scalars_ready == 0:
-        return alloc_global(size, aligned, heap_start)
+        return alloc_global(size, aligned, heap_start, heap_end)
     if alloc_uword(g_arena_scalars) == 0:
-        return alloc_global(size, aligned, heap_start)
+        return alloc_global(size, aligned, heap_start, heap_end)
     ai := cell_load(g_arena_scalars, 0)
     if ai < 0:
-        return alloc_global(size, aligned, heap_start)
-    // Large objects use the global bump heap. Kernel-backed extents are a
-    // separate follow-up; this keeps the raw body free of six-argument
-    // syscalls while preserving allocation correctness.
-    if aligned > 1048576:
-        return alloc_global(size, aligned, heap_start)
+        return alloc_global(size, aligned, heap_start, heap_end)
 
     slot : ., mut = cell_load(g_arena_slot, ai * 8)
     if slot < 0:
-        slot = arena_get_slot(ai, size)
+        // arena_new_sized could not obtain a first slot (pool limit). The
+        // legacy body traps here instead of silently allocating a new one.
+        return alloc_fail(size, -1, slot, cell_load(g_arena_scalars, 16))
     max_size := cell_load(g_arena_scalars, 8)
     slot_base : ., mut = arena_slot_base(slot)
     if cell_load(g_arena_static, ai * 8) != 0:
@@ -168,6 +175,14 @@ fn alloc_arena(size: int, heap_start: string) -> string:
         zero_alloc(p, aligned)
         cell_store(p, 0, size)
         return alloc_ptr(alloc_uword(p) + 8)
+
+    // Large objects use the global bump heap. Kernel-backed extents are a
+    // separate follow-up; this keeps the raw body free of six-argument
+    // syscalls while preserving allocation correctness. The check stays after
+    // the static branch: a static arena's peak is at most one slot, so a
+    // larger request must trap exactly as the legacy body does.
+    if aligned > 1048576:
+        return alloc_global(size, aligned, heap_start, heap_end)
 
     loop:
         lookup := aligned / 16
@@ -183,9 +198,13 @@ fn alloc_arena(size: int, heap_start: string) -> string:
                     slot = arena_get_slot(ai, size)
                     slot_base = arena_slot_base(slot)
                 else:
-                    base = slot_cur
+                    // Class metadata holds absolute addresses. Storing a
+                    // slot-relative offset would alias when the arena moves
+                    // to a different slot while this chunk is still live.
+                    base = alloc_uword(slot_base) + slot_cur
                     cell_store(g_class_base, idx * 8, base)
-                    cell_store(g_class_limit, idx * 8, max_size)
+                    cell_store(g_class_limit, idx * 8,
+                               alloc_uword(slot_base) + max_size)
                     cell_store(g_class_cursor, idx * 8, 0)
                     cell_store(g_arena_slot_cursor, ai * 8, max_size)
             else:
@@ -195,17 +214,18 @@ fn alloc_arena(size: int, heap_start: string) -> string:
                     slot = arena_get_slot(ai, size)
                     slot_base = arena_slot_base(slot)
                 else:
-                    base = slot_cur
+                    base = alloc_uword(slot_base) + slot_cur
                     cell_store(g_arena_slot_cursor, ai * 8, newcur)
                     cell_store(g_class_base, idx * 8, base)
-                    cell_store(g_class_limit, idx * 8, newcur)
+                    cell_store(g_class_limit, idx * 8,
+                               alloc_uword(slot_base) + newcur)
                     cell_store(g_class_cursor, idx * 8, 0)
         base = cell_load(g_class_base, idx * 8)
         cur := cell_load(g_class_cursor, idx * 8)
         limit := cell_load(g_class_limit, idx * 8)
         if base >= 0 && cur + aligned <= limit - base:
             cell_store(g_class_cursor, idx * 8, cur + aligned)
-            p := alloc_ptr(alloc_uword(slot_base) + base + cur)
+            p := alloc_ptr(base + cur)
             zero_alloc(p, aligned)
             cell_store(p, 0, size)
             return alloc_ptr(alloc_uword(p) + 8)

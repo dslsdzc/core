@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Allocator: clang reference parity and structural checks.
 
-The Core blob is compiled by the Python bootstrap (raw semantics).  A clang
-reference implements the same simple-bump contract.  The test also checks the
-generated assembly frame balance, the absence of a recursive alloc call, and
-the ELF trampoline shape.
+The Core blob is compiled by the Python bootstrap (raw semantics). A clang
+reference implements the same simple-bump contract. Each row is a real
+allocation sequence: both implementations see the same heap state before
+every call, and the states must match after every call.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ ASM_CHECK = BASE / "tools" / "asm_check.py"
 COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
 
+COLUMNS = 12
+
 
 def run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
@@ -37,7 +39,7 @@ def make_sequences() -> list[list[int]]:
     state = 0x12345678
     for _ in range(200):
         row = []
-        for _ in range(12):
+        for _ in range(COLUMNS):
             state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
             row.append(state % 300000)
         rows.append(row)
@@ -62,7 +64,7 @@ def c_source(rows: list[list[int]]) -> str:
 #define HEAP_SIZE (1UL << 30)
 #define MAX_REQUEST 67108864L
 
-extern char *alloc_simple(long size, char *heap_start);
+extern char *alloc_simple(long size, char *heap_start, char *heap_end);
 extern char *_g_g_heap_ptr;
 extern char *_g_g_heap_end;
 extern long heap_expand(void);
@@ -70,6 +72,7 @@ extern long heap_expand(void);
 static char *ref_alloc(long size, char *heap_start) {{
     if (size < 0 || size > MAX_REQUEST)
         return NULL;
+    char *heap_end = heap_start + HEAP_SIZE;
     long aligned = (size + 15) / 8 * 8;
     long need = aligned;
     if (aligned >= 4096)
@@ -78,7 +81,7 @@ static char *ref_alloc(long size, char *heap_start) {{
     if (hp == NULL) {{
         hp = heap_start;
         _g_g_heap_ptr = hp;
-        _g_g_heap_end = heap_start + 1073741824L;
+        _g_g_heap_end = heap_end;
     }}
     if (need >= 4096)
         hp = (char *)(((uintptr_t)hp + 4095) & ~(uintptr_t)4095);
@@ -99,27 +102,35 @@ static char *ref_alloc(long size, char *heap_start) {{
     return hp + 8;
 }}
 
-static const long seq[][12] = {{
+static const long seq[][{COLUMNS}] = {{
 {seq}
 }};
 
 static int check_one(long size, char *heap_start) {{
-    _g_g_heap_ptr = NULL;
-    _g_g_heap_end = NULL;
-    char *a = alloc_simple(size, heap_start);
+    char *saved_hp = _g_g_heap_ptr;
+    char *saved_he = _g_g_heap_end;
+
+    char *a = alloc_simple(size, heap_start, heap_start + HEAP_SIZE);
     long a_off = a ? (long)(a - heap_start) : -1;
     long a_hdr = a ? *(long *)(a - 8) : -1;
     unsigned char a_first = (a && size > 0) ? (unsigned char)a[0] : 0;
     unsigned char a_last = (a && size > 0) ? (unsigned char)a[size - 1] : 0;
+    char *after_core = _g_g_heap_ptr;
 
-    _g_g_heap_ptr = NULL;
-    _g_g_heap_end = NULL;
+    _g_g_heap_ptr = saved_hp;
+    _g_g_heap_end = saved_he;
     char *b = ref_alloc(size, heap_start);
     long b_off = b ? (long)(b - heap_start) : -1;
     long b_hdr = b ? *(long *)(b - 8) : -1;
     unsigned char b_first = (b && size > 0) ? (unsigned char)b[0] : 0;
     unsigned char b_last = (b && size > 0) ? (unsigned char)b[size - 1] : 0;
+    char *after_ref = _g_g_heap_ptr;
 
+    if (after_core != after_ref) {{
+        fprintf(stderr, "size %ld heap_ptr mismatch: core=%p ref=%p\\n",
+                size, (void *)after_core, (void *)after_ref);
+        return 1;
+    }}
     if (a_off != b_off || a_hdr != b_hdr ||
         a_first != b_first || a_last != b_last) {{
         fprintf(stderr,
@@ -152,14 +163,16 @@ int main(void) {{
     }}
     size_t rows = sizeof(seq) / sizeof(seq[0]);
     for (size_t r = 0; r < rows; r++) {{
-        for (size_t c = 0; c < 12; c++) {{
+        _g_g_heap_ptr = NULL;
+        _g_g_heap_end = NULL;
+        for (size_t c = 0; c < {COLUMNS}; c++) {{
             if (check_one(seq[r][c], heap_start) != 0) {{
                 fprintf(stderr, "row %zu col %zu\\n", r, c);
                 return 1;
             }}
         }}
     }}
-    printf("allocator LLVM parity: %zu rows\\n", rows);
+    printf("allocator LLVM parity: %zu rows x {COLUMNS}\\n", rows);
     return 0;
 }}
 """
@@ -167,14 +180,19 @@ int main(void) {{
 
 def check_trampoline(elf_path: Path) -> bool:
     data = elf_path.read_bytes()
-    for i in range(len(data) - 15):
-        if data[i] == 0x48 and data[i + 1] == 0xBE and data[i + 10] == 0xE9:
+    for i in range(len(data) - 25):
+        if data[i] == 0x48 and data[i + 1] == 0xBE:
             heap = struct.unpack_from("<Q", data, i + 2)[0]
             if not (0x400000 <= heap <= 0x44000000):
                 continue
-            rel = struct.unpack_from("<i", data, i + 11)[0]
-            target = i + 0x400000 + 11 + 4 + rel
-            if 0x400000 <= target < heap:
+            if data[i + 10] != 0x48 or data[i + 11] != 0xBA:
+                continue
+            limit = struct.unpack_from("<Q", data, i + 12)[0]
+            if data[i + 20] != 0xE9:
+                continue
+            rel = struct.unpack_from("<i", data, i + 21)[0]
+            target = i + 0x400000 + 21 + 4 + rel
+            if limit > heap and 0x400000 <= target < heap:
                 return True
     return False
 
@@ -238,14 +256,13 @@ def main() -> int:
         elf = root / "tramp"
         src.write_text("fn main() -> int:\n    p := alloc(16)\n    return 0\n",
                        encoding="utf-8")
-        r = run([str(COREC), "ccr", "--alloc-blob", str(src), "-o", str(ccr)])
+        r = run([str(COREC), "ccr", str(src), "-o", str(ccr)])
         if r.returncode != 0:
             print("FAIL: corec ccr for trampoline")
             print(r.stdout)
             print(r.stderr)
             return 1
-        r = run([str(COREARCH), str(ccr), "--static", "--alloc-blob",
-                 "-o", str(elf)])
+        r = run([str(COREARCH), str(ccr), "--static", "-o", str(elf)])
         if r.returncode != 0:
             print("FAIL: corearch for trampoline")
             print(r.stdout)
