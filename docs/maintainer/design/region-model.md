@@ -141,17 +141,24 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 
 已实现：
 - 多 Arena 模型（2026-07-28）：stdlib arena + IR 子图绑定 + ELF 双路径 + mmap 扩展（第 4 节）
+- size class 分档（2026-10-28 规格，2026-10-29 边界收尾）：25 档 + 大对象区；
+  动态 arena 按 1MiB slot 增长，`>1MiB` 请求走独立 extent；simple/arena 共用
+  Core blob；tagged BigInt、失败 trap 和解释器 parity 已覆盖
+  （`tests/selfhost/test_alloc_arena_parity.py`、`test_arena_interp.py`）
 - 三个 pass（provenance/region/bounds，与 pointer-model 共享）
 
 设计阶段（M1-M3 推进，以计划为准）：
 - split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
-- size class 分档策略：规格已定（`docs/superpowers/specs/2026-10-28-arena-size-classes.md`），待实施
 - 字节权限层使用（验证器侧）
+- `alloc_at` 声明式放置（`docs/maintainer/design/pointer-model.md`，`src/` 零命中）
 
 待解决问题：
-- 区域级空间浪费（小分配占大区域；动态区域大小调整，设计已定分档，待实现）
-- 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互，需验证
-- 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）
+- 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）；普通分配在复用时
+  已通过 `_arena_zero`/`_memzero` 清零
+- 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互；
+  具体 RegionCheck 缺口（B010 零 raise、B011 零覆盖、store/call/区域内返回逃逸、
+  pts 流不敏感）见 `TODO.md` 条目 `#2026-09-20-1`
+- 并发区域：每 G 独立 arena 尚未实现；本轮 arena 边界设计明确不含并发
 
 ---
 
