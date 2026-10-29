@@ -8,16 +8,17 @@
 // is at or before the current node.
 g_rc_last_store : string, mut
 
-// CFG and reaching-definition state for the current function. The linear node
-// order is not a CFG; branches carry case targets in g_lat_case and jumps carry
-// label ids. These tables are rebuilt per function and used only for scalar
-// pointer lifetime queries.
-g_rc_cfg_ready : int, mut
-g_rc_cfg_nstart : int, mut
-g_rc_cfg_ncount : int, mut
-g_rc_label_ids : string, mut
-g_rc_label_nodes : string, mut
-g_rc_label_count : int, mut
+// Control adjacency and reaching-definition state for the current function.
+// The linear node order is not execution order; branches carry case targets in
+// g_lat_case and jumps carry label ids. The adjacency is derived from those
+// HDFG nodes and cached per function; it is not a second graph. RegionCheck and
+// BytePermission query it for reaching definitions.
+g_rc_ctl_ready : int, mut
+g_rc_ctl_nstart : int, mut
+g_rc_ctl_ncount : int, mut
+g_rc_ctl_label_ids : string, mut
+g_rc_ctl_label_nodes : string, mut
+g_rc_ctl_label_count : int, mut
 g_rc_rd_in : string, mut
 g_rc_rd_out : string, mut
 g_rc_rd_stack : string, mut
@@ -447,10 +448,11 @@ fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int, depth: i
     return 0
 
 // ── Reaching definitions for scalar pointers ──
-// The linear node order is not a CFG. Build successors from IR_JUMP labels and
-// IR_MATCH CASE targets, then run a forward may-reaching-definitions dataflow.
-// This replaces the path-insensitive all-definition heuristics for scalar
-// pointer values while leaving heap points-to sets on their existing lattice.
+// Derive the control adjacency from IR_JUMP labels and IR_MATCH CASE targets
+// (the nodes themselves are HDFG nodes; this is a cached index, not a second
+// graph), then run a forward may-reaching-definitions dataflow. This replaces
+// the path-insensitive all-definition heuristics for scalar pointer values
+// while leaving heap points-to sets on their existing lattice.
 
 fn rc_ptr_nonzero(s: string) -> int:
     p : ., mut = 0
@@ -458,24 +460,24 @@ fn rc_ptr_nonzero(s: string) -> int:
         p = @ptr_of(s)
     return p
 
-fn rc_label_node(label: int) -> int:
+fn rc_ctl_label_node(label: int) -> int:
     if label < 0:
         return -1
     i : ., mut = 0
     loop:
-        if i >= g_rc_label_count:
+        if i >= g_rc_ctl_label_count:
             return -1
-        if cell_load(g_rc_label_ids, i * 8) == label:
-            return cell_load(g_rc_label_nodes, i * 8)
+        if cell_load(g_rc_ctl_label_ids, i * 8) == label:
+            return cell_load(g_rc_ctl_label_nodes, i * 8)
         i = i + 1
     return -1
 
-fn rc_cfg_prepare(nstart: int, ncount: int):
-    if g_rc_cfg_ready != 0 && g_rc_cfg_nstart == nstart && g_rc_cfg_ncount == ncount:
+fn rc_ctl_prepare(nstart: int, ncount: int):
+    if g_rc_ctl_ready != 0 && g_rc_ctl_nstart == nstart && g_rc_ctl_ncount == ncount:
         return
-    g_rc_cfg_nstart = nstart
-    g_rc_cfg_ncount = ncount
-    g_rc_cfg_ready = 1
+    g_rc_ctl_nstart = nstart
+    g_rc_ctl_ncount = ncount
+    g_rc_ctl_ready = 1
     g_rc_rd_var = -1
     count : ., mut = 0
     ni : ., mut = nstart
@@ -485,9 +487,9 @@ fn rc_cfg_prepare(nstart: int, ncount: int):
         if cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
             count = count + 1
         ni = ni + 1
-    g_rc_label_count = count
-    g_rc_label_ids = alloc(count * 8)
-    g_rc_label_nodes = alloc(count * 8)
+    g_rc_ctl_label_count = count
+    g_rc_ctl_label_ids = alloc(count * 8)
+    g_rc_ctl_label_nodes = alloc(count * 8)
     if g_ir_var_count > 0:
         g_rc_rd_cache = alloc(g_ir_var_count * 8)
     else:
@@ -502,13 +504,13 @@ fn rc_cfg_prepare(nstart: int, ncount: int):
         if ni >= nstart + ncount:
             break
         if cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
-            cell_store(g_rc_label_ids, i * 8,
+            cell_store(g_rc_ctl_label_ids, i * 8,
                 cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1))
-            cell_store(g_rc_label_nodes, i * 8, ni)
+            cell_store(g_rc_ctl_label_nodes, i * 8, ni)
             i = i + 1
         ni = ni + 1
 
-fn rc_succ_count(ni: int) -> int:
+fn rc_ctl_succ_count(ni: int) -> int:
     op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
     if op == IR_RETURN:
         return 0
@@ -519,23 +521,23 @@ fn rc_succ_count(ni: int) -> int:
         if sc < 0:
             return 0
         return sc
-    if ni + 1 < g_rc_cfg_nstart + g_rc_cfg_ncount:
+    if ni + 1 < g_rc_ctl_nstart + g_rc_ctl_ncount:
         return 1
     return 0
 
-fn rc_succ_at(ni: int, k: int) -> int:
+fn rc_ctl_succ_at(ni: int, k: int) -> int:
     op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
     if op == IR_JUMP:
         label := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        return rc_label_node(label)
+        return rc_ctl_label_node(label)
     if op == IR_MATCH:
         base := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         if base < 0 || k < 0 || base + k >= g_lat_case_count:
             return -1
         label := cell_load_i32(g_lat_case,
             (base + k) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
-        return rc_label_node(label)
-    if ni + 1 < g_rc_cfg_nstart + g_rc_cfg_ncount:
+        return rc_ctl_label_node(label)
+    if ni + 1 < g_rc_ctl_nstart + g_rc_ctl_ncount:
         return ni + 1
     return -1
 
@@ -578,7 +580,7 @@ fn rc_rd_compute(var: int):
             g_rc_rd_var = var
             return
     g_rc_rd_var = var
-    n := g_rc_cfg_ncount
+    n := g_rc_ctl_ncount
     if n <= 0:
         g_rc_rd_words = 1
         return
@@ -607,7 +609,7 @@ fn rc_rd_compute(var: int):
                 break
             cell_store(g_rc_rd_out, w * 8, 0)
             w = w + 1
-        if rc_node_defines(g_rc_cfg_nstart + idx, var) != 0:
+        if rc_node_defines(g_rc_ctl_nstart + idx, var) != 0:
             rc_rd_set(g_rc_rd_out, 0, idx)
         else:
             w = 0
@@ -617,14 +619,14 @@ fn rc_rd_compute(var: int):
                 cell_store(g_rc_rd_out, w * 8,
                     cell_load(g_rc_rd_in, (idx * words + w) * 8))
                 w = w + 1
-        sc := rc_succ_count(g_rc_cfg_nstart + idx)
+        sc := rc_ctl_succ_count(g_rc_ctl_nstart + idx)
         k : ., mut = 0
         loop:
             if k >= sc:
                 break
-            s := rc_succ_at(g_rc_cfg_nstart + idx, k)
+            s := rc_ctl_succ_at(g_rc_ctl_nstart + idx, k)
             if s >= 0:
-                sidx := s - g_rc_cfg_nstart
+                sidx := s - g_rc_ctl_nstart
                 if sidx >= 0 && sidx < n:
                     changed : ., mut = 0
                     w = 0
@@ -648,10 +650,10 @@ fn rc_rd_compute(var: int):
         store_str_ptr(g_rc_rd_cache, var * 8, g_rc_rd_in)
 
 fn rc_rd_any(var: int, use_ni: int) -> int:
-    if use_ni < g_rc_cfg_nstart || use_ni >= g_rc_cfg_nstart + g_rc_cfg_ncount:
+    if use_ni < g_rc_ctl_nstart || use_ni >= g_rc_ctl_nstart + g_rc_ctl_ncount:
         return 0
     rc_rd_compute(var)
-    row := use_ni - g_rc_cfg_nstart
+    row := use_ni - g_rc_ctl_nstart
     w : ., mut = 0
     loop:
         if w >= g_rc_rd_words:
@@ -663,9 +665,9 @@ fn rc_rd_any(var: int, use_ni: int) -> int:
 
 fn rc_rd_collect(var: int, use_ni: int, depth: int) -> int:
     rc_rd_compute(var)
-    row := use_ni - g_rc_cfg_nstart
-    base : ., mut = depth * g_rc_cfg_ncount
-    if base + g_rc_cfg_ncount > (RC_MAX_DEPTH + 1) * g_rc_cfg_ncount:
+    row := use_ni - g_rc_ctl_nstart
+    base : ., mut = depth * g_rc_ctl_ncount
+    if base + g_rc_ctl_ncount > (RC_MAX_DEPTH + 1) * g_rc_ctl_ncount:
         base = 0
     count : ., mut = 0
     w : ., mut = 0
@@ -681,7 +683,7 @@ fn rc_rd_collect(var: int, use_ni: int, depth: int) -> int:
                     break
                 if (word / mask) % 2 == 1:
                     cell_store(g_rc_rd_defs, (base + count) * 8,
-                               g_rc_cfg_nstart + w * 63 + lane)
+                               g_rc_ctl_nstart + w * 63 + lane)
                     count = count + 1
                 mask = mask * 2
                 lane = lane + 1
@@ -1040,7 +1042,7 @@ fn rc_alias_compute(fi: int):
         return
     nstart := cell_load(g_df_func_node_start, fi * 8)
     ncount := cell_load(g_df_func_node_count, fi * 8)
-    rc_cfg_prepare(nstart, ncount)
+    rc_ctl_prepare(nstart, ncount)
     vstart := cell_load(g_ir_func_var_start, fi * 8)
     vcount := cell_load(g_ir_func_var_count, fi * 8)
     vi : ., mut = vstart
@@ -1236,7 +1238,7 @@ fn rc_rd_dest_local(var: int, use_ni: int, lo: int, fi: int, depth: int) -> int:
 
 fn rc_dest_is_local(ptr_var: int, use_ni: int, lo: int, fi: int) -> int:
     if fi >= 0 && fi < g_ir_func_count:
-        rc_cfg_prepare(cell_load(g_df_func_node_start, fi * 8),
+        rc_ctl_prepare(cell_load(g_df_func_node_start, fi * 8),
                        cell_load(g_df_func_node_count, fi * 8))
     if rc_rd_any(ptr_var, use_ni) != 0:
         return rc_rd_dest_local(ptr_var, use_ni, lo, fi, 0)
@@ -2028,7 +2030,7 @@ fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
             0, 0)
 
 fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
-    rc_cfg_prepare(nstart, ncount)
+    rc_ctl_prepare(nstart, ncount)
     // Reset only this function's variable range. The map itself is allocated
     // once per pass, not once per function; global/other-function entries stay
     // at their initial -1.

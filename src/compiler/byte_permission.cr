@@ -405,7 +405,7 @@ fn bp_alias_compute(fi: int):
         return
     nstart := cell_load(g_df_func_node_start, fi * 8)
     ncount := cell_load(g_df_func_node_count, fi * 8)
-    rc_cfg_prepare(nstart, ncount)
+    rc_ctl_prepare(nstart, ncount)
     vstart := cell_load(g_ir_func_var_start, fi * 8)
     vcount := cell_load(g_ir_func_var_count, fi * 8)
     vi : ., mut = vstart
@@ -477,7 +477,7 @@ fn bp_summary_func(fi: int) -> int:
     ncount := cell_load(g_df_func_node_count, fi * 8)
     vstart := cell_load(g_ir_func_var_start, fi * 8)
     vcount := cell_load(g_ir_func_var_count, fi * 8)
-    rc_cfg_prepare(nstart, ncount)
+    rc_ctl_prepare(nstart, ncount)
     bp_reset_last_store(vstart, vcount)
     old0 := cell_load(g_bp_param_write, fi * 2 * 8)
     old1 := cell_load(g_bp_param_write, (fi * 2 + 1) * 8)
@@ -544,7 +544,7 @@ fn bp_check_call(ni: int, first_arg: int, argc: int, fn_ni: int,
         j = j + 1
 
 fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
-    rc_cfg_prepare(nstart, ncount)
+    rc_ctl_prepare(nstart, ncount)
     bp_reset_last_store(vstart, vcount)
     ni : ., mut = nstart
     loop:
@@ -687,7 +687,7 @@ fn byte_permission_all():
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
-        rc_cfg_prepare(nstart, ncount)
+        rc_ctl_prepare(nstart, ncount)
         bp_init_var_range(vstart, vcount)
         bp_infer_strings(nstart, ncount, vstart, vcount)
         bp_alias_compute(fi)
