@@ -41,6 +41,9 @@ g_rc_out_pairs : string, mut
 // the parameter escapes (`gp = *pp`).
 g_rc_param_content_alias : string, mut
 g_rc_param_content_escape : string, mut
+// Parameters forwarded to an extern call outside `unsafe`; callers must either
+// pass program-lifetime pointers or put the call in an unsafe block.
+g_rc_param_ffi : string, mut
 g_rc_param_changed : int, mut
 
 // Recursion budget for value/definition traces. The trace follows compiler
@@ -1296,6 +1299,16 @@ fn rc_summary_func(fi: int) -> int:
             rc_summary_store(fi, out, s1, d, ni, nstart)
         if op == IR_STORE_FIELD && s1 >= 0 && s2 >= 0:
             rc_summary_store(fi, out, s1, s2, ni, nstart)
+        if op == IR_CALL_EXTERN && is_in_unsafe(ni) == 0 && s2 >= 0 && s3 > 0:
+            j : ., mut = 0
+            loop:
+                if j >= s3:
+                    break
+                arg := s2 + j
+                if arg >= 0 && arg < g_ir_var_count:
+                    rc_mask_or_from(g_rc_param_ffi, fi * 2,
+                                    g_rc_param_alias, arg * 2)
+                j = j + 1
         if op == IR_RETURN && s1 >= 0 && s1 < g_ir_var_count:
             rc_mask_or_from(ret, 0, g_rc_param_alias, s1 * 2)
         if op == IR_CALL && s2 > 0:
@@ -1314,6 +1327,11 @@ fn rc_summary_func(fi: int) -> int:
                         arg := s1 + j
                         if arg >= 0 && arg < g_ir_var_count:
                             rc_summary_content_escape(fi, arg, ni, nstart)
+                    if rc_mask_has(g_rc_param_ffi, callee * 2, j) != 0:
+                        arg := s1 + j
+                        if arg >= 0 && arg < g_ir_var_count:
+                            rc_mask_or_from(g_rc_param_ffi, fi * 2,
+                                            g_rc_param_alias, arg * 2)
                     if rc_mask_nonempty(g_rc_out_pairs, callee * 128 + j * 2) != 0:
                         arg := s1 + j
                         if arg >= 0 && arg < g_ir_var_count:
@@ -1365,6 +1383,7 @@ fn rc_param_summaries():
     g_rc_out_pairs = alloc(g_ir_func_count * 128 * 8)
     g_rc_param_content_alias = alloc(g_ir_var_count * 2 * 8)
     g_rc_param_content_escape = alloc(g_ir_func_count * 2 * 8)
+    g_rc_param_ffi = alloc(g_ir_func_count * 2 * 8)
     i : ., mut = 0
     loop:
         if i >= g_ir_var_count * 2:
@@ -1378,6 +1397,7 @@ fn rc_param_summaries():
         cell_store(g_rc_param_escape, i * 8, 0)
         cell_store(g_rc_ret_alias, i * 8, 0)
         cell_store(g_rc_param_content_escape, i * 8, 0)
+        cell_store(g_rc_param_ffi, i * 8, 0)
         i = i + 1
     i = 0
     loop:
@@ -1579,6 +1599,12 @@ fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int,
                 if rc_value_has_release(arg, ni, nstart, 0) != 0:
                     check_error(EC_B_LIFETIME,
                         "parameter escape: callee stores a region-local pointer",
+                        0, 0)
+        if is_in_unsafe(ni) == 0 && rc_mask_has(g_rc_param_ffi, callee * 2, j) != 0:
+            if arg >= 0 && arg < g_ir_var_count:
+                if rc_value_has_release(arg, ni, nstart, 0) != 0:
+                    check_error(EC_B_LIFETIME,
+                        "extern call: region-local pointer argument requires unsafe",
                         0, 0)
         if rc_mask_has(g_rc_param_content_escape, callee * 2, j) != 0:
             if arg >= 0 && arg < g_ir_var_count:
@@ -1954,6 +1980,20 @@ fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int
                     rc_store_escape(ni, s1, s2, nstart)
 
         // Interprocedural escape through a call argument.
+        if op == IR_CALL_EXTERN && is_in_unsafe(ni) == 0 && s2 >= 0 && s3 > 0:
+            j : ., mut = 0
+            loop:
+                if j >= s3:
+                    break
+                arg := s2 + j
+                if arg >= 0 && arg < g_ir_var_count:
+                    if rc_store_value_is_pointer(arg) != 0:
+                        if rc_value_has_release(arg, ni, nstart, 0) != 0:
+                            check_error(EC_B_LIFETIME,
+                                "extern call: region-local pointer argument requires unsafe",
+                                0, 0)
+                j = j + 1
+
         if op == IR_CALL:
             rc_call_check(ni, s1, s2, s3, nstart, fi)
 

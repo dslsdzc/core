@@ -422,6 +422,22 @@ def test_p32_deref_loaded_pointer_transitive():
     )
 
 
+def test_p33_extern_region_local_argument_requires_unsafe():
+    """P33 FFI 边界：非 unsafe 的 extern 调用传归还区指针 ⇒ 报 B11。"""
+    assert_rejected(
+        "extern fn dummy(p: &int) -> int\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        dummy(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "requires unsafe",
+    )
+
+
+def test_p34_extern_argument_forwarded_through_wrapper():
+    """P34 FFI 边界经转发：wrap 把形参交给 extern，调用点的归还区实参仍报。"""
+    assert_rejected(
+        "extern fn dummy(p: &int) -> int\nfn wrap(p: &int) -> int:\n    return dummy(p)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        wrap(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "requires unsafe",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -548,6 +564,20 @@ def test_r24_deref_loaded_pointer_read_only_is_safe():
     )
 
 
+def test_r25_extern_global_argument_is_safe():
+    """R25 FFI 反向对照：全局对象是程序寿命，非 unsafe 调用不产生悬垂。"""
+    assert_accepted(
+        "extern fn dummy(p: &int) -> int\ng : int, mut\nfn main() -> int:\n    return dummy(&g)\n"
+    )
+
+
+def test_r26_extern_inside_unsafe_is_safe():
+    """R26 FFI 反向对照：归还区指针在 unsafe 域内传给 extern ⇒ 接受。"""
+    assert_accepted(
+        "extern fn dummy(p: &int) -> int\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        unsafe:\n            dummy(&x)\n        i = i + 1\n    return 0\n"
+    )
+
+
 def test_r18_in_loop_safe_overwrite():
     """R18 堆指针到达定义：循环内先写死指针、再无条件写活指针，循环后解引用
     ⇒ 到达定义只有安全写入，不得保守误报。"""
@@ -666,6 +696,10 @@ if __name__ == "__main__":
         test_p32_deref_loaded_pointer_transitive,
         test_r23_deref_loaded_global_pointer_is_safe,
         test_r24_deref_loaded_pointer_read_only_is_safe,
+        test_p33_extern_region_local_argument_requires_unsafe,
+        test_p34_extern_argument_forwarded_through_wrapper,
+        test_r25_extern_global_argument_is_safe,
+        test_r26_extern_inside_unsafe_is_safe,
     ]
     failures = 0
     for test in tests:
