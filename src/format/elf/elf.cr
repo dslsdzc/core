@@ -1923,6 +1923,25 @@ fn elf_gen(buf: string) -> int:
     w8(buf, cp, 195)
     cp = cp + 1  // ret
 
+    // Early clear fallback. Only emit it when the program actually contains an
+    // IR_ARENA_CLEAR, so programs without a plan keep the exact v1 ELF.
+    has_clear : ., mut = 0
+    hi : ., mut = 0
+    loop:
+        if hi >= g_ir_instr_count:
+            break
+        if iri_op(hi) == IR_ARENA_CLEAR:
+            has_clear = 1
+            break
+        hi = hi + 1
+    if has_clear != 0:
+        grow_func_offsets(g_x86_func_off_count * 2 + 2)
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("arena_clear"))
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
+        g_x86_func_off_count = g_x86_func_off_count + 1
+        w8(buf, cp, 195)
+        cp = cp + 1  // ret
+
     // ── scheduler call trampolines ──
     sched_reg_one("sched_call_0", 0, cp)
     cp = cp + emit_sched_call(buf, cp, 0)

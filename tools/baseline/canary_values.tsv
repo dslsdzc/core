@@ -227,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438	131274
-gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89	131496
+gt_ccr	gt.ccr	978cbe151abd87a6f7efc35d9cb2fd8c7fbd8e9096a7b7b47b97096055bc1e23	131330
+gt_static_ccr	gt_st.bin.ccr	599d3fda1dd673d607ceaf996059a847f1e24f3d164c6fd1deda9ad6f85c7717	131552
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -607,3 +607,17 @@ gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bf
 # 新值：
 #   canary_elf 560dbd2566ad0230ff5b1679de7f656f405804e370cf76a764af423ca4dbb59e 61622
 # 实现提交：91ba68f06b96 (arena extent + C model + legacy removal)
+
+# ── 「本次重锁 2026-10-30」V2.1 early clear ──
+# **性质 = 内容面新增一条合法 IR_ARENA_CLEAR，非发射面回归**。
+# `generics_test.cr` 的 `main` 在 label15 后新增一条 `arena_clear _arena`：
+# 之前的函数级分配已死亡，同基本块的 `b2` 分配随后复用同一槽。
+# 四条 `.ccr` 中仅 gt 两条 +56B（一条 NOD + 邻接/状态边）；pa 两条与
+# canary ELF 逐字节不变。`generics_test.cr` 运行 ALL PASS rc=0；suite ALL PASS；
+# D1 5/5 PASS。维护者显式授权重锁 gt 两条（2026-10-30）。
+# 旧值留痕（自本次起作废）：
+#   gt_ccr        19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438 131274
+#   gt_static_ccr 605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89 131496
+# 新值：
+#   gt_ccr        978cbe151abd87a6f7efc35d9cb2fd8c7fbd8e9096a7b7b47b97096055bc1e23 131330
+#   gt_static_ccr 599d3fda1dd673d607ceaf996059a847f1e24f3d164c6fd1deda9ad6f85c7717 131552

@@ -698,10 +698,19 @@ fn corec_main() -> int:
                 print("split ")
                 println(int_str(pi))
             pi = pi + 1
+        ci : ., mut = 0
+        loop:
+            if ci >= g_plan_clear_count:
+                break
+            print("clear ")
+            print(int_str(cell_load(g_plan_clear_label, ci * 8)))
+            print(" ")
+            println(int_str(cell_load(g_plan_clear_sg, ci * 8)))
+            ci = ci + 1
 
     // V2.0 Phase B: regenerate the whole IR with split IFs, then re-validate.
     // The plan is empty for the common case, so v1 artifacts stay byte-identical.
-    if region_plan_has_split() != 0:
+    if region_plan_has_plan() != 0:
         g_plan_active = 1
         ir_gen_all()
         g_plan_active = 0

@@ -508,6 +508,42 @@ fn arena_reset(ai: int), pub:
         arena_set_current(-1)
     g_arena_suspend = 0
 
+// Early clear (V2.1): reset the current slot's cursor, size-class metadata and
+// dedicated large extents, but keep the arena id live and current. Older slots
+// in the chain stay attached until the final arena_reset; the current slot is
+// the hot path and is reused immediately.
+fn arena_clear(ai: int), pub:
+    if ai < 0 || ai >= g_arena_count:
+        return
+    if cell_load(g_arena_live, ai * 8) == 0:
+        return
+    g_arena_suspend = 1
+
+    ln : ., mut = cell_load(g_arena_large_count, ai * 8)
+    loop:
+        if ln <= 0:
+            break
+        lp := load_str_ptr(g_arena_large_head, ai * 8)
+        lnxt := load_str_ptr(lp, 0)
+        lsz := cell_load(lp, 8)
+        r1 := syscall3(11, lp, lsz, 0)
+        store_str_ptr(g_arena_large_head, ai * 8, lnxt)
+        ln = ln - 1
+    cell_store(g_arena_large_count, ai * 8, 0)
+    cell_store(g_arena_large_head, ai * 8, -1)
+
+    cell_store(g_arena_cursors, ai * 8, 0)
+    cell_store(g_arena_slot_cursor, ai * 8, 0)
+    ci : ., mut = 0
+    loop:
+        if ci >= ARENA_CLASS_COUNT:
+            break
+        cell_store(g_class_base, (ai * ARENA_CLASS_COUNT + ci) * 8, -1)
+        cell_store(g_class_cursor, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        cell_store(g_class_limit, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
+        ci = ci + 1
+    g_arena_suspend = 0
+
 // ── Interpreter allocation path ──
 // The ELF backend uses the precompiled raw blob. `corec run` interprets this
 // Core function instead, so both paths share the arena metadata and the same

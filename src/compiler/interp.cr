@@ -100,6 +100,19 @@ fn ir_interp_arena_reset(ai_var: int):
                cell_load(g_ir_vals, ai_var * 8))
     ir_interp_run_fn(cfi, g_interp_scratch, 1)
 
+fn ir_interp_arena_clear(ai_var: int):
+    if ai_var < 0:
+        return
+    aid := ir_interp_word(cell_load(g_ir_vals, ai_var * 8))
+    if aid < 0:
+        return
+    cfi := ir_interp_find_func("arena_clear")
+    if cfi < 0:
+        return
+    cell_store(g_ir_vals, g_interp_scratch * 8,
+               cell_load(g_ir_vals, ai_var * 8))
+    ir_interp_run_fn(cfi, g_interp_scratch, 1)
+
 // Call dispatch and inline callee execution. This is the only implementation for
 // both the main loop and callee paths.
 // Interpreter abort code. 0 means continue; a non-zero value is what ir_interpret
@@ -947,6 +960,8 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             ir_interp_arena_new(d2, t1)
         if op2 == 33:
             ir_interp_arena_reset(t1)
+        if op2 == 56:
+            ir_interp_arena_clear(t1)
         if op2 == 46 || op2 == 47:
             if d2 >= 0 && t1 >= 0:
                 cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
@@ -1497,6 +1512,8 @@ fn ir_interpret() -> int:
             ir_interp_arena_new(d, s1)
         if op == 33:
             ir_interp_arena_reset(s1)
+        if op == 56:
+            ir_interp_arena_clear(s1)
 
         // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
         if op == 43:

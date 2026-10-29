@@ -131,6 +131,9 @@ fn ir_instr_str(instr_idx: int) -> string:
     if iri_op(instr_idx) == IR_ALLOC_ARRAY:
         s = s + ir_var_str(iri_dest(instr_idx)) + "[" + int_str(iri_s1(instr_idx)) + "]"
         return s
+    if iri_op(instr_idx) == IR_ARENA_CLEAR:
+        s = s + "arena_clear " + ir_var_str(iri_s1(instr_idx))
+        return s
     if iri_op(instr_idx) == IR_ALLOC_AT:
         s = s + ir_var_str(iri_dest(instr_idx)) + " = alloc_at(" + int_str(iri_s1(instr_idx)) + ", " + int_str(iri_s2(instr_idx)) + ", " + int_str(iri_s3(instr_idx)) + ")"
         return s

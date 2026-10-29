@@ -6250,6 +6250,8 @@ fn purity_op_effect(op: int) -> int:
         return 1
     if op == IR_AWAIT:
         return 1
+    if op == IR_ARENA_CLEAR:
+        return 1
     return 0
 
 // IR 函数序号（g_ir_func_* 表下标）-> 源 FuncInfo 下标；-1 = 越界（不可达防御）。

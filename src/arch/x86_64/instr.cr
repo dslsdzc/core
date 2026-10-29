@@ -2087,6 +2087,26 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + 5  // call placeholder
         return cp
 
+    if op == IR_ARENA_CLEAR:
+        // Same guard shape as IR_ARENA_RESET, but clear keeps the arena live.
+        cp = cp + e2_load_var(buf, pos+cp, 7, s1)
+        w8(buf, pos+cp, 72)
+        w8(buf, pos+cp+1, 133)
+        w8(buf, pos+cp+2, 255)
+        cp = cp + 3
+        w8(buf, pos+cp, 124)
+        w8(buf, pos+cp+1, 5)
+        cp = cp + 2
+        ni_arena_clear := str_intern("arena_clear")
+        grow_call_patch(g_x86_call_patch_count + 1)
+        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_clear)
+        g_x86_call_patch_count = g_x86_call_patch_count + 1
+        e2_w8(buf, pos+cp, 232)
+        e2_w32(buf, pos+cp+1, 0)
+        cp = cp + 5
+        return cp
+
     if op == IR_LOAD && d >= 0:
         do2 := g2_slot(d)
         // char 槽存的是无 tag 的 intern index；写入 TI_INT 槽（例如

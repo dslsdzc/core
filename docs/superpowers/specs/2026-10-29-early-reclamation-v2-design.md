@@ -1,6 +1,6 @@
 # 区域 v2：自动提前回收（split / merge / share + IR 回收点）
 
-> 状态：V2.0 已实现（2026-10-29）；V2.1–V2.4 待实施
+> 状态：V2.0、V2.1 保守切片已实现（2026-10-30）；V2.2–V2.4 待实施
 > 日期：2026-10-29
 > 关联：`docs/maintainer/design/region-model.md`、`docs/maintainer/adr/adr-0007-graph-anchored-regions.md`、`docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
@@ -230,6 +230,7 @@ if all allocations pass: split(S) = 1
 - 只在基本块边界插入 `IR_ARENA_CLEAR`；区域出口仍 `IR_ARENA_RESET`。
 - 非局部出口（return/break/continue）为仍 live 的子槽插入 cleanup close；或将该候选排除。
 - 验收：构造长直线函数，前面分配死亡后 clear，同一槽后续分配复用；slot 计数不增加；有后续使用时 clear 不插入。
+- 实现（2026-10-30，保守切片）：先不做完整后支配。只在“最后一次使用之后的直线后缀”上找 clear 点：候选 label 之后不得有回边/跳回 ≤ 候选点的 jump/match；候选点之前该槽的分配全部死亡；候选点之后同一基本块内必须有同槽分配，保证 clear 立即带来复用。非局部出口的槽不 clear。运行期 `arena_clear` 清空当前 slot 游标、size-class 元数据和大对象 extent，保留 arena id/current；区域出口仍 `arena_reset`。完整后支配/活跃性版本留待 V2.1b。
 
 ### V2.2 merge 复制
 

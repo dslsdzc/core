@@ -334,6 +334,7 @@ branch, jump, label, phi, load_enum_tag,    // 18-23
 slice, deref, store_ptr,                    // 24-26
 spawn, yield, await,                        // 27-29
 alloc_at,                                   // 55 声明式固定地址放置
+arena_clear,                                // 56 提前清空游标/档位/extent，保留 arena id
 spec_constraint, spec_forall, spec_exists,  // 30-32
 spec_imply, spec_old, spec_assume           // 33-35
 ```

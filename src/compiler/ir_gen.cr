@@ -6764,6 +6764,19 @@ fn ir_gen_all():
     g_sg_count = 0
     g_cur_sg = -1
     rc_ctl_invalidate()
+    // Second IR runs inherit whole-program facts from Phase A. Reset the
+    // generation-time optimistic purity and usage counts so Phase B matches a
+    // cold v1 generation (lazy thunks depend on both).
+    gs : ., mut = 0
+    loop:
+        if gs >= g_func_count:
+            break
+        fi_set_ispure(gs, 1)
+        gs = gs + 1
+    g_purity_inst_count = 0
+    g_var_use_count = ""
+    g_var_use_count_cap = 0
+    g_df_state_finalized = 0
     g_ir_var_count = 0
     g_ir_instr_count = 0
     g_ir_func_count = 0

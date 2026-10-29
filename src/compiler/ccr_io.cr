@@ -426,7 +426,7 @@ fn ccr_op_is_system(op: int, arena_count: int) -> int:
         if arena_count > 0:
             return 1
         return 0
-    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ALLOC_AT:
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ALLOC_AT || op == IR_ARENA_CLEAR:
         return 1
     return 0
 
@@ -461,7 +461,7 @@ fn ccr_op_is_concurrent(op: int) -> int:
         return 1
     return 0
 
-// v10 opcode table. The IR opcode values are assigned densely 0..55 in ast.cr;
+// v10 opcode table. The IR opcode values are assigned densely 0..56 in ast.cr;
 // anything outside that table is not a v10 operation. Rejecting unknown opcodes
 // before emission also prevents emit_instr from silently falling through as a
 // zero-byte instruction.
@@ -470,7 +470,7 @@ fn ccr_op_is_known(op: int) -> int:
     // keeping it reserved (rather than renumbering) preserves all later IDs.
     if op == 19:
         return 0
-    if op >= IR_NOP && op <= IR_ALLOC_AT:
+    if op >= IR_NOP && op <= IR_ARENA_CLEAR:
         return 1
     return 0
 
@@ -575,6 +575,9 @@ fn ccr_validate_nod_operands() -> int:
         else if op == IR_ALLOC_AT:
             // s1/s2/s3 are literal address/size/align fields.
             if ccr_nod_var_ok(d) == 0:
+                return -1
+        else if op == IR_ARENA_CLEAR:
+            if ccr_nod_var_ok(s1) == 0:
                 return -1
         else if op == IR_ALLOC_STRUCT:
             if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s3) == 0:

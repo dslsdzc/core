@@ -122,6 +122,10 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_te
     df_connect_srcs(nid, opcode, src1, src2, src3, tk_aux)
     // VSDG state chain（kind=1）不在此连接，见 df_replay_state_chain 头注
     // （时点：真纯度需要全程序 IR 体 -> 状态依赖关系统一在 IR 生成结束后重建）。
+    // V2.1 early clear: a planned label is followed by clear nodes before the
+    // next instruction is emitted.
+    if opcode == IR_LABEL && g_plan_active != 0:
+        region_plan_emit_clears(src1)
     return nid
 
 // --- Edge creation ---
@@ -375,6 +379,9 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux:
     if opcode == IR_ARENA_RESET:
         df_use_var(node_id, s1)
         return
+    if opcode == IR_ARENA_CLEAR:
+        df_use_var(node_id, s1)
+        return
     if opcode == IR_INLINE:
         df_use_var(node_id, s1)
         return
@@ -579,6 +586,8 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "alloc_array"
     if opcode == IR_ALLOC_AT:
         return "alloc_at"
+    if opcode == IR_ARENA_CLEAR:
+        return "arena_clear"
     if opcode == IR_STORE:
         return "store"
     if opcode == IR_LOAD:

@@ -172,6 +172,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_struct_impl.py   # struct/impl 矩阵：推断字段经方法/接口读取、关联函数不带接收者且可返回 struct、`Self` 类型、`self: T` 与游离 `self` 拒绝、`&mut self`、返回推断字段结构体时省略返回型（14 例）
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
+    python3 tests/selfhost/test_early_clear.py  # V2.1 early clear：直线后缀回收点、指针逃逸/无后续分配/回边保持 v1
     python3 tests/selfhost/test_region_plan.py  # V2.0 IF split：无逃逸 if 建子 arena；逃逸/return/call/unsafe/嵌套循环保持 v1
     python3 tests/selfhost/test_alloc_at.py  # ALLOC_AT 声明式固定地址放置：编译期地址/大小/对齐、IR 节点、静态边界、静态 ELF、固定地址程序寿命
     python3 tests/selfhost/test_byte_permission.py  # 字节权限层：字符串字面量/只读全局只读，alloc 缓冲区可读写，unsafe 跳过；B012 两向固定用例
