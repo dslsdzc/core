@@ -148,9 +148,10 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - 四个 pass（provenance/region/byte permission/bounds，与 pointer-model 共享）
 - 字节权限层验证器侧（2026-10-29）：`src/compiler/byte_permission.cr`，两 bit 权限格、按分配/槽位推断、`unsafe` 跳过、`cell_store` 形参写入摘要，错误码 B012
 - `alloc_at` 声明式放置（2026-10-29）：`IR_ALLOC_AT`（opcode 55）+ 前端识别 + provenance/边界 + 后端地址常量；v1 限制见 pointer-model
+- V2.0 IF split（2026-10-29）：无逃逸 `if` 获得子 arena，出口 reset；两阶段 IR 生成 + 保守 plan（`src/compiler/region_plan.cr`）
 
 设计阶段（M1-M3 推进，以计划为准）：
-- split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
+- V2.1 early clear、V2.2 merge 复制、V2.3 share、V2.4 清零配置
 
 待解决问题：
 - 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）；普通分配在复用时

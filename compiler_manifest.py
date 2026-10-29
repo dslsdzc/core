@@ -52,6 +52,7 @@ COREC_FILES = [
     'src/compiler/opt.cr',
     'src/compiler/ptr_analysis.cr',
     'src/compiler/region_check.cr',
+    'src/compiler/region_plan.cr',
     'src/compiler/byte_permission.cr',
     'src/compiler/provenance_verify.cr',
     'src/compiler/diag.cr',

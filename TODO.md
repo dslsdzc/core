@@ -2168,6 +2168,7 @@
   - 2026-10-29 pointee 内容经 out 参数：`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，调用点按目标寿命（`rc_dest_max_exit`）比较内容值；覆盖 `test_p35`/`p36`/`p37`/`r27`。
   - 2026-10-29 字节权限层（验证器侧）：新增 `src/compiler/byte_permission.cr` 与 B012。权限状态两个 bit、只降不升；字符串字面量为只读，Core 分配/未知值可读写，全局槽字节可写（`mut` 只限制按名赋值）。检查 `cell_store`/`store8` 写入、`cell_load`/`load8`/`str_len` 读取、经只读分配的指针写入；`g_bp_param_write` 摘要沿调用图传播。覆盖 `test_byte_permission.py` 13 例。剩余：持久化/运行期表示、每字节子区间、`alloc_at` 权限声明。
   - 2026-10-29 `alloc_at` 声明式放置：`IR_ALLOC_AT`（opcode 55）+ `alloc_at`/`align` 声明期识别 + ptr_analysis 分配根 + provenance 边界（字节 → 8 字节 cell）+ 固定地址程序寿命 + 后端地址常量 + 解释器响亮拒绝。覆盖 `test_alloc_at.py` 11 例。v1 只接受编译期字面量、固定 `*int`；部署配置地址、显式元素类型、运行时对齐尚未实现。
+  - 2026-10-29 区域 V2.0：IF split 落地。`region_plan.cr` 在 Phase A 标记无逃逸的 SG_IF，Phase B 用 `ir_gen_all` 重生成 IR，在 IF 入口/出口发射子 arena。当前门：无 return/call/unsafe/非局部跳转、无 `g_current_arena` 读、无取址局部槽中转、嵌套 loop 分配不计数。覆盖 `test_region_plan.py` 8 例；无 plan 程序 canary 5/5 不变。剩余 V2.1–V2.4 见设计文档。
   - 不适用（已核）："被返回的本地堆对象"不单列摘要。`alloc()` 的返回类型是 `string`，走全局堆而非区域 arena（实测循环后返回并解引用仍有效）；`IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` 是栈/区域槽，只能通过 `&` 引用逃逸，已由指针路径覆盖。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）

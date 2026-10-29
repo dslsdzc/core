@@ -303,6 +303,16 @@ fn sg_alloc_push(kind: int):
     cell_store(g_sg_alloc_unknown, g_sg_count * 8, 0)
     sg_push(kind)
 
+// Close a split child without adding its bytes to the parent's arena peak.
+// The child arena was created by sg_alloc_push; its reset is emitted after the
+// SG closes, so uses after the IF merge are outside the region exit.
+fn sg_alloc_pop_split():
+    if g_sg_count <= 0:
+        return
+    arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
+    sg_pop()
+    emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+
 fn sg_alloc_pop():
     total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
     unk := cell_load(g_sg_alloc_unknown, (g_sg_count - 1) * 8)
@@ -4195,7 +4205,19 @@ fn gen_expr(node: int) -> int:
 
     // If expression
     if ast_kind(node) == EXPR_IF:
-        sg_push(SG_IF)  // conditional region: covers [condition, merge)
+        // V2.0: a planned IF owns a child arena. The plan is filled in Phase A
+        // after PointerAnalysis/RegionCheck and read only during Phase B.
+        sg_idx := g_sg_count
+        split := region_plan_is_split(sg_idx)
+        arena_instr : ., mut = -1
+        if split != 0:
+            sg_alloc_push(SG_IF)
+            arena_var := new_ir_var("_arena", TI_INT)
+            cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+            emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
+            arena_instr = g_ir_instr_count - 1
+        else:
+            sg_push(SG_IF)  // conditional region: covers [condition, merge)
         cond := ast_a(node)
         then_node := ast_b(node)
         else_node := ast_c(node)
@@ -4259,7 +4281,13 @@ fn gen_expr(node: int) -> int:
         if then_u != 0 || other_u != 0:
             sg_alloc_set(base_t + pk, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
-        sg_pop()
+        if split != 0:
+            peak := sg_alloc_cur_total()
+            if g_no_auto_arena == 0 && peak != 0:
+                iri_set_s1(arena_instr, peak)
+            sg_alloc_pop_split()
+        else:
+            sg_pop()
         return result_var
 
     // Loop
@@ -6731,6 +6759,11 @@ fn ccr_set_raw_mode_from_source():
 fn ir_gen_all():
     ccr_set_raw_mode_from_source()
     saved_lib := g_cur_lib
+    if g_plan_active == 0:
+        region_plan_reset()
+    g_sg_count = 0
+    g_cur_sg = -1
+    rc_ctl_invalidate()
     g_ir_var_count = 0
     g_ir_instr_count = 0
     g_ir_func_count = 0

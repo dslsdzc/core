@@ -433,6 +433,14 @@ fn pa_zero_cells(buf: string, n: int):
         i = i + 1
 
 fn ptr_analysis_all():
+    // Phase B replaces the whole IR graph. Old points-to rows describe deleted
+    // nodes; drop the buffers instead of zeroing rows that no longer align.
+    if g_pts_force_rebuild != 0:
+        g_pts = ""
+        g_alloc_pts = ""
+        g_pts_cap = 0
+        g_alloc_pts_cap = 0
+        g_pts_force_rebuild = 0
     pa_prepare_unsafe()
     g_pa_alloc_count = 0
     g_pa_alloc_max = pa_count_allocs()

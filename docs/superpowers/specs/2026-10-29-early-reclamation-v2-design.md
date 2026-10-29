@@ -1,6 +1,6 @@
 # 区域 v2：自动提前回收（split / merge / share + IR 回收点）
 
-> 状态：设计草案，待批准
+> 状态：V2.0 已实现（2026-10-29）；V2.1–V2.4 待实施
 > 日期：2026-10-29
 > 关联：`docs/maintainer/design/region-model.md`、`docs/maintainer/adr/adr-0007-graph-anchored-regions.md`、`docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
@@ -222,6 +222,7 @@ if all allocations pass: split(S) = 1
 - 候选无逃逸才建子槽；有逃逸保持 v1。
 - 两阶段 IR 生成 + `region_plan_analyze`。
 - 验收：R2（if 内分配逃逸到 if 外）保持 v1，运行结果不变；新增“if 内分配不逃逸”用例，`IR_ARENA_NEW/RESET` 成对出现；canary 若因现有语料触发 split 而变化，逐项归因并按换代纪律更新值表，不得静默改判据。
+- 实现（2026-10-29）：`src/compiler/region_plan.cr` 负责 Phase A 的保守 plan；`ir_gen` 在 Phase B 为标记的 IF 发射子 arena。当前只接受“直接分配、无逃逸、无 return/call/unsafe/非局部跳转、无 `g_current_arena` 读、无取址局部槽中转”的 IF。Phase B 用 `ir_gen_all` 全量重生成，不读写 `.cir` 缓存；缓存 plan 留到后续。
 
 ### V2.1 early clear
 

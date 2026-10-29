@@ -67,6 +67,7 @@ import pass
 import opt
 import ptr_analysis
 import region_check
+import region_plan
 import byte_permission
 import provenance_verify
 import rt

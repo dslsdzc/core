@@ -578,6 +578,7 @@ g_plugin_rtype_cap : int, mut
 g_pts : string, mut
 g_pts_count : int, mut
 g_pts_cap : int, mut
+g_pts_force_rebuild : int, mut
 g_pts_words : int, mut
 g_pa_alloc_max : int, mut
 g_offsets : string, mut

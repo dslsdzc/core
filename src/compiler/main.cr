@@ -261,6 +261,8 @@ fn corec_main() -> int:
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
     cli_flag_bool_debug("dump-tk-terms", "", "Debug: dump per-DFNode type terms")
     cli_flag_bool_debug("dump-case-model", "", "Debug: report semantic CASE model vs derived wire counts")
+    cli_flag_bool_debug("dump-region-plan", "", "Debug: report V2 split plan SG indices")
+    cli_flag_bool_debug("dump-ir-text", "", "Debug: print IR text after the safety passes")
     // The old type-shadow CLI channels were removed; the judgment path has no
     // switch and always goes through the engine.
     cli_flag_bool_debug("verify-named-dedup", "", "Debug: verify type side-table consistency")
@@ -505,6 +507,7 @@ fn corec_main() -> int:
     g_ccr_case_cap = 0
     g_cir_has_match = 0
     init_df()
+    region_plan_reset()
     // This path does not use ir_gen_all, so initialize optional representation
     // state here, before ir_gen_globals, because the hidden channels depend on
     // variable ordering.
@@ -675,11 +678,40 @@ fn corec_main() -> int:
         return 0
 
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
-    base_diags := g_diag_count
+    base_diags : ., mut = g_diag_count
     ptr_analysis_all()
     timing_mark("ptr_analysis")
     region_check_all()
     timing_mark("region_check")
+    // Phase A may reject the v1 program. Do not plan on top of a failed graph.
+    if g_diag_count > base_diags:
+        print_diagnostics()
+        return 1
+
+    region_plan_analyze()
+    if cli_has("dump-region-plan") != 0:
+        pi : ., mut = 0
+        loop:
+            if pi >= g_sg_count:
+                break
+            if region_plan_is_split(pi) != 0:
+                print("split ")
+                println(int_str(pi))
+            pi = pi + 1
+
+    // V2.0 Phase B: regenerate the whole IR with split IFs, then re-validate.
+    // The plan is empty for the common case, so v1 artifacts stay byte-identical.
+    if region_plan_has_split() != 0:
+        g_plan_active = 1
+        ir_gen_all()
+        g_plan_active = 0
+        g_pts_force_rebuild = 1
+        base_diags = g_diag_count
+        ptr_analysis_all()
+        timing_mark("ptr_analysis_plan")
+        region_check_all()
+        timing_mark("region_check_plan")
+
     byte_permission_all()
     timing_mark("byte_permission")
     provenance_verify_all()
@@ -688,6 +720,9 @@ fn corec_main() -> int:
     if g_diag_count > base_diags:
         print_diagnostics()
         return 1
+
+    if cli_has("dump-ir-text") != 0:
+        print(cir_text_dump())
 
     // build and ccr need lower_to_ccr. O2 allocation and consistency checks run
     // in corearch after loading the .ccr; corec keeps only semantic CSE.

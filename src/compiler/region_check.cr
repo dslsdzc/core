@@ -93,6 +93,8 @@ fn rc_sg_releases(sg: int) -> int:
     k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
     if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
         return 1
+    if k == SG_IF && region_plan_is_split(sg) != 0:
+        return 1
     return 0
 
 // Nearest ancestor region that releases memory, including the allocation's own
@@ -471,6 +473,14 @@ fn rc_ctl_label_node(label: int) -> int:
             return cell_load(g_rc_ctl_label_nodes, i * 8)
         i = i + 1
     return -1
+
+// Invalidate the derived adjacency when the IR is regenerated. The cache key is
+// the node range; Phase A and Phase B can share a range while the labels and
+// MATCH tables differ.
+fn rc_ctl_invalidate():
+    g_rc_ctl_ready = 0
+    g_rc_rd_var = -1
+    g_rc_rd_cache = ""
 
 fn rc_ctl_prepare(nstart: int, ncount: int):
     if g_rc_ctl_ready != 0 && g_rc_ctl_nstart == nstart && g_rc_ctl_ncount == ncount:
