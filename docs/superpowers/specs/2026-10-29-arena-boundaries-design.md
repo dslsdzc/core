@@ -168,11 +168,13 @@ class/slot 规则：
 - 解释器启动时把 `g_current_arena` 显式初始化为 tagged -1，与 ELF entry 的
   `emit_start` 一致。
 - `IR_BINARY` 的 dex 分流按操作数类型触发，而不是只看结果槽：任一操作数为
-  `TI_DEX`/`TI_DEX_S` 时使用 raw 字运算，比较结果写 raw 0/1。`ir_gen` 已在
-  节点前完成 int→scaled 的转换，解释器不再二次 untag（`dex_scale_int` 依赖
-  原始除 2 去掉 BigInt tag）。
+  `TI_DEX`/`TI_DEX_S` 时使用 raw 字运算，比较结果写 raw 0/1，SHL/SHR 也走
+  raw 移位。`ir_gen` 已在节点前完成 int→scaled 的转换，解释器不再二次 untag
+  （`dex_scale_int` 依赖原始除 2 去掉 BigInt tag）。
 - `arena_alloc` 的清零走 `_memzero`。解释器在 `ir_interp_call` 里用编译后的
-  循环执行它，不再逐节点解释 1MiB 的清零循环；native 编译同一函数。
+  循环执行它，不再逐节点解释 1MiB 的清零循环；仅在解释 arena body
+  （`g_interp_arena_active`）时拦截，非 arena 程序的同名函数不会被遮蔽。
+  native 编译同一函数。
 
 ### 回归
 

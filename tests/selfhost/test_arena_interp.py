@@ -111,11 +111,11 @@ fn main() -> int:
     a := arena_new()
     if a < 0:
         return 10
-    big := alloc(1048576)
-    if check_zero(big, 1048576) != 0:
+    big := alloc(1048568)
+    if check_zero(big, 1048568) != 0:
         return 11
     cell_store(big, 0, 123)
-    cell_store(big, 1048576 - 8, 456)
+    cell_store(big, 1048568 - 8, 456)
     small := alloc(64)
     if check_zero(small, 64) != 0:
         return 12
@@ -124,8 +124,8 @@ fn main() -> int:
     b := arena_new()
     if b != a:
         return 13
-    big2 := alloc(1048576)
-    if check_zero(big2, 1048576) != 0:
+    big2 := alloc(1048568)
+    if check_zero(big2, 1048568) != 0:
         return 14
     small2 := alloc(64)
     if check_zero(small2, 64) != 0:
@@ -146,7 +146,7 @@ fn main() -> int:
     loop:
         if i >= 32:
             break
-        p := alloc(1048576)
+        p := alloc(1048568)
         if p == 0:
             return 1
         i = i + 1

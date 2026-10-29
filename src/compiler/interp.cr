@@ -161,6 +161,50 @@ fn ir_interp_binary_raw(d: int, s1: int, s2: int, s3: int):
     else if s3 == 22:
         cell_store(g_ir_vals, d * 8, lv + rv)
 
+// Raw shifts for dex-scaled words. The frontend has no shift emitter today,
+// but the ELF generic path handles OP_SHL/OP_SHR, so the interpreter must not
+// drop them if one appears. SHR is logical on the 64-bit word; negative values
+// use the floor correction plus 2^(64-n).
+fn ir_interp_shl(v: int, n: int) -> int:
+    r : ., mut = v
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        r = r * 2
+        i = i + 1
+    return r
+
+fn ir_interp_shr(v: int, n: int) -> int:
+    if n <= 0:
+        return v
+    q : ., mut = v
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        q = q / 2
+        i = i + 1
+    if v < 0:
+        back : ., mut = q
+        i = 0
+        loop:
+            if i >= n:
+                break
+            back = back * 2
+            i = i + 1
+        if back != v:
+            q = q - 1
+        z : ., mut = 1
+        i = 0
+        loop:
+            if i >= 64 - n:
+                break
+            z = z * 2
+            i = i + 1
+        q = q + z
+    return q
+
 // Shared IR_BINARY dispatch for the main loop and callee loops.
 // g_ir_vals int slots hold tagged mathematical integers. Char/bool/dex and
 // pointer values remain raw machine words, so the operand variable types select
@@ -259,6 +303,10 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
             cell_store(g_ir_vals, d * 8, interp_b2i(lv <= rv))
         else if s3 == 11:
             cell_store(g_ir_vals, d * 8, interp_b2i(lv >= rv))
+        else if s3 == 15:
+            cell_store(g_ir_vals, d * 8, ir_interp_shl(lv, rv))
+        else if s3 == 16:
+            cell_store(g_ir_vals, d * 8, ir_interp_shr(lv, rv))
         return
 
     if ti == TI_BOOL || irv_type(s1) == TI_BOOL || irv_type(s2) == TI_BOOL:
@@ -487,7 +535,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
         return
-    if ir_interp_name_is(fn_ni, "_memzero") != 0:
+    if ir_interp_name_is(fn_ni, "_memzero") != 0 && g_interp_arena_active != 0:
         if s2 >= 2:
             mzb := cell_load(g_ir_vals, s1 * 8)
             mzn := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
