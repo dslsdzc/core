@@ -356,8 +356,12 @@ def main() -> int:
     obj = compile_source(source)
     blob, funcs, calls, globals_ = build_blob(obj)
     out = Path(args.out)
+    try:
+        source_label = source.resolve().relative_to(BASE)
+    except ValueError:
+        source_label = source
     out.write_text(
-        emit_core(blob, funcs, calls, globals_, source), encoding="utf-8")
+        emit_core(blob, funcs, calls, globals_, source_label), encoding="utf-8")
     summary = {
         "blob_size": len(blob),
         "simple_off": funcs.get("alloc_simple", -1),
