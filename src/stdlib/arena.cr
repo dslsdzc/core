@@ -508,6 +508,161 @@ fn arena_reset(ai: int), pub:
         arena_set_current(-1)
     g_arena_suspend = 0
 
+// ── Interpreter allocation path ──
+// The ELF backend uses the precompiled raw blob. `corec run` interprets this
+// Core function instead, so both paths share the arena metadata and the same
+// class/slot rules. The interpreter's `alloc` builtin calls this function only
+// while an arena is active; metadata and >1MiB extents go to the host heap.
+
+fn _arena_ptr(v: int) -> string:
+    p : ., mut = ""
+    unsafe:
+        p = @str_of(v)
+    return p
+
+fn _arena_word(s: string) -> int:
+    v : ., mut = 0
+    unsafe:
+        v = @ptr_of(s)
+    return v
+
+fn _arena_slot_base(slot: int) -> string:
+    seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
+    return _arena_ptr(_arena_word(seg) + (slot % 64) * 1048576)
+
+fn _arena_zero(p: string, n: int):
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(p, i, 0)
+        i = i + 8
+
+fn _arena_get_slot(ai: int, size: int) -> int:
+    sf := arena_scalar_get(40)
+    slot : ., mut = -1
+    if sf >= 0:
+        slot = sf
+        arena_scalar_set(40, cell_load(g_arena_slot_next, sf * 8))
+    else:
+        count : ., mut = arena_scalar_get(32)
+        pool : ., mut = arena_scalar_get(16)
+        if count >= pool:
+            arena_grow_pool()
+            count = arena_scalar_get(32)
+            pool = arena_scalar_get(16)
+        if count >= pool:
+            return -1
+        slot = count
+        arena_scalar_set(32, count + 1)
+    old := cell_load(g_arena_slot, ai * 8)
+    if old >= 0:
+        cell_store(g_arena_slot_next, slot * 8, old)
+    else:
+        cell_store(g_arena_slot_next, slot * 8, -1)
+    cell_store(g_arena_slot, ai * 8, slot)
+    cell_store(g_arena_slot_cursor, ai * 8, 0)
+    return slot
+
+fn _arena_alloc_extent(size: int, aligned: int, ai: int) -> string:
+    base := alloc(aligned + 16)
+    if _arena_word(base) == 0:
+        return _arena_ptr(0)
+    total := aligned + 16
+    head := load_str_ptr(g_arena_large_head, ai * 8)
+    store_str_ptr(base, 0, head)
+    cell_store(base, 8, total)
+    cell_store(base, 16, size)
+    store_str_ptr(g_arena_large_head, ai * 8, base)
+    cell_store(g_arena_large_count, ai * 8,
+               cell_load(g_arena_large_count, ai * 8) + 1)
+    return _arena_ptr(_arena_word(base) + 24)
+
+fn arena_alloc(size: int) -> string:
+    if size < 0:
+        return _arena_ptr(0)
+    if size > 1099511627776:
+        return _arena_ptr(0)
+    if g_arena_suspend != 0 || g_arena_scalars_ready == 0:
+        return _arena_ptr(0)
+    if _arena_word(g_arena_scalars) == 0:
+        return _arena_ptr(0)
+    ai := arena_scalar_get(0)
+    if ai < 0:
+        return _arena_ptr(0)
+    aligned := (size + 15) / 8 * 8
+    slot : ., mut = cell_load(g_arena_slot, ai * 8)
+    if slot < 0:
+        return _arena_ptr(0)
+    slot_base : ., mut = _arena_slot_base(slot)
+    if _arena_word(slot_base) == 0:
+        return _arena_ptr(0)
+    if cell_load(g_arena_static, ai * 8) != 0:
+        cur := cell_load(g_arena_cursors, ai * 8)
+        limit := cell_load(g_arena_sizes, ai * 8)
+        if cur + aligned > limit:
+            return _arena_ptr(0)
+        cell_store(g_arena_cursors, ai * 8, cur + aligned)
+        p := _arena_ptr(_arena_word(slot_base) + cur)
+        _arena_zero(p, aligned)
+        cell_store(p, 0, size)
+        return _arena_ptr(_arena_word(p) + 8)
+
+    if aligned > 1048576:
+        return _arena_alloc_extent(size, aligned, ai)
+
+    max_size := arena_scalar_get(8)
+    loop:
+        lookup := aligned / 16
+        cls : ., mut = 25
+        if lookup <= 255:
+            cls = cell_load(g_class_lookup, lookup * 8)
+        idx := ai * 26 + cls
+        base : ., mut = cell_load(g_class_base, idx * 8)
+        if base < 0:
+            if cls == 25:
+                slot_cur := cell_load(g_arena_slot_cursor, ai * 8)
+                if aligned > max_size - slot_cur:
+                    slot = _arena_get_slot(ai, size)
+                    if slot < 0:
+                        return _arena_ptr(0)
+                    slot_base = _arena_slot_base(slot)
+                else:
+                    base = _arena_word(slot_base) + slot_cur
+                    cell_store(g_class_base, idx * 8, base)
+                    cell_store(g_class_limit, idx * 8,
+                               _arena_word(slot_base) + max_size)
+                    cell_store(g_class_cursor, idx * 8, 0)
+                    cell_store(g_arena_slot_cursor, ai * 8, max_size)
+            else:
+                slot_cur := cell_load(g_arena_slot_cursor, ai * 8)
+                newcur := slot_cur + 4096
+                if newcur > max_size:
+                    slot = _arena_get_slot(ai, size)
+                    if slot < 0:
+                        return _arena_ptr(0)
+                    slot_base = _arena_slot_base(slot)
+                else:
+                    base = _arena_word(slot_base) + slot_cur
+                    cell_store(g_arena_slot_cursor, ai * 8, newcur)
+                    cell_store(g_class_base, idx * 8, base)
+                    cell_store(g_class_limit, idx * 8,
+                               _arena_word(slot_base) + newcur)
+                    cell_store(g_class_cursor, idx * 8, 0)
+        base = cell_load(g_class_base, idx * 8)
+        cur := cell_load(g_class_cursor, idx * 8)
+        limit := cell_load(g_class_limit, idx * 8)
+        if base >= 0 && cur + aligned <= limit - base:
+            cell_store(g_class_cursor, idx * 8, cur + aligned)
+            p := _arena_ptr(base + cur)
+            _arena_zero(p, aligned)
+            cell_store(p, 0, size)
+            return _arena_ptr(_arena_word(p) + 8)
+        if base >= 0:
+            cell_store(g_class_base, idx * 8, -1)
+
+    return _arena_ptr(0)
+
 fn arena_avail(ai: int) -> int, pub:
     if ai < 0 || ai >= g_arena_count:
         return 0

@@ -1,6 +1,6 @@
 # Arena 边界处理设计
 
-> 状态：② 完成（① 已完成；③ 待实施）
+> 状态：①②③ 完成
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-28-arena-size-classes.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
 
@@ -127,33 +127,53 @@ cell：
 
 ## ③ 解释器 run 路径
 
-### 新增 Core 分配函数
+### Core 分配函数
 
-在 `src/stdlib/arena.cr` 增加 `arena_alloc(size: int) -> string`，按与 ELF stub 相同的顺序实现：
+`src/stdlib/arena.cr` 增加 `arena_alloc(size)`，与 ELF blob 共用 arena 元数据和
+class/slot 规则：
 
-1. 读 `g_current_arena`；小于 0 时返回空串或走宿主堆（由调用方决定）。
-2. 计算 `aligned = align_up(size + 8, 8)`。
-3. 选择 class 25 或查表 class。
-4. class 25 使用 slot 尾部；其它 class 切 4KB 块。
-5. 块或尾部不足时链接新 slot。
-6. 大于 1MB 时取连续 slot；大于 64MB 时 mmap extent。
-7. 写隐藏长度头，返回数据指针。
+1. `size < 0` 或 `size > 1TB` 返回 0；调用方停止并报错。
+2. `size < 0`、未就绪、`g_current_arena < 0` 或 slot 缺失返回 0。
+3. 计算 `aligned = align_up(size + 15, 8)`。
+4. class 25 使用 slot 尾部；其它 class 切 4KB 块；块不足时通过
+   `_arena_get_slot` 链接新 slot（free-list 与 bump 都更新 `g_arena_slot` 和
+   cursor）。
+5. static arena 使用 `g_arena_cursors`/`g_arena_sizes` 的单 cursor。
+6. dynamic arena 的 `>1MiB` 请求使用 `_arena_alloc_extent`：节点布局与 ELF
+   extent 相同（next、munmap 长度、隐藏长度头、payload），计数写入
+   `g_arena_large_count`，`arena_reset` 清空 head/count。解释器的 `alloc`
+   在 arena 分配期间走宿主堆，因此 extent 也来自宿主堆；`syscall3(11)` 在
+   解释器里是空操作，内存不会真正 `munmap`，但用户可见的分配/reset 语义
+   一致。
 
-该函数只服务解释器；ELF 仍使用手写 stub。两者的一致性由同一组 arena 测试覆盖。
+该函数只服务解释器；ELF 仍使用编译出的 blob。
 
 ### 解释器接线
 
-- `IR_ALLOC`：如果被解释程序有 `arena_alloc` 且 `g_current_arena >= 0`，把大小写入临时槽，调用 `arena_alloc`，结果写入目标槽；否则保持现有宿主 `alloc`。
-- `IR_ARENA_NEW`：如果存在 `arena_new` / `arena_new_sized`，按 `s1` 调用并把返回的 arena id 写入目标槽；否则写 -1。
-- `IR_ARENA_RESET`：如果存在 `arena_reset`，把 arena id 写入临时槽并调用；否则空操作。
-
-解释器自己的 `alloc`（编译器数据结构）不变，继续使用宿主堆。arena 库内部的元数据分配在 `g_current_arena = -1` 时也走宿主堆。
+- `IR_ARENA_NEW`：`s1 == 0` 写无 arena 哨兵（tagged -1），不调用
+  `arena_new`；`s1 > 0` 调用 `arena_new_sized(peak)`；`s1 < 0` 调用
+  `arena_new`。这与 native `instr.cr` 的分支一致，避免基础设施函数递归。
+- `IR_ARENA_RESET`：arena id 小于 0 时跳过；否则调用解释后的
+  `arena_reset(id)`。
+- `alloc` builtin：若存在 `arena_alloc` 且 `g_current_arena >= 0`，调用它；
+  否则走宿主 `alloc`。调用期间 `g_interp_arena_active = 1`，`arena_alloc`
+  内部的元数据/池/extent `alloc` 不会递归回 arena。
+- 解释器新增 `cell_load`/`cell_store`、`load64`、`load_str_ptr`/
+  `store_str_ptr`、`store8`、`syscall6` 的接线。`cell_load` 返回值按 tagged
+  int 处理，指针类 builtin 保持 raw 字；每个 builtin 分支结束后 `return`，
+  不再落入用户函数查找。
+- 解释器启动时把 `g_current_arena` 显式初始化为 tagged -1，与 ELF entry 的
+  `emit_start` 一致。
 
 ### 回归
 
-- `corec run tests/suite/arena_test.cr` 返回 0。
-- `corec run` 一个 2MB + 100MB 分配程序，返回值与 native 一致。
-- 解释器的失败路径：pool limit 和 1TB 请求都停止执行并报错，不返回 0。
+- `corec run` 执行 `arena_test.cr`、`arena_boundary_test.cr`、
+  `arena_alloc_regress.cr`、`arena_extent_test.cr`，返回 0。
+- 2MB + 100MB 分配程序在 `corec run` 与 native ELF 下返回 0，隐藏头和首
+  个 payload cell 一致。
+- `tests/selfhost/test_arena_interp.py` 覆盖上述套件、2MB/100MB parity，以及
+  static 超限、`>1TB`、pool limit 三条失败路径；失败必须输出
+  `arena allocation failed` 且返回非 0。
 
 ## 实施状态
 
@@ -187,12 +207,14 @@ cell：
 | `many_slots` | 0 |
 | `tagbig2`（2^32/2^64 BigInt） | 0 |
 | `corec selftest-stub-regalloc` | 14/14 |
-| canary | 5/5（ELF 重锁为 `368f4ab0…`，53430 B） |
+| canary | 5/5（ELF `560dbd25…`，61622 B） |
 
 ### ③ 解释器 run 路径
 
-未实施。`corec run` 的 `IR_ALLOC` 仍使用宿主堆；`IR_ARENA_NEW` /
-`IR_ARENA_RESET` 仍是近似。实施需要 Core 版 `arena_alloc` 和解释器接线。
+已完成。`arena_alloc`、`IR_ARENA_NEW`/`IR_ARENA_RESET`、`alloc`/cell/pointer
+builtin 和解释器启动时的 `g_current_arena` 初始化已接线；
+`tests/selfhost/test_arena_interp.py` 覆盖 arena 套件、2MB/100MB 和三条失败
+路径。
 
 ## 实施顺序
 

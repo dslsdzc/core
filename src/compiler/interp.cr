@@ -18,6 +18,9 @@
 g_ir_vals : string, mut
 g_ir_vals_cap : int, mut
 g_interp_big : int, mut = 1
+g_interp_current_arena_var : int, mut = -1
+g_interp_arena_active : int, mut = 0
+g_interp_scratch : int, mut = 0
 
 // Bool -> int without a bool argument crossing an int boundary. The S1P
 // liveness ledger treats `bool` passed to an `int` parameter as a mismatch
@@ -42,6 +45,47 @@ fn ir_interp_const(ti: int, raw: int) -> int:
     if ti == TI_INT:
         return ir_interp_tag(raw)
     return raw
+
+fn ir_interp_find_func(name: string) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), name) != 0:
+            return i
+        i = i + 1
+    return -1
+
+fn ir_interp_arena_new(d: int, peak: int):
+    if d < 0:
+        return
+    // s1 == 0 means the scope has no allocations: native stores the no-arena
+    // sentinel instead of calling arena_new. Calling it here would recurse
+    // through arena infrastructure.
+    r : ., mut = ir_interp_tag(-1)
+    if peak > 0:
+        cfi := ir_interp_find_func("arena_new_sized")
+        if cfi >= 0:
+            cell_store(g_ir_vals, g_interp_scratch * 8, ir_interp_tag(peak))
+            r = ir_interp_run_fn(cfi, g_interp_scratch, 1)
+    else if peak < 0:
+        cfi := ir_interp_find_func("arena_new")
+        if cfi >= 0:
+            r = ir_interp_run_fn(cfi, 0, 0)
+    cell_store(g_ir_vals, d * 8, r)
+
+fn ir_interp_arena_reset(ai_var: int):
+    if ai_var < 0:
+        return
+    aid := ir_interp_word(cell_load(g_ir_vals, ai_var * 8))
+    if aid < 0:
+        return
+    cfi := ir_interp_find_func("arena_reset")
+    if cfi < 0:
+        return
+    cell_store(g_ir_vals, g_interp_scratch * 8,
+               cell_load(g_ir_vals, ai_var * 8))
+    ir_interp_run_fn(cfi, g_interp_scratch, 1)
 
 // Call dispatch and inline callee execution. This is the only implementation for
 // both the main loop and callee paths.
@@ -302,9 +346,104 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
            // TAG_AUTO_STR: print_i and println_i are no-ops; syscall3 returns 0.
 
     // syscall3 and syscall4 return 0 in the interpreter.
-    if ir_interp_name_is(fn_ni, "syscall3") != 0 || ir_interp_name_is(fn_ni, "syscall4") != 0:
+    if ir_interp_name_is(fn_ni, "syscall3") != 0 || ir_interp_name_is(fn_ni, "syscall4") != 0 || ir_interp_name_is(fn_ni, "syscall6") != 0:
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
+    if ir_interp_name_is(fn_ni, "cell_load") != 0:
+        if d >= 0 && s2 >= 2:
+            cb := cell_load(g_ir_vals, s1 * 8)
+            cp := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            cbs : ., mut = ""
+            unsafe:
+                cbs = @str_of(cb)
+            cell_store(g_ir_vals, d * 8, ir_interp_tag(cell_load(cbs, cp)))
+        return
+    if ir_interp_name_is(fn_ni, "cell_store") != 0:
+        if s2 >= 3:
+            cb := cell_load(g_ir_vals, s1 * 8)
+            cp := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            cv := ir_interp_word(cell_load(g_ir_vals, (s1 + 2) * 8))
+            cbs : ., mut = ""
+            unsafe:
+                cbs = @str_of(cb)
+            cell_store(cbs, cp, cv)
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
+    if ir_interp_name_is(fn_ni, "alloc") != 0:
+        if d >= 0 && s2 >= 1:
+            sz := ir_interp_word(cell_load(g_ir_vals, s1 * 8))
+            if sz < 0:
+                println("interpreter error: alloc negative size")
+                g_interp_abort = -1
+                return
+            ca : ., mut = -1
+            if g_interp_current_arena_var >= 0:
+                ca = ir_interp_word(cell_load(g_ir_vals, g_interp_current_arena_var * 8))
+            cfa := ir_interp_find_func("arena_alloc")
+            p : ., mut = 0
+            if g_interp_arena_active != 0:
+                // arena_alloc is already running; its metadata/extent allocs
+                // must use the host heap, not recurse into arena_alloc.
+                hp := alloc(sz)
+                unsafe:
+                    p = @ptr_of(hp)
+            else if ca >= 0 && cfa >= 0:
+                g_interp_arena_active = 1
+                p = ir_interp_run_fn(cfa, s1, 1)
+                g_interp_arena_active = 0
+                if g_interp_abort == 0 && p == 0:
+                    println("interpreter error: arena allocation failed (pool limit or invalid size)")
+                    g_interp_abort = -1
+            else:
+                hp := alloc(sz)
+                unsafe:
+                    p = @ptr_of(hp)
+            if g_interp_abort == 0:
+                cell_store(g_ir_vals, d * 8, p)
+        return
+    if ir_interp_name_is(fn_ni, "load64") != 0:
+        if d >= 0 && s2 >= 2:
+            b64 := cell_load(g_ir_vals, s1 * 8)
+            p64 := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            bs64 : ., mut = ""
+            unsafe:
+                bs64 = @str_of(b64)
+            cell_store(g_ir_vals, d * 8, ir_interp_tag(cell_load(bs64, p64)))
+        return
+    if ir_interp_name_is(fn_ni, "load_str_ptr") != 0:
+        if d >= 0 && s2 >= 2:
+            bsp := cell_load(g_ir_vals, s1 * 8)
+            psp := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            bs2 : ., mut = ""
+            unsafe:
+                bs2 = @str_of(bsp)
+            cell_store(g_ir_vals, d * 8, cell_load(bs2, psp))
+        return
+    if ir_interp_name_is(fn_ni, "store_str_ptr") != 0:
+        if s2 >= 3:
+            bss := cell_load(g_ir_vals, s1 * 8)
+            pss := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            vss := cell_load(g_ir_vals, (s1 + 2) * 8)
+            bs3 : ., mut = ""
+            unsafe:
+                bs3 = @str_of(bss)
+            cell_store(bs3, pss, vss)
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
+    if ir_interp_name_is(fn_ni, "store8") != 0:
+        if s2 >= 3:
+            b8 := cell_load(g_ir_vals, s1 * 8)
+            p8 := ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))
+            v8 := ir_interp_word(cell_load(g_ir_vals, (s1 + 2) * 8))
+            sb8 : ., mut = ""
+            unsafe:
+                sb8 = @str_of(b8)
+            store8(sb8, p8, v8)
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
     if ir_interp_name_is(fn_ni, "str_len") != 0:
         if d >= 0 && s2 >= 1:
             cell_store(g_ir_vals, d * 8, ir_interp_tag(istr_len(cell_load(g_ir_vals, s1 * 8))))
@@ -682,10 +821,10 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 vi3 = vi3 + 1
             unsafe:
                 cell_store(g_ir_vals, d2 * 8, @ptr_of(bp2))
-        if op2 == 32 && d2 >= 0:
-            cell_store(g_ir_vals, d2 * 8, 0)
-        // IR_ARENA_NEW
-           // IR_ARENA_RESET
+        if op2 == 32:
+            ir_interp_arena_new(d2, t1)
+        if op2 == 33:
+            ir_interp_arena_reset(t1)
         if op2 == 46 || op2 == 47:
             if d2 >= 0 && t1 >= 0:
                 cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
@@ -900,6 +1039,24 @@ fn ir_interpret() -> int:
                 iv2 = ir_interp_tag(iv2)
             cell_store(g_ir_vals, gv2 * 8, iv2)
         gi2 = gi2 + 1
+
+    // Arena dispatch state: the global var slot and a scratch slot beyond the
+    // program's var range. Both are reused by IR_ARENA_NEW/RESET and alloc().
+    g_interp_scratch = g_ir_var_count
+    g_interp_current_arena_var = -1
+    g_interp_arena_active = 0
+    gi3 : ., mut = 0
+    loop:
+        if gi3 >= g_ir_global_count:
+            break
+        if str_eq(istr_get(cell_load(g_ir_globals, gi3 * 24)), "g_current_arena") != 0:
+            g_interp_current_arena_var = cell_load(g_ir_globals, gi3 * 24 + 8)
+            break
+        gi3 = gi3 + 1
+    if g_interp_current_arena_var >= 0:
+        // The ELF entry initializes this runtime global to -1 regardless of
+        // the source initializer. Mirror it before the first alloc().
+        cell_store(g_ir_vals, g_interp_current_arena_var * 8, ir_interp_tag(-1))
 
     // Pre-scan: build the label-to-node mapping for branches.
     g_label_count = 0
@@ -1212,11 +1369,11 @@ fn ir_interpret() -> int:
         if op == 31:
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * interp_ptr_stride())
-        // IR_ARENA_NEW and IR_ARENA_RESET: the slot model has no scoped arena, so
-        // these are approximations.
+        // IR_ARENA_NEW and IR_ARENA_RESET call the interpreted arena library.
         if op == 32:
-            if d >= 0:
-                cell_store(g_ir_vals, d * 8, 0)
+            ir_interp_arena_new(d, s1)
+        if op == 33:
+            ir_interp_arena_reset(s1)
 
         // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
         if op == 43:
