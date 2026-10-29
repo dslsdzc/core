@@ -840,11 +840,7 @@ fn reset_frontend_state():
     g_df_state_finalized = 0   // state chain is rebuilt once per compilation
     g_line_count = 0
     g_unsafe_depth = 0
-    g_alloc_pts_cap = 0
-    g_pts_cap = 0
     g_pts_count = 0
-    g_pts_words = 1
     g_pa_alloc_max = 0
     g_pa_alloc_count = 0
-    g_pa_alloc_nodes_cap = 0
     g_checker_current_fi = 0

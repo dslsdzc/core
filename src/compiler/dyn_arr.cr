@@ -1839,7 +1839,7 @@ fn grow_pts(n: int):
         if nc > n:
             break
         nc = nc * 2
-    words := g_pts_words
+    words : ., mut = g_pts_words
     if words <= 0:
         words = 1
     nb := alloc(nc * words * 8)

@@ -2,6 +2,12 @@
 // RegionCheck verifies that every DEREF target is in a live subgraph. It runs
 // after PointerAnalysis (ptr_analysis.cr), which builds g_pts.
 
+// Last store/phi to each IR variable in the function currently being checked.
+// RegionCheck walks nodes in order, so this is the exact reaching definition
+// for the current use; recursive lifetime traces read it when their query point
+// is at or before the current node.
+g_rc_last_store : string, mut
+
 fn subgraph_containing(node_seq: int) -> int:
     // O(1) region lookup. df_create_node writes g_df_node_region.
     if node_seq >= 0 && node_seq < g_df_node_count:
@@ -140,10 +146,14 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
                 last_kind = 1
                 last_s1 = -1
                 last_s2 = s2
+                if rc_node_in_if(i) != 0:
+                    last_kind = 3
             if op == IR_PHI && d == ptr_var:
                 last_kind = 2
                 last_s1 = s1
                 last_s2 = s2
+                if rc_node_in_if(i) != 0:
+                    last_kind = 3
             i = i + 1
         if last_kind == 1:
             if last_s2 < 0:
@@ -159,6 +169,7 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
             if rc_pts_escapes(last_s2, use_ni, mode) != 0:
                 return 0
             return 1
+        // last_kind 3 = the last write is conditional and may not execute.
         return 0
 
     saw_safe : int, mut = 0
@@ -175,6 +186,8 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
                 return 0
             if rc_pts_escapes(s2, use_ni, mode) != 0:
                 return 0
+            if rc_node_in_conditional(i) != 0:
+                return 0
             saw_safe = 1
         if op == IR_PHI && d == ptr_var:
             if s1 < 0 || s2 < 0:
@@ -183,6 +196,8 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
                 return 0
             if rc_pts_escapes(s2, use_ni, mode) != 0:
                 return 0
+            if rc_node_in_conditional(i) != 0:
+                return 0
             saw_safe = 1
         i = i + 1
     return saw_safe
@@ -190,6 +205,72 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int, use_ni: int, mode: int) ->
 // Whether ptr_var holds a dead pointer at node ni. Address types are TYP_PTR and
 // TYP_REF; only the kind is checked. A non-address value is accepted because an
 // integer read through a dereference is ordinary data, not another pointer.
+fn rc_func_nstart(ni: int) -> int:
+    sg : ., mut = subgraph_containing(ni)
+    loop:
+        if sg < 0:
+            return 0
+        if cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND) == SG_FUNC:
+            return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NSTART)
+        sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    return 0
+
+fn rc_node_in_if(node_seq: int) -> int:
+    sg : ., mut = subgraph_containing(node_seq)
+    loop:
+        if sg < 0:
+            return 0
+        if cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND) == SG_IF:
+            return 1
+        sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    return 0
+
+fn rc_node_in_conditional(node_seq: int) -> int:
+    sg : ., mut = subgraph_containing(node_seq)
+    loop:
+        if sg < 0:
+            return 0
+        k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
+        if k == SG_IF || k == SG_LOOP || k == SG_FOR:
+            return 1
+        sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    return 0
+
+// Releasing region of the object a pointer variable points to, for pointers
+// without allocation bits (scalar slots addressed by `&x`). The trace follows
+// the last store before the use, then the producer/REF declaration. -1 =
+// function-level, -2 = unknown. Heap pointers are handled by their pts bits and
+// return -2 here.
+fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
+    if ptr_var < 0 || depth > 8:
+        return -2
+    if pa_pts_empty(ptr_var) == 0:
+        return -2
+    si := rc_last_store_before(ptr_var, lo, use_ni)
+    if si >= 0:
+        val := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
+        return rc_stack_release_sg_rec(val, si, lo, depth + 1)
+    prod := cell_load(g_df_var_producer, ptr_var * 8)
+    if prod < 0:
+        return -2
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+    s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+    if op == IR_REF:
+        decl := cell_load(g_df_var_producer, s1 * 8)
+        if decl >= 0:
+            dop := cell_load(g_df_nodes, decl * ESZ_DFNODE + OFF_DF_OPCODE)
+            if dop == IR_ALLOC || dop == IR_ALLOC_STRUCT || dop == IR_ALLOC_ARRAY:
+                return rc_releasing_region(decl)
+        return rc_releasing_region(prod)
+    if op == IR_ADDR_INDEX || op == IR_SLICE:
+        return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
+    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
+        return rc_releasing_region(prod)
+    if op == IR_BINARY && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB):
+        return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
+    return -2
+
 fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
     if ptr_var < 0:
         return 0
@@ -197,6 +278,19 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
     if ti < 0 || (get_type_kind(ti) != TYP_PTR && get_type_kind(ti) != TYP_REF):
         return 0
     if pa_pts_empty(ptr_var) != 0:
+        lo := rc_func_nstart(ni)
+        sg := rc_stack_release_sg_rec(ptr_var, ni, lo, 0)
+        if sg < 0:
+            return 0
+        ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+        escaped : ., mut = 0
+        if ni >= ex:
+            escaped = 1
+        if mode != 0 && rc_sg_is_ancestor(sg, subgraph_containing(ni)) != 0:
+            escaped = 1
+        if escaped != 0:
+            // The trace already followed the last store before this use.
+            return 1
         return 0
     ai : ., mut = 0
     loop:
@@ -207,7 +301,7 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
                 // Ordinary uses clear reassignments after the region exit.
                 // A return inside the region must also inspect writes between
                 // the allocation and the return.
-                lo := rc_bit_exit(ai)
+                lo : ., mut = rc_bit_exit(ai)
                 if mode != 0 && ni < lo:
                     lo = cell_load(g_pa_alloc_nodes, ai * 8)
                     if lo < 0:
@@ -245,13 +339,26 @@ fn rc_node_exit(node_seq: int) -> int:
     return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
 
 fn rc_last_store_before(ptr_var: int, lo: int, hi: int) -> int:
+    if ptr_var < 0 || hi <= lo:
+        return -1
+    if ptr_var < g_ir_var_count:
+        cached := cell_load(g_rc_last_store, ptr_var * 8)
+        if cached < hi:
+            // The cached definition is the latest before the current node. If
+            // it is below the query interval, there is no definition in range;
+            // if it is inside, it is the answer. A definition at or after hi
+            // belongs to a later point and must fall back to the scan.
+            if cached >= lo:
+                return cached
+            return -1
     i : ., mut = hi - 1
     loop:
         if i < lo:
             return -1
         op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
-        if op == IR_STORE && s1 == ptr_var:
+        d := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
+        if (op == IR_STORE && s1 == ptr_var) || (op == IR_PHI && d == ptr_var):
             return i
         i = i - 1
     return -1
@@ -287,7 +394,14 @@ fn rc_dest_max_exit_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
     op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
     s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
     s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
-    if op == IR_REF || op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
+    if op == IR_REF:
+        decl := cell_load(g_df_var_producer, s1 * 8)
+        if decl >= 0:
+            dop := cell_load(g_df_nodes, decl * ESZ_DFNODE + OFF_DF_OPCODE)
+            if dop == IR_ALLOC || dop == IR_ALLOC_STRUCT || dop == IR_ALLOC_ARRAY:
+                return rc_node_exit(decl)
+        return rc_node_exit(prod)
+    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
         return rc_node_exit(prod)
     if op == IR_ADDR_INDEX || op == IR_SLICE:
         return rc_dest_max_exit_rec(s1, use_ni, lo, depth + 1)
@@ -315,6 +429,12 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
                 if dest == -1 || dest > vexit:
                     return 1
         ai = ai + 1
+    if pa_pts_empty(val_var) != 0:
+        vsg := rc_stack_release_sg_rec(val_var, use_ni, rc_func_nstart(use_ni), 0)
+        if vsg >= 0:
+            vexit := cell_load(g_sgs, vsg * ESZ_SG + OFF_SG_EXIT)
+            if dest == -1 || dest > vexit:
+                return 1
     return 0
 
 // A stored pointer points to an allocation that is already dead or will die
@@ -331,6 +451,16 @@ fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
             0, 0)
 
 fn region_check_func(nstart: int, ncount: int):
+    if g_ir_var_count > 0:
+        g_rc_last_store = alloc(g_ir_var_count * 8)
+        vi : ., mut = 0
+        loop:
+            if vi >= g_ir_var_count:
+                break
+            cell_store(g_rc_last_store, vi * 8, -1)
+            vi = vi + 1
+    else:
+        g_rc_last_store = ""
     ni : ., mut = nstart
     loop:
         if ni >= nstart + ncount:
@@ -339,6 +469,13 @@ fn region_check_func(nstart: int, ncount: int):
         d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+
+        // Keep the reaching definition map current in node order. Query nodes
+        // use the entries written by earlier nodes only.
+        if op == IR_STORE && s1 >= 0 && s1 < g_ir_var_count:
+            cell_store(g_rc_last_store, s1 * 8, ni)
+        if op == IR_PHI && d >= 0 && d < g_ir_var_count:
+            cell_store(g_rc_last_store, d * 8, ni)
 
         if is_in_unsafe(ni) != 0:
             ni = ni + 1

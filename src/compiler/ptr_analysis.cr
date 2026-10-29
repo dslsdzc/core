@@ -61,7 +61,7 @@ fn grow_alloc_pts(n: int):
         if nc > n:
             break
         nc = nc * 2
-    words := g_pts_words
+    words : ., mut = g_pts_words
     if words <= 0:
         words = 1
     nb := alloc(nc * words * 8)
@@ -422,17 +422,34 @@ fn pa_count_allocs() -> int:
         fi = fi + 1
     return count
 
+fn pa_zero_cells(buf: string, n: int):
+    if str_len(buf) == 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(buf, i * 8, 0)
+        i = i + 1
+
 fn ptr_analysis_all():
     pa_prepare_unsafe()
     g_pa_alloc_count = 0
     g_pa_alloc_max = pa_count_allocs()
-    g_pts_words = (g_pa_alloc_max + 62) / 63
-    if g_pts_words < 1:
-        g_pts_words = 1
-    g_pts_cap = 0
+    new_words : ., mut = (g_pa_alloc_max + 62) / 63
+    if new_words < 1:
+        new_words = 1
+    if g_pts_words != new_words:
+        // The row layout changed; old rows cannot be reused.
+        g_pts_words = new_words
+        g_pts_cap = 0
+        g_alloc_pts_cap = 0
+    else:
+        // Same layout: keep the buffers and clear the used rows. This avoids
+        // orphaning the previous compile's tables in a long-lived process.
+        pa_zero_cells(g_pts, g_pts_cap * g_pts_words)
+        pa_zero_cells(g_alloc_pts, g_alloc_pts_cap * g_pts_words)
     g_pts_count = 0
-    g_alloc_pts_cap = 0
-    g_pa_alloc_nodes_cap = 0
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:

@@ -242,6 +242,41 @@ def test_p11_store_outlives_destination():
     )
 
 
+def test_p12_scalar_return_inside_loop_escapes():
+    """P12 标量槽位 `&x`：`IR_ALLOC` 标量没有 pts 位，旧实现直接放行。这里
+    x 声明在循环内、return 在循环内 ⇒ B10。"""
+    assert_rejected(
+        "fn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        return &x\n    seed := 0\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p13_scalar_store_outlives():
+    """P13 标量槽位存储逃逸：循环内 `&x` 存入函数级槽位 ⇒ B11 outlives。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        *slotp = &x\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p14_ref_destination_inside_loop():
+    """P14 REF 目标寿命：slot 在函数级声明、`&slot` 在循环内求值。目标寿命必须
+    取 slot 的声明区（函数级），不是 REF 节点所在的循环区。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        slotp := &slot\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p15_conditional_reassign_does_not_clear():
+    """P15 条件重赋值：循环后 `if cond == 1: p = &seed` 可能不执行 ⇒ 不得把
+    循环内已死的 arr 指针清除；解引用必须报 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        i = i + 1\n    cond := 0\n    if cond == 1:\n        p = &seed\n    return *p\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -297,6 +332,13 @@ def test_r6_store_of_live_pointer_stays_clean():
     )
 
 
+def test_r12_scalar_function_level_return_is_clean():
+    """R12 标量槽位反向对照：x 在函数级声明 ⇒ `return &x` 合法。"""
+    assert_accepted(
+        "fn make() -> &int:\n    x := 7\n    return &x\nfn main() -> int:\n    return 0\n"
+    )
+
+
 def test_r10_store_live_into_function_level_slot():
     """R10 存储逃逸反向对照：函数级值存入函数级槽位 ⇒ 两者同寿命，不得报。"""
     assert_accepted(
@@ -347,6 +389,10 @@ if __name__ == "__main__":
         test_p9_ref_typed_dangling_deref_is_b011,
         test_p10_more_than_64_allocations_are_tracked,
         test_p11_store_outlives_destination,
+        test_p12_scalar_return_inside_loop_escapes,
+        test_p13_scalar_store_outlives,
+        test_p14_ref_destination_inside_loop,
+        test_p15_conditional_reassign_does_not_clear,
         test_r1_function_level_alloc_may_be_returned,
         test_r2_if_branch_alloc_is_not_released_at_branch_end,
         test_r3_reassign_to_live_pointer_after_loop,
@@ -358,6 +404,7 @@ if __name__ == "__main__":
         test_r9_reassign_before_return_clears,
         test_r10_store_live_into_function_level_slot,
         test_r11_store_loop_value_into_loop_slot,
+        test_r12_scalar_function_level_return_is_clean,
     ]
     failures = 0
     for test in tests:
