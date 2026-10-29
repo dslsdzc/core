@@ -211,10 +211,10 @@ class/slot 规则：
 
 ### ③ 解释器 run 路径
 
-已完成。`arena_alloc`、`IR_ARENA_NEW`/`IR_ARENA_RESET`、`alloc`/cell/pointer
-builtin 和解释器启动时的 `g_current_arena` 初始化已接线；
-`tests/selfhost/test_arena_interp.py` 覆盖 arena 套件、2MB/100MB 和三条失败
-路径。
+已完成。实现提交：`31a27491f0ef`。`arena_alloc`、`IR_ARENA_NEW`/
+`IR_ARENA_RESET`、`alloc`/cell/pointer builtin 和解释器启动时的
+`g_current_arena` 初始化已接线；`tests/selfhost/test_arena_interp.py` 覆盖
+arena 套件、2MB/100MB 和三条失败路径。
 
 ## 实施顺序
 
