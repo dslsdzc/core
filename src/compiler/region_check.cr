@@ -30,7 +30,25 @@ g_rc_rd_cache : string, mut
 g_rc_rd_defs : string, mut
 g_rc_param_alias : string, mut
 g_rc_param_escape : string, mut
+g_rc_ret_alias : string, mut
+// For each function/parameter j, a 64-bit mask of parameters i such that the
+// value passed for j may be stored through the pointer passed for i. The call
+// site resolves the pair against the actual destination lifetime instead of
+// treating every out-parameter store as an escape.
+g_rc_out_pairs : string, mut
+// A value loaded through `*p` carries p's parameter identity in this mask. A
+// store of that value into program/unknown memory means the pointee content of
+// the parameter escapes (`gp = *pp`).
+g_rc_param_content_alias : string, mut
+g_rc_param_content_escape : string, mut
 g_rc_param_changed : int, mut
+
+// Recursion budget for value/definition traces. The trace follows compiler
+// generated copy chains (call result -> lazy thunk -> force -> store) in
+// addition to user-level aliases, so a small fixed budget is not enough; the
+// depth also selects a dedicated slot in g_rc_rd_defs so nested RD collections
+// cannot overwrite an outer iteration.
+RC_MAX_DEPTH : int = 32
 
 fn subgraph_containing(node_seq: int) -> int:
     // O(1) region lookup. df_create_node writes g_df_node_region.
@@ -278,7 +296,7 @@ fn rc_node_in_conditional(node_seq: int) -> int:
 // function-level, -2 = unknown. Heap pointers are handled by their pts bits and
 // return -2 here.
 fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
-    if ptr_var < 0 || depth > 8:
+    if ptr_var < 0 || depth > RC_MAX_DEPTH:
         return -2
     if pa_pts_empty(ptr_var) == 0:
         return -2
@@ -313,7 +331,7 @@ fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> in
     return -2
 
 fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     si := rc_last_store_before(val, lo, at_node)
     if si >= 0:
@@ -337,7 +355,7 @@ fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int, d
 // A conditional/PHI definition cannot be represented by one last-store trace;
 // report if any possible definition escapes.
 fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     i : ., mut = lo
     loop:
@@ -359,7 +377,7 @@ fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int, depth: int) -
     return 0
 
 fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     si := rc_last_store_before(val, lo, at_node)
     if si >= 0:
@@ -376,7 +394,7 @@ fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int, depth: in
     return 0
 
 fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     i : ., mut = lo
     loop:
@@ -444,7 +462,7 @@ fn rc_cfg_prepare(nstart: int, ncount: int):
     else:
         g_rc_rd_cache = ""
     if ncount > 0:
-        g_rc_rd_defs = alloc(9 * ncount * 8)
+        g_rc_rd_defs = alloc((RC_MAX_DEPTH + 1) * ncount * 8)
     else:
         g_rc_rd_defs = ""
     i : ., mut = 0
@@ -616,7 +634,7 @@ fn rc_rd_collect(var: int, use_ni: int, depth: int) -> int:
     rc_rd_compute(var)
     row := use_ni - g_rc_cfg_nstart
     base : ., mut = depth * g_rc_cfg_ncount
-    if base + g_rc_cfg_ncount > 9 * g_rc_cfg_ncount:
+    if base + g_rc_cfg_ncount > (RC_MAX_DEPTH + 1) * g_rc_cfg_ncount:
         base = 0
     count : ., mut = 0
     w : ., mut = 0
@@ -643,12 +661,31 @@ fn rc_rd_collect(var: int, use_ni: int, depth: int) -> int:
 // Does one reaching definition of `var` hold an escaping value at use_ni?
 fn rc_scalar_def_escapes(var: int, def_node: int, escape_ni: int, lo: int,
                          mode: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     op := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_OPCODE)
     d  := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_DEST)
     s1 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S1)
     s2 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S2)
+    s3 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S3)
+    if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+        if s1 >= 0:
+            return rc_scalar_value_escapes(s1, def_node, escape_ni, lo, mode, depth + 1)
+        return 0
+    if op == IR_CALL:
+        callee := rc_func_by_name(s3)
+        if callee >= 0:
+            pc := cell_load(g_ir_func_param_count, callee * 8)
+            j : ., mut = 0
+            loop:
+                if j >= pc || j >= s2 || j >= 64:
+                    break
+                if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                    arg := s1 + j
+                    if rc_scalar_value_escapes(arg, def_node, escape_ni, lo, mode, depth + 1) != 0:
+                        return 1
+                j = j + 1
+        return 0
     if op == IR_STORE && s1 == var:
         if s2 < 0:
             return 0
@@ -661,10 +698,29 @@ fn rc_scalar_def_escapes(var: int, def_node: int, escape_ni: int, lo: int,
         return 0
     return rc_scalar_value_escapes(var, def_node, escape_ni, lo, mode, depth + 1)
 
+// Compiler-generated lazy thunks are transparent copies: following the
+// producer directly avoids spending the recursion budget on wrapper nodes.
+fn rc_lazy_source(val: int) -> int:
+    if val < 0 || val >= g_ir_var_count:
+        return -1
+    prod := cell_load(g_df_var_producer, val * 8)
+    if prod < 0:
+        return -1
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    if op != IR_LAZY_THUNK && op != IR_LAZY_FORCE:
+        return -1
+    s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+    if s1 < 0 || s1 >= g_ir_var_count:
+        return -1
+    return s1
+
 fn rc_scalar_value_escapes(val: int, at_node: int, escape_ni: int, lo: int,
                            mode: int, depth: int) -> int:
-    if val < 0 || depth > 8:
+    if val < 0 || depth > RC_MAX_DEPTH:
         return 0
+    lazy := rc_lazy_source(val)
+    if lazy >= 0:
+        return rc_scalar_value_escapes(lazy, at_node, escape_ni, lo, mode, depth + 1)
     if pa_pts_empty(val) == 0:
         return rc_pts_escapes(val, escape_ni, mode)
     if rc_node_defines(at_node, val) == 0 && rc_rd_any(val, at_node) != 0:
@@ -680,7 +736,7 @@ fn rc_scalar_value_escapes(val: int, at_node: int, escape_ni: int, lo: int,
     return 0
 
 fn rc_rd_defs_escape(var: int, query_ni: int, escape_ni: int, lo: int, mode: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     base := rc_rd_collect(var, query_ni, depth)
     dc := g_rc_rd_def_count
@@ -697,8 +753,11 @@ fn rc_rd_defs_escape(var: int, query_ni: int, escape_ni: int, lo: int, mode: int
 
 fn rc_scalar_value_outlives_rd(val: int, at_node: int, dest: int, lo: int,
                                depth: int) -> int:
-    if val < 0 || depth > 8:
+    if val < 0 || depth > RC_MAX_DEPTH:
         return 0
+    lazy := rc_lazy_source(val)
+    if lazy >= 0:
+        return rc_scalar_value_outlives_rd(lazy, at_node, dest, lo, depth + 1)
     if pa_pts_empty(val) == 0:
         ai : ., mut = 0
         loop:
@@ -715,7 +774,7 @@ fn rc_scalar_value_outlives_rd(val: int, at_node: int, dest: int, lo: int,
     return rc_stack_value_outlives(val, at_node, dest, lo, 1)
 
 fn rc_rd_defs_outlives(var: int, dest: int, use_ni: int, lo: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     base := rc_rd_collect(var, use_ni, depth)
     dc := g_rc_rd_def_count
@@ -728,7 +787,24 @@ fn rc_rd_defs_outlives(var: int, dest: int, use_ni: int, lo: int, depth: int) ->
         d  := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S2)
-        if op == IR_STORE && s1 == var:
+        s3 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S3)
+        if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+            if s1 >= 0 && rc_scalar_value_outlives_rd(s1, def_node, dest, lo, depth + 1) != 0:
+                return 1
+        else if op == IR_CALL:
+            callee := rc_func_by_name(s3)
+            if callee >= 0:
+                pc := cell_load(g_ir_func_param_count, callee * 8)
+                j : ., mut = 0
+                loop:
+                    if j >= pc || j >= s2 || j >= 64:
+                        break
+                    if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                        arg := s1 + j
+                        if rc_scalar_value_outlives_rd(arg, def_node, dest, lo, depth + 1) != 0:
+                            return 1
+                    j = j + 1
+        else if op == IR_STORE && s1 == var:
             if s2 >= 0 && rc_scalar_value_outlives_rd(s2, def_node, dest, lo, depth + 1) != 0:
                 return 1
         else if op == IR_PHI && d == var:
@@ -743,8 +819,11 @@ fn rc_rd_defs_outlives(var: int, dest: int, use_ni: int, lo: int, depth: int) ->
     return 0
 
 fn rc_scalar_value_max_rd(val: int, at_node: int, lo: int, depth: int) -> int:
-    if val < 0 || depth > 8:
+    if val < 0 || depth > RC_MAX_DEPTH:
         return -2
+    lazy := rc_lazy_source(val)
+    if lazy >= 0:
+        return rc_scalar_value_max_rd(lazy, at_node, lo, depth + 1)
     if pa_pts_empty(val) == 0:
         max_exit : ., mut = -2
         seen : ., mut = 0
@@ -768,7 +847,7 @@ fn rc_scalar_value_max_rd(val: int, at_node: int, lo: int, depth: int) -> int:
     return rc_dest_max_exit_rec(val, at_node, lo, 1)
 
 fn rc_rd_defs_max(var: int, use_ni: int, lo: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return -2
     base := rc_rd_collect(var, use_ni, depth)
     dc := g_rc_rd_def_count
@@ -782,8 +861,28 @@ fn rc_rd_defs_max(var: int, use_ni: int, lo: int, depth: int) -> int:
         d  := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S2)
+        s3 := cell_load(g_df_nodes, def_node * ESZ_DFNODE + OFF_DF_S3)
         ex : ., mut = -2
-        if op == IR_STORE && s1 == var:
+        if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+            if s1 >= 0:
+                ex = rc_scalar_value_max_rd(s1, def_node, lo, depth + 1)
+        else if op == IR_CALL:
+            callee := rc_func_by_name(s3)
+            if callee >= 0:
+                pc := cell_load(g_ir_func_param_count, callee * 8)
+                j : ., mut = 0
+                loop:
+                    if j >= pc || j >= s2 || j >= 64:
+                        break
+                    if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                        arg := s1 + j
+                        e := rc_scalar_value_max_rd(arg, def_node, lo, depth + 1)
+                        if e == -1:
+                            return -1
+                        if e > ex:
+                            ex = e
+                    j = j + 1
+        else if op == IR_STORE && s1 == var:
             if s2 >= 0:
                 ex = rc_scalar_value_max_rd(s2, def_node, lo, depth + 1)
         else if op == IR_PHI && d == var:
@@ -855,6 +954,47 @@ fn rc_mask_or_from(out: string, dst_base: int, src_buf: string, src_base: int) -
 fn rc_mask_or(buf: string, dst_base: int, src_base: int) -> int:
     return rc_mask_or_from(buf, dst_base, buf, src_base)
 
+fn rc_mask_nonempty(buf: string, base: int) -> int:
+    if base < 0:
+        return 0
+    if cell_load(buf, base * 8) != 0:
+        return 1
+    if cell_load(buf, (base + 1) * 8) != 0:
+        return 1
+    return 0
+
+// A value may be stored through an out-parameter into a destination whose
+// lifetime is resolved at the call site. If the destination is a parameter,
+// record the (source, destination) pair; a global or unknown destination is an
+// immediate escape.
+fn rc_summary_store(fi: int, out: string, dest_var: int, val_var: int,
+                    ni: int, nstart: int):
+    if dest_var < 0 || val_var < 0 || val_var >= g_ir_var_count:
+        return
+    if rc_dest_is_local(dest_var, ni, nstart, fi) != 0:
+        return
+    if rc_mask_nonempty(g_rc_param_alias, val_var * 2) == 0:
+        if rc_mask_nonempty(g_rc_param_content_alias, val_var * 2) == 0:
+            return
+    if rc_mask_nonempty(g_rc_param_alias, dest_var * 2) == 0:
+        rc_mask_or_from(out, 0, g_rc_param_alias, val_var * 2)
+        rc_mask_or_from(g_rc_param_content_escape, fi * 2,
+                        g_rc_param_content_alias, val_var * 2)
+        return
+    j : ., mut = 0
+    loop:
+        if j >= 64:
+            return
+        if rc_mask_has(g_rc_param_alias, val_var * 2, j) != 0:
+            i : ., mut = 0
+            loop:
+                if i >= 64:
+                    break
+                if rc_mask_has(g_rc_param_alias, dest_var * 2, i) != 0:
+                    rc_mask_set(g_rc_out_pairs, fi * 128 + j * 2, i)
+                i = i + 1
+        j = j + 1
+
 fn rc_alias_compute(fi: int):
     pc := cell_load(g_ir_func_param_count, fi * 8)
     if pc <= 0:
@@ -871,6 +1011,8 @@ fn rc_alias_compute(fi: int):
         if vi >= 0 && vi < g_ir_var_count:
             cell_store(g_rc_param_alias, vi * 2 * 8, 0)
             cell_store(g_rc_param_alias, (vi * 2 + 1) * 8, 0)
+            cell_store(g_rc_param_content_alias, vi * 2 * 8, 0)
+            cell_store(g_rc_param_content_alias, (vi * 2 + 1) * 8, 0)
         vi = vi + 1
     j : ., mut = 0
     loop:
@@ -896,17 +1038,48 @@ fn rc_alias_compute(fi: int):
             d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
             s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
             s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
             if op == IR_STORE && s1 >= 0 && s2 >= 0:
                 if s1 < g_ir_var_count && s2 < g_ir_var_count:
                     if rc_mask_or(g_rc_param_alias, s1 * 2, s2 * 2) != 0:
+                        changed = 1
+                    if rc_mask_or(g_rc_param_content_alias, s1 * 2, s2 * 2) != 0:
                         changed = 1
             if op == IR_PHI && d >= 0 && d < g_ir_var_count:
                 if s1 >= 0 && s1 < g_ir_var_count:
                     if rc_mask_or(g_rc_param_alias, d * 2, s1 * 2) != 0:
                         changed = 1
+                    if rc_mask_or(g_rc_param_content_alias, d * 2, s1 * 2) != 0:
+                        changed = 1
                 if s2 >= 0 && s2 < g_ir_var_count:
                     if rc_mask_or(g_rc_param_alias, d * 2, s2 * 2) != 0:
                         changed = 1
+                    if rc_mask_or(g_rc_param_content_alias, d * 2, s2 * 2) != 0:
+                        changed = 1
+            if (op == IR_LAZY_THUNK || op == IR_LAZY_FORCE) && d >= 0 && s1 >= 0:
+                if d < g_ir_var_count && s1 < g_ir_var_count:
+                    if rc_mask_or(g_rc_param_alias, d * 2, s1 * 2) != 0:
+                        changed = 1
+                    if rc_mask_or(g_rc_param_content_alias, d * 2, s1 * 2) != 0:
+                        changed = 1
+            if op == IR_DEREF && d >= 0 && s1 >= 0:
+                if d < g_ir_var_count && s1 < g_ir_var_count:
+                    if rc_mask_or_from(g_rc_param_content_alias, d * 2,
+                                       g_rc_param_alias, s1 * 2) != 0:
+                        changed = 1
+            if op == IR_CALL && d >= 0 && d < g_ir_var_count && s2 > 0:
+                callee := rc_func_by_name(s3)
+                if callee >= 0:
+                    j : ., mut = 0
+                    loop:
+                        if j >= s2 || j >= 64:
+                            break
+                        if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                            arg := s1 + j
+                            if arg >= 0 && arg < g_ir_var_count:
+                                if rc_mask_or(g_rc_param_alias, d * 2, arg * 2) != 0:
+                                    changed = 1
+                        j = j + 1
             ni = ni + 1
 
 fn rc_is_param_var(fi: int, var: int) -> int:
@@ -922,7 +1095,7 @@ fn rc_is_param_var(fi: int, var: int) -> int:
 // A local scalar/heap object is safe; a global, a pointer parameter, or an
 // unknown destination is not.
 fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int) -> int:
-    if ptr_var < 0 || depth > 8:
+    if ptr_var < 0 || depth > RC_MAX_DEPTH:
         return 0
     if rc_is_param_var(fi, ptr_var) != 0:
         return 0
@@ -957,7 +1130,28 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
         return rc_dest_is_local_rec(s1, use_ni, lo, fi, depth + 1)
     if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
         return 1
+    if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+        if s1 >= 0:
+            return rc_dest_is_local_rec(s1, use_ni, lo, fi, depth + 1)
+        return 0
     if op == IR_CALL:
+        s2 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S2)
+        callee := rc_func_by_name(s3)
+        if callee >= 0:
+            pc := cell_load(g_ir_func_param_count, callee * 8)
+            seen : ., mut = 0
+            j : ., mut = 0
+            loop:
+                if j >= pc || j >= s2 || j >= 64:
+                    break
+                if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                    seen = 1
+                    arg := s1 + j
+                    if rc_dest_is_local_rec(arg, prod, lo, fi, depth + 1) == 0:
+                        return 0
+                j = j + 1
+            if seen != 0:
+                return 1
         if s3 >= 0 && str_eq(istr_get(s3), "alloc") != 0:
             return 1
     if op == IR_UNARY && s1 >= 0:
@@ -967,7 +1161,7 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
     return 0
 
 fn rc_rd_dest_local(var: int, use_ni: int, lo: int, fi: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     base := rc_rd_collect(var, use_ni, depth)
     dc := g_rc_rd_def_count
@@ -1007,6 +1201,45 @@ fn rc_dest_is_local(ptr_var: int, use_ni: int, lo: int, fi: int) -> int:
         return rc_rd_dest_local(ptr_var, use_ni, lo, fi, 0)
     return rc_dest_is_local_rec(ptr_var, use_ni, lo, fi, 0)
 
+// Propagate "the pointee content of a caller value escapes" through a call in
+// the summary. The interesting shapes are `&slot` (inspect what slot holds) and
+// forwarding a parameter (the caller owns the pointee).
+fn rc_summary_content_escape(fi: int, arg: int, ni: int, nstart: int):
+    if arg < 0 || arg >= g_ir_var_count:
+        return
+    if rc_is_param_var(fi, arg) != 0:
+        rc_mask_set(g_rc_param_content_escape, fi * 2,
+                    arg - cell_load(g_ir_func_var_start, fi * 8))
+        return
+    prod := cell_load(g_df_var_producer, arg * 8)
+    if prod < 0:
+        return
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+    if op == IR_REF && s1 >= 0:
+        if rc_is_param_var(fi, s1) != 0:
+            rc_mask_set(g_rc_param_content_escape, fi * 2, s1 - cell_load(g_ir_func_var_start, fi * 8))
+        if rc_rd_any(s1, ni) != 0:
+            base := rc_rd_collect(s1, ni, 0)
+            dc := g_rc_rd_def_count
+            i : ., mut = 0
+            loop:
+                if i >= dc:
+                    return
+                dn := cell_load(g_rc_rd_defs, (base + i) * 8)
+                dop := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_OPCODE)
+                ds1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
+                ds2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
+                if dop == IR_STORE && ds1 == s1:
+                    if ds2 >= 0 && ds2 < g_ir_var_count:
+                        rc_mask_or_from(g_rc_param_content_escape, fi * 2,
+                                        g_rc_param_alias, ds2 * 2)
+                        rc_mask_or_from(g_rc_param_content_escape, fi * 2,
+                                        g_rc_param_content_alias, ds2 * 2)
+                i = i + 1
+        return
+    rc_mask_or_from(g_rc_param_content_escape, fi * 2, g_rc_param_alias, arg * 2)
+
 // Update one function's summary. Returns 1 when the summary grew.
 fn rc_summary_func(fi: int) -> int:
     pc := cell_load(g_ir_func_param_count, fi * 8)
@@ -1025,9 +1258,14 @@ fn rc_summary_func(fi: int) -> int:
         vi = vi + 1
     old0 := cell_load(g_rc_param_escape, fi * 2 * 8)
     old1 := cell_load(g_rc_param_escape, (fi * 2 + 1) * 8)
+    ret_old0 := cell_load(g_rc_ret_alias, fi * 2 * 8)
+    ret_old1 := cell_load(g_rc_ret_alias, (fi * 2 + 1) * 8)
     out := alloc(16)
     cell_store(out, 0, old0)
     cell_store(out, 8, old1)
+    ret := alloc(16)
+    cell_store(ret, 0, ret_old0)
+    cell_store(ret, 8, ret_old1)
     ni : ., mut = nstart
     loop:
         if ni >= nstart + ncount:
@@ -1048,11 +1286,18 @@ fn rc_summary_func(fi: int) -> int:
         if op == IR_STORE && s1 >= 0 && s2 >= 0:
             if s2 < g_ir_var_count && rc_is_global_var(s1) != 0:
                 rc_mask_or_from(out, 0, g_rc_param_alias, s2 * 2)
+                rc_mask_or_from(g_rc_param_content_escape, fi * 2,
+                                g_rc_param_content_alias, s2 * 2)
         if op == IR_STORE_PTR && s1 >= 0 && s2 >= 0:
-            if s2 < g_ir_var_count:
-                dl := rc_dest_is_local(s1, ni, nstart, fi)
-                if dl == 0:
-                    rc_mask_or_from(out, 0, g_rc_param_alias, s2 * 2)
+            rc_summary_store(fi, out, s1, s2, ni, nstart)
+        if op == IR_STORE_INDEX && s1 >= 0 && s2 >= 0:
+            rc_summary_store(fi, out, s1, s2, ni, nstart)
+        if op == IR_STORE_INDEX_VAR && s1 >= 0 && d >= 0:
+            rc_summary_store(fi, out, s1, d, ni, nstart)
+        if op == IR_STORE_FIELD && s1 >= 0 && s2 >= 0:
+            rc_summary_store(fi, out, s1, s2, ni, nstart)
+        if op == IR_RETURN && s1 >= 0 && s1 < g_ir_var_count:
+            rc_mask_or_from(ret, 0, g_rc_param_alias, s1 * 2)
         if op == IR_CALL && s2 > 0:
             callee := rc_func_by_name(s3)
             if callee >= 0:
@@ -1065,19 +1310,61 @@ fn rc_summary_func(fi: int) -> int:
                         arg := s1 + j
                         if arg >= 0 && arg < g_ir_var_count:
                             rc_mask_or_from(out, 0, g_rc_param_alias, arg * 2)
+                    if rc_mask_has(g_rc_param_content_escape, callee * 2, j) != 0:
+                        arg := s1 + j
+                        if arg >= 0 && arg < g_ir_var_count:
+                            rc_summary_content_escape(fi, arg, ni, nstart)
+                    if rc_mask_nonempty(g_rc_out_pairs, callee * 128 + j * 2) != 0:
+                        arg := s1 + j
+                        if arg >= 0 && arg < g_ir_var_count:
+                            i : ., mut = 0
+                            loop:
+                                if i >= cpc || i >= 64:
+                                    break
+                                if rc_mask_has(g_rc_out_pairs, callee * 128 + j * 2, i) != 0:
+                                    di := s1 + i
+                                    if di >= 0 && di < g_ir_var_count:
+                                        if rc_mask_nonempty(g_rc_param_alias, di * 2) != 0:
+                                            x : ., mut = 0
+                                            loop:
+                                                if x >= 64:
+                                                    break
+                                                if rc_mask_has(g_rc_param_alias, arg * 2, x) != 0:
+                                                    y : ., mut = 0
+                                                    loop:
+                                                        if y >= 64:
+                                                            break
+                                                        if rc_mask_has(g_rc_param_alias, di * 2, y) != 0:
+                                                            rc_mask_set(g_rc_out_pairs, fi * 128 + x * 2, y)
+                                                        y = y + 1
+                                                x = x + 1
+                                        else if rc_dest_is_local(di, ni, nstart, fi) == 0:
+                                            rc_mask_or_from(out, 0, g_rc_param_alias, arg * 2)
+                                i = i + 1
                     j = j + 1
         ni = ni + 1
     new0 := cell_load(out, 0)
     new1 := cell_load(out, 8)
+    new_ret0 := cell_load(ret, 0)
+    new_ret1 := cell_load(ret, 8)
+    changed : ., mut = 0
     if new0 != old0 || new1 != old1:
         cell_store(g_rc_param_escape, fi * 2 * 8, new0)
         cell_store(g_rc_param_escape, (fi * 2 + 1) * 8, new1)
-        return 1
-    return 0
+        changed = 1
+    if new_ret0 != ret_old0 || new_ret1 != ret_old1:
+        cell_store(g_rc_ret_alias, fi * 2 * 8, new_ret0)
+        cell_store(g_rc_ret_alias, (fi * 2 + 1) * 8, new_ret1)
+        changed = 1
+    return changed
 
 fn rc_param_summaries():
     g_rc_param_alias = alloc(g_ir_var_count * 2 * 8)
     g_rc_param_escape = alloc(g_ir_func_count * 2 * 8)
+    g_rc_ret_alias = alloc(g_ir_func_count * 2 * 8)
+    g_rc_out_pairs = alloc(g_ir_func_count * 128 * 8)
+    g_rc_param_content_alias = alloc(g_ir_var_count * 2 * 8)
+    g_rc_param_content_escape = alloc(g_ir_func_count * 2 * 8)
     i : ., mut = 0
     loop:
         if i >= g_ir_var_count * 2:
@@ -1089,6 +1376,14 @@ fn rc_param_summaries():
         if i >= g_ir_func_count * 2:
             break
         cell_store(g_rc_param_escape, i * 8, 0)
+        cell_store(g_rc_ret_alias, i * 8, 0)
+        cell_store(g_rc_param_content_escape, i * 8, 0)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_ir_func_count * 128:
+            break
+        cell_store(g_rc_out_pairs, i * 8, 0)
         i = i + 1
     fi : ., mut = 0
     loop:
@@ -1105,13 +1400,22 @@ fn rc_param_summaries():
         loop:
             if fi >= g_ir_func_count:
                 break
+            rc_alias_compute(fi)
+            fi = fi + 1
+        fi = 0
+        loop:
+            if fi >= g_ir_func_count:
+                break
             if rc_summary_func(fi) != 0:
                 changed = 1
             fi = fi + 1
 
 fn rc_value_has_release(val: int, at_node: int, lo: int, depth: int) -> int:
-    if val < 0 || depth > 8:
+    if val < 0 || depth > RC_MAX_DEPTH:
         return 0
+    lazy := rc_lazy_source(val)
+    if lazy >= 0:
+        return rc_value_has_release(lazy, at_node, lo, depth + 1)
     if rc_node_defines(at_node, val) == 0 && rc_rd_any(val, at_node) != 0:
         return rc_rd_defs_release(val, at_node, lo, depth + 1)
     if pa_pts_empty(val) == 0:
@@ -1129,7 +1433,7 @@ fn rc_value_has_release(val: int, at_node: int, lo: int, depth: int) -> int:
     return 0
 
 fn rc_rd_defs_release(var: int, use_ni: int, lo: int, depth: int) -> int:
-    if depth > 8:
+    if depth > RC_MAX_DEPTH:
         return 0
     base := rc_rd_collect(var, use_ni, depth)
     dc := g_rc_rd_def_count
@@ -1142,7 +1446,24 @@ fn rc_rd_defs_release(var: int, use_ni: int, lo: int, depth: int) -> int:
         d  := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
-        if op == IR_STORE && s1 == var:
+        s3 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S3)
+        if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+            if s1 >= 0 && rc_value_has_release(s1, dn, lo, depth + 1) != 0:
+                return 1
+        else if op == IR_CALL:
+            callee := rc_func_by_name(s3)
+            if callee >= 0:
+                pc := cell_load(g_ir_func_param_count, callee * 8)
+                j : ., mut = 0
+                loop:
+                    if j >= pc || j >= s2 || j >= 64:
+                        break
+                    if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                        arg := s1 + j
+                        if rc_value_has_release(arg, dn, lo, depth + 1) != 0:
+                            return 1
+                    j = j + 1
+        else if op == IR_STORE && s1 == var:
             if s2 >= 0 && rc_value_has_release(s2, dn, lo, depth + 1) != 0:
                 return 1
         else if op == IR_PHI && d == var:
@@ -1156,7 +1477,94 @@ fn rc_rd_defs_release(var: int, use_ni: int, lo: int, depth: int) -> int:
         i = i + 1
     return 0
 
-fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int, nstart: int):
+// Inspect the value held in a local slot that a `&slot` argument points to.
+// Region-local pointer values there die before program/global memory, so a
+// callee that loads and stores them into a global leaks.
+fn rc_slot_content_escapes(slot: int, at_node: int, nstart: int, fi: int,
+                           depth: int) -> int:
+    if slot < 0 || depth > RC_MAX_DEPTH:
+        return 0
+    if rc_is_param_var(fi, slot) != 0 || rc_is_global_var(slot) != 0:
+        return 0
+    if rc_rd_any(slot, at_node) == 0:
+        return 0
+    base := rc_rd_collect(slot, at_node, depth)
+    dc := g_rc_rd_def_count
+    i : ., mut = 0
+    loop:
+        if i >= dc:
+            return 0
+        dn := cell_load(g_rc_rd_defs, (base + i) * 8)
+        op := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == slot:
+            if s2 >= 0 && rc_value_has_release(s2, dn, nstart, 0) != 0:
+                return 1
+        else if op == IR_PHI && d == slot:
+            if s1 >= 0 && rc_value_has_release(s1, dn, nstart, 0) != 0:
+                return 1
+            if s2 >= 0 && rc_value_has_release(s2, dn, nstart, 0) != 0:
+                return 1
+        i = i + 1
+    return 0
+
+// Does the pointee of `ptr_var` hold a region-local pointer? Used for the
+// `gp = *pp` summary relation.
+fn rc_pointee_content_escapes(ptr_var: int, at_node: int, nstart: int,
+                              fi: int, depth: int) -> int:
+    if ptr_var < 0 || depth > RC_MAX_DEPTH:
+        return 0
+    if rc_is_global_var(ptr_var) != 0:
+        return 0
+    if pa_pts_empty(ptr_var) == 0:
+        ai : ., mut = 0
+        loop:
+            if ai >= g_pa_alloc_count:
+                return 0
+            if pa_pts_has(ptr_var, ai) != 0 && rc_bit_exit(ai) >= 0:
+                return 1
+            ai = ai + 1
+        return 0
+    if rc_rd_any(ptr_var, at_node) != 0:
+        base := rc_rd_collect(ptr_var, at_node, depth)
+        dc := g_rc_rd_def_count
+        i : ., mut = 0
+        loop:
+            if i >= dc:
+                return 0
+            dn := cell_load(g_rc_rd_defs, (base + i) * 8)
+            op := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_OPCODE)
+            d  := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_DEST)
+            s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
+            s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
+            if op == IR_REF && d == ptr_var:
+                if s1 >= 0 && rc_slot_content_escapes(s1, at_node, nstart, fi, depth + 1) != 0:
+                    return 1
+            else if op == IR_STORE && s1 == ptr_var:
+                if s2 >= 0 && rc_pointee_content_escapes(s2, dn, nstart, fi, depth + 1) != 0:
+                    return 1
+            else if op == IR_PHI && d == ptr_var:
+                if s1 >= 0 && rc_pointee_content_escapes(s1, dn, nstart, fi, depth + 1) != 0:
+                    return 1
+                if s2 >= 0 && rc_pointee_content_escapes(s2, dn, nstart, fi, depth + 1) != 0:
+                    return 1
+            i = i + 1
+        return 0
+    prod := cell_load(g_df_var_producer, ptr_var * 8)
+    if prod >= 0:
+        op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+        if op == IR_REF && s1 >= 0:
+            return rc_slot_content_escapes(s1, at_node, nstart, fi, depth + 1)
+        if op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+            if s1 >= 0:
+                return rc_pointee_content_escapes(s1, prod, nstart, fi, depth + 1)
+    return 0
+
+fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int,
+                 nstart: int, fi: int):
     callee := rc_func_by_name(fn_ni)
     if callee < 0:
         return
@@ -1165,13 +1573,35 @@ fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int, nstart: int):
     loop:
         if j >= pc || j >= argc || j >= 64:
             return
+        arg := first_arg + j
         if rc_mask_has(g_rc_param_escape, callee * 2, j) != 0:
-            arg := first_arg + j
             if arg >= 0 && arg < g_ir_var_count:
                 if rc_value_has_release(arg, ni, nstart, 0) != 0:
                     check_error(EC_B_LIFETIME,
                         "parameter escape: callee stores a region-local pointer",
                         0, 0)
+        if rc_mask_has(g_rc_param_content_escape, callee * 2, j) != 0:
+            if arg >= 0 && arg < g_ir_var_count:
+                if rc_pointee_content_escapes(arg, ni, nstart, fi, 0) != 0:
+                    check_error(EC_B_LIFETIME,
+                        "parameter escape: callee leaks the pointee into a global",
+                        0, 0)
+        if rc_mask_nonempty(g_rc_out_pairs, callee * 128 + j * 2) != 0:
+            i : ., mut = 0
+            loop:
+                if i >= pc || i >= argc || i >= 64:
+                    break
+                if rc_mask_has(g_rc_out_pairs, callee * 128 + j * 2, i) != 0:
+                    di := first_arg + i
+                    if di >= 0 && di < g_ir_var_count && arg >= 0:
+                        // A destination supplied by our own caller is resolved
+                        // at the next call site, not here.
+                        if rc_is_param_var(fi, di) == 0:
+                            if rc_store_outlives(di, arg, ni, nstart) != 0:
+                                check_error(EC_B_LIFETIME,
+                                    "parameter escape: callee stores a region-local pointer",
+                                    0, 0)
+                i = i + 1
         j = j + 1
 
 fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
@@ -1280,7 +1710,7 @@ fn rc_last_store_before(ptr_var: int, lo: int, hi: int) -> int:
     return -1
 
 fn rc_dest_max_exit_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> int:
-    if ptr_var < 0 || depth > 8:
+    if ptr_var < 0 || depth > RC_MAX_DEPTH:
         return -2
     if pa_pts_empty(ptr_var) == 0:
         max_exit : ., mut = -2
@@ -1420,6 +1850,16 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
 // A stored pointer points to an allocation that is already dead or will die
 // before the destination. Both cases report EC_B_LIFETIME; the messages keep
 // the two causes distinguishable.
+fn rc_store_value_is_pointer(val: int) -> int:
+    if val < 0:
+        return 0
+    ti := irv_type(val)
+    if ti >= 0 && (get_type_kind(ti) == TYP_PTR || get_type_kind(ti) == TYP_REF):
+        return 1
+    if pa_pts_empty(val) == 0:
+        return 1
+    return 0
+
 fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
     if rc_var_dead(val_var, ni) != 0:
         check_error(EC_B_LIFETIME,
@@ -1430,7 +1870,7 @@ fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
             "store escape: destination outlives the stored allocation",
             0, 0)
 
-fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int):
+fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
     rc_cfg_prepare(nstart, ncount)
     // Reset only this function's variable range. The map itself is allocated
     // once per pass, not once per function; global/other-function entries stay
@@ -1484,9 +1924,38 @@ fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int):
                     "store escape: global outlives the stored allocation",
                     0, 0)
 
+        // Element/field stores go through a base object instead of IR_STORE_PTR.
+        if op == IR_STORE_INDEX && s1 >= 0 && s2 >= 0:
+            if rc_store_value_is_pointer(s2) != 0:
+                if rc_is_global_var(s1) != 0:
+                    if rc_value_has_release(s2, ni, nstart, 0) != 0:
+                        check_error(EC_B_LIFETIME,
+                            "store escape: global outlives the stored allocation",
+                            0, 0)
+                else:
+                    rc_store_escape(ni, s1, s2, nstart)
+        if op == IR_STORE_INDEX_VAR && s1 >= 0 && d >= 0:
+            if rc_store_value_is_pointer(d) != 0:
+                if rc_is_global_var(s1) != 0:
+                    if rc_value_has_release(d, ni, nstart, 0) != 0:
+                        check_error(EC_B_LIFETIME,
+                            "store escape: global outlives the stored allocation",
+                            0, 0)
+                else:
+                    rc_store_escape(ni, s1, d, nstart)
+        if op == IR_STORE_FIELD && s1 >= 0 && s2 >= 0:
+            if rc_store_value_is_pointer(s2) != 0:
+                if rc_is_global_var(s1) != 0:
+                    if rc_value_has_release(s2, ni, nstart, 0) != 0:
+                        check_error(EC_B_LIFETIME,
+                            "store escape: global outlives the stored allocation",
+                            0, 0)
+                else:
+                    rc_store_escape(ni, s1, s2, nstart)
+
         // Interprocedural escape through a call argument.
         if op == IR_CALL:
-            rc_call_check(ni, s1, s2, s3, nstart)
+            rc_call_check(ni, s1, s2, s3, nstart, fi)
 
         ni = ni + 1
 
@@ -1512,5 +1981,5 @@ fn region_check_all():
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
-        region_check_func(nstart, ncount, vstart, vcount)
+        region_check_func(nstart, ncount, vstart, vcount, fi)
         fi = fi + 1

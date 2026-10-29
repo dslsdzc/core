@@ -2163,7 +2163,8 @@
   - 2026-10-29 复审续修：标量槽位 `&x`（`IR_ALLOC` 无 pts 位）改走声明区追踪，return/store 均可判定；REF 目标寿命取被取址变量的声明区，而不是 REF 节点所在区；全局/参数没有本地 `IR_ALLOC` 时按函数/程序级寿命，不再误报；条件/PHI/循环内的标量指针改用 **CFG 到达定义**（`IR_JUMP` + `IR_MATCH` CASE 目标）逐 use 求值，值追踪递归到被拷贝变量的到达定义（`test_p16`–`p20`）；条件分支里的安全重赋值不再清除逃逸判定（`test_p15`）；“两支都覆盖更早死定义”不再保守误报（`test_r15`）；`rc_last_store` 每次 pass 只分配一次、按函数变量区重置；同宽重复编译复用 pts 缓冲。
   - 2026-10-29 参数逃逸：`rc_param_summaries` 建立参数别名 + 逃逸摘要（全局/参数指针/未知目标；本地槽位/`&param` 参数槽/`alloc()` 本地堆安全），两个 32 位字覆盖 64 形参，跳过 unsafe，沿调用图固定点传递；`rc_call_check` 对归还区实参报 B11；直接全局 `IR_STORE` 也报 `global outlives`。覆盖 `test_p21`/`p22`/`p23`/`r16`/`r17`，含 64 形参探针。
   - 2026-10-29 堆指针使用点：`rc_var_escapes`/`rc_value_has_release` 先取 reaching definitions，再按到达值检查 pts/标量寿命；循环内先写死再写活后循环外使用不再误报（`test_r18`）。pts 内容集仍是包含式，不是流敏感 points-to。
-  - 保留登记（未实现/不完整，勿当已实现）：跨调用返回值摘要未完成（`id(&x)` 经 lazy thunk 链仍漏检）；`gp = *pp` 这一类经 `IR_DEREF` 加载的指针别名未传播；同一归还区的 out 参数会保守误报；`STORE_INDEX`/`STORE_FIELD` 目标、被返回的本地堆对象、外部/未知被调函数未建摘要。
+  - 2026-10-29 返回值与 out 参数摘要：`g_rc_ret_alias` 记录"返回哪个形参"，调用结果经 lazy thunk/force 链继续沿实参求值；`g_rc_out_pairs` 记录"源形参 j 可能经目标形参 i 写出"，调用点用 `rc_store_outlives` 比较目标实参与源实参的寿命，同区 out 参数不再保守误报；`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 接入摘要与直接检查（含全局结构体/数组字段）；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容，沿形参转发。覆盖 `test_p24`–`p32`、`r19`–`r24`。
+  - 保留登记（未实现/不完整，勿当已实现）：外部/未知被调函数（`IR_CALL_EXTERN`）未建摘要，FFI 指针实参是否强制 `unsafe` 待裁；被返回的本地堆对象在当前源语言面无法表达（`alloc()` 结果类型不可作为函数返回型）；经 out 参数传递的 pointee 内容（`*dst = *pp`，目标为形参）保守跳过。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）
 
