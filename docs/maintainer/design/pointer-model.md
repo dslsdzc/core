@@ -74,8 +74,8 @@ unsafe:
 
 1. 过期 DEREF（`IR_DEREF`），错误码 `B011`（`EC_B_LIFETIME`）。
 2. 返回值离开区域（`IR_RETURN`，`rc_return_escape`），错误码 `B010`（`EC_B_ESCAPE`）。错误信息见 `errors.md:245`，例子是 `return &x`。
-3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿最后写入与声明区追踪；条件/PHI 定义取所有可能分支的保守最大寿命。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
-4. 参数离开区域（`IR_CALL`，`rc_call_check`）：按函数摘要判定。摘要标记可能被存入全局、另一个函数的指针参数或未知目标的参数；被调函数本地槽位/本地堆目标不计逃逸。摘要沿调用图传递（`rc_param_summaries` 固定点），调用点若实参指向归还区，报 `parameter escape`。外部/未知被调函数不建摘要。
+3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿到达定义与声明区追踪；条件/PHI 定义逐 use 求值。直接 `IR_STORE` 到全局指针也检查（`global outlives the stored allocation`）。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
+4. 参数离开区域（`IR_CALL`，`rc_call_check`）：按函数摘要判定。摘要标记可能被存入全局、另一个函数的指针参数或未知目标的参数；被调函数本地槽位（含 `&param` 参数槽）和 `alloc()` 本地堆目标不计逃逸。摘要用两个 32 位字覆盖 64 个形参，跳过 `unsafe` 节点，沿调用图传递（`rc_param_summaries` 固定点）。调用点若实参指向归还区，报 `parameter escape`。外部/未知被调函数不建摘要。
 
 区域活性语义：
 

@@ -339,6 +339,15 @@ def test_p22_parameter_escape_transitive():
     )
 
 
+def test_p23_direct_global_store_escape():
+    """P23 直接全局赋值：循环局部指针 p 赋给全局 gp ⇒ B11 global outlives。
+    该形态不经过 IR_STORE_PTR，旧存储检查看不到。"""
+    assert_rejected(
+        "gp : &int, mut\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p := &x\n        gp = p\n        i = i + 1\n    return 0\n",
+        "error[B11]", "global outlives",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -514,6 +523,7 @@ if __name__ == "__main__":
         test_r15_all_branches_overwrite_dead_definition,
         test_p21_parameter_escape_to_global,
         test_p22_parameter_escape_transitive,
+        test_p23_direct_global_store_escape,
         test_r16_parameter_stored_in_local_slot_is_safe,
         test_r17_function_level_argument_is_safe,
     ]

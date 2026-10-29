@@ -809,8 +809,8 @@ fn rc_rd_defs_max(var: int, use_ni: int, lo: int, depth: int) -> int:
 // outlives the callee frame: a global, another function's memory (a pointer
 // parameter), or an unknown destination. Stores into callee-local slots or
 // callee-created heap objects do not escape. Calls propagate summaries through
-// their arguments. At a call site, an escaping parameter that receives a
-// region-local pointer is reported.
+// their arguments. Masks use two 32-bit cells so all 64 legal parameters are
+// representable without touching signed bit 63.
 
 fn rc_func_by_name(name_ni: int) -> int:
     i : ., mut = 0
@@ -822,56 +822,63 @@ fn rc_func_by_name(name_ni: int) -> int:
         i = i + 1
     return -1
 
-fn rc_mask_has(mask: int, bit: int) -> int:
-    if mask <= 0 || bit < 0 || bit > 61:
+fn rc_mask_has(buf: string, base: int, bit: int) -> int:
+    if base < 0 || bit < 0 || bit >= 64:
         return 0
-    m := pa_bit_mask(bit)
-    return (mask / m) % 2
+    w := bit / 32
+    m := pa_bit_mask(bit % 32)
+    return (cell_load(buf, (base + w) * 8) / m) % 2
 
-fn rc_mask_or(a: int, b: int) -> int:
-    out : ., mut = a
-    m : ., mut = 1
-    bit : ., mut = 0
+fn rc_mask_set(buf: string, base: int, bit: int):
+    if base < 0 || bit < 0 || bit >= 64:
+        return
+    w := bit / 32
+    m := pa_bit_mask(bit % 32)
+    idx := (base + w) * 8
+    cur := cell_load(buf, idx)
+    if (cur / m) % 2 == 0:
+        cell_store(buf, idx, cur + m)
+
+fn rc_mask_or_from(out: string, dst_base: int, src_buf: string, src_base: int) -> int:
+    if dst_base < 0 || src_base < 0:
+        return 0
+    changed : ., mut = 0
+    w : ., mut = 0
     loop:
-        if bit > 61:
+        if w >= 2:
             break
-        if (b / m) % 2 == 1 && (out / m) % 2 == 0:
-            out = out + m
-        m = m * 2
-        bit = bit + 1
-    return out
+        if pa_cell_merge(out, dst_base + w, src_buf, src_base + w) != 0:
+            changed = 1
+        w = w + 1
+    return changed
 
-fn rc_alias_or(dst: int, src: int) -> int:
-    if dst < 0 || src < 0:
-        return 0
-    a := cell_load(g_rc_param_alias, dst * 8)
-    b := cell_load(g_rc_param_alias, src * 8)
-    out := rc_mask_or(a, b)
-    if out != a:
-        cell_store(g_rc_param_alias, dst * 8, out)
-        return 1
-    return 0
+fn rc_mask_or(buf: string, dst_base: int, src_base: int) -> int:
+    return rc_mask_or_from(buf, dst_base, buf, src_base)
 
 fn rc_alias_compute(fi: int):
+    pc := cell_load(g_ir_func_param_count, fi * 8)
+    if pc <= 0:
+        return
     nstart := cell_load(g_df_func_node_start, fi * 8)
     ncount := cell_load(g_df_func_node_count, fi * 8)
+    rc_cfg_prepare(nstart, ncount)
     vstart := cell_load(g_ir_func_var_start, fi * 8)
     vcount := cell_load(g_ir_func_var_count, fi * 8)
-    pc := cell_load(g_ir_func_param_count, fi * 8)
     vi : ., mut = vstart
     loop:
         if vi >= vstart + vcount:
             break
         if vi >= 0 && vi < g_ir_var_count:
-            cell_store(g_rc_param_alias, vi * 8, 0)
+            cell_store(g_rc_param_alias, vi * 2 * 8, 0)
+            cell_store(g_rc_param_alias, (vi * 2 + 1) * 8, 0)
         vi = vi + 1
     j : ., mut = 0
     loop:
-        if j >= pc || j > 61:
+        if j >= pc || j >= 64:
             break
         pv := vstart + j
         if pv >= 0 && pv < g_ir_var_count:
-            cell_store(g_rc_param_alias, pv * 8, pa_bit_mask(j))
+            rc_mask_set(g_rc_param_alias, pv * 2, j)
         j = j + 1
     changed : ., mut = 1
     loop:
@@ -882,32 +889,25 @@ fn rc_alias_compute(fi: int):
         loop:
             if ni >= nstart + ncount:
                 break
+            if is_in_unsafe(ni) != 0:
+                ni = ni + 1
+                continue
             op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
             d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
             s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
             s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
             if op == IR_STORE && s1 >= 0 && s2 >= 0:
-                if rc_alias_or(s1, s2) != 0:
-                    changed = 1
-            if op == IR_PHI && d >= 0:
-                if s1 >= 0 && rc_alias_or(d, s1) != 0:
-                    changed = 1
-                if s2 >= 0 && rc_alias_or(d, s2) != 0:
-                    changed = 1
+                if s1 < g_ir_var_count && s2 < g_ir_var_count:
+                    if rc_mask_or(g_rc_param_alias, s1 * 2, s2 * 2) != 0:
+                        changed = 1
+            if op == IR_PHI && d >= 0 && d < g_ir_var_count:
+                if s1 >= 0 && s1 < g_ir_var_count:
+                    if rc_mask_or(g_rc_param_alias, d * 2, s1 * 2) != 0:
+                        changed = 1
+                if s2 >= 0 && s2 < g_ir_var_count:
+                    if rc_mask_or(g_rc_param_alias, d * 2, s2 * 2) != 0:
+                        changed = 1
             ni = ni + 1
-
-fn rc_last_store_scan(ptr_var: int, lo: int, hi: int) -> int:
-    i : ., mut = hi - 1
-    loop:
-        if i < lo:
-            return -1
-        op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
-        d := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
-        s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
-        if (op == IR_STORE && s1 == ptr_var) || (op == IR_PHI && d == ptr_var):
-            return i
-        i = i - 1
-    return -1
 
 fn rc_is_param_var(fi: int, var: int) -> int:
     if fi < 0 || var < 0:
@@ -930,7 +930,7 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
         return 1
     if rc_is_global_var(ptr_var) != 0:
         return 0
-    si := rc_last_store_scan(ptr_var, lo, use_ni)
+    si := rc_last_store_before(ptr_var, lo, use_ni)
     if si >= 0:
         val := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_S2)
         return rc_dest_is_local_rec(val, si, lo, fi, depth + 1)
@@ -941,8 +941,12 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
     s1 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
     s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
     if op == IR_REF:
-        if rc_is_global_var(s1) != 0 || rc_is_param_var(fi, s1) != 0:
+        if rc_is_global_var(s1) != 0:
             return 0
+        if rc_is_param_var(fi, s1) != 0:
+            // &param is the callee's local parameter slot, not the caller's
+            // memory reached through the parameter.
+            return 1
         decl := cell_load(g_df_var_producer, s1 * 8)
         if decl >= 0:
             dop := cell_load(g_df_nodes, decl * ESZ_DFNODE + OFF_DF_OPCODE)
@@ -953,53 +957,139 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
         return rc_dest_is_local_rec(s1, use_ni, lo, fi, depth + 1)
     if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
         return 1
+    if op == IR_CALL:
+        if s3 >= 0 && str_eq(istr_get(s3), "alloc") != 0:
+            return 1
+    if op == IR_UNARY && s1 >= 0:
+        return rc_dest_is_local_rec(s1, use_ni, lo, fi, depth + 1)
     if op == IR_BINARY && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB):
         return rc_dest_is_local_rec(s1, use_ni, lo, fi, depth + 1)
     return 0
 
+fn rc_rd_dest_local(var: int, use_ni: int, lo: int, fi: int, depth: int) -> int:
+    if depth > 8:
+        return 0
+    base := rc_rd_collect(var, use_ni, depth)
+    dc := g_rc_rd_def_count
+    if dc <= 0:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= dc:
+            return 1
+        dn := cell_load(g_rc_rd_defs, (base + i) * 8)
+        op := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, dn * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == var:
+            lv : ., mut = 0
+            if s2 >= 0:
+                lv = rc_dest_is_local_rec(s2, dn, lo, fi, depth + 1)
+            if s2 < 0 || lv == 0:
+                return 0
+        else if op == IR_PHI && d == var:
+            if s1 < 0 || rc_dest_is_local_rec(s1, dn, lo, fi, depth + 1) == 0:
+                return 0
+            if s2 < 0 || rc_dest_is_local_rec(s2, dn, lo, fi, depth + 1) == 0:
+                return 0
+        else:
+            if rc_dest_is_local_rec(var, dn, lo, fi, depth + 1) == 0:
+                return 0
+        i = i + 1
+    return 1
+
+fn rc_dest_is_local(ptr_var: int, use_ni: int, lo: int, fi: int) -> int:
+    if fi >= 0 && fi < g_ir_func_count:
+        rc_cfg_prepare(cell_load(g_df_func_node_start, fi * 8),
+                       cell_load(g_df_func_node_count, fi * 8))
+    if rc_rd_any(ptr_var, use_ni) != 0:
+        return rc_rd_dest_local(ptr_var, use_ni, lo, fi, 0)
+    return rc_dest_is_local_rec(ptr_var, use_ni, lo, fi, 0)
+
 // Update one function's summary. Returns 1 when the summary grew.
 fn rc_summary_func(fi: int) -> int:
+    pc := cell_load(g_ir_func_param_count, fi * 8)
+    if pc <= 0:
+        return 0
     nstart := cell_load(g_df_func_node_start, fi * 8)
     ncount := cell_load(g_df_func_node_count, fi * 8)
-    old := cell_load(g_rc_param_escape, fi * 8)
-    out : ., mut = old
+    vstart := cell_load(g_ir_func_var_start, fi * 8)
+    vcount := cell_load(g_ir_func_var_count, fi * 8)
+    vi : ., mut = vstart
+    loop:
+        if vi >= vstart + vcount:
+            break
+        if vi >= 0 && vi < g_ir_var_count && rc_ptr_nonzero(g_rc_last_store) != 0:
+            cell_store(g_rc_last_store, vi * 8, -1)
+        vi = vi + 1
+    old0 := cell_load(g_rc_param_escape, fi * 2 * 8)
+    old1 := cell_load(g_rc_param_escape, (fi * 2 + 1) * 8)
+    out := alloc(16)
+    cell_store(out, 0, old0)
+    cell_store(out, 8, old1)
     ni : ., mut = nstart
     loop:
         if ni >= nstart + ncount:
             break
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        if rc_ptr_nonzero(g_rc_last_store) != 0:
+            if op == IR_STORE && s1 >= 0 && s1 < g_ir_var_count:
+                cell_store(g_rc_last_store, s1 * 8, ni)
+            if op == IR_PHI && d >= 0 && d < g_ir_var_count:
+                cell_store(g_rc_last_store, d * 8, ni)
+        if is_in_unsafe(ni) != 0:
+            ni = ni + 1
+            continue
         if op == IR_STORE && s1 >= 0 && s2 >= 0:
-            if rc_is_global_var(s1) != 0:
-                out = rc_mask_or(out, cell_load(g_rc_param_alias, s2 * 8))
+            if s2 < g_ir_var_count && rc_is_global_var(s1) != 0:
+                rc_mask_or_from(out, 0, g_rc_param_alias, s2 * 2)
         if op == IR_STORE_PTR && s1 >= 0 && s2 >= 0:
-            if rc_dest_is_local_rec(s1, ni, nstart, fi, 0) == 0:
-                out = rc_mask_or(out, cell_load(g_rc_param_alias, s2 * 8))
+            if s2 < g_ir_var_count:
+                dl := rc_dest_is_local(s1, ni, nstart, fi)
+                if dl == 0:
+                    rc_mask_or_from(out, 0, g_rc_param_alias, s2 * 2)
         if op == IR_CALL && s2 > 0:
             callee := rc_func_by_name(s3)
             if callee >= 0:
-                pc := cell_load(g_ir_func_param_count, callee * 8)
-                csum := cell_load(g_rc_param_escape, callee * 8)
+                cpc := cell_load(g_ir_func_param_count, callee * 8)
                 j : ., mut = 0
                 loop:
-                    if j >= pc || j >= s2 || j > 61:
+                    if j >= cpc || j >= s2 || j >= 64:
                         break
-                    if rc_mask_has(csum, j) != 0:
+                    if rc_mask_has(g_rc_param_escape, callee * 2, j) != 0:
                         arg := s1 + j
                         if arg >= 0 && arg < g_ir_var_count:
-                            out = rc_mask_or(out, cell_load(g_rc_param_alias, arg * 8))
+                            rc_mask_or_from(out, 0, g_rc_param_alias, arg * 2)
                     j = j + 1
         ni = ni + 1
-    if out != old:
-        cell_store(g_rc_param_escape, fi * 8, out)
+    new0 := cell_load(out, 0)
+    new1 := cell_load(out, 8)
+    if new0 != old0 || new1 != old1:
+        cell_store(g_rc_param_escape, fi * 2 * 8, new0)
+        cell_store(g_rc_param_escape, (fi * 2 + 1) * 8, new1)
         return 1
     return 0
 
 fn rc_param_summaries():
-    g_rc_param_alias = alloc(g_ir_var_count * 8)
-    g_rc_param_escape = alloc(g_ir_func_count * 8)
+    g_rc_param_alias = alloc(g_ir_var_count * 2 * 8)
+    g_rc_param_escape = alloc(g_ir_func_count * 2 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_var_count * 2:
+            break
+        cell_store(g_rc_param_alias, i * 8, 0)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_ir_func_count * 2:
+            break
+        cell_store(g_rc_param_escape, i * 8, 0)
+        i = i + 1
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
@@ -1071,17 +1161,17 @@ fn rc_call_check(ni: int, first_arg: int, argc: int, fn_ni: int, nstart: int):
     if callee < 0:
         return
     pc := cell_load(g_ir_func_param_count, callee * 8)
-    csum := cell_load(g_rc_param_escape, callee * 8)
     j : ., mut = 0
     loop:
-        if j >= pc || j >= argc || j > 61:
+        if j >= pc || j >= argc || j >= 64:
             return
-        if rc_mask_has(csum, j) != 0:
+        if rc_mask_has(g_rc_param_escape, callee * 2, j) != 0:
             arg := first_arg + j
-            if arg >= 0 && rc_value_has_release(arg, ni, nstart, 0) != 0:
-                check_error(EC_B_LIFETIME,
-                    "parameter escape: callee stores a region-local pointer",
-                    0, 0)
+            if arg >= 0 && arg < g_ir_var_count:
+                if rc_value_has_release(arg, ni, nstart, 0) != 0:
+                    check_error(EC_B_LIFETIME,
+                        "parameter escape: callee stores a region-local pointer",
+                        0, 0)
         j = j + 1
 
 fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
@@ -1383,6 +1473,13 @@ fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int):
         // Interprocedural escape through a store.
         if op == IR_STORE_PTR:
             rc_store_escape(ni, s1, s2, nstart)
+
+        // Direct global assignment of a region-local pointer.
+        if op == IR_STORE && s1 >= 0 && s2 >= 0 && rc_is_global_var(s1) != 0:
+            if rc_value_has_release(s2, ni, nstart, 0) != 0:
+                check_error(EC_B_LIFETIME,
+                    "store escape: global outlives the stored allocation",
+                    0, 0)
 
         // Interprocedural escape through a call argument.
         if op == IR_CALL:
