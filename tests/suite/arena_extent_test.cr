@@ -20,10 +20,10 @@ fn main() -> int:
     if h == -1:
         return 3
     cell_store(p, 0, 7)
-    cell_store(p, 104857599, 9)
+    cell_store(p, 104857592, 9)
     if cell_load(p, 0) != 7:
         return 4
-    if cell_load(p, 104857599) != 9:
+    if cell_load(p, 104857592) != 9:
         return 5
     arena_reset(a)
     if cell_load(g_arena_large_count, a * 8) != 0:

@@ -340,6 +340,12 @@ static int compare_after(long size, char *cp, char *rp) {
                 size, cs, cc, rs, rc);
         return 1;
     }
+    if (cs >= 0 && rs >= 0 &&
+        ((long *)_g_g_arena_slot_next)[cs] != ref.next[rs]) {
+        fprintf(stderr, "size %ld slot_next mismatch: core=%ld ref=%ld\n",
+                size, ((long *)_g_g_arena_slot_next)[cs], ref.next[rs]);
+        return 1;
+    }
     if (core_static(0) != ref.is_static[0] ||
         core_size(0) != ref.size[0] ||
         core_bump(0) != ref.bump[0]) {
@@ -353,7 +359,13 @@ static int compare_after(long size, char *cp, char *rp) {
         long rb = ref.cbase[i];
         long cl = ((long *)_g_g_class_limit)[i];
         long rl = ref.climit[i];
-        if (cb >= 0 && rb >= 0) {
+        if ((cb < 0) != (rb < 0)) {
+            fprintf(stderr,
+                    "size %ld class %d presence mismatch: core=%ld ref=%ld\n",
+                    size, i, cb, rb);
+            return 1;
+        }
+        if (cb >= 0) {
             cb -= core_base0;
             rb -= ref_base0;
             cl -= core_base0;
@@ -376,11 +388,26 @@ static int compare_after(long size, char *cp, char *rp) {
     return 0;
 }
 
+static void seed_free_slot(long slot) {
+    ((long *)_g_g_arena_scalars)[4] = 2;  // offset 32, count
+    ((long *)_g_g_arena_scalars)[5] = slot;  // offset 40, free-list head
+    ((long *)_g_g_arena_slot_next)[slot] = -1;
+    ((long *)_g_g_arena_slot)[0] = 0;
+    ((long *)_g_g_arena_slot_cursor)[0] = 0;
+    ref.free_head = slot;
+    ref.next[slot] = -1;
+    ref.slot[0] = 0;
+    ref.cursor[0] = 0;
+    ref.count = 2;
+}
+
 static int run_sequence(const long *sizes, size_t n, int static_mode,
-                        long pool_init) {
+                        long pool_init, int seed_free) {
     build_lookup();
     setup_core(static_mode, pool_init);
     setup_ref(static_mode, pool_init);
+    if (seed_free)
+        seed_free_slot(1);
     long first_slot = ref.slot[0];
     int switched = 0;
     for (size_t i = 0; i < n; i++) {
@@ -390,6 +417,11 @@ static int run_sequence(const long *sizes, size_t n, int static_mode,
         if ((cp == NULL) != (rr != 0)) {
             fprintf(stderr, "size %ld null mismatch: core=%p ref=%p\n",
                     sizes[i], (void *)cp, (void *)rp);
+            return 1;
+        }
+        if (cp == NULL || rp == NULL) {
+            fprintf(stderr, "size %ld unexpectedly failed in a valid sequence\n",
+                    sizes[i]);
             return 1;
         }
         if (compare_after(sizes[i], cp, rp) != 0)
@@ -412,21 +444,26 @@ int main(void) {
         16, 32, 3361, 100000,
     };
     if (run_sequence(dynamic_sizes,
-                     sizeof(dynamic_sizes) / sizeof(dynamic_sizes[0]), 0, 64) != 0)
+                     sizeof(dynamic_sizes) / sizeof(dynamic_sizes[0]), 0, 64, 0) != 0)
         return 1;
     const long grow_sizes[] = {16, 1048568, 1048568, 16};
     if (run_sequence(grow_sizes,
-                     sizeof(grow_sizes) / sizeof(grow_sizes[0]), 0, 1) != 0)
+                     sizeof(grow_sizes) / sizeof(grow_sizes[0]), 0, 1, 0) != 0)
+        return 1;
+    const long free_sizes[] = {1048568, 1048568, 16, 32};
+    if (run_sequence(free_sizes,
+                     sizeof(free_sizes) / sizeof(free_sizes[0]), 0, 64, 1) != 0)
         return 1;
     const long static_sizes[] = {
         0, 16, 32, 4096, 100000, 500000, 100000,
     };
     if (run_sequence(static_sizes,
-                     sizeof(static_sizes) / sizeof(static_sizes[0]), 1, 64) != 0)
+                     sizeof(static_sizes) / sizeof(static_sizes[0]), 1, 64, 0) != 0)
         return 1;
-    printf("arena C model: %zu dynamic + %zu grow + %zu static sizes\n",
+    printf("arena C model: %zu dynamic + %zu grow + %zu free + %zu static sizes\n",
            sizeof(dynamic_sizes) / sizeof(dynamic_sizes[0]),
            sizeof(grow_sizes) / sizeof(grow_sizes[0]),
+           sizeof(free_sizes) / sizeof(free_sizes[0]),
            sizeof(static_sizes) / sizeof(static_sizes[0]));
     return 0;
 }

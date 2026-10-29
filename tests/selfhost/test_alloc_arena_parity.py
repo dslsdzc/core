@@ -80,12 +80,24 @@ fn main() -> int:
     if cell_load(g_arena_large_head, a * 8) == -1:
         return 3
     cell_store(p, 0, 5)
-    cell_store(p, 2097151, 6)
+    cell_store(p, 2097144, 6)
     if cell_load(p, 0) != 5:
         return 4
+    if cell_load(p, 2097144) != 6:
+        return 5
+    // Page-aligned total: aligned(1052648) + 16 = 1052672. The last valid
+    // full cell at payload offset size-8 must be mapped.
+    q := alloc(1052648)
+    if cell_load(q, -8) != 1052648:
+        return 6
+    cell_store(q, 1052640, 8)
+    if cell_load(q, 1052640) != 8:
+        return 7
+    if cell_load(g_arena_large_count, a * 8) != 2:
+        return 8
     arena_reset(a)
     if cell_load(g_arena_large_count, a * 8) != 0:
-        return 5
+        return 9
     return 0
 """
 
