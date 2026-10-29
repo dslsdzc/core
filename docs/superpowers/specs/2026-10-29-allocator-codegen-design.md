@@ -1,6 +1,6 @@
 # Allocator 代码生成设计
 
-> 状态：已实施（Core simple/arena blob 默认；旧 body 保留在 --alloc-legacy）
+> 状态：已实施（Core simple/arena blob 是唯一 allocator body）
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-29-arena-boundaries-design.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
 
@@ -27,8 +27,9 @@
 - `src/runtime/runtime_frontend_abi.cr` 注册 `alloc`。
 - `alloc(n)` 降低成 `IR_CALL`，返回内部 `TI_UNIT` 指针哨兵。
 - `src/arch/x86_64/instr.cr` 在 tagged 模式下先把实参转成 raw word。
-- `src/format/elf/elf.cr` 的 `emit_alloc_body` / `emit_alloc_body_simple` 直接
-  写 x86-64 字节，所有跳转、寄存器保存、RIP 位移都在这里手工维护。
+- 改造前 `src/format/elf/elf.cr` 的 `emit_alloc_body` / `emit_alloc_body_simple`
+  直接写 x86-64 字节，所有跳转、寄存器保存、RIP 位移都在这里手工维护。这两
+  个函数已经删除。
 - `src/runtime/bigint_blob.cr` 已经证明“Python bootstrap → `.o` → 抽取
   `.text/.rodata/.data` → 拷进代码段”的路线可用。
 
@@ -184,68 +185,57 @@ alloc_blob_global_off(i)
 已落地：
 
 - `src/runtime/alloc_body.cr`：`alloc_simple`、`alloc_global`、`alloc_arena`、
-  `arena_get_slot`、`arena_slot_base`，全部 raw Core，不调用 `alloc`。
-- ABI 从两个参数扩展为三个：`rdi = size`、`rsi = heap_start`、
-  `rdx = heap_end`。trampoline 先 `movabs rsi, heap_start`、再
-  `movabs rdx, bss_va + 1GiB`，然后跳到选中的 body。这样初始堆不会越过
-  数据段 `PT_LOAD` 的 `P_MEMSZ`。
+  `alloc_arena_extent`、`arena_get_slot`、`arena_slot_base`，全部 raw Core，
+  不调用 `alloc`。
+- ABI 为三个参数：`rdi = size`、`rsi = heap_start`、`rdx = heap_end`。
+  trampoline 先 `movabs rsi, heap_start`、再 `movabs rdx, bss_va + 1GiB`，
+  然后跳到选中的 body。初始堆不会越过数据段 `PT_LOAD` 的 `P_MEMSZ`。
 - `tools/gen_alloc_blob.py`：Python bootstrap → `.o` → 字节 + 外部全局/调用
-  重定位表；拒绝未授权顶层全局、带初值的 allocator 全局、本地 `.data`
-  符号、未授权外部调用、绝对/TLS/GOT 重定位和非空 `.rela.data`/
-  `.rela.rodata`。生成器支持 `--check`，CI 用它防止 `alloc_blob.cr` 过期。
+  重定位表；拒绝未授权顶层全局、带初值的 allocator 全局、本地/匿名 `.data`
+  符号、未授权外部调用、绝对/TLS/GOT 重定位，以及非空 `.rela.*`
+  （除 `.rela.text`）。生成器支持 `--check`，CI 用它防止 blob 过期。
 - 重定位按入口分组：`alloc_simple` 可达的进 simple 组，`alloc_arena` 可达
   的进 arena 组，共享 helper 同时进入两组。`elf_gen` 只回填选中组；选中
-  组里缺全局或调用时设置错误并让 `elf_gen` 返回 -1，不再打印后继续。
-- `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 9184`，
-  `ALLOC_BLOB_SIMPLE_OFF = 2409`，`ALLOC_BLOB_ARENA_OFF = 4248`。
-- `src/format/elf/elf.cr`：trampoline、blob 拷贝、分组重定位回填；
-  默认走 blob，`--alloc-legacy` 保留旧手写 body。`has_arena_runtime` 以
-  arena.cr 内部探针全局（`g_arena_scalars`/`g_arena_slot`/
-  `g_arena_slot_cursor`）为信号：任一存在就选中 arena body，缺任何全局
-  则硬失败。函数名不再作为信号，避免用户同名 `arena_new` 误选。
-- class 元数据保存绝对地址（`slot_base + offset`），不再保存 slot 相对偏移；
-  否则 arena 切换 slot 后，旧 class chunk 会在新 slot 上别名。
-- `arena_get_slot` 的 free-list 和 bump 两条路径都会把新 slot 链入当前
-  arena、更新 `g_arena_slot[ai]` 并清零 cursor。
-- static arena 的 `>1MB` 请求在 static 分支内按 `cur + aligned > limit`
-  trap；只有 dynamic arena 的 `>1MB` 请求才回退到全局堆。
-- `globals_size` 改为按正 `gv` 条目计数，修复重复 `gv` 时 `heap_start` 落进
-  globals 区的重叠。
-- `emit_heap_expand` 的堆从 1GB 提升到 1.5GB，覆盖 arena 的 1GB 分配。
+  组里缺全局或调用时设置错误并让 `elf_gen` 返回 -1。
+- `src/runtime/alloc_blob.cr`：生成物，当前 `ALLOC_BLOB_SIZE = 10144`，
+  `ALLOC_BLOB_SIMPLE_OFF = 2409`，`ALLOC_BLOB_ARENA_OFF = 5189`。
+- `src/format/elf/elf.cr`：trampoline、blob 拷贝、分组重定位回填。旧的
+  `emit_alloc_body_legacy` / `emit_alloc_body_simple` 和 `--alloc-legacy` /
+  `--alloc-blob` 开关已删除；blob 是唯一实现。
+- `has_arena_runtime` 以 arena.cr 内部探针全局（`g_arena_scalars`/
+  `g_arena_slot`/`g_arena_slot_cursor`）为信号：任一存在就选中 arena body，
+  缺任何全局则硬失败。函数名不再作为信号，避免用户同名 `arena_new` 误选。
+- class 元数据保存绝对地址（`slot_base + offset`）；`arena_get_slot` 的
+  free-list 和 bump 两条路径都会把新 slot 链入当前 arena、更新
+  `g_arena_slot[ai]` 并清零 cursor。
+- static arena 的 `>1MiB` 请求在 static 分支内按 `cur + aligned > limit`
+  trap；dynamic arena 的 `>1MiB` 请求走 `alloc_arena_extent`。
+- `alloc_arena_extent` 用 bootstrap 新增的 `syscall6(9, ...)` 建立专用匿名
+  mmap。布局与 `arena.cr` 的 reset 链一致：`+0` next、`+8` munmap 长度、
+  `+16` 隐藏长度头、`+24` payload。`arena_reset` 逐个 `munmap` 并清空。
+- `globals_size` 按正 `gv` 条目计数；`emit_heap_expand` 的堆为 1.5GB。
 - 失败见证仍写 `g_alloc_fail_*`；失败路径用 `syscall3(60,132,0,0)` 退出，
-  shell 退出码为 132。legacy body 仍用 `ud2`，Python 的 subprocess 看到
-  `-4`，两者都按 trap 处理。
+  shell 退出码为 132。
 
 验证：
 
 | 测试 | 结果 |
 |---|---|
-| `tools/gen_alloc_blob.py --check` | PASS |
+| `tools/gen_alloc_blob.py --check` | PASS（10144 B） |
 | `test_alloc_blob_relocs.py` | PASS（分组、拒绝、stale check） |
 | `test_alloc_simple_parity.py` | PASS（21 个尺寸） |
-| `test_alloc_simple_elf.py` | PASS（legacy/blob、同名函数、缺全局 fail-closed） |
-| `test_alloc_arena_parity.py` | PASS（arena_test / boundary / alloc_regress / 3 个 trap） |
+| `test_alloc_simple_elf.py` | PASS（同名函数、缺全局 fail-closed） |
+| `test_alloc_arena_parity.py` | PASS（lifecycle / boundary / regress / extent / 3 trap / 2MB / mmap failure） |
+| `test_alloc_arena_llvm.py` | PASS（22 dynamic + 4 grow + 7 static 独立 C 模型） |
 | `test_alloc_llvm_parity.py` | PASS（203 行 × 12 的真实序列 + 结构检查） |
 | `corec selftest-stub-regalloc` | 14/14 |
 | `corec check src/compiler` | ok |
-| canary | 5/5（ELF `8fba3fe5…`，61622 B） |
+| arena stress | `arena_large` / `chunks` / `many_slots` / `static_peak` 均 0 |
+| bigint | interp / literals / containers / apx_tag 通过 |
+| canary | 5/5（ELF `560dbd25…`，61622 B；四条 `.ccr` 不变） |
 
-已知偏差：
-
-1. 大于 1MB 的 dynamic arena 对象走全局堆，不使用专用 mmap extent；
-   `arena_reset` 不会 `munmap` 这些对象，也不产生 class `-2` 的 mmap 失败
-   见证。原因是核心 body 不能通过 `syscall3`/`syscall4` 发六参数 `mmap`。
-   后续加六参数 syscall 或 raw helper 后补齐。
-2. clang 差分覆盖 simple/global 路径；arena class/slot 路径以旧手写 body
-   作为行为参考，并用 `tests/suite/arena_alloc_regress.cr` 锁住 slot 别名
-   和 free-list 链接。独立 clang arena 模型未实现。
-3. 旧 `emit_alloc_body_legacy` / `emit_alloc_body_simple` 仍保留，仅
-   `--alloc-legacy` 可达。
-4. `g_alloc_fail_*` 四条全局现在对每条程序登记，保证新旧 allocator 的失败
-   见证都有真实 BSS 槽。四条 `.ccr` 因此比上一版各少 60B；这是显式裁定，
-   不是语料漂移。未使用的 `g_alloc_home_idx` 不再登记。
-5. `--alloc-blob` 仍是接受的调试旗标，但默认已经是 blob；有效开关是
-   `--alloc-legacy`。
+已知偏差：无。旧手写 body 已删除；dynamic arena 的 >1MiB 对象不再走全局堆；
+class/slot 路径有独立 C 模型；extent mmap 失败写 class `-2` 并 trap。
 
 ## 风险
 

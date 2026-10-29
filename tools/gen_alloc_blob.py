@@ -54,6 +54,8 @@ EXTERNAL_GLOBALS = {
     "g_class_cursor",
     "g_class_limit",
     "g_class_lookup",
+    "g_arena_large_head",
+    "g_arena_large_count",
     "g_alloc_fail_request",
     "g_alloc_fail_class",
     "g_alloc_fail_cursor",

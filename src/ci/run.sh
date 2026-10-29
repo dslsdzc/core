@@ -387,6 +387,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_alloc_simple_parity.py
     python3 tests/selfhost/test_alloc_simple_elf.py
     python3 tests/selfhost/test_alloc_arena_parity.py
+    python3 tests/selfhost/test_alloc_arena_llvm.py
     python3 tests/selfhost/test_alloc_llvm_parity.py
     ;;
 

@@ -101,6 +101,8 @@ g_class_base : string, mut
 g_class_cursor : string, mut
 g_class_limit : string, mut
 g_class_lookup : string, mut
+g_arena_large_head : string, mut
+g_arena_large_count : string, mut
 
 fn arena_slot_base(slot: int) -> string:
     seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
@@ -144,6 +146,27 @@ fn arena_get_slot(ai: int, size: int) -> int:
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     return slot
 
+fn alloc_arena_extent(size: int, aligned: int, ai: int) -> string:
+    // Dedicated anonymous mapping. Layout matches arena.cr:
+    //   +0  next extent pointer
+    //   +8  total mapping length for munmap
+    //   +16 hidden length header
+    //   +24 payload
+    total := aligned + 16
+    p := syscall6(9, 0, total, 3, 16418, -1, 0)
+    base := alloc_ptr(p)
+    if p < 0:
+        head := load_str_ptr(g_arena_large_head, ai * 8)
+        return alloc_fail(size, -2, alloc_uword(head), 0)
+    head := load_str_ptr(g_arena_large_head, ai * 8)
+    store_str_ptr(base, 0, head)
+    cell_store(base, 8, total)
+    cell_store(base, 16, size)
+    store_str_ptr(g_arena_large_head, ai * 8, base)
+    cell_store(g_arena_large_count, ai * 8,
+               cell_load(g_arena_large_count, ai * 8) + 1)
+    return alloc_ptr(alloc_uword(base) + 24)
+
 fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if size < 0:
         return alloc_fail(size, -1, 0, 0)
@@ -176,13 +199,11 @@ fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
         cell_store(p, 0, size)
         return alloc_ptr(alloc_uword(p) + 8)
 
-    // Large objects use the global bump heap. Kernel-backed extents are a
-    // separate follow-up; this keeps the raw body free of six-argument
-    // syscalls while preserving allocation correctness. The check stays after
-    // the static branch: a static arena's peak is at most one slot, so a
-    // larger request must trap exactly as the legacy body does.
+    // Large objects get a dedicated mmap extent. The check stays after the
+    // static branch: a static arena's peak is at most one slot, so a larger
+    // request must trap exactly as the legacy body does.
     if aligned > 1048576:
-        return alloc_global(size, aligned, heap_start, heap_end)
+        return alloc_arena_extent(size, aligned, ai)
 
     loop:
         lookup := aligned / 16

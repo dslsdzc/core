@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ELF smoke test for --alloc-blob on a program without arena."""
+"""ELF smoke test for the Core allocator blob on a program without arena."""
 
 from __future__ import annotations
 
@@ -39,11 +39,10 @@ def main() -> int:
         root = Path(td)
         src = root / "alloc_elf.cr"
         ccr = root / "alloc_elf.ccr"
-        old = root / "alloc_old"
-        new = root / "alloc_new"
+        elf = root / "alloc_elf"
         src.write_text(SRC, encoding="utf-8")
 
-        r = run([str(COREC), "ccr", "--alloc-blob", str(src), "-o", str(ccr)])
+        r = run([str(COREC), "ccr", str(src), "-o", str(ccr)])
         if r.returncode != 0:
             print("FAIL: corec ccr")
             print(r.stdout)
@@ -51,38 +50,21 @@ def main() -> int:
             return 1
 
         r = run([str(COREARCH), str(ccr), "--static", "--raw-int",
-                 "--alloc-legacy", "-o", str(old)])
+                 "-o", str(elf)])
         if r.returncode != 0:
-            print("FAIL: legacy corearch")
+            print("FAIL: corearch")
             print(r.stdout)
             print(r.stderr)
             return 1
-        ro = run([str(old)])
+        ro = run([str(elf)])
         if ro.returncode != 0:
-            print(f"FAIL: legacy ELF rc={ro.returncode}")
-            return 1
-
-        r = run([str(COREARCH), str(ccr), "--static", "--raw-int",
-                 "--alloc-blob", "-o", str(new)])
-        if r.returncode != 0:
-            print("FAIL: --alloc-blob corearch")
-            print(r.stdout)
-            print(r.stderr)
-            return 1
-        rn = run([str(new)])
-        if rn.returncode != 0:
-            print(f"FAIL: blob ELF rc={rn.returncode}")
-            return 1
-
-        if old.stat().st_size == new.stat().st_size:
-            print("FAIL: allocator blob did not change the ELF size")
+            print(f"FAIL: blob ELF rc={ro.returncode}")
             return 1
 
         built = root / "alloc_built"
-        r = run([str(COREC), "build", "--alloc-blob", str(src),
-                 "--static", "-o", str(built)])
+        r = run([str(COREC), "build", str(src), "--static", "-o", str(built)])
         if r.returncode != 0:
-            print("FAIL: corec build --alloc-blob")
+            print("FAIL: corec build")
             print(r.stdout)
             print(r.stderr)
             return 1

@@ -404,3 +404,15 @@ Deviations from the plan, with reasons:
    `g_heap_ptr`; it is no longer a list of independent first allocations.
 6. `tools/gen_alloc_blob.py --check` was added and is run by CI so a stale
    `src/runtime/alloc_blob.cr` cannot pass the ELF tests.
+
+7. `syscall6` was added to the Python bootstrap only (the allocator body is
+   compiled by the bootstrap). Dynamic arena objects above 1 MiB now use
+   `alloc_arena_extent`, with the layout that `arena_reset` already expects:
+   next pointer, munmap length, hidden length, payload. The mmap-failure case
+   writes class -2 and exits 132.
+8. The legacy hand-written body and the `--alloc-legacy` / `--alloc-blob`
+   flags were deleted. `emit_alloc_body` emits only the selected blob group;
+   the tests and CI were rewritten for the blob-only path.
+9. `test_alloc_arena_llvm.py` adds an independent C model for class/slot,
+   pool growth, and static arenas. Extents and mmap failure are covered by
+   `test_alloc_arena_parity.py`.

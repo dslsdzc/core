@@ -34,20 +34,16 @@
 
 ### 大对象路径
 
-`g_arena_large_head[ai]` 仍由库的 `arena_reset` 维护；旧的手写 allocator
-会在 >64MB 时创建专用 mmap extent，并在 reset 时 `munmap`。Core allocator
-blob 不能通过 `syscall3`/`syscall4` 发六参数 `mmap`，因此当前实现把
-`>1MB` 的 arena 请求交给全局 bump 堆：
+`g_arena_large_head[ai]` 由库的 `arena_reset` 维护。Core allocator blob
+的 `alloc_arena_extent` 通过 bootstrap 的 `syscall6` 建立专用匿名 mmap：
 
-- 全局堆的初始范围是数据段内 1GiB，`heap_end` 由 trampoline 以第三个
-  参数传入，不会越过 `PT_LOAD` 的 `P_MEMSZ`。
-- 全局堆耗尽时调用 `heap_expand`，由既有函数 mmap 新区域。
-- `arena_reset` 不会 `munmap` 这些对象，class `-2` 的 mmap 失败见证不会
-  产生；失败仍写 `g_alloc_fail_*` 并以退出码 132 结束。
-
-专用 extent 和六参数 syscall 是后续工作；在它们落地前，行为以
-`docs/superpowers/specs/2026-10-29-allocator-codegen-design.md` 的
-“已知偏差”为准。
+- 布局与 reset 链一致：`+0` next 指针、`+8` munmap 长度、`+16` 隐藏长度头、
+  `+24` payload。
+- `arena_reset` 逐个 `munmap` 并清空 head/count。
+- mmap 失败写 `g_alloc_fail_request`、class `-2`、当前 head 和 0，然后退出
+  132。
+- dynamic arena 的 >1MiB 对象不再回退到全局堆；static arena 的 >1MiB 请求
+  仍在 static 分支内 trap。
 
 ### 大小临界值
 
@@ -62,8 +58,8 @@ blob 不能通过 `syscall3`/`syscall4` 发六参数 `mmap`，因此当前实现
 | 4089 | 查表 clamp |
 | 4096 | class 25 尾部 |
 | 1MB - 8 | class 25 尾部 |
-| 1MB | class 25 尾部 |
-| 1MB + 8 | 全局堆（blob）或连续 slot（legacy） |
+| 1MB | 专用 mmap extent（对齐后大于 1MB） |
+| 1MB + 8 | 专用 mmap extent |
 | 64MB - 8 | 64 个连续 slot |
 | 64MB | mmap extent |
 | 64MB + 1 | mmap extent |
@@ -104,7 +100,7 @@ cell：
 
 ### 初始化和 reset
 
-- `g_arena_scalars_ready` 在标量缓冲区建立期间为 0；stub 看到 0 时走全局堆。
+- `g_arena_scalars_ready` 在标量缓冲区建立期间为 0；allocator body 看到 0 时走全局堆。
 - `g_arena_suspend` 在 `arena_init` 和 `arena_reset` 期间为 1；stub 看到非 0 时
   走全局堆。这样 tagged 算术产生的 big-int 装箱不会进入半初始化或正在重置的
   arena。
