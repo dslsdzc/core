@@ -680,6 +680,8 @@ fn corec_main() -> int:
     timing_mark("ptr_analysis")
     region_check_all()
     timing_mark("region_check")
+    byte_permission_all()
+    timing_mark("byte_permission")
     provenance_verify_all()
     timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.

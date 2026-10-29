@@ -8,12 +8,13 @@
 
 C 风格原始指针表达力强，但没有安全保障。Rust 用借用检查器换取安全，代价是学习成本和表达力限制。Core 的目标是保留 C 风格指针的自由，同时不要求用户写安全标注。
 
-编译器维护完整的 HDFG。图中每个值的产生节点记录来源（provenance），每个解引用是 DEREF 或 STORE_PTR 节点。三个 pass 在图上验证指针安全，与类型系统解耦：
+编译器维护完整的 HDFG。图中每个值的产生节点记录来源（provenance），每个解引用是 DEREF 或 STORE_PTR 节点。四个 pass 在图上验证指针安全，与类型系统解耦：
 
 | Pass | 文件 | 功能 |
 |---|---|---|
 | PointerAnalysis | `ptr_analysis.cr` | 建立 points-to 关系，做约束求解，跟踪 alloc content |
-| RegionCheck | `region_check.cr` | 检查内存是否离开分配区域。过期解引用、返回值离开区域、存储离开区域三种情况已实现；参数离开区域未实现 |
+| RegionCheck | `region_check.cr` | 检查内存是否离开分配区域。过期解引用、返回值离开区域、存储离开区域、参数离开区域、out 参数配对与返回值别名已实现 |
+| BytePermission | `byte_permission.cr` | 检查每字节可读/可写权限；字符串字面量与只读分配不可写，`unsafe` 域跳过 |
 | ProvenanceVerify | `provenance_verify.cr` | 检查 DEREF 和 STORE_PTR 是否越界，静态证明或插入运行时检查 |
 
 ## 术语
@@ -120,13 +121,19 @@ p := mmio + 4096        // 越界，编译错误或运行时检查
 
 ## 字节权限层
 
-字节权限层仍在设计阶段。经典映射在字节序列、宽度和边界之上增加每字节权限，来源是 CompCert v2 投影和 `cache-semantics` 规则 7：
+字节权限的验证器侧已实现（`src/compiler/byte_permission.cr`，错误码 B012）。经典映射在字节序列、宽度和边界之上增加每字节权限，来源是 CompCert v2 投影和 `cache-semantics` 规则 7：
 
 ```text
 Freeable > Writable > Readable > Nonempty > Empty
 ```
 
-权限和 provenance、offset、size 一样是图数据。验证器读取图数据即可获得每字节的控制。实现状态见 `region-model.md` 第 5 节，当前为设计阶段。
+实现只保留两个独立位：`readable` 和 `writable`，状态为 none / read-only / write-only / read-write，只允许下降。`Nonempty`/`Empty` 归 ENT/REG，`Freeable` 归区域所有权。
+
+- 表示：当前按分配和槽位保存状态（每个 pts 分配一格、每个 IR 变量一格）。没有操作降低子区间，因此不需要每字节覆盖表；以后加稀疏区间表即可扩展，不改权限格。
+- 推断：字符串字面量为 read-only；Core 分配（`IR_ALLOC_ARRAY/STRUCT`、`alloc()` 缓冲区）与未知值为 read-write。全局槽字节可写，`mut` 只限制按名赋值（TA06），不进入字节权限；`&g` 取到的是可写存储。带到达定义的值逐定义取 meet，因此可变全局重新赋值为可写缓冲区后可以写，而仍指向字面量时不能写。
+- 检查：`cell_store`/`store8` 要求可写，`cell_load`/`load8`/`str_len` 要求可读；`IR_STORE_PTR`、`IR_STORE_INDEX`、`IR_STORE_INDEX_VAR`、`IR_STORE_FIELD` 经只读分配时拒绝；`unsafe` 域跳过。
+- 跨过程：`g_bp_param_write` 记录"形参可能被 `cell_store` 写入"，沿调用图固定点传播；字面量实参在调用点报 B012。
+- 未做：运行期权限元数据与 trap、每字节子区间、`alloc_at` 的权限声明、write-only 状态的产生点。
 
 ## 与其他语言的对比
 

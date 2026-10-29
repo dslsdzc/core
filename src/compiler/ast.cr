@@ -524,6 +524,7 @@ EC_B_BORROW_MUT2    : int = 13003 // B003  Two mutable borrows
 EC_B_USE_WHILE_BORROWED : int = 13004 // B004  Use while borrowed
 EC_B_ESCAPE         : int = 13010 // B010  Reference escapes function
 EC_B_LIFETIME       : int = 13011 // B011  Lifetime too short
+EC_B_PERMISSION     : int = 13012 // B012  Byte permission violation
 
 // R0xx; Runtime
 EC_R_DIV_ZERO     : int = 14001 // R001  Division by zero

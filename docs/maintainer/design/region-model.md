@@ -116,7 +116,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 | 回收时机（指定回收） | 图分析生成回收点（IR 层），推断在编译器内部，用户看不到 |
 | 碎片策略 / size class | 图分析推导分配策略 |
 | 跨区域合法性 | RegionCheck 自动判定 |
-| 所有验证 | 三个 pass 自动 |
+| 所有验证 | 四个 pass 自动 |
 
 用户只表达两件只有用户自己知道的事实：
 
@@ -145,11 +145,11 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
   动态 arena 按 1MiB slot 增长，`>1MiB` 请求走独立 extent；simple/arena 共用
   Core blob；tagged BigInt、失败 trap 和解释器 parity 已覆盖
   （`tests/selfhost/test_alloc_arena_parity.py`、`test_arena_interp.py`）
-- 三个 pass（provenance/region/bounds，与 pointer-model 共享）
+- 四个 pass（provenance/region/byte permission/bounds，与 pointer-model 共享）
+- 字节权限层验证器侧（2026-10-29）：`src/compiler/byte_permission.cr`，两 bit 权限格、按分配/槽位推断、`unsafe` 跳过、`cell_store` 形参写入摘要，错误码 B012
 
 设计阶段（M1-M3 推进，以计划为准）：
 - split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
-- 字节权限层使用（验证器侧）
 - `alloc_at` 声明式放置（`docs/maintainer/design/pointer-model.md`，`src/` 零命中）
 
 待解决问题：
@@ -158,6 +158,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互；
   具体 RegionCheck 缺口（B010 零 raise、B011 零覆盖、store/call/区域内返回逃逸、
   pts 流不敏感）见 `TODO.md` 条目 `#2026-09-20-1`
+- 字节权限的持久化/运行期表示、每字节子区间、`alloc_at` 权限声明尚未实现
 - 并发区域：每 G 独立 arena 尚未实现；本轮 arena 边界设计明确不含并发
 
 ---
@@ -167,7 +168,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - 层定义：docs/maintainer/design/materialization-space.md（存在格 / Materialization Space）
 - 规则来源：docs/academic/cache-semantics.md（规则 1–7；规则 7 = 本方案正确性标准）
 - IR 定位点：docs/maintainer/design/existence-structure.md（REG first_ent/last_ent）
-- 指针模型：docs/maintainer/design/pointer-model.md（provenance 三个 pass、RegionCheck）
+- 指针模型：docs/maintainer/design/pointer-model.md（四个 pass、RegionCheck）
 - 并发衔接：execution-model.md 第 4 节（每 G arena 生命周期）
 - 设计依据：docs/archive/2026-08-13-graph-anchored-regions-design.md、2026-07-28-arena-model-design.md
 - 术语索引：docs/glossary.md

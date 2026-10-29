@@ -48,7 +48,7 @@ flowchart LR
 ## 四、相关文档
 
 - 寄存器分配是缓存语义的映射实例，四条判定见 docs/maintainer/design/regalloc-cache-mapping.md。
-- 指针模型见 docs/maintainer/design/pointer-model.md，其中包含 provenance 的三个 pass。
+- 指针模型见 docs/maintainer/design/pointer-model.md，其中包含 provenance/region/byte permission/bounds 四个 pass。
 - 控制流 region 与内存区域不同，见 execution-model.md 第 2 节和 existence-structure.md 的 REG。
 - 术语见 docs/glossary.md 第 2 节（三层映射）和第 4 节（存在格与缓存映射术语）。
 - 归档讨论见 docs/archive/memory-model-capability-lattice.md（v1 到 v4 备忘）。
