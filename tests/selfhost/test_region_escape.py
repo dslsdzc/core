@@ -304,6 +304,24 @@ def test_p18_conditional_scalar_store_outlives():
     )
 
 
+def test_p19_nested_conditional_copy_escapes():
+    """P19 嵌套条件拷贝：p = q，q 自身是条件定义（一支 &x、一支 &seed）。
+    值追踪必须递归到 q 的全定义，不能只信 q 的最后一条安全分支。"""
+    assert_rejected(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    q : ., mut = &seed\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        if cond == 1:\n            q = &x\n        else:\n            q = &seed\n        if cond == 1:\n            p = q\n        else:\n            p = q\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p20_loop_reassign_may_not_run():
+    """P20 第二个循环可能执行 0 次：p 在第一轮持有已死 &x，第二轮的安全写入
+    不能清除判定。标量 last-store 在 SG_LOOP 内也必须走全定义检查。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p = &x\n        i = i + 1\n    i = 0\n    while i < 0:\n        p = &seed\n        i = i + 1\n    return *p\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -438,6 +456,8 @@ if __name__ == "__main__":
         test_p16_conditional_scalar_return_escapes,
         test_p17_conditional_destination_outlives,
         test_p18_conditional_scalar_store_outlives,
+        test_p19_nested_conditional_copy_escapes,
+        test_p20_loop_reassign_may_not_run,
         test_r1_function_level_alloc_may_be_returned,
         test_r2_if_branch_alloc_is_not_released_at_branch_end,
         test_r3_reassign_to_live_pointer_after_loop,

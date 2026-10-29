@@ -288,7 +288,17 @@ fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> in
         return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
     return -2
 
-fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int) -> int:
+fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int, depth: int) -> int:
+    if depth > 8:
+        return 0
+    si := rc_last_store_before(val, lo, at_node)
+    if si >= 0:
+        sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
+        if rc_node_in_conditional(si) != 0 || sop == IR_PHI:
+            // The value itself has conditional/loop definitions. Recurse over
+            // every possible definition instead of trusting one last store.
+            if rc_stack_any_escapes(val, ni, lo, mode, depth + 1) != 0:
+                return 1
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg < 0:
         return 0
@@ -302,7 +312,9 @@ fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int) -
 // Conservative check across every definition of a scalar pointer variable.
 // A conditional/PHI definition cannot be represented by one last-store trace;
 // report if any possible definition escapes.
-fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int) -> int:
+fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int, depth: int) -> int:
+    if depth > 8:
+        return 0
     i : ., mut = lo
     loop:
         if i >= ni:
@@ -312,17 +324,25 @@ fn rc_stack_any_escapes(ptr_var: int, ni: int, lo: int, mode: int) -> int:
         s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
         if op == IR_STORE && s1 == ptr_var:
-            if rc_stack_value_escapes(s2, i, ni, lo, mode) != 0:
+            if rc_stack_value_escapes(s2, i, ni, lo, mode, depth + 1) != 0:
                 return 1
         if op == IR_PHI && d == ptr_var:
-            if s1 >= 0 && rc_stack_value_escapes(s1, i, ni, lo, mode) != 0:
+            if s1 >= 0 && rc_stack_value_escapes(s1, i, ni, lo, mode, depth + 1) != 0:
                 return 1
-            if s2 >= 0 && rc_stack_value_escapes(s2, i, ni, lo, mode) != 0:
+            if s2 >= 0 && rc_stack_value_escapes(s2, i, ni, lo, mode, depth + 1) != 0:
                 return 1
         i = i + 1
     return 0
 
-fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int) -> int:
+fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int, depth: int) -> int:
+    if depth > 8:
+        return 0
+    si := rc_last_store_before(val, lo, at_node)
+    if si >= 0:
+        sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
+        if rc_node_in_conditional(si) != 0 || sop == IR_PHI:
+            if rc_stack_any_outlives(val, dest, at_node, lo, depth + 1) != 0:
+                return 1
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg < 0:
         return 0
@@ -331,7 +351,9 @@ fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int) -> int:
         return 1
     return 0
 
-fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int) -> int:
+fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int, depth: int) -> int:
+    if depth > 8:
+        return 0
     i : ., mut = lo
     loop:
         if i >= use_ni:
@@ -341,12 +363,12 @@ fn rc_stack_any_outlives(ptr_var: int, dest: int, use_ni: int, lo: int) -> int:
         s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
         if op == IR_STORE && s1 == ptr_var:
-            if rc_stack_value_outlives(s2, i, dest, lo) != 0:
+            if rc_stack_value_outlives(s2, i, dest, lo, depth + 1) != 0:
                 return 1
         if op == IR_PHI && d == ptr_var:
-            if s1 >= 0 && rc_stack_value_outlives(s1, i, dest, lo) != 0:
+            if s1 >= 0 && rc_stack_value_outlives(s1, i, dest, lo, depth + 1) != 0:
                 return 1
-            if s2 >= 0 && rc_stack_value_outlives(s2, i, dest, lo) != 0:
+            if s2 >= 0 && rc_stack_value_outlives(s2, i, dest, lo, depth + 1) != 0:
                 return 1
         i = i + 1
     return 0
@@ -362,8 +384,8 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
         si := rc_last_store_before(ptr_var, lo, ni)
         if si >= 0:
             sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
-            if rc_node_in_if(si) != 0 || sop == IR_PHI:
-                if rc_stack_any_escapes(ptr_var, ni, lo, mode) != 0:
+            if rc_node_in_conditional(si) != 0 || sop == IR_PHI:
+                if rc_stack_any_escapes(ptr_var, ni, lo, mode, 0) != 0:
                     return 1
         sg := rc_stack_release_sg_rec(ptr_var, ni, lo, 0)
         if sg < 0:
@@ -578,8 +600,8 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
         si := rc_last_store_before(val_var, lo, use_ni)
         if si >= 0:
             sop := cell_load(g_df_nodes, si * ESZ_DFNODE + OFF_DF_OPCODE)
-            if rc_node_in_if(si) != 0 || sop == IR_PHI:
-                if rc_stack_any_outlives(val_var, dest, use_ni, lo) != 0:
+            if rc_node_in_conditional(si) != 0 || sop == IR_PHI:
+                if rc_stack_any_outlives(val_var, dest, use_ni, lo, 0) != 0:
                     return 1
     return 0
 
