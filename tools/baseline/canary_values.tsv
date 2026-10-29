@@ -606,3 +606,4 @@ gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bf
 #   canary_elf 8fba3fe55029877dd31e368820d530963fa2f7a47317764a4d5585ce79365f4c 61622
 # 新值：
 #   canary_elf 560dbd2566ad0230ff5b1679de7f656f405804e370cf76a764af423ca4dbb59e 61622
+# 实现提交：91ba68f06b96 (arena extent + C model + legacy removal)

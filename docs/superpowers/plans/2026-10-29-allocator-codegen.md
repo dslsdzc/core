@@ -379,7 +379,7 @@ jj commit -m "docs: record allocator blob codegen"
 
 ## Execution notes (2026-10-29)
 
-Implementation commit: `3c97b41006b6cf883501496493d7f55d9d6019d2`.
+Implementation commit: `3c97b41006b6cf883501496493d7f55d9d6019d2`; deviation closure commit: `91ba68f06b96`.
 
 Deviations from the plan, with reasons:
 
