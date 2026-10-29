@@ -195,7 +195,7 @@ fn df_state_close_regions_at(head: string, next: string, pos: int):
         if last_node >= nstart:
             // 终止边源必须在区内（循环体无副作用时序列头是区前的 store，连过去等于
             // 宣称循环退出依赖于该区不含的副作用）。
-            if g_last_state_node >= nstart:
+            if g_last_state_node >= nstart && g_last_state_node != last_node:
                 df_add_edge_kind(g_last_state_node, last_node, 1)  // termination dependency
             // 序列头推进到区退出节点：循环之后的副作用必须依赖循环终止
             // （spec 4.2：不终止的循环必须终止整图）。

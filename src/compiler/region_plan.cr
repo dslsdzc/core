@@ -14,6 +14,13 @@ g_plan_clear_sg : string, mut
 g_plan_clear_count : int, mut
 g_plan_clear_cap : int, mut
 g_plan_active : int, mut
+// Post-dominator sets for the current function (bitset rows, 63 lanes).
+g_rp_pdom : string, mut
+g_rp_common : string, mut
+g_rp_pdom_words : int, mut
+g_rp_pdom_nstart : int, mut
+g_rp_pdom_ncount : int, mut
+g_rp_pdom_ok : int, mut
 
 fn region_plan_grow(n: int):
     if n < g_plan_split_cap:
@@ -39,6 +46,7 @@ fn region_plan_grow(n: int):
 
 fn region_plan_reset():
     g_plan_active = 0
+    g_rp_pdom_ok = 0
     // A string global starts null; cap is the allocated-size witness.
     if g_plan_split_cap <= 0:
         g_plan_split_count = 0
@@ -137,10 +145,12 @@ fn region_plan_emit_clears(label_id: int):
             return
         if cell_load(g_plan_clear_label, i * 8) == label_id:
             sg := cell_load(g_plan_clear_sg, i * 8)
-            if sg >= 0 && sg < g_sg_arena_var_cap:
-                slot := cell_load(g_sg_arena_var, sg * 8)
-                if slot >= 0:
-                    emit(IR_ARENA_CLEAR, -1, slot, 0, 0, 0)
+            if sg >= 0 && sg < g_sg_arena_var_cap && sg < g_sg_count:
+                k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
+                if k == SG_FUNC || k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
+                    slot := cell_load(g_sg_arena_var, sg * 8)
+                    if slot >= 0:
+                        emit(IR_ARENA_CLEAR, -1, slot, 0, 0, 0)
         i = i + 1
 
 fn rp_var_is_pointer(var: int) -> int:
@@ -153,6 +163,16 @@ fn rp_var_is_pointer(var: int) -> int:
     if k == TYP_PTR || k == TYP_REF:
         return 1
     return 0
+
+// A stack slot can carry a points-to set even when its IR type row is TI_UNIT
+// (the slot's declared type lives on the variable, not the alloc node). Any
+// non-empty pts set is therefore a pointer carrier for escape/liveness scans.
+fn rp_var_may_point(var: int) -> int:
+    if var < 0:
+        return 0
+    if pa_pts_empty(var) == 0:
+        return 1
+    return rp_var_is_pointer(var)
 
 fn rp_slot_inside(slot: int, sg: int) -> int:
     if slot < 0 || rc_is_global_var(slot) != 0:
@@ -267,13 +287,13 @@ fn rp_alloc_escapes(alloc_id: int, sg: int, nstart: int, ncount: int,
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
         uses_alloc : ., mut = 0
-        if s1 >= 0 && rp_var_is_pointer(s1) != 0 && pa_pts_has(s1, alloc_id) != 0:
+        if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, alloc_id) != 0:
             uses_alloc = 1
-        if s2 >= 0 && rp_var_is_pointer(s2) != 0 && pa_pts_has(s2, alloc_id) != 0:
+        if s2 >= 0 && rp_var_may_point(s2) != 0 && pa_pts_has(s2, alloc_id) != 0:
             uses_alloc = 1
-        if s3 >= 0 && rp_var_is_pointer(s3) != 0 && pa_pts_has(s3, alloc_id) != 0:
+        if s3 >= 0 && rp_var_may_point(s3) != 0 && pa_pts_has(s3, alloc_id) != 0:
             uses_alloc = 1
-        if d >= 0 && rp_var_is_pointer(d) != 0 && op == IR_STORE_INDEX_VAR && pa_pts_has(d, alloc_id) != 0:
+        if d >= 0 && rp_var_may_point(d) != 0 && op == IR_STORE_INDEX_VAR && pa_pts_has(d, alloc_id) != 0:
             uses_alloc = 1
         if uses_alloc != 0 && ni != an:
             nsg := subgraph_containing(ni)
@@ -356,30 +376,240 @@ fn rp_alloc_slot(an: int) -> int:
         sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
     return -1
 
-fn rp_alloc_last_use(alloc_id: int, nstart: int, ncount: int) -> int:
-    an := cell_load(g_pa_alloc_nodes, alloc_id * 8)
-    last : ., mut = nstart
-    ni : ., mut = nstart
+RP_FULL : int = 9223372036854775807
+
+fn rp_bit_set(buf: string, base: int, bit: int):
+    if bit < 0:
+        return
+    w := bit / 63
+    m := pa_bit_mask(bit % 63)
+    idx := (base + w) * 8
+    cur := cell_load(buf, idx)
+    if (cur / m) % 2 == 0:
+        cell_store(buf, idx, cur + m)
+
+fn rp_bit_has(buf: string, base: int, bit: int) -> int:
+    if bit < 0:
+        return 0
+    w := bit / 63
+    m := pa_bit_mask(bit % 63)
+    return (cell_load(buf, (base + w) * 8) / m) % 2
+
+fn rp_bits_clear(buf: string, base: int, words: int):
+    w : ., mut = 0
     loop:
-        if ni >= nstart + ncount:
-            return last
-        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
-        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
-        s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-        use : ., mut = 0
-        if s1 >= 0 && rp_var_is_pointer(s1) != 0 && pa_pts_has(s1, alloc_id) != 0:
-            use = 1
-        if s2 >= 0 && rp_var_is_pointer(s2) != 0 && pa_pts_has(s2, alloc_id) != 0:
-            use = 1
-        if s3 >= 0 && rp_var_is_pointer(s3) != 0 && pa_pts_has(s3, alloc_id) != 0:
-            use = 1
-        if d >= 0 && op == IR_STORE_INDEX_VAR && rp_var_is_pointer(d) != 0 && pa_pts_has(d, alloc_id) != 0:
-            use = 1
-        if use != 0 && ni != an && ni > last:
-            last = ni
-        ni = ni + 1
+        if w >= words:
+            return
+        cell_store(buf, (base + w) * 8, 0)
+        w = w + 1
+
+fn rp_bits_fill(buf: string, base: int, words: int):
+    w : ., mut = 0
+    loop:
+        if w >= words:
+            return
+        cell_store(buf, (base + w) * 8, RP_FULL)
+        w = w + 1
+
+fn rp_bits_and(dst: string, dbase: int, src: string, sbase: int, words: int) -> int:
+    changed : ., mut = 0
+    w : ., mut = 0
+    loop:
+        if w >= words:
+            return changed
+        a := cell_load(dst, (dbase + w) * 8)
+        b := cell_load(src, (sbase + w) * 8)
+        out : ., mut = 0
+        mask : ., mut = 1
+        k : ., mut = 0
+        loop:
+            if k >= 63:
+                break
+            if (a / mask) % 2 == 1 && (b / mask) % 2 == 1:
+                out = out + mask
+            mask = mask * 2
+            k = k + 1
+        if out != a:
+            cell_store(dst, (dbase + w) * 8, out)
+            changed = 1
+        w = w + 1
+    return changed
+
+fn rp_bits_copy(dst: string, dbase: int, src: string, sbase: int, words: int):
+    w : ., mut = 0
+    loop:
+        if w >= words:
+            return
+        cell_store(dst, (dbase + w) * 8, cell_load(src, (sbase + w) * 8))
+        w = w + 1
+
+fn rp_bits_same(a: string, abase: int, b: string, bbase: int, words: int) -> int:
+    w : ., mut = 0
+    loop:
+        if w >= words:
+            return 1
+        if cell_load(a, (abase + w) * 8) != cell_load(b, (bbase + w) * 8):
+            return 0
+        w = w + 1
+
+// Post-dominators over the HDFG-derived control adjacency. Exits are nodes with
+// no successors; pdom[exit] = {exit}. The worklist starts with every node and
+// re-enqueues predecessors when a row shrinks. A size/iteration cap keeps the
+// pass bounded; exceeding it disables early clear for this function (v1).
+fn rp_pdom_prepare(nstart: int, ncount: int):
+    if g_rp_pdom_ok != 0 && g_rp_pdom_nstart == nstart && g_rp_pdom_ncount == ncount:
+        return
+    g_rp_pdom_nstart = nstart
+    g_rp_pdom_ncount = ncount
+    g_rp_pdom_ok = 0
+    if ncount <= 0 || ncount > 2000:
+        return
+    words : ., mut = (ncount + 62) / 63
+    if words < 1:
+        words = 1
+    g_rp_pdom_words = words
+    g_rp_pdom = alloc(ncount * words * 8)
+    i : ., mut = 0
+    loop:
+        if i >= ncount:
+            break
+        rp_bits_fill(g_rp_pdom, i * words, words)
+        i = i + 1
+    // Exit rows contain only the exit itself.
+    i = 0
+    loop:
+        if i >= ncount:
+            break
+        if rc_ctl_succ_count(nstart + i) == 0:
+            rp_bits_clear(g_rp_pdom, i * words, words)
+            rp_bit_set(g_rp_pdom, i * words, i)
+        i = i + 1
+    // Predecessor lists.
+    edge_total : ., mut = 0
+    i = 0
+    loop:
+        if i >= ncount:
+            break
+        edge_total = edge_total + rc_ctl_succ_count(nstart + i)
+        i = i + 1
+    pred_head := alloc(ncount * 8)
+    pred_from := alloc((edge_total + 1) * 8)
+    pred_next := alloc((edge_total + 1) * 8)
+    i = 0
+    loop:
+        if i >= ncount:
+            break
+        cell_store(pred_head, i * 8, -1)
+        i = i + 1
+    e : ., mut = 0
+    i = 0
+    loop:
+        if i >= ncount:
+            break
+        sc := rc_ctl_succ_count(nstart + i)
+        k : ., mut = 0
+        loop:
+            if k >= sc:
+                break
+            v := rc_ctl_succ_at(nstart + i, k)
+            if v >= nstart && v < nstart + ncount:
+                vi := v - nstart
+                cell_store(pred_from, e * 8, i)
+                cell_store(pred_next, e * 8, cell_load(pred_head, vi * 8))
+                cell_store(pred_head, vi * 8, e)
+                e = e + 1
+            k = k + 1
+        i = i + 1
+    work := alloc(ncount * 8)
+    queued := alloc(ncount * 8)
+    i = 0
+    loop:
+        if i >= ncount:
+            break
+        cell_store(work, i * 8, i)
+        cell_store(queued, i * 8, 1)
+        i = i + 1
+    top : ., mut = ncount
+    temp := alloc(words * 8)
+    guard : ., mut = 0
+    loop:
+        if top <= 0:
+            break
+        top = top - 1
+        u := cell_load(work, top * 8)
+        cell_store(queued, u * 8, 0)
+        sc := rc_ctl_succ_count(nstart + u)
+        if sc <= 0:
+            rp_bits_clear(temp, 0, words)
+        else:
+            rp_bits_fill(temp, 0, words)
+            k : ., mut = 0
+            loop:
+                if k >= sc:
+                    break
+                v := rc_ctl_succ_at(nstart + u, k)
+                if v >= nstart && v < nstart + ncount:
+                    rp_bits_and(temp, 0, g_rp_pdom, (v - nstart) * words, words)
+                k = k + 1
+        rp_bit_set(temp, 0, u - nstart)
+        if rp_bits_same(temp, 0, g_rp_pdom, u * words, words) == 0:
+            rp_bits_copy(g_rp_pdom, u * words, temp, 0, words)
+            pe : ., mut = cell_load(pred_head, u * 8)
+            loop:
+                if pe < 0:
+                    break
+                pv := cell_load(pred_from, pe * 8)
+                if cell_load(queued, pv * 8) == 0:
+                    cell_store(work, top * 8, pv)
+                    top = top + 1
+                    cell_store(queued, pv * 8, 1)
+                pe = cell_load(pred_next, pe * 8)
+        guard = guard + 1
+        if guard > ncount * 8 + 2000:
+            return
+    // common[alloc] = intersection of pdom[use] over every use of that alloc.
+    if g_pa_alloc_count > 0:
+        g_rp_common = alloc(g_pa_alloc_count * words * 8)
+        ai : ., mut = 0
+        loop:
+            if ai >= g_pa_alloc_count:
+                break
+            rp_bits_fill(g_rp_common, ai * words, words)
+            ai = ai + 1
+        ni : ., mut = nstart
+        loop:
+            if ni >= nstart + ncount:
+                break
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+            s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+            if s1 >= 0 && rp_var_may_point(s1) != 0:
+                ai2 : ., mut = 0
+                loop:
+                    if ai2 >= g_pa_alloc_count:
+                        break
+                    if pa_pts_has(s1, ai2) != 0 && ni != cell_load(g_pa_alloc_nodes, ai2 * 8):
+                        rp_bits_and(g_rp_common, ai2 * words, g_rp_pdom, (ni - nstart) * words, words)
+                    ai2 = ai2 + 1
+            if s2 >= 0 && rp_var_may_point(s2) != 0:
+                ai3 : ., mut = 0
+                loop:
+                    if ai3 >= g_pa_alloc_count:
+                        break
+                    if pa_pts_has(s2, ai3) != 0 && ni != cell_load(g_pa_alloc_nodes, ai3 * 8):
+                        rp_bits_and(g_rp_common, ai3 * words, g_rp_pdom, (ni - nstart) * words, words)
+                    ai3 = ai3 + 1
+            if s3 >= 0 && rp_var_may_point(s3) != 0:
+                ai4 : ., mut = 0
+                loop:
+                    if ai4 >= g_pa_alloc_count:
+                        break
+                    if pa_pts_has(s3, ai4) != 0 && ni != cell_load(g_pa_alloc_nodes, ai4 * 8):
+                        rp_bits_and(g_rp_common, ai4 * words, g_rp_pdom, (ni - nstart) * words, words)
+                    ai4 = ai4 + 1
+            ni = ni + 1
+    g_rp_pdom_ok = 1
 
 // No later jump/match may reach a node at or before the clear point. A backedge
 // to a use after the clear would make the clear unsound.
@@ -412,9 +642,6 @@ fn rp_clear_suffix_safe(qn: int, sg_end: int) -> int:
         ni = ni + 1
     return 1
 
-// A later allocation in the same basic block makes the clear immediately
-// useful on this path. An allocation in another branch does not: clearing here
-// would only add an instruction without enabling reuse on the current path.
 fn rp_same_block_alloc_after(qn: int, sg: int, sg_end: int) -> int:
     ni : ., mut = qn + 1
     loop:
@@ -428,8 +655,20 @@ fn rp_same_block_alloc_after(qn: int, sg: int, sg_end: int) -> int:
                 return 1
         ni = ni + 1
 
-// Earliest label where every allocation before it is dead, and at least one
-// allocation follows (so the clear actually enables reuse).
+fn rp_prior_uses_pdom(qn: int, sg: int, nstart: int) -> int:
+    if g_rp_pdom_ok == 0:
+        return 0
+    words := g_rp_pdom_words
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            return 1
+        an := cell_load(g_pa_alloc_nodes, ai * 8)
+        if an < qn && rp_alloc_slot(an) == sg:
+            if rp_bit_has(g_rp_common, ai * words, qn - nstart) == 0:
+                return 0
+        ai = ai + 1
+
 fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: int) -> int:
     qn : ., mut = sg_start
     loop:
@@ -437,7 +676,6 @@ fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: 
             return -1
         op := cell_load(g_df_nodes, qn * ESZ_DFNODE + OFF_DF_OPCODE)
         if op == IR_LABEL:
-            max_last : ., mut = nstart
             before : ., mut = 0
             ai : ., mut = 0
             loop:
@@ -448,13 +686,11 @@ fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: 
                 if rp_alloc_slot(an) == sg && (aop == IR_ALLOC_ARRAY || aop == IR_ALLOC_STRUCT):
                     if an < qn:
                         before = 1
-                        lu := rp_alloc_last_use(ai, nstart, ncount)
-                        if lu > max_last:
-                            max_last = lu
                 ai = ai + 1
-            if before != 0 && max_last < qn && rp_same_block_alloc_after(qn, sg, sg_end) != 0:
-                if rp_clear_suffix_safe(qn, sg_end) != 0:
-                    return cell_load(g_df_nodes, qn * ESZ_DFNODE + OFF_DF_S1)
+            if before != 0 && rp_prior_uses_pdom(qn, sg, nstart) != 0:
+                if rp_same_block_alloc_after(qn, sg, sg_end) != 0:
+                    if rp_clear_suffix_safe(qn, sg_end) != 0:
+                        return cell_load(g_df_nodes, qn * ESZ_DFNODE + OFF_DF_S1)
         qn = qn + 1
     return -1
 
@@ -515,6 +751,7 @@ fn region_plan_analyze():
             fi = fi + 1
             continue
         rc_ctl_prepare(nstart, ncount)
+        rp_pdom_prepare(nstart, ncount)
         sg : ., mut = 0
         loop:
             if sg >= g_sg_count:

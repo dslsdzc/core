@@ -102,6 +102,70 @@ def test_p1_early_clear_emitted():
     run_program(POSITIVE, 0)
 
 
+CROSS_BRANCH = """fn main() -> int:
+    a := [1, 2]
+    y : ., mut = 1
+    x : ., mut = 0
+    if y < 2:
+        x = a[0]
+    else:
+        x = a[1]
+    b := [3, 4]
+    return x + b[0] - 4
+"""
+
+BRANCH_RETURN = """fn main() -> int:
+    a := [1, 2]
+    y : ., mut = 1
+    x : ., mut = 0
+    if y < 2:
+        return a[0] - 1
+    else:
+        x = a[1]
+    b := [3, 4]
+    return x + b[0] - 5
+"""
+
+
+def test_p1b_cross_branch_merge_clear():
+    """P1b 后支配：两支都使用 a，merge label 后同块分配 b ⇒ clear 在 merge。"""
+    result = run_ccr(CROSS_BRANCH)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert any(ln.startswith("clear ") for ln in diag.splitlines()), diag
+    run_program(CROSS_BRANCH, 0)
+
+
+def test_p1c_branch_return_blocks_merge_clear():
+    """P1c 后支配反向：then 支返回，merge 不后支配该支使用 ⇒ 不 clear。"""
+    result = run_ccr(BRANCH_RETURN)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not any(ln.startswith("clear ") for ln in diag.splitlines()), diag
+    run_program(BRANCH_RETURN, 0)
+
+
+LOOP_EXIT = """fn main() -> int:
+    a := [1, 2]
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        total = total + a[0]
+        i = i + 1
+    b := [3, 4]
+    return total + b[0] - 5
+"""
+
+
+def test_p1d_loop_exit_clear():
+    """P1d 循环出口：a 在循环体内使用，exit label 后同块分配 b ⇒ clear。"""
+    result = run_ccr(LOOP_EXIT)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert any(ln.startswith("clear ") for ln in diag.splitlines()), diag
+    run_program(LOOP_EXIT, 0)
+
+
 def test_p2_pointer_used_after_keeps_v1():
     result = run_ccr(ESCAPE)
     diag = result.stdout + result.stderr
@@ -129,6 +193,9 @@ def test_p4_loop_backedge_no_clear():
 if __name__ == "__main__":
     tests = [
         test_p1_early_clear_emitted,
+        test_p1b_cross_branch_merge_clear,
+        test_p1c_branch_return_blocks_merge_clear,
+        test_p1d_loop_exit_clear,
         test_p2_pointer_used_after_keeps_v1,
         test_p3_no_later_allocation_no_clear,
         test_p4_loop_backedge_no_clear,
