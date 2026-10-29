@@ -165,7 +165,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 
 | 字段 | 含义 |
 |------|------|
-| opcode | ALLOC_AT（编号待实现时分配，不与 SPEC_* 冲突为前提） |
+| opcode | ALLOC_AT = 55 |
 | dest_var | 结果指针变量 |
 | src1 | 固定地址（编译期常量或部署配置值） |
 | src2 | 大小（字节） |
@@ -333,7 +333,7 @@ store_index_var, make_enum, ref,            // 15-17
 branch, jump, label, phi, load_enum_tag,    // 18-23
 slice, deref, store_ptr,                    // 24-26
 spawn, yield, await,                        // 27-29
-alloc_at,                                   // 编号待实现时分配（声明式放置）
+alloc_at,                                   // 55 声明式固定地址放置
 spec_constraint, spec_forall, spec_exists,  // 30-32
 spec_imply, spec_old, spec_assume           // 33-35
 ```

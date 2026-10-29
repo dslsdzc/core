@@ -1052,6 +1052,12 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             println(istr_get(t1))
             g_interp_abort = 2
             break
+        // Fixed-address placement is an ELF/deployment fact; the interpreter
+        // must not fake a host pointer and silently read/write process memory.
+        if op2 == 55:
+            println("error: interp 不支持固定地址放置（IR_ALLOC_AT）")
+            g_interp_abort = 2
+            break
         // IR_CALL and IR_SPAWN use the shared dispatch for builtins and inline calls.
         if op2 == 4 || op2 == 27:
             ir_interp_call(d2, t1, t2, t3)
@@ -1514,6 +1520,11 @@ fn ir_interpret() -> int:
         if op == 45:
             print("error: interp 无法调用外部函数：")
             println(istr_get(s1))
+            return 2
+        // Fixed-address placement is an ELF/deployment fact; see the callee
+        // dispatch above for the same loud boundary.
+        if op == 55:
+            println("error: interp 不支持固定地址放置（IR_ALLOC_AT）")
             return 2
 
         // IR_I2F and IR_F2I are rejected at dispatch entry.

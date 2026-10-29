@@ -2167,6 +2167,7 @@
   - 2026-10-29 FFI 边界：非 `unsafe` 域的 `IR_CALL_EXTERN` 传归还区指针实参报 B11；`g_rc_param_ffi` 把"形参转发给 extern"的约束沿包装函数传回调用点。覆盖 `test_p33`/`p34`/`r25`/`r26`。
   - 2026-10-29 pointee 内容经 out 参数：`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，调用点按目标寿命（`rc_dest_max_exit`）比较内容值；覆盖 `test_p35`/`p36`/`p37`/`r27`。
   - 2026-10-29 字节权限层（验证器侧）：新增 `src/compiler/byte_permission.cr` 与 B012。权限状态两个 bit、只降不升；字符串字面量为只读，Core 分配/未知值可读写，全局槽字节可写（`mut` 只限制按名赋值）。检查 `cell_store`/`store8` 写入、`cell_load`/`load8`/`str_len` 读取、经只读分配的指针写入；`g_bp_param_write` 摘要沿调用图传播。覆盖 `test_byte_permission.py` 13 例。剩余：持久化/运行期表示、每字节子区间、`alloc_at` 权限声明。
+  - 2026-10-29 `alloc_at` 声明式放置：`IR_ALLOC_AT`（opcode 55）+ `alloc_at`/`align` 声明期识别 + ptr_analysis 分配根 + provenance 边界（字节 → 8 字节 cell）+ 固定地址程序寿命 + 后端地址常量 + 解释器响亮拒绝。覆盖 `test_alloc_at.py` 11 例。v1 只接受编译期字面量、固定 `*int`；部署配置地址、显式元素类型、运行时对齐尚未实现。
   - 不适用（已核）："被返回的本地堆对象"不单列摘要。`alloc()` 的返回类型是 `string`，走全局堆而非区域 arena（实测循环后返回并解引用仍有效）；`IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` 是栈/区域槽，只能通过 `&` 引用逃逸，已由指针路径覆盖。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）

@@ -19,6 +19,7 @@ fn get_alloc_extent(alloc_seq: int) -> int:
     an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
     op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
     s1 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    s2 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S2)
     s3 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
@@ -26,6 +27,10 @@ fn get_alloc_extent(alloc_seq: int) -> int:
     if op == IR_ALLOC_ARRAY:
         // s1 is the semantic element count; one element occupies one IR cell.
         return s1
+    if op == IR_ALLOC_AT:
+        // s2 is the declared byte size. IR bounds are element cells; the v1
+        // placement surface is *int, so one cell is 8 bytes.
+        return s2 / 8
     if op == IR_ALLOC_STRUCT:
         // Field count is the struct's cell extent. An unknown struct name falls
         // back to a single cell, matching the scalar placeholder in the IR.

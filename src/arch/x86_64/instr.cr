@@ -1948,6 +1948,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_ALLOC:
         return 0
 
+    if op == IR_ALLOC_AT:
+        // Declarative placement: the address is a compile-time fact. Materialize
+        // it as the value of the destination pointer variable.
+        if d < 0:
+            return 0
+        do2 := g2_slot(d)
+        cp = cp + e2_movabs_rdi(buf, pos+cp, s1)
+        cp = cp + e2_mov(buf, pos+cp, 0, 7)  // rax <- rdi
+        cp = cp + e2_st(buf, pos+cp, 0, do2)
+        return cp
+
     if op == IR_ALLOC_STRUCT:
         do2 := g2_slot(d)
         name_ni := s3

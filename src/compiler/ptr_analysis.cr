@@ -279,9 +279,9 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
 
             if d >= 0:
                 // Addr: ALLOC, REF, and ADDR_INDEX create a self-pointer.
-                if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
-                    // IR_ALLOC marks a scalar slot and is not tracked. Only heap
-                    // allocations receive points-to bits.
+                if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY || op == IR_ALLOC_AT:
+                    // IR_ALLOC marks a scalar slot and is not tracked. Heap and
+                    // fixed-address allocations receive points-to bits.
                     if pa_pts_empty(d) != 0:
                         // Give each allocation its own bit and record the mapping
                         // from bit to DF node for size queries. The set width is
@@ -416,7 +416,7 @@ fn pa_count_allocs() -> int:
             if ni >= nstart + ncount:
                 break
             op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-            if (op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY) && pa_in_unsafe(ni) == 0:
+            if (op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY || op == IR_ALLOC_AT) && pa_in_unsafe(ni) == 0:
                 count = count + 1
             ni = ni + 1
         fi = fi + 1

@@ -98,6 +98,11 @@ fn rc_sg_releases(sg: int) -> int:
 // region. -1 means none; such an allocation lives for the whole function and
 // cannot escape a region.
 fn rc_releasing_region(alloc_node: int) -> int:
+    aop := cell_load(g_df_nodes, alloc_node * ESZ_DFNODE + OFF_DF_OPCODE)
+    if aop == IR_ALLOC_AT:
+        // Fixed-address placement is external/program-lifetime memory; a
+        // surrounding loop or if must never be treated as its release point.
+        return -1
     sg : ., mut = subgraph_containing(alloc_node)
     loop:
         if sg < 0:
@@ -105,6 +110,26 @@ fn rc_releasing_region(alloc_node: int) -> int:
         if rc_sg_releases(sg) != 0:
             return sg
         sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+
+// True when every allocation bit is a fixed-address placement. Such memory is
+// external/program-lifetime, never callee-owned storage, so a store through it
+// must not be classified as a local out-parameter write.
+fn rc_pts_is_fixed_address(var: int) -> int:
+    if var < 0:
+        return 0
+    saw : ., mut = 0
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            return saw
+        if pa_pts_has(var, ai) != 0:
+            saw = 1
+            an := cell_load(g_pa_alloc_nodes, ai * 8)
+            aop := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
+            if aop != IR_ALLOC_AT:
+                return 0
+        ai = ai + 1
+    return saw
 
 // Whether `anc` is `sg` itself or one of its ancestors. Region membership is
 // read from the SG tree, not inferred from node index ranges: a return inside a
@@ -330,7 +355,7 @@ fn rc_stack_release_sg_rec(ptr_var: int, use_ni: int, lo: int, depth: int) -> in
         return -1
     if op == IR_ADDR_INDEX || op == IR_SLICE:
         return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
-    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
+    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY || op == IR_ALLOC_AT:
         return rc_releasing_region(prod)
     if op == IR_BINARY && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB):
         return rc_stack_release_sg_rec(s1, use_ni, lo, depth + 1)
@@ -1114,6 +1139,8 @@ fn rc_dest_is_local_rec(ptr_var: int, use_ni: int, lo: int, fi: int, depth: int)
     if rc_is_param_var(fi, ptr_var) != 0:
         return 0
     if pa_pts_empty(ptr_var) == 0:
+        if rc_pts_is_fixed_address(ptr_var) != 0:
+            return 0
         return 1
     if rc_is_global_var(ptr_var) != 0:
         return 0

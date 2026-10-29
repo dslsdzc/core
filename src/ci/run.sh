@@ -172,6 +172,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_struct_impl.py   # struct/impl 矩阵：推断字段经方法/接口读取、关联函数不带接收者且可返回 struct、`Self` 类型、`self: T` 与游离 `self` 拒绝、`&mut self`、返回推断字段结构体时省略返回型（14 例）
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
+    python3 tests/selfhost/test_alloc_at.py  # ALLOC_AT 声明式固定地址放置：编译期地址/大小/对齐、IR 节点、静态边界、静态 ELF、固定地址程序寿命
     python3 tests/selfhost/test_byte_permission.py  # 字节权限层：字符串字面量/只读全局只读，alloc 缓冲区可读写，unsafe 跳过；B012 两向固定用例
     python3 tests/selfhost/test_region_escape.py  # TODO #2026-09-20-1：RegionCheck 三条逃逸检查的真实触发条件。**两向固定用例**——正向 P1 循环内分配+紧邻解引用（修前 rc=0 静默通过，根因 = 半开区间 [NSTART, EXIT) 被当成闭区间，`ni > EXIT` 漏掉紧邻格）· P2 隔句同形 · P3 返回逃逸=**B10**（修前误用 B11）· P4 存储逃逸（修前判定值被整行丢弃 ⇒ 检查从不触发）· P5 if 内分配按父链归到外层循环 · P6 重赋值清除的负控；反向对照必须 rc=0：if 型（修前误报 rc=1，R2 附 build+run 反证「内存没释放」）· 函数级返回型 · 重赋值型（修前误报 rc=1）· 循环内使用型 · 非指针面 · 存活指针 · 无堆分配。**面 = `ccr`/`build`**（`check` 面在 IR 生成前早退，region_check 根本不跑 ⇒ 旧 test_region_cfg 那条「逃逸」断言靠 `or 'error'` 兜底，不是固定用例）= 14 例
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归

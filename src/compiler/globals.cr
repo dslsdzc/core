@@ -352,6 +352,7 @@ g_gen_map_count : int, mut
 g_func_ret_ti : string, mut
 g_func_ret_count : int, mut
 g_func_ret_cap : int, mut
+g_alloc_at_ptr_ti : int, mut = -1
 g_infer_ret_active : int, mut
 g_infer_ret_ti : int, mut
 // Globally unique suffix for synthesized `__inferN` / `__retN` names. Function
@@ -801,6 +802,7 @@ fn reset_frontend_state():
     g_enum_count = 0
     g_sym_count = 0
     g_type_count = 0
+    g_alloc_at_ptr_ti = -1
     g_iface_count = 0
     g_impl_for_count = 0
     g_method_count = 0

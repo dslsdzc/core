@@ -949,6 +949,8 @@ fn corearch_alloc_size_of_var(v: int) -> int:
             break
         if nod_dest(ni) == v:
             aop := nod_op(ni)
+            if aop == IR_ALLOC_AT:
+                return nod_s2(ni)
             if aop == IR_ALLOC_ARRAY:
                 cnt := nod_s1(ni)
                 if cnt <= 0:

@@ -124,6 +124,13 @@ fn named_dedup_slot(name_idx: int) -> int:
 // 该值不是固定的，会导致类型错误且不报错。
 // 当前生产调用点的实参都是名字下标（str_intern、si_name、ei_name、类型节点的 ast_int_val）
 // 且大于等于 0，该分支是防御路径。
+// `alloc_at` returns *int. The row is allocated lazily so programs that never
+// use declarative placement keep the exact type/string table of the baseline.
+fn alloc_at_ptr_ti() -> int:
+    if g_alloc_at_ptr_ti < 0:
+        g_alloc_at_ptr_ti = alloc_type(TYP_PTR, TI_INT, 0)
+    return g_alloc_at_ptr_ti
+
 fn alloc_named_type(name_idx: int) -> int:
     if name_idx < 0:
         return alloc_type(TYP_NAMED, name_idx, 0)
@@ -226,6 +233,7 @@ fn named_dedup_verify() -> int:
 
 fn init_types():
     g_type_count = 0
+    g_alloc_at_ptr_ti = -1
     named_dedup_reset()   // 类型表重置 -> 侧表随之作废（陈旧 name->ti 不得跨重置复用）
     // 约束诊断去重侧表同理作废（键含 AST 节点下标：跨编译期复用会漏报/误报）
     gen_constr_seen_reset()
@@ -4689,6 +4697,17 @@ fn infer_expr(node: int) -> int:
         if ast_kind(func_node) == EXPR_AT:
             ast_set_b(func_node, first_arg)
             return infer_expr(func_node)
+        // Declaration-time builtins are recognized by name and only interned
+        // when the source actually uses them. Registering them in the prelude
+        // would grow the string table of every program.
+        if func_ni >= 0:
+            dname := istr_get(func_ni)
+            if dname == "alloc_at":
+                infer_call_args(first_arg)
+                return alloc_at_ptr_ti()
+            if dname == "align":
+                infer_call_args(first_arg)
+                return TI_INT
         // Check prelude builtins (syscall3/syscall4 public OS ABI, raw memory
         // ABI restricted to @std/@core — no .cr body). Arguments are inferred
         // here as well: the symbol-table path is gone for internal builtins.

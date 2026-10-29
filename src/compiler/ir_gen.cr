@@ -1677,6 +1677,19 @@ fn is_byte_buf_var(var_idx: int) -> int:
             return 1
     return 0
 
+// Value of a compile-time integer producer, or -1 when the variable is not an
+// IR_CONST integer. Used by declarative placement (alloc_at) and align().
+fn ir_const_int_of_var(var: int) -> int:
+    if var < 0:
+        return -1
+    prod := cell_load(g_df_var_producer, var * 8)
+    if prod < 0:
+        return -1
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    if op != IR_CONST:
+        return -1
+    return cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+
 fn ir_call_return_type(func_ni: int) -> int:
     if func_ni < 0:
         return TI_UNIT
@@ -4020,6 +4033,35 @@ fn gen_expr(node: int) -> int:
         handled := dispatch_call(func_ni, ac, arg_vars)
         if handled >= 0:
             return handled
+
+        // `align(n)` is a declaration-time identity: allocation placement only
+        // needs the numeric value, never a runtime call.
+        if func_ni >= 0 && ac >= 1 && str_eq(istr_get(func_ni), "align") != 0:
+            return cell_load(arg_vars, 0)
+
+        // Declarative placement: the address, size and alignment are physical
+        // facts and must be compile-time integers. The node gets provenance like
+        // any other allocation, then the ordinary passes track it.
+        if func_ni >= 0 && ac >= 3 && str_eq(istr_get(func_ni), "alloc_at") != 0:
+            av0 := cell_load(arg_vars, 0 * 8)
+            av1 := cell_load(arg_vars, 1 * 8)
+            av2 := cell_load(arg_vars, 2 * 8)
+            addr := ir_const_int_of_var(av0)
+            size := ir_const_int_of_var(av1)
+            al := ir_const_int_of_var(av2)
+            if addr < 0 || size < 0 || al < 0:
+                check_error(EC_TK_SIZE_TYPE,
+                    "alloc_at requires compile-time integer address, size and align",
+                    0, 0)
+                return new_ir_var("alloc_at", alloc_at_ptr_ti())
+            if size <= 0 || size % 8 != 0:
+                check_error(EC_TK_SIZE_TYPE,
+                    "alloc_at size must be a positive multiple of 8 bytes",
+                    0, 0)
+                return new_ir_var("alloc_at", alloc_at_ptr_ti())
+            dest := new_ir_var("alloc_at", alloc_at_ptr_ti())
+            emit(IR_ALLOC_AT, dest, addr, size, al, TI_INT)
+            return dest
 
         // For method calls (EXPR_FIELD), func_ni was set by checker
         // Use it directly

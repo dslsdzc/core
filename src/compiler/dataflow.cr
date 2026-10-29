@@ -577,6 +577,8 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "alloc_struct"
     if opcode == IR_ALLOC_ARRAY:
         return "alloc_array"
+    if opcode == IR_ALLOC_AT:
+        return "alloc_at"
     if opcode == IR_STORE:
         return "store"
     if opcode == IR_LOAD:

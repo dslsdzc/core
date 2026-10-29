@@ -648,6 +648,7 @@ IR_APPROX : int = 51  //无操作数注解：apx 变量声明处（语义许可�
 IR_PTR_OF : int = 52  // dest=same int var, s1=same string var; view/convert address to mathematical int
 IR_STR_OF : int = 53  // dest=same string var, s1=same int var; view/convert mathematical int to raw address
 IR_MATCH : int = 54   // src1=scrutinee var, src2=CASE table start, src3=case count; multi-way dispatch
+IR_ALLOC_AT : int = 55 // dest=pointer, s1=fixed address, s2=size bytes, s3=align bytes, tk=element type
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1

@@ -426,7 +426,7 @@ fn ccr_op_is_system(op: int, arena_count: int) -> int:
         if arena_count > 0:
             return 1
         return 0
-    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF:
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ALLOC_AT:
         return 1
     return 0
 
@@ -461,7 +461,7 @@ fn ccr_op_is_concurrent(op: int) -> int:
         return 1
     return 0
 
-// v10 opcode table. The IR opcode values are assigned densely 0..54 in ast.cr;
+// v10 opcode table. The IR opcode values are assigned densely 0..55 in ast.cr;
 // anything outside that table is not a v10 operation. Rejecting unknown opcodes
 // before emission also prevents emit_instr from silently falling through as a
 // zero-byte instruction.
@@ -470,7 +470,7 @@ fn ccr_op_is_known(op: int) -> int:
     // keeping it reserved (rather than renumbering) preserves all later IDs.
     if op == 19:
         return 0
-    if op >= IR_NOP && op <= IR_MATCH:
+    if op >= IR_NOP && op <= IR_ALLOC_AT:
         return 1
     return 0
 
@@ -570,6 +570,10 @@ fn ccr_validate_nod_operands() -> int:
             if ccr_nod_var_ok(s1) == 0:
                 return -1
         else if op == IR_ALLOC || op == IR_ALLOC_ARRAY:
+            if ccr_nod_var_ok(d) == 0:
+                return -1
+        else if op == IR_ALLOC_AT:
+            // s1/s2/s3 are literal address/size/align fields.
             if ccr_nod_var_ok(d) == 0:
                 return -1
         else if op == IR_ALLOC_STRUCT:
@@ -673,7 +677,7 @@ fn ccr_validate_nod_operands() -> int:
 // fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
 // their old src2/src3 facts are the migration's critical cases.
 fn ccr_nod_src3_semantic(op: int) -> int:
-    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_MATCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_MATCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX || op == IR_ALLOC_AT:
         return 1
     return 0
 

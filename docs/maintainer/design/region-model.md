@@ -147,10 +147,10 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
   （`tests/selfhost/test_alloc_arena_parity.py`、`test_arena_interp.py`）
 - 四个 pass（provenance/region/byte permission/bounds，与 pointer-model 共享）
 - 字节权限层验证器侧（2026-10-29）：`src/compiler/byte_permission.cr`，两 bit 权限格、按分配/槽位推断、`unsafe` 跳过、`cell_store` 形参写入摘要，错误码 B012
+- `alloc_at` 声明式放置（2026-10-29）：`IR_ALLOC_AT`（opcode 55）+ 前端识别 + provenance/边界 + 后端地址常量；v1 限制见 pointer-model
 
 设计阶段（M1-M3 推进，以计划为准）：
 - split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
-- `alloc_at` 声明式放置（`docs/maintainer/design/pointer-model.md`，`src/` 零命中）
 
 待解决问题：
 - 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）；普通分配在复用时
@@ -158,7 +158,8 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互；
   具体 RegionCheck 缺口（B010 零 raise、B011 零覆盖、store/call/区域内返回逃逸、
   pts 流不敏感）见 `TODO.md` 条目 `#2026-09-20-1`
-- 字节权限的持久化/运行期表示、每字节子区间、`alloc_at` 权限声明尚未实现
+- 字节权限的持久化/运行期表示、每字节子区间尚未实现
+- `alloc_at` v1 只接受编译期字面量、固定 `*int`、8 字节 cell；部署配置地址、显式元素类型、对齐的运行时落实尚未实现
 - 并发区域：每 G 独立 arena 尚未实现；本轮 arena 边界设计明确不含并发
 
 ---
