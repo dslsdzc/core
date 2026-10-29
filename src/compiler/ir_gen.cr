@@ -5,6 +5,8 @@
 // (IR globals declared in globals.cr)
 
 // Subgraph-level arena tracking for compile-time size estimation
+g_no_auto_arena : int, mut = 0    // 1 while generating arena infrastructure
+g_program_has_arena : int, mut = 0 // 1 when the program imports the arena library
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
 g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
@@ -4243,7 +4245,7 @@ fn gen_expr(node: int) -> int:
         pop_loop_labels()
         pop_ir_scope()
         peak := sg_peak_of_current()
-        if peak != 0:
+        if g_no_auto_arena == 0 && peak != 0:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)  // arena reused per iteration
@@ -4280,7 +4282,7 @@ fn gen_expr(node: int) -> int:
         pop_loop_labels()
         pop_ir_scope()
         peak := sg_peak_of_current()
-        if peak != 0:
+        if g_no_auto_arena == 0 && peak != 0:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
@@ -4412,7 +4414,7 @@ fn gen_expr(node: int) -> int:
         pop_loop_labels()
         pop_ir_scope()
         peak := sg_peak_of_current()
-        if peak != 0:
+        if g_no_auto_arena == 0 && peak != 0:
             iri_set_s1(arena_instr, peak)
         // Increment ivar and jump to header (arena reset runs on every path,
         // including the continue path, so per-iteration memory is reused)
@@ -5589,7 +5591,7 @@ fn gen_expr(node: int) -> int:
         arena_instr := g_ir_instr_count - 1
         ret := gen_expr(ast_a(node))
         peak := sg_peak_of_current()
-        if peak != 0:
+        if g_no_auto_arena == 0 && peak != 0:
             iri_set_s1(arena_instr, peak)
         sg_alloc_pop()
         return ret
@@ -5702,6 +5704,28 @@ fn gen_expr(node: int) -> int:
 
 // --- Generate IR for one function ---
 
+fn is_arena_infra_name(name_idx: int) -> int:
+    n := istr_get(name_idx)
+    if str_eq(n, "arena_init") != 0:
+        return 1
+    if str_eq(n, "arena_new") != 0:
+        return 1
+    if str_eq(n, "arena_new_sized") != 0:
+        return 1
+    if str_eq(n, "arena_reset") != 0:
+        return 1
+    if str_eq(n, "arena_grow_pool") != 0:
+        return 1
+    if str_eq(n, "_grow_arena_meta") != 0:
+        return 1
+    if str_eq(n, "_arena_copy_cells") != 0:
+        return 1
+    if str_eq(n, "arena_avail") != 0:
+        return 1
+    if str_eq(n, "arena_alloc") != 0:
+        return 1
+    return 0
+
 fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
@@ -5709,6 +5733,12 @@ fn ir_gen_func(fi: int):
     g_cir_has_match = 0
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
+    g_no_auto_arena = is_arena_infra_name(name_idx)
+    // main's automatic arena would be created before the user's arena_init
+    // call and would share ids with the explicit arena. Arena programs use the
+    // explicit arena instead.
+    if g_program_has_arena != 0 && str_eq(istr_get(name_idx), "main") != 0:
+        g_no_auto_arena = 1
     first_param := ast_b(fn_node)
     param_count := ast_c(fn_node)
     // 返回类型：从 FuncInfo 取原始 TY_* 常量（ast_type_val(fn_node) 是返回类型
@@ -5875,9 +5905,11 @@ fn ir_gen_func(fi: int):
     g_cur_ret_opt = 0
     g_cur_ret_dex_opt = 0
 
-    // Patch arena size and reset before return
+    // Patch arena size and reset before return. Arena infrastructure functions
+    // must not create automatic arenas: their epilogue reset would re-enter
+    // arena_reset and recurse.
     peak := sg_peak_of_current()
-    if peak != 0:
+    if g_no_auto_arena == 0 && peak != 0:
         iri_set_s1(arena_instr, peak)
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
@@ -5886,6 +5918,7 @@ fn ir_gen_func(fi: int):
     if g_cur_ret_opt != 0:
         emit_rep_set(g_optrep_ret_cell, oe_boxed())
     emit(IR_RETURN, -1, -1, 0, 0, 0)
+    g_no_auto_arena = 0
 
     cell_store(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - cell_load(g_ir_func_instr_start, func_idx * 8))
     cell_store(g_ir_func_var_count, func_idx * 8, g_ir_var_count - cell_load(g_ir_func_var_start, func_idx * 8))
@@ -6632,21 +6665,21 @@ fn ccr_set_raw_mode_from_source():
     // the tagged BigInt semantics by default. The .ccr header carries this flag
     // to corearch so both sides agree before code generation.
     g_ccr_emit_raw_int = 0
+    g_program_has_arena = ccr_source_has_marker("fn arena_init")
     if ccr_source_has_marker("fn parse_expr") != 0:
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("fn arena_init") != 0:
+        // The arena runtime stores raw slot ids, byte offsets, and pointers in
+        // cells that the allocator stub reads as raw words. Until the tagged
+        // scalar path is complete, arena-backed programs use raw machine ints.
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("import cli") != 0:
         // The CLI word-table layer intentionally stores raw string pointers via
         // cell_store/cell_load and views them back through @str_of. Legacy raw
         // semantics are required for that table; user CLI programs are not
         // arithmetic kernels.
-        g_ccr_emit_raw_int = 1
-    if ccr_source_has_marker("fn arena_init") != 0:
-        // The arena layer stores byte offsets, slot indexes, and class bounds in
-        // cells that the runtime allocator reads as raw machine words. Tagged
-        // integers would desynchronise the library from the allocator stub, so
-        // arena-backed programs use raw machine integers.
         g_ccr_emit_raw_int = 1
     if ccr_source_dir_is_compiler() != 0:
         g_ccr_emit_raw_int = 1

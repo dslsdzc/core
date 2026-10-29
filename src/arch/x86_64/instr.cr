@@ -2015,11 +2015,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             ni_arena_new : ., mut = str_intern("arena_new")
             if s1 > 0:
                 ni_arena_new = str_intern("arena_new_sized")
-                // mov rdi, s1
+                // mov rdi, s1. In tagged mode the callee receives a tagged
+                // int, so double the raw byte peak before the call.
+                peak_arg : ., mut = s1
+                if g_x86_big_enabled != 0:
+                    peak_arg = s1 * 2
                 w8(buf, pos+cp, 72)
                 w8(buf, pos+cp+1, 199)
                 w8(buf, pos+cp+2, 199)
-                e2_w32(buf, pos+cp+3, s1)
+                e2_w32(buf, pos+cp+3, peak_arg)
                 cp = cp + 7
             grow_call_patch(g_x86_call_patch_count + 1)
             cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
@@ -2034,11 +2038,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // Avoids calling arena_new from arena infrastructure itself
             // (arena_new/arena_reset/_grow_arena_meta), which would recurse.
             // IR_ARENA_RESET with id < 0 is a safe no-op in arena_reset.
+            none_id : ., mut = -1
+            if g_x86_big_enabled != 0:
+                // Tagged -1 is -2. A raw -1 would be odd and the tagged
+                // comparison in arena_reset would treat it as a boxed pointer.
+                none_id = -2
             w8(buf, pos+cp, 72)
             w8(buf, pos+cp+1, 199)
             w8(buf, pos+cp+2, 192)
-            e2_w32(buf, pos+cp+3, -1)
-            cp = cp + 7  // mov rax, -1
+            e2_w32(buf, pos+cp+3, none_id)
+            cp = cp + 7  // mov rax, -1 (tagged -1 in big mode)
             cp = cp + e2_st(buf, pos+cp, 0, do2)
         return cp
 

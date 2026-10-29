@@ -275,6 +275,16 @@ fn ea_ud2(buf: string, pos: int) -> int:
     w8(buf, pos + 1, 11)
     return 2
 
+fn ea_sar_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
+    cp := pos
+    cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
+    w8(buf, cp, 193)
+    cp = cp + 1
+    cp = cp + ea_modrm(buf, cp, 3, 7, dst % 8)
+    w8(buf, cp, imm % 256)
+    cp = cp + 1
+    return cp - pos
+
 fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     cp := pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
@@ -587,6 +597,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // 1: size, arena index. A missing arena takes the global bump path.
     cp = cp + ea_mov_rr(buf, pos + cp, r0, 7)
     cp = cp + ea_mov_rip_load(buf, pos + cp, r1, gv_current_arena)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, r1, 1)
     cp = cp + ea_test_rr(buf, pos + cp, r1, r1)
     cp = cp + ea_mov_rr(buf, pos + cp, 7, r0)
     cp = cp + ea_mov_rr(buf, pos + cp, 9, r0)
@@ -611,6 +623,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     // 3: slot_end = slot_base + max_size.
     cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, r2, 1)
     cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
 
     // Static-peak arenas bypass size classes and use one bump cursor.
@@ -665,6 +679,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     jne_not_large := cp
     cp = cp + ea_jne32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_max_size)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 5, 1)
     cp = cp + ea_cmp_rr(buf, pos + cp, r6, 5)
     ja_cap_large := cp
     cp = cp + ea_ja32(buf, pos + cp, 0)
@@ -688,6 +704,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_class_cursor)
     cp = cp + ea_mov_store_index8(buf, pos + cp, 15, 14, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_max_size)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 5, 1)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_cursor)
     cp = cp + ea_mov_store_index8(buf, pos + cp, 15, r1, 5)
     jmp_base_large := cp
@@ -735,17 +753,25 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     slot_full := cp
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_free)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 5, 1)
     cp = cp + ea_cmp_imm8(buf, pos + cp, 5, 0)
     jl_bump := cp
     cp = cp + ea_jl32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot_next)
     cp = cp + ea_mov_load_index8(buf, pos + cp, 15, 15, 5)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_shl_imm8(buf, pos + cp, 15, 1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_arena_slot_free)
     jmp_have := cp
     cp = cp + ea_jmp32(buf, pos + cp, 0)
     slot_bump := cp
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_count)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 5, 1)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_pool_slots)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 15, 1)
     cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
     jb_have_slot := cp
     cp = cp + ea_jb32(buf, pos + cp, 0)
@@ -784,7 +810,11 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 1, 88)
     cp = cp + 2
     cp = cp + ea_mov_rip_load(buf, pos + cp, 5, gv_arena_slot_count)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 5, 1)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_pool_slots)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 15, 1)
     cp = cp + ea_cmp_rr(buf, pos + cp, 5, 15)
     jae_grow_fail := cp
     cp = cp + ea_jae32(buf, pos + cp, 0)
@@ -792,6 +822,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w32(buf, pos + jb_have_slot + 2, slot_have - (jb_have_slot + 6))
     cp = cp + ea_mov_rr(buf, pos + cp, 15, 5)
     cp = cp + ea_inc(buf, pos + cp, 15)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_shl_imm8(buf, pos + cp, 15, 1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 15, gv_arena_slot_count)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_arena_slot)
     cp = cp + ea_mov_load_index8(buf, pos + cp, 14, 15, r1)
@@ -814,6 +846,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_shl_imm8(buf, pos + cp, 5, 20)
     cp = cp + ea_add_rr(buf, pos + cp, r3, 5)
     cp = cp + ea_mov_rip_load(buf, pos + cp, r2, gv_arena_max_size)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, r2, 1)
     cp = cp + ea_add_rr(buf, pos + cp, r2, r3)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_alloc_home_idx)
     jmp_chunk := cp
@@ -827,6 +861,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + ea_mov_rr(buf, pos + cp, 0, 5)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_cursor)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 0, gv_arena_pool_slots)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 0, 1)
     cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
     cp = cp + ea_ud2(buf, pos + cp)
 
@@ -840,6 +876,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     ja_multi_cap := cp
     cp = cp + ea_ja32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 14, gv_segment_count)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 14, 1)
     // arena_grow_pool is ordinary compiled code, so the caller-saved values
     // the allocator keeps live must be saved across the call. Four pushes keep
     // rsp 16-byte aligned.
@@ -875,6 +913,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 1, 88)
     cp = cp + 2
     cp = cp + ea_mov_rip_load(buf, pos + cp, 15, gv_segment_count)
+    if g_x86_big_enabled != 0:
+        cp = cp + ea_sar_imm8(buf, pos + cp, 15, 1)
     cp = cp + ea_cmp_rr(buf, pos + cp, 15, 14)
     jbe_grow_fail := cp
     cp = cp + ea_jbe32(buf, pos + cp, 0)
@@ -980,7 +1020,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos + cp + 1, 133)
     w8(buf, pos + cp + 2, 192)
     cp = cp + 3
-    cp = cp + ea_js32(buf, pos + cp, capacity_full - (cp + 6))
+    js_ext_fail := cp
+    cp = cp + ea_js32(buf, pos + cp, 0)
     cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_large_head)
     cp = cp + ea_mov_load_index8(buf, pos + cp, 2, 2, 14)
     cp = cp + ea_mov_store(buf, pos + cp, 0, 2)
@@ -999,6 +1040,20 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + 1
     w8(buf, pos + cp, 195)
     cp = cp + 1
+
+    // mmap extent failure: class -2 distinguishes it from slot exhaustion.
+    extent_fail := cp
+    cp = cp + ea_mov_rr(buf, pos + cp, 0, r0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_request)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, -2)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_class)
+    cp = cp + ea_mov_rip_load(buf, pos + cp, 2, gv_arena_large_head)
+    cp = cp + ea_mov_load_index8(buf, pos + cp, 2, 2, r14)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 2, gv_alloc_fail_cursor)
+    cp = cp + ea_mov_imm32(buf, pos + cp, 0, 0)
+    cp = cp + ea_mov_rip_store(buf, pos + cp, 0, gv_alloc_fail_limit)
+    cp = cp + ea_ud2(buf, pos + cp)
+    w32(buf, pos + js_ext_fail + 2, extent_fail - (js_ext_fail + 6))
 
     w32(buf, pos + ja_multi_cap + 2, large_ext - (ja_multi_cap + 6))
 

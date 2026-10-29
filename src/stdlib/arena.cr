@@ -28,7 +28,8 @@ ARENA_CLASS_COUNT : int = 26
 g_arena_slot_cursor : string, mut   // int[] — bytes carved from the current slot per arena
 g_arena_slot : string, mut          // int[] — current slot id per arena
 g_arena_static : string, mut        // int[] — 1 when the arena uses a static peak
-g_arena_large_head : string, mut    // int[] — mmap extent list per arena
+g_arena_live : string, mut          // int[] — 1 while the arena id is allocated
+g_arena_large_head : string, mut    // string[] — mmap extent list per arena
 g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
 g_arena_slot_free : int, mut = -1
 g_arena_slot_count : int, mut = 0
@@ -130,6 +131,16 @@ fn _grow_arena_meta(needed: int):
     if g_arena_cap > 0:
         _dyncpy(g_arena_static, g_arena_cap * 8, nb4c)
     g_arena_static = nb4c
+    nb4c2 := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb4c2, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_live, g_arena_cap * 8, nb4c2)
+    g_arena_live = nb4c2
     nb4d := alloc(nc * 8)
     zi = 0
     loop:
@@ -182,9 +193,18 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     // The 25 class slices are 4KB each, so a slot must hold at least 100KB.
     if arena_size < 131072:
         arena_size = 131072
+    // Retire the active arena from before this init. main's automatic function
+    // arena is created before user code runs, so it can be live here. Resetting
+    // the current arena is enough: the compiler creates at most one automatic
+    // arena per active function.
+    prev_arena := g_current_arena
     g_current_arena = -1
+    if prev_arena >= 0:
+        arena_reset(prev_arena)
     g_arena_pool_limit = pool_size
-    if g_arena_pool_limit < 67108864:
+    // A zero limit means "no limit"; only positive values below one segment
+    // are raised to the minimum segment size.
+    if g_arena_pool_limit > 0 && g_arena_pool_limit < 67108864:
         g_arena_pool_limit = 67108864
     // Pool segments are 64MB each and hold sixty-four 1MB slots.
     arena_size = 1048576
@@ -194,7 +214,7 @@ fn arena_init(pool_size: int, arena_size: int), pub:
     g_segment_count = 1
     seg0 := alloc(67108864)
     g_arena_pool_data = seg0
-    cell_store(g_segment_base, 0, seg0)
+    store_str_ptr(g_segment_base, 0, seg0)
     g_class_sizes = alloc(25 * 8)
     cell_store(g_class_sizes, 0, 16)
     cell_store(g_class_sizes, 8, 20)
@@ -253,7 +273,9 @@ fn arena_init(pool_size: int, arena_size: int), pub:
         lb = lb + 1
     g_arena_free_list = -1
     g_arena_count = 0
-    g_arena_cap = 0
+    // Keep g_arena_cap: the metadata arrays are still allocated and all arenas
+    // were retired above. Dropping the capacity would reallocate them zeroed and
+    // leave stale ids (such as main's automatic arena) pointing at zero cells.
 
 fn _arena_copy_cells(src: string, nbytes: int, dst: string):
     i : ., mut = 0
@@ -283,7 +305,7 @@ fn arena_grow_pool(), pub:
         g_slot_next_cap = nc2
     g_current_arena = -1
     seg := alloc(67108864)
-    cell_store(g_segment_base, g_segment_count * 8, seg)
+    store_str_ptr(g_segment_base, g_segment_count * 8, seg)
     g_segment_count = g_segment_count + 1
     g_arena_pool_slots = g_arena_pool_slots + 64
     g_current_arena = saved
@@ -314,6 +336,7 @@ fn arena_new_sized(peak: int) -> int, pub:
         cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
         cell_store(g_arena_static, ai * 8, 0)
     cell_store(g_arena_parents, ai * 8, -1)
+    cell_store(g_arena_live, ai * 8, 1)
     sl : ., mut = g_arena_slot_free
     if sl >= 0:
         g_arena_slot_free = cell_load(g_arena_slot_next, sl * 8)
@@ -353,16 +376,24 @@ fn arena_new() -> int, pub:
 fn arena_reset(ai: int), pub:
     if ai < 0 || ai >= g_arena_count:
         return
+    // A second reset must not push the same id into the free list again.
+    if cell_load(g_arena_live, ai * 8) == 0:
+        return
+    cell_store(g_arena_live, ai * 8, 0)
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
     parent := cell_load(g_arena_parents, ai * 8)
 
     // Unmap dedicated large-object extents.
-    lp : ., mut = cell_load(g_arena_large_head, ai * 8)
+    lp : ., mut = load_str_ptr(g_arena_large_head, ai * 8)
     loop:
-        if lp < 0:
+        stop : ., mut = 0
+        unsafe:
+            if @ptr_of(lp) < 0:
+                stop = 1
+        if stop != 0:
             break
-        lnxt := cell_load(lp, 0)
+        lnxt := load_str_ptr(lp, 0)
         lsz := cell_load(lp, 8)
         r1 := syscall3(11, lp, lsz, 0)
         lp = lnxt
