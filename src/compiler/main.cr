@@ -256,6 +256,7 @@ fn corec_main() -> int:
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
+    cli_flag_bool_debug("alloc-blob", "", "Debug: register the Core allocator blob globals")
     cli_flag_bool_debug("inject-cir-skip-journal", "", "Debug hook: skip .cir journal replay at load")
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
@@ -770,6 +771,8 @@ fn corec_main() -> int:
     // compiler/self-host artifacts keep raw machine ints.
     if g_ccr_emit_raw_int != 0:
         cmd2 = cmd2 + " --raw-int"
+    if g_ccr_emit_alloc_blob != 0:
+        cmd2 = cmd2 + " --alloc-blob"
     self_path := get_arg(0)
     sl2 := str_len(self_path)
     if sl2 > 0:

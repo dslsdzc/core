@@ -123,6 +123,7 @@ CCR_MAGIC : int = 827474755  // "CCR1" (0x31524343)
 // the SYSTEM header bit and to pass --raw-int to the backend. It is not a wire
 // field and does not select int mode by itself.
 g_ccr_emit_raw_int : int, mut
+g_ccr_emit_alloc_blob : int, mut
 
 // NOD record: 40 bytes.
 // {op i32, dest i32, s1 i64, src2 i32, src3 i32, type_id i32, flags u32,

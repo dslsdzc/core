@@ -6251,6 +6251,15 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_heap_ptr"))
     reg_one_global(str_intern("g_heap_end"))
     reg_one_global(str_intern("g_current_arena"))
+    // The allocator failure witness and the arena home slot are only needed
+    // by the Core allocator blob. Keeping them out of ordinary .ccr files
+    // preserves the canary byte contract.
+    if g_ccr_emit_alloc_blob != 0:
+        reg_one_global(str_intern("g_alloc_fail_request"))
+        reg_one_global(str_intern("g_alloc_fail_class"))
+        reg_one_global(str_intern("g_alloc_fail_cursor"))
+        reg_one_global(str_intern("g_alloc_fail_limit"))
+        reg_one_global(str_intern("g_alloc_home_idx"))
     reg_one_global(str_intern("g_arena_cursors"))
     reg_one_global(str_intern("g_arena_sizes"))
     reg_one_global(str_intern("g_arena_parents"))
@@ -6681,6 +6690,9 @@ fn ccr_set_raw_mode_from_source():
 
 fn ir_gen_all():
     ccr_set_raw_mode_from_source()
+    g_ccr_emit_alloc_blob = 0
+    if cli_has("alloc-blob") != 0:
+        g_ccr_emit_alloc_blob = 1
     saved_lib := g_cur_lib
     g_ir_var_count = 0
     g_ir_instr_count = 0
