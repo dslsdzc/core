@@ -568,8 +568,11 @@ fn patch_alloc_blob_globals(buf: string, bss_va: int):
         if gv < 0:
             println("alloc blob: missing global " + name)
         else:
-            target := bss_va + 16 + cell_load(g_x86_global_off, gv * 8)
-            w32(buf, g_alloc_blob_start + off, target - (g_alloc_blob_start + off + 4))
+            goff0 := cell_load(g_x86_global_off, gv * 8)
+            // target is a virtual address; the call site is a buffer offset.
+            // Convert the target to a buffer offset before taking the delta.
+            target_off := (bss_va + 16 + goff0) - TEXT_BASE
+            w32(buf, g_alloc_blob_start + off, target_off - (g_alloc_blob_start + off + 4))
         i = i + 1
 
 fn emit_alloc_blob_body(buf: string, pos: int, bss_va: int,
@@ -1682,9 +1685,9 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 255)
     cp = cp + 2
-    // mov esi, 1073741824. BE xx xx xx xx (length = 1 GiB)
+    // mov esi, 1610612736. BE xx xx xx xx (length = 1.5 GiB)
     e2_w8(buf, pos+cp, 190)
-    e2_w32(buf, pos+cp+1, 1073741824)
+    e2_w32(buf, pos+cp+1, 1610612736)
     cp = cp + 5
     // mov edx, 3. BA 03 00 00 00 (prot = PROT_READ|PROT_WRITE)
     w8(buf, pos+cp, 186)
@@ -1742,11 +1745,11 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
         w8(buf, pos+cp+2, 5)
         w8_signed(buf, pos+cp+3, rel_hp_s)
         cp = cp + 7
-    // lea r11, [rax + 1073741824]. 4C 8D 98 xx xx xx xx (heap_end = new base + 1GB)
+    // lea r11, [rax + 1610612736]. 4C 8D 98 xx xx xx xx (heap_end = new base + 1.5GB)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 152)
-    e2_w32(buf, pos+cp+3, 1073741824)
+    e2_w32(buf, pos+cp+3, 1610612736)
     cp = cp + 7
     // mov [rip + g_heap_end], r11: store via rip_patch
     if gv_heap_end >= 0:
@@ -3011,17 +3014,19 @@ fn elf_gen(buf: string) -> int:
     // BSS VA will be computed after all code emitted: placeholder for now
     bss_va : ., mut = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
 
-    max_gv : ., mut = 0
+    // Count positive global entries, not the max var index: g_ir_globals can
+    // contain duplicate var ids, and the offset loop below assigns one slot per
+    // entry. Using max_gv + 1 would put heap_start inside the globals area.
+    gcount : ., mut = 0
     gsi : ., mut = 0
     loop:
         if gsi >= g_ir_global_count:
             break
         gvv := cell_load(g_ir_globals, gsi * 24 + 8)
-        if gvv >= 0 && gvv > max_gv:
-            max_gv = gvv
+        if gvv >= 0:
+            gcount = gcount + 1
         gsi = gsi + 1
-    // globals_size = (max_var_idx + 1) * 8 ensures BSS covers all globals
-    globals_size : ., mut = (max_gv + 1) * 8
+    globals_size : ., mut = (gcount + 1) * 8
     if globals_size < 256:
         globals_size = 256
     if g_x86_emit_rt_stubs != 0:
