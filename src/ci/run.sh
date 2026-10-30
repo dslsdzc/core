@@ -176,6 +176,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_region_plan.py  # V2.0 IF split：无逃逸 if 建子 arena；逃逸/return/call/unsafe/嵌套循环保持 v1
     python3 tests/selfhost/test_merge_copy.py  # V2.2 merge copy：单标量数组跨 IF 复制/重绑；长度 0/1/64/65、双分支、动态下标、嵌套逃逸、父槽预算
     python3 tests/selfhost/test_share.py  # V2.3 read-only share：顶层 IF 标量数组由消费者循环只读共享，reset 在最后消费者退出后；写/调用/窗口分配/g_current_arena 保持 v1
+    python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/chan_recv (raw-int scheduler build)
     python3 tests/selfhost/test_alloc_at.py  # ALLOC_AT 声明式固定地址放置：编译期地址/大小/对齐、IR 节点、静态边界、静态 ELF、固定地址程序寿命
     python3 tests/selfhost/test_byte_permission.py  # 字节权限层：字符串字面量/只读全局只读，alloc 缓冲区可读写，unsafe 跳过；B012 两向固定用例
     python3 tests/selfhost/test_region_escape.py  # TODO #2026-09-20-1：RegionCheck 三条逃逸检查的真实触发条件。**两向固定用例**——正向 P1 循环内分配+紧邻解引用（修前 rc=0 静默通过，根因 = 半开区间 [NSTART, EXIT) 被当成闭区间，`ni > EXIT` 漏掉紧邻格）· P2 隔句同形 · P3 返回逃逸=**B10**（修前误用 B11）· P4 存储逃逸（修前判定值被整行丢弃 ⇒ 检查从不触发）· P5 if 内分配按父链归到外层循环 · P6 重赋值清除的负控；反向对照必须 rc=0：if 型（修前误报 rc=1，R2 附 build+run 反证「内存没释放」）· 函数级返回型 · 重赋值型（修前误报 rc=1）· 循环内使用型 · 非指针面 · 存活指针 · 无堆分配。**面 = `ccr`/`build`**（`check` 面在 IR 生成前早退，region_check 根本不跑 ⇒ 旧 test_region_cfg 那条「逃逸」断言靠 `or 'error'` 兜底，不是固定用例）= 14 例
