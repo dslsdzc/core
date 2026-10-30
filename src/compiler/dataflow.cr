@@ -433,7 +433,14 @@ fn grow_var_use_count(needed: int):
 
 fn compute_usage_counts():
     // For each edge from_id->to_id, increment the usage count of
-    // from_id's dest variable (the IR variable it produces).
+    // from_id's dest variable (the IR variable it produces). Clear first so a
+    // second call (post-finalize planning and later lowering) is idempotent.
+    vi : ., mut = 0
+    loop:
+        if vi >= g_var_use_count_cap:
+            break
+        cell_store(g_var_use_count, vi * 8, 0)
+        vi = vi + 1
     ei : ., mut = 0
     loop:
         if ei >= g_df_edge_count:

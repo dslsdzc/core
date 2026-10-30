@@ -206,8 +206,8 @@
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
 canary_elf	pa	560dbd2566ad0230ff5b1679de7f656f405804e370cf76a764af423ca4dbb59e	61622
-pa_ccr	pa.ccr	a61ed937b10855d527c539877340fae200496db658bbf5c1922570bf8cd5e798	97760
-pa_static_ccr	pa_st.bin.ccr	770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73eb1caff71d59	97982
+pa_ccr	pa.ccr	b453223750f1559ab738b5795e2faf2b2cc3b38b4b126cb6eab89aa42149e249	97736
+pa_static_ccr	pa_st.bin.ccr	4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2fdeac7ebe69e	97958
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -227,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438	131274
-gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89	131496
+gt_ccr	gt.ccr	4950bcd1f00981c85ed0dd266ba695f3481c2b0b96cfe308b3869647226cd22a	131250
+gt_static_ccr	gt_st.bin.ccr	52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e99f5e23ed78c2	131472
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -629,3 +629,26 @@ gt_static_ccr	gt_st.bin.ccr	605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bf
 # 修正后 gt 的两条值与 2026-10-29 基线逐字节相同（19ac…/6051…），本次撤销
 # 上一条重锁；pa 与 ELF 本来就未变。D1 5/5 PASS。
 # 保留上一条注记作为历史，当前有效值以下面两行为准。
+
+# ── 「本次重锁 2026-10-30」控制流惰性/纯度时序 ──
+# 性质 = 合法的 state 边重排，不是发射面回归。
+# 变更：`compute_all_purity` 不再把写本地标量槽的 IR_STORE 当外部效应；
+# `compute_usage_counts()` 移到 `df_state_finalize()` 之后并幂等重算。
+# 读数（旧 compiler 4baa09aa 对本轮源码逐项对拍）：
+#   pa: NOD 1309 不变 · data 813 不变 · state 318→315（-3，-24B）
+#   gt: NOD 1753 不变 · data 1082 不变 · state 453→450（-3，-24B）
+# 逐边：`float_str_bits` 内的 `fpow2i` 调用/本地 store 不再入 state 链，
+# 旧 (call→store) 两条边被绕成一条 (call→next)；三处调用各 -1 条边。
+# canary ELF 560d… 61622 不变；pa/gt 运行 rc=0；`test_ccr_v7` 27/27
+# （纯调用/效应调用边集断言）；`test_lazy.py` 9/9；suite ALL PASS；D1 5/5。
+# 旧值留痕（自本次起作废）：
+#   pa_ccr        a61ed937b10855d527c539877340fae200496db658bbf5c1922570bf8cd5e798 97760
+#   pa_static_ccr 770e58bb1da38272080ce2f1db2f98dc8380f569ef0c3f37da73eb1caff71d59 97982
+#   gt_ccr        19ac0722dd16fdfdc9085e8f6da9ab1aaea7db2a801d82fbdd9a7e6178c38438 131274
+#   gt_static_ccr 605191c6c1ff4970d88b31b8baffd8fd553afbbcc5c58ff364bfe878b6c16b89 131496
+# 新值：
+#   pa_ccr        b453223750f1559ab738b5795e2faf2b2cc3b38b4b126cb6eab89aa42149e249 97736
+#   pa_static_ccr 4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2fdeac7ebe69e 97958
+#   gt_ccr        4950bcd1f00981c85ed0dd266ba695f3481c2b0b96cfe308b3869647226cd22a 131250
+#   gt_static_ccr 52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e99f5e23ed78c2 131472
+

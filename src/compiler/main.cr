@@ -653,6 +653,7 @@ fn corec_main() -> int:
     // consumer. True purity needs the whole program, and chain construction depends
     // on it.
     df_state_finalize()
+    compute_usage_counts()
     timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived

@@ -62,6 +62,166 @@ g_rp_pdom_words : int, mut
 g_rp_pdom_nstart : int, mut
 g_rp_pdom_ncount : int, mut
 g_rp_pdom_ok : int, mut
+// Control-flow lazy plan: AST call node ids that may be deferred to their
+// unique force point. Keyed by AST node (stable across Phase B).
+g_lazy_plan_nodes : string, mut
+g_lazy_plan_count : int, mut
+g_lazy_plan_cap : int, mut
+// IR call instruction index -> AST call node id, filled during ir_gen.
+g_lazy_call_ast : string, mut
+g_lazy_call_ast_cap : int, mut
+// Phase B deferred calls: var -> callee/return type/emitted.
+g_lazy_def_var : string, mut
+g_lazy_def_func : string, mut
+g_lazy_def_ti : string, mut
+g_lazy_def_done : string, mut
+g_lazy_def_count : int, mut
+g_lazy_def_cap : int, mut
+
+fn lazy_plan_grow(n: int):
+    if n <= g_lazy_plan_cap:
+        return
+    nc : ., mut = g_lazy_plan_cap * 2
+    if nc < 32:
+        nc = 32
+    loop:
+        if nc >= n:
+            break
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    li : ., mut = 0
+    loop:
+        if li >= nc:
+            break
+        cell_store(nb, li * 8, 0)
+        li = li + 1
+    if g_lazy_plan_cap > 0:
+        cell_copy(g_lazy_plan_nodes, g_lazy_plan_cap * 8, nb)
+    g_lazy_plan_nodes = nb
+    g_lazy_plan_cap = nc
+
+fn lazy_plan_add(ast_node: int):
+    if ast_node < 0:
+        return
+    lazy_plan_grow(g_lazy_plan_count + 1)
+    cell_store(g_lazy_plan_nodes, g_lazy_plan_count * 8, ast_node)
+    g_lazy_plan_count = g_lazy_plan_count + 1
+
+fn lazy_plan_has(ast_node: int) -> int:
+    if ast_node < 0:
+        return 0
+    li : ., mut = 0
+    loop:
+        if li >= g_lazy_plan_count:
+            return 0
+        if cell_load(g_lazy_plan_nodes, li * 8) == ast_node:
+            return 1
+        li = li + 1
+    return 0
+
+fn lazy_ast_grow(n: int):
+    if n <= g_lazy_call_ast_cap:
+        return
+    nc : ., mut = g_lazy_call_ast_cap * 2
+    if nc < 256:
+        nc = 256
+    loop:
+        if nc >= n:
+            break
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    if g_lazy_call_ast_cap > 0:
+        cell_copy(g_lazy_call_ast, g_lazy_call_ast_cap * 8, nb)
+    g_lazy_call_ast = nb
+    g_lazy_call_ast_cap = nc
+
+fn lazy_ast_set(instr_idx: int, ast_node: int):
+    if instr_idx < 0:
+        return
+    lazy_ast_grow(instr_idx + 1)
+    cell_store(g_lazy_call_ast, instr_idx * 8, ast_node)
+
+fn lazy_ast_get(instr_idx: int) -> int:
+    if instr_idx < 0 || instr_idx >= g_lazy_call_ast_cap:
+        return -1
+    return cell_load(g_lazy_call_ast, instr_idx * 8)
+
+fn lazy_def_grow(n: int):
+    if n <= g_lazy_def_cap:
+        return
+    nc : ., mut = g_lazy_def_cap * 2
+    if nc < 32:
+        nc = 32
+    loop:
+        if nc >= n:
+            break
+        nc = nc * 2
+    nv := alloc(nc * 8)
+    nf := alloc(nc * 8)
+    nt := alloc(nc * 8)
+    nd := alloc(nc * 8)
+    if g_lazy_def_cap > 0:
+        cell_copy(g_lazy_def_var, g_lazy_def_cap * 8, nv)
+        cell_copy(g_lazy_def_func, g_lazy_def_cap * 8, nf)
+        cell_copy(g_lazy_def_ti, g_lazy_def_cap * 8, nt)
+        cell_copy(g_lazy_def_done, g_lazy_def_cap * 8, nd)
+    g_lazy_def_var = nv
+    g_lazy_def_func = nf
+    g_lazy_def_ti = nt
+    g_lazy_def_done = nd
+    g_lazy_def_cap = nc
+
+fn lazy_def_add(var: int, func_ni: int, ti: int):
+    lazy_def_grow(g_lazy_def_count + 1)
+    cell_store(g_lazy_def_var, g_lazy_def_count * 8, var)
+    cell_store(g_lazy_def_func, g_lazy_def_count * 8, func_ni)
+    cell_store(g_lazy_def_ti, g_lazy_def_count * 8, ti)
+    cell_store(g_lazy_def_done, g_lazy_def_count * 8, 0)
+    g_lazy_def_count = g_lazy_def_count + 1
+
+// Turn `target := <deferred pure call>` into a deferred target definition.
+// The call is emitted at target's first force point instead of the LET.
+fn lazy_defer_store(src: int, target: int) -> int:
+    if src < 0 || target < 0 || rc_is_global_var(target) != 0:
+        return -1
+    di : ., mut = 0
+    loop:
+        if di >= g_lazy_def_count:
+            return -1
+        if cell_load(g_lazy_def_var, di * 8) == src:
+            if cell_load(g_lazy_def_done, di * 8) != 0:
+                return -1
+            cell_store(g_lazy_def_done, di * 8, 1)
+            fn_ni := cell_load(g_lazy_def_func, di * 8)
+            ti := cell_load(g_lazy_def_ti, di * 8)
+            lazy_def_add(target, fn_ni, ti)
+            irv_set_type(target, ti)
+            return ti
+        di = di + 1
+    return -1
+
+fn lazy_def_emit(var: int) -> int:
+    if var < 0:
+        return 0
+    di : ., mut = 0
+    loop:
+        if di >= g_lazy_def_count:
+            return 0
+        if cell_load(g_lazy_def_var, di * 8) == var:
+            if cell_load(g_lazy_def_done, di * 8) == 0:
+                cell_store(g_lazy_def_done, di * 8, 1)
+                emit(IR_CALL, var, -1, 0,
+                     cell_load(g_lazy_def_func, di * 8),
+                     cell_load(g_lazy_def_ti, di * 8))
+                return 1
+            return 0
+        di = di + 1
+    return 0
+
+fn lazy_gen_reset():
+    g_lazy_def_count = 0
+    g_lazy_call_ast_cap = 0
+    g_lazy_call_ast = ""
 
 fn region_plan_grow(n: int):
     if n < g_plan_split_cap:
@@ -88,6 +248,15 @@ fn region_plan_grow(n: int):
 fn region_plan_reset():
     g_plan_active = 0
     g_rp_pdom_ok = 0
+    g_lazy_plan_count = 0
+    if g_lazy_plan_cap > 0:
+        li : ., mut = 0
+        loop:
+            if li >= g_lazy_plan_cap:
+                break
+            cell_store(g_lazy_plan_nodes, li * 8, 0)
+            li = li + 1
+    g_lazy_def_count = 0
     g_plan_share_reset_emitted = 0
     g_rp_share_consumer = -1
     g_rp_share_exit = -1
@@ -463,6 +632,8 @@ fn region_plan_has_clear() -> int:
     return 0
 
 fn region_plan_has_plan() -> int:
+    if g_lazy_plan_count > 0:
+        return 1
     if g_plan_split_count > 0 || g_plan_clear_count > 0 || g_plan_merge_count > 0 || g_plan_share_count > 0:
         return 1
     return 0
@@ -2668,6 +2839,184 @@ fn rp_share_effective_prepare():
         cell_store(g_plan_share_reset_event, s * 8, cell_load(sre, i * 8))
         i = i + 1
 
+fn lazy_loop_ancestor(node: int) -> int:
+    sg : ., mut = subgraph_containing(node)
+    loop:
+        if sg < 0:
+            return -1
+        k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
+        if k == SG_LOOP || k == SG_FOR:
+            return sg
+        sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    return -1
+
+fn lazy_callee_no_alloc(fi: int) -> int:
+    if fi < 0:
+        return 0
+    cs := cell_load(g_df_func_node_start, fi * 8)
+    cc := cell_load(g_df_func_node_count, fi * 8)
+    if cs < 0 || cc <= 0:
+        return 0
+    ni : ., mut = cs
+    loop:
+        if ni >= cs + cc:
+            return 1
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_ALLOC_AT || op == IR_ARENA_CLEAR:
+            return 0
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+            return 0
+        ni = ni + 1
+    return 0
+
+// Select zero-argument pure scalar calls whose single force point sits in a
+// conditional branch/loop body within the same loop iteration. The plan is
+// keyed by the AST call node id; Phase B defers the call to the force point.
+fn lazy_plan_analyze():
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            return
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
+        if nstart < 0 || ncount <= 0:
+            fi = fi + 1
+            continue
+        ni : ., mut = nstart
+        loop:
+            if ni >= nstart + ncount:
+                break
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            if op == IR_CALL:
+            if op != IR_CALL:
+                ni = ni + 1
+                continue
+            ac := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+            dest := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+            if ac != 0 || dest < 0:
+                ni = ni + 1
+                continue
+            ti := irv_type(dest)
+            if rp_scalar_elem(ti) == 0:
+                ni = ni + 1
+                continue
+            ast := lazy_ast_get(ni)
+            if ast < 0:
+                ni = ni + 1
+                continue
+            cfi := rc_func_by_name(s3)
+            if cfi < 0 || fi_ispure(cfi) == 0:
+                ni = ni + 1
+                continue
+            if lazy_callee_no_alloc(cfi) == 0:
+                ni = ni + 1
+                continue
+            // Follow the eager lazy-thunk wrapper emitted in Phase A.
+            res : ., mut = dest
+            tj : ., mut = nstart
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LAZY_THUNK:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1) == res:
+                        res = cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_DEST)
+                        break
+                tj = tj + 1
+            fcount : ., mut = 0
+            force_node : ., mut = -1
+            fd : ., mut = -1
+            tj = nstart
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LAZY_FORCE:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1) == res:
+                        fcount = fcount + 1
+                        force_node = tj
+                        fd = cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_DEST)
+                tj = tj + 1
+            if fcount != 1 || fd < 0:
+                ni = ni + 1
+                continue
+            if fd >= g_var_use_count_cap:
+                ni = ni + 1
+                continue
+            if cell_load(g_var_use_count, fd * 8) != 1:
+                ni = ni + 1
+                continue
+            // A forced value assigned to a local slot: defer the call to the
+            // slot's unique use, so `v := pure()` is not evaluated at the LET.
+            store_node : ., mut = -1
+            store_target : ., mut = -1
+            tj = force_node + 1
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if rp_if_reads_var(tj, 1, fd) != 0:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_STORE:
+                        store_node = tj
+                        store_target = cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1)
+                    break
+                tj = tj + 1
+            if store_node >= 0 && store_target >= 0 && rc_is_global_var(store_target) == 0:
+                // The defining store itself counts as a use in
+                // compute_usage_counts; the read-use scan below starts after
+                // that store and rejects any later write to the slot.
+                fd = store_target
+                force_node = store_node
+            use : ., mut = -1
+            uc : ., mut = 0
+            tj = force_node + 1
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                op2 := cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE)
+                s1b := cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1)
+                if op2 == IR_STORE && s1b == fd:
+                    uc = uc + 2
+                else if rp_if_reads_var(tj, 1, fd) != 0:
+                    uc = uc + 1
+                    use = tj
+                tj = tj + 1
+            if uc != 1 || use < 0:
+                ni = ni + 1
+                continue
+            target : ., mut = -1
+            tj = nstart
+            loop:
+                if tj >= use:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
+                    target = tj
+                tj = tj + 1
+            if target <= ni:
+                ni = ni + 1
+                continue
+            has_match : ., mut = 0
+            tj = ni
+            loop:
+                if tj >= target:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_MATCH:
+                    has_match = 1
+                    break
+                tj = tj + 1
+            if has_match == 0:
+                ni = ni + 1
+                continue
+            if lazy_loop_ancestor(ni) != lazy_loop_ancestor(use):
+                ni = ni + 1
+                continue
+            csg := subgraph_containing(ni)
+            usg := subgraph_containing(use)
+            if csg != usg && rc_sg_is_ancestor(csg, usg) == 0:
+                ni = ni + 1
+                continue
+            lazy_plan_add(ast)
+            ni = ni + 1
+        fi = fi + 1
+
 fn region_plan_analyze():
     region_plan_reset()
     // Phase B currently regenerates with ir_gen_all, which does not reproduce
@@ -2781,7 +3130,7 @@ fn region_plan_analyze():
     fi = 0
     loop:
         if fi >= g_ir_func_count:
-            return
+            break
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -2803,3 +3152,5 @@ fn region_plan_analyze():
                         region_plan_mark_clear(lbl, sg)
             sg = sg + 1
         fi = fi + 1
+
+    lazy_plan_analyze()

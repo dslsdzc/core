@@ -6227,6 +6227,18 @@ fn spec_check_all():
 // IR 生成期它的唯一消费者是 ir_gen.cr 的 lazy 判定；删除默认值会让 lazy 全部不发射，
 // 发射路径逐字节改变。真纯度在 IR 生成后由本函数覆盖写回。
 
+fn purity_is_global_var(var: int) -> int:
+    if var < 0:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_global_count:
+            return 0
+        if cell_load(g_ir_globals, i * 24 + 8) == var:
+            return 1
+        i = i + 1
+    return 0
+
 fn purity_op_effect(op: int) -> int:
     if op == IR_STORE:
         return 1
@@ -6339,7 +6351,14 @@ fn compute_all_purity():
             if ii >= istart + icnt:
                 break
             op := iri_op(ii)
-            if purity_op_effect(op) != 0:
+            if op == IR_STORE:
+                // A store to a local slot is not an external effect. Global
+                // stores remain impure; array/field/pointer stores stay in
+                // purity_op_effect because they may alias external memory.
+                dst := iri_s1(ii)
+                if dst >= 0 && purity_is_global_var(dst) != 0:
+                    cell_store(local, sfi * 8, 1)
+            else if purity_op_effect(op) != 0:
                 cell_store(local, sfi * 8, 1)
             if op == IR_CALL:
                 cf := find_func(iri_s3(ii))

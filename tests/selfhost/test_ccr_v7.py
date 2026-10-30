@@ -1896,7 +1896,7 @@ def test_v7_cache_hit_restore_path():
 # 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
 
 CHAIN_SRC = (
-    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id(x: int) -> int:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := cell_load(\"x\", 0)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id(x: int) -> int:\n    return x\ng_effect : int, mut = 0\nfn effect():\n    g_effect = 1\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := cell_load(\"x\", 0)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
 
 
 def _op_nodes(nod, opcode, lo=0, hi=-1):

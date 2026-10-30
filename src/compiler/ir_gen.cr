@@ -1995,6 +1995,10 @@ fn is_hotpatch_func(name_idx: int) -> int:
 fn force_if_thunk(var_idx: int) -> int:
     if var_idx < 0:
         return var_idx
+    // A deferred pure call is materialized at its first (and planned only)
+    // force point. Subsequent forces see the call producer.
+    if lazy_def_emit(var_idx) != 0:
+        return var_idx
     prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod >= 0:
         prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
@@ -3385,6 +3389,9 @@ fn gen_expr(node: int) -> int:
             name_idx := ast_int_val(target)
             lv := find_local(name_idx)
             if lv >= 0:
+                deferred_ti := lazy_defer_store(val_var, lv)
+                if deferred_ti >= 0:
+                    return lv
                 if irv_type(lv) == TI_DYN:
                     // Dyn variable assignment: pack value with type tag
                     tag : ., mut = irv_type(val_var)
@@ -4212,6 +4219,12 @@ fn gen_expr(node: int) -> int:
                     track_alloc_unknown()
             else:
                 track_alloc_unknown()
+        lazy_ast_set(g_ir_instr_count, node)
+        if g_plan_active != 0 && ac == 0 && lazy_plan_has(node) != 0:
+            // Compile-time lazy sink: define the result at its unique force
+            // point instead of evaluating the pure call here.
+            lazy_def_add(dest, func_ni, call_ti)
+            return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
         // the row on the call result lets a later match recover the payload form
@@ -5359,6 +5372,12 @@ fn gen_expr(node: int) -> int:
             irv_set_type(var, declared_ti)
         if val_node >= 0:
             val_var : ., mut = gen_expr(val_node)
+            deferred_ti := lazy_defer_store(val_var, var)
+            if deferred_ti >= 0:
+                bind_local(var_ni, var)
+                if is_apx != 0:
+                    emit(IR_APPROX, -1, 0, 0, 0, 0)
+                return var
             val_var = force_if_thunk(val_var)
             // 可选表示：推断槽按初值表示补配表示位（有表示位可拷贝 / Some/None 构造 /
             // 未覆盖情形回落值，回落配位无害：默认 1 = 装箱 = 既有语义）
@@ -6894,6 +6913,7 @@ fn ir_gen_all():
     saved_lib := g_cur_lib
     if g_plan_active == 0:
         region_plan_reset()
+    lazy_gen_reset()
     g_sg_count = 0
     g_cur_sg = -1
     rc_ctl_invalidate()

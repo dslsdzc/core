@@ -173,6 +173,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_early_clear.py  # V2.1 early clear：直线后缀回收点、指针逃逸/无后续分配/回边保持 v1
+    python3 tests/selfhost/test_lazy.py  # control-flow lazy: pure zero-arg scalar calls sink to unique if/loop force point
     python3 tests/selfhost/test_region_plan.py  # V2.0 IF split：无逃逸 if 建子 arena；逃逸/return/call/unsafe/嵌套循环保持 v1
     python3 tests/selfhost/test_merge_copy.py  # V2.2 merge copy：单标量数组跨 IF 复制/重绑；长度 0/1/64/65、双分支、动态下标、嵌套逃逸、父槽预算
     python3 tests/selfhost/test_share.py  # V2.3 read-only share：顶层 IF 标量数组由消费者循环只读共享，reset 在最后消费者退出后；写/调用/窗口分配/g_current_arena 保持 v1
