@@ -402,6 +402,74 @@ fn main() -> int:
     return 0
 """
 
+STRING_PARAM = """fn choose(s: string, c: int) -> int:
+    t : ., mut = "old"
+    if c == 0:
+        t = s
+    if t == "abc":
+        return 0
+    if t == "old":
+        return 1
+    return 2
+
+fn main() -> int:
+    return choose("abc", 0) + choose("abc", 1)
+"""
+
+STRING_LOCAL = """fn main() -> int:
+    u := "abc"
+    t : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        t = u
+    if t == "abc":
+        return 0
+    return 1
+"""
+
+STRING_PARAM_FALSE = """fn choose(s: string, c: int) -> int:
+    t : ., mut = "old"
+    if c == 0:
+        t = s
+    if t == "old":
+        return 0
+    return 1
+
+fn main() -> int:
+    return choose("abc", 3)
+"""
+
+STRING_ARENA = """import arena
+
+fn choose(s: string, c: int) -> int:
+    t : ., mut = "old"
+    if c == 0:
+        t = s
+    if t == "abc":
+        return 0
+    return 1
+
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new_sized(65536)
+    r := choose("abc", 0)
+    arena_reset(a)
+    return r
+"""
+
+STRING_USER_CALL = """fn mk() -> string:
+    return "ab"
+
+fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = mk()
+    if s == "ab":
+        return 0
+    return 1
+"""
+
 POD_STRUCT = """struct P:
     x: int, y: bool
 
@@ -474,6 +542,31 @@ fn main() -> int:
     if c == 0:
         h = H { a = [7, 8], b = 9 }
     return h.a[0] - 7
+"""
+
+STRING_ARRAY_DEEP = """fn main() -> int:
+    a : [string; 2], mut
+    a[0] = "old"
+    a[1] = "old"
+    c : ., mut = 0
+    if c == 0:
+        b : [string; 2], mut
+        b[0] = "x"
+        b[1] = "y"
+        a = b
+    if a[0] == "x":
+        return 0
+    return 1
+"""
+
+STRING_TUPLE = """fn main() -> int:
+    t : ., mut = ("old", 1)
+    c : ., mut = 0
+    if c == 0:
+        t = ("new", 2)
+    if t . 0 == "new":
+        return 0
+    return 1
 """
 
 POD_STRUCT_STRING_FIELD = """struct S:
@@ -801,16 +894,17 @@ def test_p20_length_64_and_parent_budget():
     build_run(LEN_64, 0)
 
 
-def test_p21_length_65_blocks_merge():
+def test_p21_length_65_merges_with_loop_copy():
     result = ccr(LEN_65)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_merge(diag), diag
-    assert not has_split(diag), diag
+    assert has_merge(diag), diag
+    assert "_merge_copy[65]" in diag, diag
+    assert "store_index_var" in diag, diag
     build_run(LEN_65, 0)
 
 
-def test_p22_length_zero_blocks_merge():
+def test_p22_length_zero_has_no_allocation():
     result = ccr(LEN_ZERO)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
@@ -878,11 +972,11 @@ def test_p28_loop_after_merge_uses_copy():
     build_run(LOOP_AFTER, 0)
 
 
-def test_p29_string_array_blocks_merge():
+def test_p29_string_array_deep_copies():
     result = ccr(STRING_ARRAY)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_merge(diag), diag
+    assert has_merge(diag), diag
     build_run(STRING_ARRAY, 0)
 
 
@@ -921,11 +1015,11 @@ def test_p34_pointer_fields_block_pod_merge():
         build_run(src, 0)
 
 
-def test_p35_string_field_blocks_pod_merge():
+def test_p35_string_field_is_deep_copied():
     result = ccr(POD_STRUCT_STRING_FIELD)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_merge(diag), diag
+    assert has_merge(diag), diag
     build_run(POD_STRUCT_STRING_FIELD, 0)
 
 
@@ -950,13 +1044,12 @@ def test_p37_string_else_literals_merge():
         run_interp(src, expected)
 
 
-def test_p38_nonliteral_string_blocks_merge():
-    for src in (STRING_DYNAMIC, STRING_CONCAT):
-        result = ccr(src)
-        diag = result.stdout + result.stderr
-        assert result.returncode == 0, diag
-        assert not has_merge(diag), diag
-        build_run(src, 0)
+def test_p38_impure_call_blocks_merge():
+    result = ccr(STRING_USER_CALL)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    build_run(STRING_USER_CALL, 0)
 
 
 def test_p39_long_string_copy_charged_to_parent():
@@ -966,6 +1059,45 @@ def test_p39_long_string_copy_charged_to_parent():
     assert has_merge(diag), diag
     build_run(STRING_LONG, 0)
     run_interp(STRING_LONG, 0)
+
+
+def test_p40_dynamic_string_values_merge():
+    for src, expected in ((STRING_PARAM, 1), (STRING_LOCAL, 0),
+                          (STRING_PARAM_FALSE, 0)):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, expected)
+        run_interp(src, expected)
+
+
+def test_p41_dynamic_string_arena_switch_path():
+    result = ccr(STRING_ARENA)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(STRING_ARENA, 0)
+    run_interp(STRING_ARENA, 0)
+
+
+def test_p42_pure_string_builtin_call_merges():
+    result = ccr(STRING_CONCAT)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(STRING_CONCAT, 0)
+    run_interp(STRING_CONCAT, 0)
+
+
+def test_p43_string_array_and_tuple_deep_copy():
+    for src in (STRING_ARRAY_DEEP, STRING_TUPLE):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+        run_interp(src, 0)
 
 
 if __name__ == "__main__":
@@ -990,25 +1122,29 @@ if __name__ == "__main__":
         test_p18_nested_local_allocation_does_not_block_merge,
         test_p19_length_one,
         test_p20_length_64_and_parent_budget,
-        test_p21_length_65_blocks_merge,
-        test_p22_length_zero_blocks_merge,
+        test_p21_length_65_merges_with_loop_copy,
+        test_p22_length_zero_has_no_allocation,
         test_p23_both_branches_allocate_share_one_copy,
         test_p24_two_merges_in_one_function,
         test_p25_dynamic_index_read_write,
         test_p26_pre_assignment_use_and_condition_read,
         test_p27_bool_and_char_elements,
         test_p28_loop_after_merge_uses_copy,
-        test_p29_string_array_blocks_merge,
+        test_p29_string_array_deep_copies,
         test_p30_both_branch_mutations_copied,
         test_p31_pod_struct_merges,
         test_p32_pod_struct_mutation_before_copy,
         test_p33_pod_tuple_merges,
         test_p34_pointer_fields_block_pod_merge,
-        test_p35_string_field_blocks_pod_merge,
+        test_p35_string_field_is_deep_copied,
         test_p36_string_literal_merges,
         test_p37_string_else_literals_merge,
-        test_p38_nonliteral_string_blocks_merge,
+        test_p38_impure_call_blocks_merge,
         test_p39_long_string_copy_charged_to_parent,
+        test_p40_dynamic_string_values_merge,
+        test_p41_dynamic_string_arena_switch_path,
+        test_p42_pure_string_builtin_call_merges,
+        test_p43_string_array_and_tuple_deep_copy,
     ]
     failures = 0
     for test in tests:

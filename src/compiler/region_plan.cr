@@ -41,6 +41,7 @@ g_rp_merge_kind : int, mut
 g_rp_merge_name : int, mut
 g_rp_merge_str1 : int, mut
 g_rp_merge_str2 : int, mut
+g_rp_merge_len : int, mut
 // Per-function transitive call-graph hazard bits:
 // 1 = unsafe region, 2 = g_current_arena read/write, 4 = arena/spawn/yield/
 // unknown call, 8 = heap/array/field/pointer store.
@@ -88,6 +89,7 @@ fn region_plan_reset():
     g_rp_merge_name = -1
     g_rp_merge_str1 = -1
     g_rp_merge_str2 = -1
+    g_rp_merge_len = -1
     g_share_bad = ""
     // A string global starts null; cap is the allocated-size witness. Each
     // table is cleared independently: merge/share can be allocated without a
@@ -178,11 +180,13 @@ fn region_plan_grow_merge(n: int):
 
 fn region_plan_mark_merge(sg: int, kind: int, elem_count: int, name: int,
                           str1: int, str2: int):
-    if sg < 0 || elem_count <= 0 || kind < 0:
+    if sg < 0 || elem_count < 0 || kind < 0:
         return
     region_plan_grow_merge(sg + 1)
     if cell_load(g_plan_merge, sg * 8) == 0:
-        cell_store(g_plan_merge, sg * 8, elem_count)
+        // Store count+1 so a zero-length array is distinguishable from an
+        // unplanned slot.
+        cell_store(g_plan_merge, sg * 8, elem_count + 1)
         cell_store(g_plan_merge_kind, sg * 8, kind)
         cell_store(g_plan_merge_name, sg * 8, name)
         cell_store(g_plan_merge_str1, sg * 8, str1)
@@ -194,9 +198,12 @@ fn region_plan_is_merge(sg: int) -> int:
         return 0
     return cell_load(g_plan_merge, sg * 8)
 
-// Element/field count of the parent copy for a merge IF (0 when not planned).
+// Element/field count of the parent copy for a merge IF.
 fn region_plan_merge_len(sg: int) -> int:
-    return region_plan_is_merge(sg)
+    v := region_plan_is_merge(sg)
+    if v <= 0:
+        return 0
+    return v - 1
 
 fn region_plan_merge_kind_of(sg: int) -> int:
     if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
@@ -1041,6 +1048,23 @@ fn rp_scalar_elem(ti: int) -> int:
         return 1
     return 0
 
+// A leaf that can be copied by value: scalar or an owned string. Strings are
+// deep-copied with str_sub; arrays/structs would need nested allocation and are
+// handled separately.
+fn rp_copyable_leaf(ti: int) -> int:
+    if rp_scalar_elem(ti) != 0:
+        return 1
+    if ti >= 0 && ti < g_type_count:
+        if get_type_kind(ti) == TYP_BASE && get_type_data(ti) == TY_STRING:
+            return 1
+    return 0
+
+fn rp_string_ti(ti: int) -> int:
+    if ti >= 0 && ti < g_type_count:
+        if get_type_kind(ti) == TYP_BASE && get_type_data(ti) == TY_STRING:
+            return 1
+    return 0
+
 fn rp_if_merge_ancestors_ok(sg: int) -> int:
     p : ., mut = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
     loop:
@@ -1111,7 +1135,7 @@ fn rp_tuple_pod(an: int, cnt: int, sg_start: int, sg_count: int) -> int:
             s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
             if op == IR_STORE_FIELD && s1 == ad && s3 == i:
                 found = 1
-                if rp_scalar_elem(irv_type(s2)) == 0:
+                if rp_copyable_leaf(irv_type(s2)) == 0:
                     return 0
             ni = ni + 1
         if found == 0:
@@ -1157,17 +1181,16 @@ fn rp_if_string_merge_eligible(sg: int, sg_start: int, sg_count: int,
                     dest = s1
                 else if dest != s1:
                     return 0
-                // Narrow slice: the assigned value is a string literal. Its
-                // bytes are materialized into the parent arena before the child
-                // arena exists, so the branch exit only rebinds the slot.
+                // A literal source can be precomputed in the parent arena
+                // before the child exists. Any other string value is copied at
+                // the branch exit through the runtime arena switch.
+                lit : ., mut = -1
                 pv := cell_load(g_df_var_producer, s2 * 8)
-                if pv < 0:
-                    return 0
-                if cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE) != IR_CONST:
-                    return 0
-                lit := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S1)
-                if lit < 0:
-                    return 0
+                if pv >= 0:
+                    if cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST:
+                        lv := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S1)
+                        if lv >= 0:
+                            lit = lv
                 count = count + 1
                 if count == 1:
                     st1 = ni
@@ -1224,10 +1247,84 @@ fn rp_if_string_merge_eligible(sg: int, sg_start: int, sg_count: int,
             ni = ni + 1
         if jc != 2 || st1 >= j1 || st2 <= j1 || st2 >= j2:
             return 0
+    if lit1 < 0 || (count == 2 && lit2 < 0):
+        lit1 = -1
+        lit2 = -1
     g_rp_merge_kind = 3
     g_rp_merge_name = dest
     g_rp_merge_str1 = lit1
     g_rp_merge_str2 = lit2
+    g_rp_merge_len = 1
+    return 1
+
+// Only calls to the pure string builders in fmt are allowed inside a string
+// merge IF. The owner check prevents a user-defined function with the same
+// name from being mistaken for the library routine.
+fn rp_fmt_owner() -> int:
+    fi := rc_func_by_name(str_intern("str_len"))
+    if fi < 0:
+        return -1
+    return func_owner(fi)
+
+fn rp_string_call_name_ok(ni: int) -> int:
+    if ni < 0:
+        return 0
+    n := istr_get(ni)
+    if str_eq(n, "str_len") != 0:
+        return 1
+    if str_eq(n, "chr") != 0:
+        return 1
+    if str_eq(n, "get_char") != 0:
+        return 1
+    if str_eq(n, "str_sub") != 0:
+        return 1
+    if str_eq(n, "str_eq") != 0:
+        return 1
+    if str_eq(n, "str_cmp") != 0:
+        return 1
+    if str_eq(n, "concat") != 0:
+        return 1
+    if str_eq(n, "int_str") != 0:
+        return 1
+    if str_eq(n, "str_int") != 0:
+        return 1
+    if str_eq(n, "to_str") != 0:
+        return 1
+    if str_eq(n, "bool_str") != 0:
+        return 1
+    if str_eq(n, "format") != 0:
+        return 1
+    if str_eq(n, "format2") != 0:
+        return 1
+    if str_eq(n, "format_int") != 0:
+        return 1
+    if str_eq(n, "float_str_bits") != 0:
+        return 1
+    return 0
+
+fn rp_string_calls_ok(sg_start: int, sg_count: int) -> int:
+    owner := rp_fmt_owner()
+    if owner < 0:
+        return 0
+    ni : ., mut = sg_start
+    loop:
+        if ni >= sg_start + sg_count:
+            return 1
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        if op == IR_CALL:
+            if rp_string_call_name_ok(s3) == 0:
+                return 0
+            cfi := rc_func_by_name(s3)
+            if cfi < 0 || func_owner(cfi) != owner:
+                return 0
+        else if op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_RETURN:
+            return 0
+        else if op == IR_JUMP:
+            if rp_label_inside(rc_ctl_label_node(s1), sg_start, sg_count) == 0:
+                return 0
+        ni = ni + 1
     return 1
 
 // V2.2 merge: one direct constant-size scalar array is stored directly into an
@@ -1240,6 +1337,7 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                         nstart: int, ncount: int, allow_calls: int) -> int:
     // Flow-insensitive points-to cannot order uses across a loop backedge, so a
     // merge IF inside a loop stays v1. Unsafe blocks are also identity-observable.
+    g_rp_merge_len = -1
     if rp_if_merge_ancestors_ok(sg) == 0:
         return 0
     if rp_if_string_merge_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
@@ -1310,10 +1408,10 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
         if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
             return 0
         cnt = cell_load(g_df_nodes, an1 * ESZ_DFNODE + OFF_DF_S1)
-        if cnt <= 0 || cnt > 64:
+        if cnt < 0:
             return 0
         elem = get_type_data(at)
-        if rp_scalar_elem(elem) == 0:
+        if rp_copyable_leaf(elem) == 0:
             return 0
     else if kind == 1:
         si := find_struct_by_name(name1)
@@ -1326,7 +1424,7 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
         loop:
             if fi >= cnt:
                 break
-            if rp_scalar_elem(struct_row_field_ti(si, fi)) == 0:
+            if rp_copyable_leaf(struct_row_field_ti(si, fi)) == 0:
                 return 0
             fi = fi + 1
     else:
@@ -1444,7 +1542,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
         if ni >= nstart + ncount:
             g_rp_merge_kind = kind
             g_rp_merge_name = name1
-            return cnt
+            g_rp_merge_len = cnt
+            return 1
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         dv := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
@@ -1529,7 +1628,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
         ni = ni + 1
     g_rp_merge_kind = kind
     g_rp_merge_name = name1
-    return cnt
+    g_rp_merge_len = cnt
+    return 1
 
 // V2.3 narrow share: a top-level IF allocates one scalar array into its child
 // slot and every use after the IF is a read through the rebound outer slot.
@@ -2064,13 +2164,94 @@ fn rp_emit_parent_str_copy(lit: int) -> int:
     emit(IR_CALL, cp, a0, 3, str_intern("str_sub"), TI_STR)
     return cp
 
-// The string copies were materialized in the parent arena at the IF entry.
+// Dynamic string copy: temporarily point the allocator and the interpreter's
+// current-arena global at the parent, let str_sub allocate/copy there, then
+// restore the child. The scalar cell is the allocator's authoritative current
+// arena; the global keeps the interpreter and future region code in sync.
+fn rp_emit_str_sub_value(src: int) -> int:
+    if src < 0:
+        return -1
+    lenv := new_ir_var("_merge_str_len", TI_INT)
+    emit(IR_CALL, lenv, src, 1, str_intern("str_len"), TI_INT)
+    zv := new_ir_var("_merge_zero", TI_INT)
+    emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+    c0 := rp_emit_merge_arg(src, TI_STR)
+    c1 := rp_emit_merge_arg(zv, TI_INT)
+    c2 := rp_emit_merge_arg(lenv, TI_INT)
+    cp := new_ir_var("_merge_str", TI_STR)
+    emit(IR_CALL, cp, c0, 3, str_intern("str_sub"), TI_STR)
+    return cp
+
+// Switch the allocator's current arena to the parent. Returns the saved child
+// id, or -1 when the program has no arena runtime (global heap path). On an
+// invalid setup returns -2.
+fn rp_emit_parent_enter(parent: int, child: int) -> int:
+    if parent < 0:
+        return -1
+    scalars := rp_global_var_named("g_arena_scalars")
+    cav := rp_global_var_named("g_current_arena")
+    if scalars < 0:
+        return -1
+    if child < 0 || cav < 0:
+        return -2
+    zv := new_ir_var("_merge_zero", TI_INT)
+    emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+    a0 := rp_emit_merge_arg(scalars, TI_STR)
+    a1 := rp_emit_merge_arg(zv, TI_INT)
+    saved := new_ir_var("_merge_saved", TI_INT)
+    emit(IR_CALL, saved, a0, 2, str_intern("cell_load"), TI_INT)
+    b0 := rp_emit_merge_arg(scalars, TI_STR)
+    b1 := rp_emit_merge_arg(zv, TI_INT)
+    b2 := rp_emit_merge_arg(parent, TI_INT)
+    emit(IR_CALL, -1, b0, 3, str_intern("cell_store"), TI_INT)
+    emit(IR_STORE, -1, cav, parent, 0, 0)
+    return saved
+
+fn rp_emit_parent_leave(saved: int) -> int:
+    if saved < 0:
+        return 1
+    scalars := rp_global_var_named("g_arena_scalars")
+    cav := rp_global_var_named("g_current_arena")
+    if scalars < 0 || cav < 0:
+        return 0
+    zv := new_ir_var("_merge_zero", TI_INT)
+    emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+    d0 := rp_emit_merge_arg(scalars, TI_STR)
+    d1 := rp_emit_merge_arg(zv, TI_INT)
+    d2 := rp_emit_merge_arg(saved, TI_INT)
+    emit(IR_CALL, -1, d0, 3, str_intern("cell_store"), TI_INT)
+    emit(IR_STORE, -1, cav, saved, 0, 0)
+    return 1
+
+// Copy one string value into the parent arena and return the new variable.
+fn rp_emit_string_value_copy(src: int, parent: int, child: int) -> int:
+    if src < 0:
+        return -1
+    saved := rp_emit_parent_enter(parent, child)
+    if saved == -2:
+        return -1
+    cp := rp_emit_str_sub_value(src)
+    if rp_emit_parent_leave(saved) == 0:
+        return -1
+    return cp
+
+fn rp_emit_string_switch_copy(dest: int, src: int, parent: int, child: int) -> int:
+    if dest < 0:
+        return 0
+    cp := rp_emit_string_value_copy(src, parent, child)
+    if cp < 0:
+        return 0
+    emit(IR_STORE, -1, dest, cp, 0, 0)
+    return 1
+
+// Literal string copies were materialized in the parent arena at the IF entry.
 // Each assigning branch only rebinds the outer slot to its precomputed copy.
-fn rp_emit_string_merge(sg: int, copy1: int, copy2: int, range_start: int,
-                        range_end: int) -> int:
+fn rp_emit_string_merge(sg: int, copy1: int, copy2: int, parent_var: int,
+                        range_start: int, range_end: int) -> int:
     dest := region_plan_merge_name_of(sg)
     if dest < 0:
         return 0
+    src : ., mut = -1
     lit : ., mut = -1
     ni : ., mut = range_start
     loop:
@@ -2080,10 +2261,17 @@ fn rp_emit_string_merge(sg: int, copy1: int, copy2: int, range_start: int,
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         if op == IR_STORE && s1 == dest && irv_type(s2) == TI_STR:
+            src = s2
+            lit = -1
             pv := cell_load(g_df_var_producer, s2 * 8)
             if pv >= 0 && cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST:
                 lit = cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S1)
         ni = ni + 1
+    if src < 0:
+        return 0
+    if region_plan_merge_str1_of(sg) < 0:
+        child := cell_load(g_sg_arena_var, sg * 8)
+        return rp_emit_string_switch_copy(dest, src, parent_var, child)
     if lit < 0:
         return 0
     cp : ., mut = -1
@@ -2097,13 +2285,13 @@ fn rp_emit_string_merge(sg: int, copy1: int, copy2: int, range_start: int,
     return 1
 
 fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
-                          str1_var: int, str2_var: int, range_start: int,
-                          range_end: int) -> int:
+                          str1_var: int, str2_var: int, parent_var: int,
+                          range_start: int, range_end: int) -> int:
     kind := region_plan_merge_kind_of(sg)
     if kind < 0:
         return 0
     if kind == 3:
-        return rp_emit_string_merge(sg, str1_var, str2_var, range_start, range_end)
+        return rp_emit_string_merge(sg, str1_var, str2_var, parent_var, range_start, range_end)
     if copy_var < 0 || copy_instr < 0:
         return 0
     an : ., mut = -1
@@ -2146,20 +2334,65 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
             return 0
         cnt = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
         elem := get_type_data(at)
-        if cnt <= 0 || cnt > 64 || rp_scalar_elem(elem) == 0:
+        if cnt < 0 || rp_scalar_elem(elem) == 0:
             return 0
         // The copy allocation was emitted with the planned element count and
         // its size already charged to the parent arena; only the type row is
         // patched.
         irv_set_type(copy_var, alloc_type(TYP_ARRAY, elem, cnt))
-        i : ., mut = 0
-        loop:
-            if i >= cnt:
-                break
+        child_av := cell_load(g_sg_arena_var, sg * 8)
+        elem_str := rp_string_ti(elem)
+        if cnt <= 8:
+            i : ., mut = 0
+            loop:
+                if i >= cnt:
+                    break
+                ev := new_ir_var("_merge_elem", elem)
+                emit(IR_LOAD_INDEX, ev, alloc_dest, 0, i, elem)
+                if elem_str != 0:
+                    cp := rp_emit_string_value_copy(ev, parent_var, child_av)
+                    if cp < 0:
+                        return 0
+                    emit(IR_STORE_INDEX, -1, copy_var, cp, i, 0)
+                else:
+                    emit(IR_STORE_INDEX, -1, copy_var, ev, i, 0)
+                i = i + 1
+        else:
+            // Constant long arrays copy through a small runtime loop instead
+            // of unrolling thousands of instructions. The loop lives inside
+            // the assigning branch and only touches the two parent/child
+            // buffers.
+            iv := new_ir_var("_merge_i", TI_INT)
+            zv := new_ir_var("_merge_zero", TI_INT)
+            emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+            emit(IR_STORE, -1, iv, zv, 0, 0)
+            cv := new_ir_var("_merge_cnt", TI_INT)
+            emit(IR_CONST, cv, cnt, 0, 0, TI_INT)
+            one := new_ir_var("_merge_one", TI_INT)
+            emit(IR_CONST, one, 1, 0, 0, TI_INT)
+            head := new_label()
+            body := new_label()
+            done := new_label()
+            emit(IR_JUMP, -1, head, 0, 0, 0)
+            emit(IR_LABEL, -1, head, 0, 0, 0)
+            cond := new_ir_var("_merge_cond", TI_BOOL)
+            emit(IR_BINARY, cond, iv, cv, OP_LT, 0)
+            emit_cond_match(cond, done, body)
+            emit(IR_LABEL, -1, body, 0, 0, 0)
             ev := new_ir_var("_merge_elem", elem)
-            emit(IR_LOAD_INDEX, ev, alloc_dest, 0, i, elem)
-            emit(IR_STORE_INDEX, -1, copy_var, ev, i, 0)
-            i = i + 1
+            emit(IR_LOAD_INDEX_VAR, ev, alloc_dest, iv, 0, elem)
+            if elem_str != 0:
+                cp := rp_emit_string_value_copy(ev, parent_var, child_av)
+                if cp < 0:
+                    return 0
+                emit(IR_STORE_INDEX_VAR, cp, copy_var, iv, 0, 0)
+            else:
+                emit(IR_STORE_INDEX_VAR, ev, copy_var, iv, 0, 0)
+            nv := new_ir_var("_merge_next", TI_INT)
+            emit(IR_BINARY, nv, iv, one, OP_ADD, 0)
+            emit(IR_STORE, -1, iv, nv, 0, 0)
+            emit(IR_JUMP, -1, head, 0, 0, 0)
+            emit(IR_LABEL, -1, done, 0, 0, 0)
     else if kind == 1:
         name := region_plan_merge_name_of(sg)
         si := find_struct_by_name(name)
@@ -2168,6 +2401,7 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
         cnt = si_field_count(si)
         if cnt <= 0 || cnt > 64:
             return 0
+        child_av := cell_load(g_sg_arena_var, sg * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
@@ -2175,7 +2409,13 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
             ft := struct_row_field_ti(si, i)
             ev := new_ir_var("_merge_field", ft)
             emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
-            emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+            if rp_string_ti(ft) != 0:
+                cp := rp_emit_string_value_copy(ev, parent_var, child_av)
+                if cp < 0:
+                    return 0
+                emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
+            else:
+                emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
             i = i + 1
     else:
         cnt = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
@@ -2200,7 +2440,14 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
                 fi = fi + 1
             ev := new_ir_var("_merge_field", ft)
             emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
-            emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+            if rp_string_ti(ft) != 0:
+                child_av2 := cell_load(g_sg_arena_var, sg * 8)
+                cp := rp_emit_string_value_copy(ev, parent_var, child_av2)
+                if cp < 0:
+                    return 0
+                emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
+            else:
+                emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
             i = i + 1
     emit(IR_STORE, -1, dest, copy_var, 0, 0)
     return 1
@@ -2350,15 +2597,21 @@ fn region_plan_analyze():
             if sg_start >= nstart && sg_start < nstart + ncount:
                 if cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND) == SG_IF:
                     if rp_if_has_unsafe(sg_start, sg_count) == 0:
-                        if rp_if_has_exit_or_effect(sg_start, sg_count) == 0:
-                            cav := rp_global_var_named("g_current_arena")
-                            if rp_if_reads_var(sg_start, sg_count, cav) == 0:
-                                if rp_if_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
-                                    region_plan_mark_split(sg)
-                                else:
-                                    mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 0)
-                                    if mc > 0:
-                                        region_plan_mark_merge(sg, g_rp_merge_kind, mc, g_rp_merge_name, g_rp_merge_str1, g_rp_merge_str2)
+                        cav := rp_global_var_named("g_current_arena")
+                        if rp_if_reads_var(sg_start, sg_count, cav) == 0:
+                            string_planned : ., mut = 0
+                            if rp_string_calls_ok(sg_start, sg_count) != 0:
+                                if rp_if_string_merge_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
+                                    region_plan_mark_merge(sg, g_rp_merge_kind, g_rp_merge_len, g_rp_merge_name, g_rp_merge_str1, g_rp_merge_str2)
+                                    string_planned = 1
+                            if string_planned == 0:
+                                if rp_if_has_exit_or_effect(sg_start, sg_count) == 0:
+                                    if rp_if_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
+                                        region_plan_mark_split(sg)
+                                    else:
+                                        mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 0)
+                                        if mc > 0:
+                                            region_plan_mark_merge(sg, g_rp_merge_kind, g_rp_merge_len, g_rp_merge_name, g_rp_merge_str1, g_rp_merge_str2)
             sg = sg + 1
         fi = fi + 1
 
