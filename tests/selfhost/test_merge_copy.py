@@ -250,6 +250,142 @@ NESTED_LOCAL = """fn main() -> int:
     return arr[0] + total - 16
 """
 
+
+LEN_ONE = """fn main() -> int:
+    a : ., mut = [0]
+    y : ., mut = 1
+    if y < 2:
+        a = [7]
+    return a[0] - 7
+"""
+
+LEN_64 = """fn main() -> int:
+    arr : [int; 64], mut
+    i : ., mut = 0
+    while i < 64:
+        arr[i] = 0
+        i = i + 1
+    y : ., mut = 1
+    if y < 2:
+        b : [int; 64], mut
+        j : ., mut = 0
+        while j < 64:
+            b[j] = j
+            j = j + 1
+        arr = b
+    return arr[0] + arr[63] - 63
+"""
+
+LEN_65 = """fn main() -> int:
+    arr : [int; 65], mut
+    i : ., mut = 0
+    while i < 65:
+        arr[i] = 0
+        i = i + 1
+    y : ., mut = 1
+    if y < 2:
+        b : [int; 65], mut
+        j : ., mut = 0
+        while j < 65:
+            b[j] = j
+            j = j + 1
+        arr = b
+    return arr[0] + arr[64] - 64
+"""
+
+LEN_ZERO = """fn main() -> int:
+    a : [int; 0], mut
+    y : ., mut = 1
+    if y < 2:
+        b : [int; 0], mut
+        a = b
+    return 0
+"""
+
+BOTH_BRANCHES = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    if y < 2:
+        arr = [7, 8]
+    else:
+        arr = [9, 10]
+    return arr[0] - 7
+"""
+
+MULTI_MERGE = """fn main() -> int:
+    a : ., mut = [0]
+    b : ., mut = [0]
+    y : ., mut = 1
+    if y < 2:
+        a = [1]
+    if y < 2:
+        b = [2]
+    return a[0] + b[0] - 3
+"""
+
+DYN_INDEX = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    i : ., mut = 1
+    if y < 2:
+        arr = [7, 8]
+        arr[i] = 9
+    return arr[0] + arr[i] - 16
+"""
+
+PRE_USE = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    x : ., mut = 0
+    if arr[0] == 5:
+        x = arr[0]
+        arr = [7, 8]
+    return x + arr[0] - 12
+"""
+
+BOOL_ARRAY = """fn main() -> int:
+    a : ., mut = [true, false]
+    y : ., mut = 1
+    if y < 2:
+        a = [false, true]
+    if a[1]:
+        return 0
+    return 1
+"""
+
+CHAR_ARRAY = """fn main() -> int:
+    a : ., mut = ['x', 'y']
+    y : ., mut = 1
+    if y < 2:
+        a = ['p', 'q']
+    if a[0] == 'p':
+        return 0
+    return 1
+"""
+
+LOOP_AFTER = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        arr = [7, 8]
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0]
+        i = i + 1
+    return total + arr[0] - 21
+"""
+
+STRING_ARRAY = """fn main() -> int:
+    a : ., mut = ["x", "y"]
+    y : ., mut = 1
+    if y < 2:
+        a = ["p", "q"]
+    if a[0] == "p":
+        return 0
+    return 1
+"""
+
 NO_ESCAPE = """fn main() -> int:
     y : ., mut = 1
     total : ., mut = 0
@@ -413,6 +549,105 @@ def test_p18_nested_local_allocation_does_not_block_merge():
     build_run(NESTED_LOCAL, 0)
 
 
+
+def test_p19_length_one():
+    result = ccr(LEN_ONE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    assert "_merge_copy[1]" in diag, diag
+    build_run(LEN_ONE, 0)
+
+
+def test_p20_length_64_and_parent_budget():
+    # `b[j] = j` also covers the STORE_INDEX_VAR dataflow mapping: the value is
+    # dest, the array is s1, and the index is s2; s3 is a literal zero.
+    result = ccr(LEN_64)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    assert "_merge_copy[64]" in diag, diag
+    main_body = diag.split("Function: main", 1)[1]
+    first_arena = next(ln for ln in main_body.splitlines() if "arena_new" in ln)
+    assert "s1=1040" in first_arena, first_arena
+    build_run(LEN_64, 0)
+
+
+def test_p21_length_65_blocks_merge():
+    result = ccr(LEN_65)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    assert not has_split(diag), diag
+    build_run(LEN_65, 0)
+
+
+def test_p22_length_zero_blocks_merge():
+    result = ccr(LEN_ZERO)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    build_run(LEN_ZERO, 0)
+
+
+def test_p23_both_branches_allocate_blocks_merge():
+    result = ccr(BOTH_BRANCHES)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    build_run(BOTH_BRANCHES, 0)
+
+
+def test_p24_two_merges_in_one_function():
+    result = ccr(MULTI_MERGE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    merges = [ln for ln in diag.splitlines() if ln.startswith("merge ")]
+    assert len(merges) == 2, merges
+    build_run(MULTI_MERGE, 0)
+
+
+def test_p25_dynamic_index_read_write():
+    result = ccr(DYN_INDEX)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(DYN_INDEX, 0)
+
+
+def test_p26_pre_assignment_use_and_condition_read():
+    result = ccr(PRE_USE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(PRE_USE, 0)
+
+
+def test_p27_bool_and_char_elements():
+    for src in (BOOL_ARRAY, CHAR_ARRAY):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p28_loop_after_merge_uses_copy():
+    result = ccr(LOOP_AFTER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(LOOP_AFTER, 0)
+
+
+def test_p29_string_array_blocks_merge():
+    result = ccr(STRING_ARRAY)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    build_run(STRING_ARRAY, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_merge_copy_value,
@@ -433,6 +668,17 @@ if __name__ == "__main__":
         test_p16_post_if_allocation_charged_to_parent,
         test_p17_other_nested_escape_blocks_merge,
         test_p18_nested_local_allocation_does_not_block_merge,
+        test_p19_length_one,
+        test_p20_length_64_and_parent_budget,
+        test_p21_length_65_blocks_merge,
+        test_p22_length_zero_blocks_merge,
+        test_p23_both_branches_allocate_blocks_merge,
+        test_p24_two_merges_in_one_function,
+        test_p25_dynamic_index_read_write,
+        test_p26_pre_assignment_use_and_condition_read,
+        test_p27_bool_and_char_elements,
+        test_p28_loop_after_merge_uses_copy,
+        test_p29_string_array_blocks_merge,
     ]
     failures = 0
     for test in tests:

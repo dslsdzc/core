@@ -150,7 +150,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - `alloc_at` 声明式放置（2026-10-29）：`IR_ALLOC_AT`（opcode 55）+ 前端识别 + provenance/边界 + 后端地址常量；v1 限制见 pointer-model
 - V2.0 IF split（2026-10-29）：无逃逸 `if` 获得子 arena，出口 reset；两阶段 IR 生成 + 保守 plan（`src/compiler/region_plan.cr`）。逃逸判定覆盖嵌套在非释放 IF 内、实际落入该子槽的 allocation
 - V2.1 early clear（2026-10-30）：`IR_ARENA_CLEAR`（opcode 56）+ `arena_clear`；V2.1b 用控制邻接上的后支配集合选择 clear 点，清空并保留槽
-- V2.2 merge 复制窄切片（2026-10-30）：单个常量长度标量数组存入外层局部槽；在赋值分支出口复制到父槽副本并重绑，子槽在汇合点 reset；副本大小在 IF 入口计入父槽 peak，merge IF 不进入任何 IF 子槽。同期修正 arena peak 记账：alloc 累计按当前打开子图（`g_cur_sg`）而不是高水位末项，非 split 子图关闭时把总量加到记录的 parent
+- V2.2 merge 复制窄切片（2026-10-30）：单个常量长度标量数组存入外层局部槽；在赋值分支出口复制到父槽副本并重绑，子槽在汇合点 reset；副本大小在 IF 入口计入父槽 peak，merge IF 不进入任何 IF 子槽。同期修正 arena peak 记账：alloc 累计按当前打开子图（`g_cur_sg`）而不是高水位末项，非 split 子图关闭时把总量加到记录的 parent。`IR_STORE_INDEX_VAR` 的 DF 映射修正为 dest=值、s1=数组、s2=下标（s3 为字面量 0），避免 `arr[i]=i` 自环
 
 设计阶段（M1-M3 推进，以计划为准）：
 - V2.3 share、V2.4 清零配置；V2.2 扩展到字符串、POD 聚合、多分支汇合

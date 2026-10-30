@@ -106,6 +106,8 @@ EXPECT_SRC_SPAN = 45  # 源函数节点范围 [0, 45)：pure_add 0..5、main 5..
 # 数据边（kind=0）= {from: [to...]}——纯 def-use（表一「去幽灵后」）；
 # 播种修复前这些集合还混有幽灵边 0→X（参数读/0 字面量槽/自环 (0,0)）——
 # 断言精确集合即回归网：幽灵边回归 = 集合多出边，立即失败。
+# IR_STORE_INDEX_VAR 的 dest 是「被写入的值」而不是定义：值 var 的 producer
+# 保持为 20，store 节点 24 只是消费者；24 不再作为 26/34 的 producer。
 EXPECT_DATA = {
     0: [3], 1: [2],
     5: [43],
@@ -113,8 +115,8 @@ EXPECT_DATA = {
     7: [9, 11, 13, 15, 16],
     8: [9], 10: [11], 12: [13], 14: [15],
     17: [19, 23, 24, 29, 30],
-    18: [19], 20: [22], 21: [22],
-    24: [26, 34], 25: [26], 26: [27],
+    18: [19], 20: [22, 24, 26, 34], 21: [22],
+    25: [26], 26: [27],
     28: [31, 33], 30: [31],
     32: [38, 40, 41, 42],
     35: [36], 36: [37], 37: [38], 39: [40], 40: [41],
@@ -125,7 +127,7 @@ EXPECT_STATE = {
     9: [11], 11: [13], 13: [15], 15: [16], 16: [19], 19: [22],
     22: [24], 24: [27], 27: [31], 31: [33], 33: [34], 34: [38], 38: [41],
 }
-assert sum(len(v) for v in EXPECT_DATA.values()) == 41, "expectation table drift"
+assert sum(len(v) for v in EXPECT_DATA.values()) == 42, "expectation table drift"
 assert sum(len(v) for v in EXPECT_STATE.values()) == 13, "expectation table drift"
 
 
