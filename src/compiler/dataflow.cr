@@ -134,6 +134,7 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_te
     // next instruction is emitted.
     if opcode == IR_LABEL && g_plan_active != 0:
         region_plan_emit_clears(src1)
+        region_plan_emit_share_resets(src1)
     return nid
 
 // --- Edge creation ---

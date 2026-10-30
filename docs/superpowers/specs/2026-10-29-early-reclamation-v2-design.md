@@ -254,15 +254,16 @@ if all allocations pass: split(S) = 1
 
 - 只读共享 + LCPD reset。
 - 验收：两个消费者只读同一槽，reset 在两者都退出之后；有写消费者时退回父槽。
-- 实现（2026-10-30，窄切片）：
+- 实现（2026-10-30，广义切片）：
   - 候选 S 是顶层 IF（SG parent = FUNC），与 V2.2 merge 同形的单个常量长度标量数组，存入外层局部槽。
-  - IF 之后只允许元素读（`IR_LOAD_INDEX`/`IR_LOAD_INDEX_VAR`）经该外层槽；任何写、切片、取址、指针比较、FFI、调用或身份观察都拒绝。
-  - 所有 IF 后的读必须落在消费者循环内；最外层消费者必须是 LOOP/FOR。消费者内不得有嵌套 loop/for/unsafe、break、return；`continue` 允许（经过 per-iteration reset）。
-  - 窗口（IF 出口到消费者出口）内不得有 call/spawn、`g_current_arena` 读、return、跳出窗口的 jump、跳到任一 loop/for 出口标签的 break，也不得有实际落入 S 槽的 allocation。allocation 的归属按“最近的、其 `IR_ARENA_NEW` 已在该节点之前的释放子图”判定；循环条件在 body arena 创建之前，条件里的 allocation 因此会落入父槽并被拒绝。
-  - 同一函数内不得有其它 merge plan（merge 副本可能落入 S）；候选自身的 merge mark 被撤销。当前一个程序最多一个 share；share 函数跳过 early clear。
-  - S 的 arena 在 IF 入口创建，IF 汇合标签**不 reset**；在最后消费者循环的 `sg_pop` 之后发射 `IR_ARENA_RESET`。外层槽继续指向 S 内的数组，不复制。`RegionCheck` 的 lifetime exit 对该 SG 使用消费者出口标签（`rc_sg_lexit` 在 Phase B 重新解析 label id），而不是 IF 汇合点。
-  - 验收覆盖 `test_share.py` 16 例：两个消费者、单消费者、for、false path、写/调用/直读/窗口分配/嵌套 IF/嵌套 loop/break/unsafe/消费者后读全部保持 v1；受 `src/ci/run.sh` selfhost-tests 挂钩。
-
+  - IF 之后只允许元素读（`IR_LOAD_INDEX`/`IR_LOAD_INDEX_VAR`）经该外层槽；写、切片、取址、指针比较、FFI 或身份观察都拒绝。
+  - Q = 最后一个使用之后最早的、可作为 current-S 点的 label：函数级/普通 IF 的 label 用 label reset（mode 1，要求 Q 后支配 IF 汇合点）；顶层 loop/for/split-IF 的退出 label 用 after-SG reset（mode 0，退出后先 reset 该区域 arena 再 reset S）。顶层结构化退出不依赖后支配（无限循环路径不继续执行，因此无需 reset）。
+  - 消费者可以是 LOOP/FOR、split IF、嵌套 loop（无 break/return/unsafe），也可以是普通 IF 后的 parent-level 读；窗口内不得有 call/spawn（跨函数证明除外）、`g_current_arena` 读、return、跳出窗口的 jump、跳到任一 loop/for 出口标签的 break、unsafe SG，或实际落入 S 槽的 allocation。allocation 归属按最近的、其 `IR_ARENA_NEW` 已在该节点之前的释放子图判定；Phase A 中 split/merge IF 的 arena 还未生成，按 SG 入口计。窗口内任何 merge IF 都拒绝（Phase B copy 会落入 S）。
+  - 多个 share 按 SG 顺序启用；若更晚的 merge 候选落在较早候选的窗口内，较早候选保持 merge/v1，因此选中的 share 槽不重叠。多个不重叠 share 合法；每个 share 单独 reset。
+  - 跨函数只读证明（直接叶 callee）：无 call/spawn、无 unsafe、无 `g_current_arena` 直接读写；若实参包含共享数组，callee 不得有 `IR_STORE_INDEX/INDEX_VAR/FIELD/PTR`（heap-readonly），且参数写/逃逸/返回别名/FFI 摘要位必须全空。非传递（callee 内不得再有调用）。
+  - 同一函数内的 merge plan 若在 share 窗口内则阻止该 share；share 函数跳过 early clear。
+  - S 的 arena 在 IF 入口创建，IF 汇合标签**不 reset**；Q 处发射 `IR_ARENA_RESET`（label hook 或 consumer SG reset 之后）。外层槽继续指向 S 内的数组，不复制。`RegionCheck` 的 lifetime exit 对该 SG 使用 Q 的 label id（`rc_sg_lexit` 在 Phase B 重新解析），而不是 IF 汇合点。
+  - 验收覆盖 `test_share.py` 25 例：两个/单个/for/嵌套 loop 消费者、IF 消费者、wider label LCPD、多个顺序 share、false path、写/直读/窗口分配/嵌套 IF/break/unsafe/消费者后读拒绝、跨函数只读/写入/逃逸/current/无数组叶调用；受 `src/ci/run.sh` selfhost-tests 挂钩。
 ### V2.4 清零配置
 
 - `arena_zero_on_reset` 部署配置。

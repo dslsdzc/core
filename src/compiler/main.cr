@@ -692,6 +692,14 @@ fn corec_main() -> int:
         print_diagnostics()
         return 1
 
+    // The cross-function share proof reads g_bp_param_write. Compute the
+    // Phase A summary before planning; the plan-regeneration path recomputes
+    // it after Phase B as before.
+    byte_permission_all()
+    timing_mark("byte_permission_plan")
+    if g_diag_count > base_diags:
+        print_diagnostics()
+        return 1
     region_plan_analyze()
     if cli_has("dump-region-plan") != 0:
         pi : ., mut = 0

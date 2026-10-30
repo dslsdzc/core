@@ -18,12 +18,15 @@ g_plan_merge_count : int, mut
 g_plan_merge_cap : int, mut
 g_plan_share : string, mut
 g_plan_share_exit : string, mut
+g_plan_share_mode : string, mut
 g_plan_share_after : string, mut
 g_plan_share_count : int, mut
 g_plan_share_cap : int, mut
 g_plan_share_reset_emitted : int, mut
 g_rp_share_consumer : int, mut
 g_rp_share_exit : int, mut
+g_rp_share_mode : int, mut
+g_rp_share_reset_node : int, mut
 g_plan_active : int, mut
 // Post-dominator sets for the current function (bitset rows, 63 lanes).
 g_rp_pdom : string, mut
@@ -61,6 +64,8 @@ fn region_plan_reset():
     g_plan_share_reset_emitted = 0
     g_rp_share_consumer = -1
     g_rp_share_exit = -1
+    g_rp_share_mode = -1
+    g_rp_share_reset_node = -1
     // A string global starts null; cap is the allocated-size witness. Each
     // table is cleared independently: merge/share can be allocated without a
     // split table in the same process.
@@ -88,6 +93,7 @@ fn region_plan_reset():
                 break
             cell_store(g_plan_share, i * 8, 0)
             cell_store(g_plan_share_exit, i * 8, -1)
+            cell_store(g_plan_share_mode, i * 8, -1)
             cell_store(g_plan_share_after, i * 8, 0)
             i = i + 1
     g_plan_share_count = 0
@@ -151,6 +157,7 @@ fn region_plan_grow_share(n: int):
         nc = nc * 2
     nb := alloc(nc * 8)
     ne := alloc(nc * 8)
+    nm := alloc(nc * 8)
     na := alloc(nc * 8)
     i : ., mut = 0
     loop:
@@ -158,14 +165,17 @@ fn region_plan_grow_share(n: int):
             break
         cell_store(nb, i * 8, 0)
         cell_store(ne, i * 8, -1)
+        cell_store(nm, i * 8, -1)
         cell_store(na, i * 8, 0)
         i = i + 1
     if g_plan_share_cap > 0:
         cell_copy(g_plan_share, g_plan_share_cap * 8, nb)
         cell_copy(g_plan_share_exit, g_plan_share_cap * 8, ne)
+        cell_copy(g_plan_share_mode, g_plan_share_cap * 8, nm)
         cell_copy(g_plan_share_after, g_plan_share_cap * 8, na)
     g_plan_share = nb
     g_plan_share_exit = ne
+    g_plan_share_mode = nm
     g_plan_share_after = na
     g_plan_share_cap = nc
 
@@ -176,8 +186,8 @@ fn region_plan_unmark_merge(sg: int):
         cell_store(g_plan_merge, sg * 8, 0)
         g_plan_merge_count = g_plan_merge_count - 1
 
-fn region_plan_mark_share(sg: int, exit_node: int, consumer: int):
-    if sg < 0 || consumer < 0 || exit_node < 0:
+fn region_plan_mark_share(sg: int, exit_label: int, mode: int, consumer: int):
+    if sg < 0 || exit_label < 0:
         return
     n : ., mut = sg + 1
     if consumer + 1 > n:
@@ -187,8 +197,10 @@ fn region_plan_mark_share(sg: int, exit_node: int, consumer: int):
         return
     if cell_load(g_plan_share, sg * 8) == 0:
         cell_store(g_plan_share, sg * 8, 1)
-        cell_store(g_plan_share_exit, sg * 8, exit_node)
-        cell_store(g_plan_share_after, consumer * 8, sg + 1)
+        cell_store(g_plan_share_exit, sg * 8, exit_label)
+        cell_store(g_plan_share_mode, sg * 8, mode)
+        if mode == 0 && consumer >= 0:
+            cell_store(g_plan_share_after, consumer * 8, sg + 1)
         g_plan_share_count = g_plan_share_count + 1
 
 fn region_plan_is_share(sg: int) -> int:
@@ -201,6 +213,25 @@ fn region_plan_share_exit(sg: int) -> int:
     if region_plan_is_share(sg) == 0:
         return -1
     return cell_load(g_plan_share_exit, sg * 8)
+
+fn region_plan_share_mode_of(sg: int) -> int:
+    if region_plan_is_share(sg) == 0:
+        return -1
+    return cell_load(g_plan_share_mode, sg * 8)
+
+// Mode-1 share whose reset is emitted at this label (or -1).
+fn region_plan_share_for_label(lbl: int) -> int:
+    if lbl < 0 || g_plan_share_count <= 0:
+        return -1
+    s : ., mut = 0
+    loop:
+        if s >= g_plan_share_cap:
+            return -1
+        if region_plan_is_share(s) != 0:
+            if cell_load(g_plan_share_mode, s * 8) == 1 && cell_load(g_plan_share_exit, s * 8) == lbl:
+                return s
+        s = s + 1
+    return -1
 
 // Consumer SG -> share owner SG (or -1). The owner's reset is emitted after
 // the consumer's own arena reset.
@@ -520,12 +551,40 @@ fn rp_if_reads_var(sg_start: int, sg_count: int, var: int) -> int:
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-        if s1 == var || s2 == var || s3 == var:
-            return 1
-        if op == IR_STORE_INDEX_VAR:
-            d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
-            if d == var:
-                return 1
+        d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        // Literal-only fields (values, labels, type tags) must not be treated
+        // as variable slots: CASE bases in particular can collide with var ids.
+        literal_only : ., mut = 0
+        if op == IR_CONST || op == IR_CONST_BIG || op == IR_LABEL || op == IR_JUMP || op == IR_ALLOC || op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_ALLOC_AT || op == IR_BOUNDS_CHECK:
+            literal_only = 1
+        if literal_only == 0:
+            if op == IR_MATCH:
+                if s1 == var:
+                    return 1
+            else if op == IR_BINARY:
+                if s1 == var || s2 == var:
+                    return 1
+            else if op == IR_UNARY:
+                if s1 == var:
+                    return 1
+            else if op == IR_LOAD_INDEX:
+                if s1 == var:
+                    return 1
+            else if op == IR_LOAD_INDEX_VAR:
+                if s1 == var || s2 == var:
+                    return 1
+            else if op == IR_STORE_INDEX:
+                if s1 == var || s2 == var:
+                    return 1
+            else if op == IR_STORE_INDEX_VAR:
+                if d == var || s1 == var || s2 == var:
+                    return 1
+            else if op == IR_STORE:
+                if s1 == var || s2 == var:
+                    return 1
+            else:
+                if s1 == var || s2 == var || s3 == var:
+                    return 1
         ni = ni + 1
 
 // Slot owner for an allocation. `rc_releasing_region` returns -1 for
@@ -907,7 +966,7 @@ fn rp_if_merge_ancestors_ok(sg: int) -> int:
 // child through any alias inside the IF; outside the IF they must go through
 // that slot. The copy runs at the end of the assigning branch and rebinds it.
 fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
-                        nstart: int, ncount: int) -> int:
+                        nstart: int, ncount: int, allow_calls: int) -> int:
     // Flow-insensitive points-to cannot order uses across a loop backedge, so a
     // merge IF inside a loop stays v1. Unsafe blocks are also identity-observable.
     if rp_if_merge_ancestors_ok(sg) == 0:
@@ -1040,7 +1099,7 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                     // IR_BINARY/IR_UNARY/IR_MATCH keep an operator or label
                     // range in the high fields; check only the value slots.
                     if op == IR_CALL || op == IR_SPAWN:
-                        if rp_call_arg_uses_alloc(s1, s2, ai_sel) != 0:
+                        if allow_calls == 0 && rp_call_arg_uses_alloc(s1, s2, ai_sel) != 0:
                             return 0
                     else if op == IR_MATCH:
                         if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
@@ -1095,47 +1154,247 @@ fn rp_sg_arena_new_node(sg: int) -> int:
         ni = ni + 1
     return -1
 
-// The consumer must reach its exit with only its own arena reset (or no arena
-// created) active: no break/return, no nested loop/unsafe whose arena could be
-// left live by a non-local exit. A nested split IF is fine: its reset restores
-// the consumer arena before the consumer exits.
-fn rp_share_consumer_simple(cons: int) -> int:
-    cs := cell_load(g_sgs, cons * ESZ_SG + OFF_SG_NSTART)
-    ce := cell_load(g_sgs, cons * ESZ_SG + OFF_SG_EXIT)
+// Reset event for a label: a loop/for/split-IF exit label uses the after-SG
+// reset (mode 0); a function-level or plain-IF label uses a label reset
+// (mode 1). A label inside any active releasing arena, an unsafe, or a merge IF
+// is not a valid current-S point.
+fn rp_share_event_for_label(q: int, p: int) -> int:
+    g_rp_share_mode = -1
+    g_rp_share_consumer = -1
+    g_rp_share_reset_node = -1
+    event : ., mut = -1
+    mode : ., mut = -1
+    rn : ., mut = q
+    cur : ., mut = subgraph_containing(q)
+    loop:
+        if cur < 0:
+            return 0
+        if cur == p:
+            break
+        k := cell_load(g_sgs, cur * ESZ_SG + OFF_SG_KIND)
+        if k == SG_UNSAFE:
+            return 0
+        if k == SG_LOOP || k == SG_FOR:
+            ex := cell_load(g_sgs, cur * ESZ_SG + OFF_SG_EXIT)
+            if q == ex - 1:
+                if event >= 0:
+                    return 0
+                event = cur
+                mode = 0
+                rn = ex
+            else:
+                return 0
+        else if k == SG_IF:
+            if region_plan_is_merge(cur) != 0:
+                return 0
+            if region_plan_is_split(cur) != 0:
+                ex := cell_load(g_sgs, cur * ESZ_SG + OFF_SG_EXIT)
+                if q == ex - 1:
+                    if event >= 0:
+                        return 0
+                    event = cur
+                    mode = 0
+                    rn = ex
+                else:
+                    return 0
+        cur = cell_load(g_sgs, cur * ESZ_SG + OFF_SG_PARENT)
+    if event < 0:
+        mode = 1
+        rn = q
+    else:
+        // A structured region exit is a reset point only when the region is a
+        // top-level statement after the share IF. Inside a plain IF it can be
+        // skipped; the enclosing join label is the safe point instead.
+        ep := cell_load(g_sgs, event * ESZ_SG + OFF_SG_PARENT)
+        if ep != p:
+            return 0
+    g_rp_share_mode = mode
+    g_rp_share_consumer = event
+    g_rp_share_reset_node = rn
+    return 1
+
+// Cross-function read-only proof for a call in a share window. Only leaf
+// callees are accepted: no calls/spawn, no unsafe, no direct g_current_arena
+// read/write, and the BP/RegionCheck summaries must show that every parameter
+// receiving the shared array is neither written nor escaped nor returned nor
+// passed to FFI.
+// The cross-function proof is read-only: a callee receiving the shared array
+// must not perform any heap/array/field/pointer store. A leaf callee may still
+// store scalars into its own stack slots; those do not reach the shared bytes.
+fn rp_share_callee_heap_readonly(cfi: int) -> int:
+    cs := cell_load(g_df_func_node_start, cfi * 8)
+    cc := cell_load(g_df_func_node_count, cfi * 8)
+    if cs < 0 || cc <= 0:
+        return 0
+    ni : ., mut = cs
+    loop:
+        if ni >= cs + cc:
+            return 1
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_FIELD || op == IR_STORE_PTR:
+            return 0
+        ni = ni + 1
+    return 0
+
+fn rp_share_call_args_ok(cfi: int, s1: int, s2: int, ai_sel: int) -> int:
+    pc := cell_load(g_ir_func_param_count, cfi * 8)
+    saw_array : ., mut = 0
+    ac : ., mut = 0
+    loop:
+        if ac >= s2:
+            if saw_array != 0 && rp_share_callee_heap_readonly(cfi) == 0:
+                return 0
+            return 1
+        av := s1 + ac
+        if av >= 0 && rp_var_may_point(av) != 0 && pa_pts_has(av, ai_sel) != 0:
+            saw_array = 1
+            if ac >= pc:
+                return 0
+            if rc_mask_has(g_bp_param_write, cfi * 2, ac) != 0:
+                return 0
+            if rc_mask_has(g_rc_param_escape, cfi * 2, ac) != 0:
+                return 0
+            if rc_mask_has(g_rc_ret_alias, cfi * 2, ac) != 0:
+                return 0
+            if rc_mask_has(g_rc_param_ffi, cfi * 2, ac) != 0:
+                return 0
+        ac = ac + 1
+    return 0
+
+fn rp_share_callee_clean(cfi: int) -> int:
+    cs := cell_load(g_df_func_node_start, cfi * 8)
+    cc := cell_load(g_df_func_node_count, cfi * 8)
+    if cs < 0 || cc <= 0:
+        return 0
+    cav := rp_global_var_named("g_current_arena")
+    if cav >= 0:
+        if rp_if_reads_var(cs, cc, cav) != 0:
+            return 0
+    ni : ., mut = cs
+    loop:
+        if ni >= cs + cc:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_CALL || op == IR_SPAWN:
+            return 0
+        if op == IR_STORE && cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1) == cav:
+            return 0
+        ni = ni + 1
+    d : ., mut = 0
+    loop:
+        if d >= g_sg_count:
+            return 1
+        ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
+        if ds >= cs && ds < cs + cc:
+            if cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
+                return 0
+        d = d + 1
+    return 1
+
+fn rp_share_call_ok(s1: int, s2: int, s3: int, ai_sel: int) -> int:
+    if is_arena_infra_name(s3) != 0:
+        return 0
+    cfi := rc_func_by_name(s3)
+    if cfi < 0:
+        return 0
+    if rp_share_callee_clean(cfi) == 0:
+        return 0
+    return rp_share_call_args_ok(cfi, s1, s2, ai_sel)
+
+// The window from the IF exit to the reset point must not observe the arena
+// switch, allocate through the shared slot, leave a nested arena current, or
+// contain a write/escape of the shared array. Calls are rejected in this slice.
+fn rp_share_window_ok(s_end: int, rn: int, mode: int, ai_sel: int, nstart: int, ncount: int) -> int:
+    ni : ., mut = s_end
+    loop:
+        if ni >= rn:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        if op == IR_CALL || op == IR_SPAWN:
+            if rp_share_call_ok(s1, s2, s3, ai_sel) == 0:
+                return 0
+        if op == IR_RETURN:
+            return 0
+        if op == IR_JUMP:
+            t := rc_ctl_label_node(cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1))
+            if t < s_end:
+                return 0
+            if mode == 1:
+                if t > rn:
+                    return 0
+            else:
+                if t >= rn:
+                    return 0
+            d : ., mut = 0
+            loop:
+                if d >= g_sg_count:
+                    break
+                ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
+                if ds >= s_end && ds < rn:
+                    dk := cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND)
+                    if dk == SG_LOOP || dk == SG_FOR:
+                        de := cell_load(g_sgs, d * ESZ_SG + OFF_SG_EXIT)
+                        if t == de - 1:
+                            return 0
+                d = d + 1
+        ni = ni + 1
     d : ., mut = 0
     loop:
         if d >= g_sg_count:
             break
-        if d != cons:
-            ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
-            if ds >= cs && ds < ce:
-                k := cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND)
-                if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
-                    return 0
-                if region_plan_is_merge(d) != 0:
-                    return 0
+        ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
+        if ds >= s_end && ds < rn:
+            dk := cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND)
+            if dk == SG_UNSAFE:
+                return 0
+            if dk == SG_IF && region_plan_is_merge(d) != 0:
+                return 0
         d = d + 1
-    ni : ., mut = cs
+    cav := rp_global_var_named("g_current_arena")
+    if cav >= 0 && rp_if_reads_var(s_end, rn - s_end, cav) != 0:
+        return 0
+    ai : ., mut = 0
     loop:
-        if ni >= ce:
-            return 1
-        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        if op == IR_RETURN:
-            return 0
-        if op == IR_JUMP:
-            t := rc_ctl_label_node(s1)
-            if t < cs || t >= ce:
+        if ai >= g_pa_alloc_count:
+            break
+        an2 := cell_load(g_pa_alloc_nodes, ai * 8)
+        if an2 > s_end && an2 < rn:
+            cur2 : ., mut = subgraph_containing(an2)
+            owned : ., mut = 0
+            loop:
+                if cur2 < 0:
+                    break
+                if rc_sg_releases(cur2) != 0:
+                    an_new : ., mut = rp_sg_arena_new_node(cur2)
+                    if an_new < 0:
+                        // A split/merge IF has no arena node in Phase A; its
+                        // child arena is created at the IF entry in Phase B.
+                        ck := cell_load(g_sgs, cur2 * ESZ_SG + OFF_SG_KIND)
+                        if ck == SG_IF && (region_plan_is_split(cur2) != 0 || region_plan_is_merge(cur2) != 0):
+                            an_new = cell_load(g_sgs, cur2 * ESZ_SG + OFF_SG_NSTART)
+                    if an_new >= 0 && an2 > an_new:
+                        owned = 1
+                        break
+                cur2 = cell_load(g_sgs, cur2 * ESZ_SG + OFF_SG_PARENT)
+            if owned == 0:
                 return 0
-            if t == ce - 1:
-                return 0
-        ni = ni + 1
-    return 0
+        ai = ai + 1
+    return 1
 
+// V2.3 share: a top-level IF allocates one scalar array into its child slot;
+// after the IF the array is only read. The slot stays live and is reset at the
+// earliest label that post-dominates the IF merge, has no intervening call/
+// allocation/arena switch, and is a valid current-S point (a function/plain-IF
+// label or a loop/for/split-IF exit). No copy is made.
 fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
                         nstart: int, ncount: int) -> int:
     g_rp_share_consumer = -1
     g_rp_share_exit = -1
+    g_rp_share_mode = -1
+    g_rp_share_reset_node = -1
     // Same hard gates as the split/merge candidate scan.
     if rp_if_has_unsafe(sg_start, sg_count) != 0:
         return 0
@@ -1147,10 +1406,9 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
     p := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
     if p < 0 || cell_load(g_sgs, p * ESZ_SG + OFF_SG_KIND) != SG_FUNC:
         return 0
-    cnt := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount)
+    cnt := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 1)
     if cnt <= 0:
         return 0
-    // The selected allocation and its outer slot.
     ai_sel : ., mut = -1
     ai : ., mut = 0
     loop:
@@ -1219,7 +1477,7 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
             if literal_only == 0:
                 if op == IR_CALL || op == IR_SPAWN:
                     if rp_call_arg_uses_alloc(s1, s2, ai_sel) != 0:
-                        return 0
+                        umax = ni
                 else if op == IR_MATCH:
                     if s1 >= 0 && rp_var_may_point(s1) != 0 && pa_pts_has(s1, ai_sel) != 0:
                         return 0
@@ -1243,96 +1501,35 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
         ni = ni + 1
     if umax < 0:
         return 0
-    // Outermost releasing consumer below the function region.
-    cons : ., mut = -1
-    cur : ., mut = subgraph_containing(umax)
+    rp_pdom_prepare(nstart, ncount)
+    if g_rp_pdom_ok == 0:
+        return 0
+    merge_node := s_end - 1
+    if cell_load(g_df_nodes, merge_node * ESZ_DFNODE + OFF_DF_OPCODE) != IR_LABEL:
+        return 0
+    words := g_rp_pdom_words
+    q : ., mut = umax + 1
     loop:
-        if cur < 0 || cur == p:
-            break
-        if rc_sg_releases(cur) != 0:
-            cons = cur
-        cur = cell_load(g_sgs, cur * ESZ_SG + OFF_SG_PARENT)
-    if cons < 0:
-        return 0
-    k := cell_load(g_sgs, cons * ESZ_SG + OFF_SG_KIND)
-    if k != SG_LOOP && k != SG_FOR:
-        return 0
-    cexit := cell_load(g_sgs, cons * ESZ_SG + OFF_SG_EXIT)
-    if cexit <= s_end || cexit >= func_end:
-        return 0
-    if umax >= cexit:
-        return 0
-    // Labels are stable across Phase A/B; node indices are not. Store the
-    // consumer's exit label id and resolve it again in the Phase B graph.
-    eln := cexit - 1
-    eop := cell_load(g_df_nodes, eln * ESZ_DFNODE + OFF_DF_OPCODE)
-    if eop != IR_LABEL:
-        return 0
-    eexit := cell_load(g_df_nodes, eln * ESZ_DFNODE + OFF_DF_S1)
-    if eexit < 0:
-        return 0
-    if rp_share_consumer_simple(cons) == 0:
-        return 0
-    // Calls in the window may allocate through the current slot and may read
-    // g_current_arena; this slice keeps the window call-free. Any return or
-    // jump to a loop exit label can leave a nested/sibling arena current at the
-    // share reset point, so those stay v1 too.
-    ni = s_end
-    loop:
-        if ni >= cexit:
-            break
-        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        if op == IR_CALL || op == IR_SPAWN:
+        if q >= func_end:
             return 0
-        if op == IR_RETURN:
-            return 0
-        if op == IR_JUMP:
-            t := rc_ctl_label_node(cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1))
-            if t < s_end || t >= cexit:
-                return 0
-            d : ., mut = 0
-            loop:
-                if d >= g_sg_count:
-                    break
-                ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
-                if ds >= s_end && ds < cexit:
-                    dk := cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND)
-                    if dk == SG_LOOP || dk == SG_FOR:
-                        de := cell_load(g_sgs, d * ESZ_SG + OFF_SG_EXIT)
-                        if t == de - 1:
-                            return 0
-                d = d + 1
-        ni = ni + 1
-    cav := rp_global_var_named("g_current_arena")
-    if cav >= 0 && rp_if_reads_var(s_end, cexit - s_end, cav) != 0:
-        return 0
-    // Nothing allocated in the window may land in the share slot. An
-    // allocation belongs to the nearest releasing ancestor whose own
-    // IR_ARENA_NEW precedes it; a loop condition runs before its arena exists,
-    // so those allocations land in the parent and are rejected here.
-    ai = 0
-    loop:
-        if ai >= g_pa_alloc_count:
-            break
-        an2 := cell_load(g_pa_alloc_nodes, ai * 8)
-        if an2 > s_end && an2 < cexit:
-            cur2 : ., mut = subgraph_containing(an2)
-            owned : ., mut = 0
-            loop:
-                if cur2 < 0 || cur2 == p:
-                    break
-                if rc_sg_releases(cur2) != 0:
-                    an_new := rp_sg_arena_new_node(cur2)
-                    if an_new >= 0 && an2 > an_new:
-                        owned = 1
-                        break
-                cur2 = cell_load(g_sgs, cur2 * ESZ_SG + OFF_SG_PARENT)
-            if owned == 0:
-                return 0
-        ai = ai + 1
-    g_rp_share_consumer = cons
-    g_rp_share_exit = eexit
-    return cnt
+        op := cell_load(g_df_nodes, q * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_LABEL:
+            ev := rp_share_event_for_label(q, p)
+            if ev != 0:
+                // Mode-1 labels need post-dominance. A top-level structured
+                // region exit (mode 0) is unconditional after the share IF;
+                // loops may not appear in post-dominance because of the
+                // non-terminating path, which is harmless here.
+                ok : ., mut = 1
+                if g_rp_share_mode == 1:
+                    ok = rp_bit_has(g_rp_pdom, (merge_node - nstart) * words, q - nstart)
+                if ok != 0:
+                    win := rp_share_window_ok(s_end, g_rp_share_reset_node, g_rp_share_mode, ai_sel, nstart, ncount)
+                    if win != 0:
+                        g_rp_share_exit = cell_load(g_df_nodes, q * ESZ_DFNODE + OFF_DF_S1)
+                        return cnt
+        q = q + 1
+    return 0
 
 // Materialize the V2.2 merge copy at the end of the assigning branch. The copy
 // allocation was emitted before the child arena, so it lives in the parent slot.
@@ -1405,7 +1602,21 @@ fn region_plan_emit_share_after(cg: int):
         check_error(EC_B_LIFETIME, "share reset lost its slot variable", 0, 0)
         return
     emit(IR_ARENA_RESET, -1, av, 0, 0, 0)
-    g_plan_share_reset_emitted = 1
+    g_plan_share_reset_emitted = g_plan_share_reset_emitted + 1
+
+fn region_plan_emit_share_resets(lbl: int):
+    s := region_plan_share_for_label(lbl)
+    if s < 0:
+        return
+    if s >= g_sg_count:
+        check_error(EC_B_LIFETIME, "share label points outside the SG table", 0, 0)
+        return
+    av := cell_load(g_sg_arena_var, s * 8)
+    if av < 0:
+        check_error(EC_B_LIFETIME, "share label lost its slot variable", 0, 0)
+        return
+    emit(IR_ARENA_RESET, -1, av, 0, 0, 0)
+    g_plan_share_reset_emitted = g_plan_share_reset_emitted + 1
 
 fn region_plan_analyze():
     region_plan_reset()
@@ -1450,58 +1661,42 @@ fn region_plan_analyze():
                                 if rp_if_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
                                     region_plan_mark_split(sg)
                                 else:
-                                    mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount)
+                                    mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 0)
                                     if mc > 0:
                                         region_plan_mark_merge(sg, mc)
             sg = sg + 1
         fi = fi + 1
 
-    // V2.3 share pass. Run after split/merge marks so the consumer's releasing
-    // status and any competing merge copy are known. This slice allows at most
-    // one share per program and requires the candidate's function to have no
-    // other merge plan (a merge copy in the same function could land in the
-    // shared slot). The candidate's own merge mark is replaced by share.
-    if g_plan_share_count == 0:
-        fi = 0
-        loop:
-            if fi >= g_ir_func_count:
-                break
-            nstart := cell_load(g_df_func_node_start, fi * 8)
-            ncount := cell_load(g_df_func_node_count, fi * 8)
-            if nstart < 0 || ncount <= 0:
-                fi = fi + 1
-                continue
-            rc_ctl_prepare(nstart, ncount)
-            sg : ., mut = 0
-            loop:
-                if sg >= g_sg_count:
-                    break
-                sg_start := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NSTART)
-                sg_count := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NCOUNT)
-                if sg_start >= nstart && sg_start < nstart + ncount:
-                    if cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND) == SG_IF:
-                        if region_plan_is_split(sg) == 0:
-                            if rp_if_share_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
-                                own : ., mut = 0
-                                if region_plan_is_merge(sg) != 0:
-                                    own = 1
-                                mcount : ., mut = 0
-                                pj : ., mut = 0
-                                loop:
-                                    if pj >= g_sg_count:
-                                        break
-                                    ps := cell_load(g_sgs, pj * ESZ_SG + OFF_SG_NSTART)
-                                    if ps >= nstart && ps < nstart + ncount:
-                                        if region_plan_is_merge(pj) != 0:
-                                            mcount = mcount + 1
-                                    pj = pj + 1
-                                if mcount == own:
-                                    if own != 0:
-                                        region_plan_unmark_merge(sg)
-                                    region_plan_mark_share(sg, g_rp_share_exit, g_rp_share_consumer)
-                                    return
-                sg = sg + 1
+    // V2.3 share pass. Run after split/merge marks so the window can reject
+    // merge copies landing in a candidate's slot. Candidates are processed in
+    // SG order; a later merge candidate inside an earlier candidate's window
+    // makes the earlier one ineligible, so the chosen share slots never
+    // overlap. Non-overlapping sequential shares are allowed.
+    fi = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
+        if nstart < 0 || ncount <= 0:
             fi = fi + 1
+            continue
+        rc_ctl_prepare(nstart, ncount)
+        sg : ., mut = 0
+        loop:
+            if sg >= g_sg_count:
+                break
+            sg_start := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NSTART)
+            sg_count := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NCOUNT)
+            if sg_start >= nstart && sg_start < nstart + ncount:
+                if cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND) == SG_IF:
+                    if region_plan_is_split(sg) == 0:
+                        if rp_if_share_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
+                            if region_plan_is_merge(sg) != 0:
+                                region_plan_unmark_merge(sg)
+                            region_plan_mark_share(sg, g_rp_share_exit, g_rp_share_mode, g_rp_share_consumer)
+            sg = sg + 1
+        fi = fi + 1
 
     // Early clear is not combined with share in this slice: the shared slot is
     // current across the consumer window, so a parent-slot clear there would be

@@ -284,6 +284,209 @@ LATER_UNRELATED_LOOP = """fn main() -> int:
     return total + other - 15
 """
 
+NESTED_BREAK_CONSUMER = """fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        j : ., mut = 0
+        while j < 2:
+            total = total + arr[0]
+            break
+        i = i + 1
+    return total - 14
+"""
+
+IF_CONSUMER = """fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    z : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    if z < 2:
+        a : [int; 2], mut
+        a[0] = 1
+        a[1] = 2
+        total = total + a[0] + arr[0]
+    return total - 8
+"""
+
+WIDER_LABEL = """fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    z : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    total = arr[0]
+    if z < 2:
+        total = total + 1
+    return total - 8
+"""
+
+MULTI_SHARE = """fn main() -> int:
+    a : [int; 2], mut
+    a[0] = 5
+    a[1] = 6
+    b : [int; 2], mut
+    b[0] = 5
+    b[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        ba : [int; 2], mut
+        ba[0] = 7
+        ba[1] = 8
+        a = ba
+    i : ., mut = 0
+    while i < 2:
+        total = total + a[0]
+        i = i + 1
+    if y < 2:
+        bb : [int; 2], mut
+        bb[0] = 9
+        bb[1] = 10
+        b = bb
+    j : ., mut = 0
+    while j < 2:
+        total = total + b[0]
+        j = j + 1
+    return total - 32
+"""
+
+READONLY_CALL = """fn sum(a: [int; 2]) -> int:
+    return a[0]
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + sum(arr)
+        i = i + 1
+    return total - 14
+"""
+
+WRITE_CALLEE = """fn bad(a: [int; 2]) -> int:
+    a[0] = 9
+    return a[0]
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + bad(arr)
+        i = i + 1
+    return total - 18
+"""
+
+ESCAPE_CALLEE = """g : [int; 2], mut = [0, 0]
+fn save(a: [int; 2]) -> int:
+    g = a
+    return 0
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + save(arr)
+        i = i + 1
+    return total
+"""
+
+CURRENT_CALLEE = """import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn touch() -> int:
+    if g_current_arena < 0:
+        return 0
+    return 0
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0] + touch()
+        i = i + 1
+    return total - 14
+"""
+
+LEAF_NO_ARRAY_CALL = """fn one() -> int:
+    return 1
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0] + one()
+        i = i + 1
+    return total - 16
+"""
+
 WRITE_CONSUMER = """fn main() -> int:
     arr : ., mut = [5, 6]
     y : ., mut = 1
@@ -450,11 +653,12 @@ def test_p10_break_in_consumer_blocks_share():
     build_run(BREAK_READER, 0)
 
 
-def test_p11_nested_consumer_loop_blocks_share():
+def test_p11_nested_consumer_loop_shares():
+    # Nested loops with no non-local exits are now a valid wider window.
     result = ccr(NESTED_CONSUMER_LOOP)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_share(diag), diag
+    assert has_share(diag), diag
     build_run(NESTED_CONSUMER_LOOP, 0)
 
 
@@ -467,11 +671,13 @@ def test_p12_read_after_consumer_blocks_share():
 
 
 
-def test_p13_call_in_consumer_blocks_share():
+def test_p13_leaf_call_in_consumer_shares():
+    # id(arr[0]) passes a scalar, not the shared pointer; the leaf callee is
+    # clean, so the wider call proof allows share.
     result = ccr(CALL_CONSUMER)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_share(diag), diag
+    assert has_share(diag), diag
     build_run(CALL_CONSUMER, 0)
 
 
@@ -502,6 +708,82 @@ def test_p16_share_reset_before_later_unrelated_loop():
     build_run(LATER_UNRELATED_LOOP, 0)
 
 
+
+def test_p17_nested_break_in_consumer_window_blocks_share():
+    result = ccr(NESTED_BREAK_CONSUMER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(NESTED_BREAK_CONSUMER, 0)
+
+
+
+def test_p18_split_if_consumer_shares():
+    result = ccr(IF_CONSUMER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(IF_CONSUMER, 0)
+
+
+def test_p19_wider_label_lcpd():
+    result = ccr(WIDER_LABEL)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(WIDER_LABEL, 0)
+
+
+def test_p20_multiple_sequential_shares():
+    result = ccr(MULTI_SHARE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    shares = [ln for ln in diag.splitlines() if ln.startswith("share ")]
+    assert len(shares) == 2, shares
+    build_run(MULTI_SHARE, 0)
+
+
+
+def test_p21_readonly_array_callee_shares():
+    result = ccr(READONLY_CALL)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(READONLY_CALL, 0)
+
+
+def test_p22_writing_callee_blocks_share():
+    result = ccr(WRITE_CALLEE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(WRITE_CALLEE, 0)
+
+
+def test_p23_escaping_callee_blocks_share():
+    result = ccr(ESCAPE_CALLEE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(ESCAPE_CALLEE, 0)
+
+
+def test_p24_current_arena_callee_blocks_share():
+    result = ccr(CURRENT_CALLEE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(CURRENT_CALLEE, 0)
+
+
+def test_p25_leaf_call_without_array_shares():
+    result = ccr(LEAF_NO_ARRAY_CALL)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(LEAF_NO_ARRAY_CALL, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_share_two_readers,
@@ -514,12 +796,21 @@ if __name__ == "__main__":
         test_p8_single_consumer_loop,
         test_p9_for_consumer,
         test_p10_break_in_consumer_blocks_share,
-        test_p11_nested_consumer_loop_blocks_share,
+        test_p11_nested_consumer_loop_shares,
         test_p12_read_after_consumer_blocks_share,
-        test_p13_call_in_consumer_blocks_share,
+        test_p13_leaf_call_in_consumer_shares,
         test_p14_nested_split_consumer_allows_share,
         test_p15_sibling_break_in_window_blocks_share,
         test_p16_share_reset_before_later_unrelated_loop,
+        test_p17_nested_break_in_consumer_window_blocks_share,
+        test_p18_split_if_consumer_shares,
+        test_p19_wider_label_lcpd,
+        test_p20_multiple_sequential_shares,
+        test_p21_readonly_array_callee_shares,
+        test_p22_writing_callee_blocks_share,
+        test_p23_escaping_callee_blocks_share,
+        test_p24_current_arena_callee_blocks_share,
+        test_p25_leaf_call_without_array_shares,
     ]
     failures = 0
     for test in tests:

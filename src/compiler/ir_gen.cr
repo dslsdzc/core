@@ -6876,8 +6876,8 @@ fn ir_gen_all():
         df_end_func(ir_func_idx)
         i = i + 1
 
-    if g_plan_active != 0 && g_plan_share_count > 0 && g_plan_share_reset_emitted == 0:
-        check_error(EC_B_LIFETIME, "share reset was not emitted", 0, 0)
+    if g_plan_active != 0 && g_plan_share_count > 0 && g_plan_share_reset_emitted != g_plan_share_count:
+        check_error(EC_B_LIFETIME, "share resets were not emitted for every planned slot", 0, 0)
 
     // 纯度 + 状态依赖边序列最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
     // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。
