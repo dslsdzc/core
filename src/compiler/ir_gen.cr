@@ -3936,6 +3936,49 @@ fn gen_expr(node: int) -> int:
             cell_store(arg_nodes, ac * 8, ast_a(an))
             ac = ac + 1
             an = ast_b(an)
+        // Raw current-arena access. These names are compiler builtins: a normal
+        // function call would create its own function arena first and read the
+        // wrong current. Lower directly to cell_load/cell_store plus the
+        // g_current_arena global so scheduler context switches see the real
+        // allocator state.
+        if func_ni >= 0:
+            bname := istr_get(func_ni)
+            if str_eq(bname, "arena_current_unchecked") != 0 && ac == 0:
+                dest := new_ir_var("arena_current", TI_INT)
+                sv := global_var_of(str_intern("g_arena_scalars"))
+                if sv >= 0:
+                    z := new_ir_var("_arena_zero", TI_INT)
+                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                    a0 := new_ir_var("_arena_arg", TI_STR)
+                    emit(IR_STORE, -1, a0, sv, 0, 0)
+                    a1 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a1, z, 0, 0)
+                    emit(IR_CALL, dest, a0, 2, str_intern("cell_load"), TI_INT)
+                else:
+                    gv := global_var_of(str_intern("g_current_arena"))
+                    if gv >= 0:
+                        emit(IR_LOAD, dest, gv, 0, 0, TI_INT)
+                    else:
+                        emit(IR_CONST, dest, 0, 0, 0, TI_INT)
+                return dest
+            if str_eq(bname, "arena_set_current_unchecked") != 0 && ac == 1:
+                av := cell_load(arg_vars, 0)
+                sv := global_var_of(str_intern("g_arena_scalars"))
+                if sv >= 0:
+                    z := new_ir_var("_arena_zero", TI_INT)
+                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                    a0 := new_ir_var("_arena_arg", TI_STR)
+                    emit(IR_STORE, -1, a0, sv, 0, 0)
+                    a1 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a1, z, 0, 0)
+                    a2 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a2, av, 0, 0)
+                    emit(IR_CALL, -1, a0, 3, str_intern("cell_store"), TI_INT)
+                gv := global_var_of(str_intern("g_current_arena"))
+                if gv >= 0:
+                    emit(IR_STORE, -1, gv, av, 0, 0)
+                return -1
+
         // dex 边界规则：dex 参数在调用点按被调方形式处理，
         //   Core 函数：一律精确形式（scaled），apx 位模式参数转 scaled（F2I(bits×S)）；
         //   extern 函数：C ABI 契约（module.cr：dex 编码 3 = binary64 跨 C 边界），

@@ -134,6 +134,24 @@ fn main() -> int:
     return 0
 """
 
+ARENA_RAW_CURRENT_SRC = """\
+import arena
+fn main() -> int:
+    arena_init(67108864, 1048576)
+    a := arena_current_unchecked()
+    if a != -1:
+        return 1
+    b := arena_new_sized(65536)
+    c := arena_current_unchecked()
+    if c != b:
+        return 2
+    arena_set_current_unchecked(-1)
+    d := arena_current_unchecked()
+    if d != -1:
+        return 3
+    return 0
+"""
+
 ZERO_ON_RESET_SRC = """\
 import arena
 g_current_arena : int, mut = -1
@@ -356,6 +374,9 @@ def main() -> int:
         # still failing if the interpreter goes back to zeroing per node.
         if run_pair(root, "arena_bulk_zero", PERF_SRC,
                     interp_timeout=30) != 0:
+            return 1
+
+        if run_pair(root, "arena_raw_current", ARENA_RAW_CURRENT_SRC) != 0:
             return 1
 
         if run_pair(root, "arena_zero_on_reset", ZERO_ON_RESET_SRC) != 0:

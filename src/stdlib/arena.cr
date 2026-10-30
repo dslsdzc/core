@@ -135,6 +135,15 @@ fn _arena_zero_reset_slots(ai: int):
                 _memzero(base, used)
         slot = cell_load(g_arena_slot_next, slot * 8)
 
+// Compiler builtins: intercepted at the call site and lowered to raw cell
+// load/store + g_current_arena. Calling these indirectly is not supported; the
+// fallback bodies exist so the type checker resolves the names.
+fn arena_current_unchecked() -> int, pub:
+    return arena_scalar_get(0)
+
+fn arena_set_current_unchecked(v: int), pub:
+    arena_set_current(v)
+
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return
