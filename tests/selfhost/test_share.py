@@ -487,6 +487,144 @@ fn main() -> int:
     return total - 16
 """
 
+TRANSITIVE_READONLY = """fn helper(a: [int; 2]) -> int:
+    return a[0]
+
+fn sum(a: [int; 2]) -> int:
+    return helper(a)
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + sum(arr)
+        i = i + 1
+    return total - 14
+"""
+
+TRANSITIVE_WRITE = """fn bad(a: [int; 2]) -> int:
+    a[0] = 9
+    return a[0]
+
+fn sum(a: [int; 2]) -> int:
+    return bad(a)
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + sum(arr)
+        i = i + 1
+    return total - 18
+"""
+
+TRANSITIVE_CURRENT = """import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn cur() -> int:
+    if g_current_arena < 0:
+        return 0
+    return 0
+
+fn sum() -> int:
+    return cur()
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0] + sum()
+        i = i + 1
+    return total - 14
+"""
+
+TRANSITIVE_ARENA = """import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn probe() -> int:
+    i := arena_avail(0)
+    return 0
+
+fn sum() -> int:
+    return probe()
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0] + sum()
+        i = i + 1
+    return total - 14
+"""
+
+OVERLAP_SHARE = """fn main() -> int:
+    a : [int; 2], mut
+    a[0] = 5
+    a[1] = 6
+    b : [int; 2], mut
+    b[0] = 5
+    b[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        ba : [int; 2], mut
+        ba[0] = 7
+        ba[1] = 8
+        a = ba
+    if y < 2:
+        bb : [int; 2], mut
+        bb[0] = 9
+        bb[1] = 10
+        b = bb
+    i : ., mut = 0
+    while i < 2:
+        total = total + a[0]
+        i = i + 1
+    j : ., mut = 0
+    while j < 2:
+        total = total + b[0]
+        j = j + 1
+    return total - 32
+"""
+
 WRITE_CONSUMER = """fn main() -> int:
     arr : ., mut = [5, 6]
     y : ., mut = 1
@@ -573,7 +711,9 @@ def test_p1_share_two_readers():
     assert has_share(diag), diag
     assert not has_merge(diag), diag
     assert "_merge_copy" not in diag, diag
-    assert not any(ln.startswith("clear ") for ln in diag.splitlines()), diag
+    # Parent-slot early clear and share coexist: the clear runs at the same
+    # loop-exit label before the share slot's delayed reset.
+    assert any(ln.startswith("clear ") for ln in diag.splitlines()), diag
     main_body = diag.split("Function: main", 1)[1]
     first_arena = next(ln for ln in main_body.splitlines() if "arena_new" in ln)
     assert "s1=48" in first_arena, first_arena
@@ -784,6 +924,49 @@ def test_p25_leaf_call_without_array_shares():
     build_run(LEAF_NO_ARRAY_CALL, 0)
 
 
+
+def test_p26_transitive_readonly_callee_shares():
+    result = ccr(TRANSITIVE_READONLY)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(TRANSITIVE_READONLY, 0)
+
+
+def test_p27_transitive_write_blocks_share():
+    result = ccr(TRANSITIVE_WRITE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(TRANSITIVE_WRITE, 0)
+
+
+def test_p28_transitive_current_blocks_share():
+    result = ccr(TRANSITIVE_CURRENT)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(TRANSITIVE_CURRENT, 0)
+
+
+def test_p29_transitive_arena_blocks_share():
+    result = ccr(TRANSITIVE_ARENA)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(TRANSITIVE_ARENA, 0)
+
+
+
+def test_p30_overlapping_shares_reset_lifo():
+    result = ccr(OVERLAP_SHARE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    shares = [ln for ln in diag.splitlines() if ln.startswith("share ")]
+    assert len(shares) == 2, shares
+    build_run(OVERLAP_SHARE, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_share_two_readers,
@@ -811,6 +994,11 @@ if __name__ == "__main__":
         test_p23_escaping_callee_blocks_share,
         test_p24_current_arena_callee_blocks_share,
         test_p25_leaf_call_without_array_shares,
+        test_p26_transitive_readonly_callee_shares,
+        test_p27_transitive_write_blocks_share,
+        test_p28_transitive_current_blocks_share,
+        test_p29_transitive_arena_blocks_share,
+        test_p30_overlapping_shares_reset_lifo,
     ]
     failures = 0
     for test in tests:
