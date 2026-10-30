@@ -4238,9 +4238,15 @@ fn gen_expr(node: int) -> int:
             // plan, so the parent arena peak includes the copy. The element
             // type row is patched at the assigning branch exit.
             merge_cnt := region_plan_merge_len(sg_idx)
-            track_alloc_array(merge_cnt)
+            merge_kind := region_plan_merge_kind_of(sg_idx)
             merge_copy_var = new_ir_var("_merge_copy", TI_UNIT)
-            emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
+            if merge_kind == 1:
+                merge_name := region_plan_merge_name_of(sg_idx)
+                track_alloc_struct(merge_name)
+                emit(IR_ALLOC_STRUCT, merge_copy_var, 0, 0, merge_name, 0)
+            else:
+                track_alloc_array(merge_cnt)
+                emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
             merge_copy_instr = g_ir_instr_count - 1
         arena_instr : ., mut = -1
         if child != 0:

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""V2.2 narrow merge-copy regression.
+"""V2.2 merge-copy regression.
 
-Only one direct constant-size scalar array per IF, stored directly into an outer
-local slot, with all outside uses through that slot. The copy runs at the end of
-the assigning branch and the outer slot is rebound there, so the other path
-still sees the old array and no merge phi is needed.
+The candidate is a constant-size scalar array, a POD struct, or a POD tuple
+stored directly into an outer local slot. One copy runs at the end of each
+assigning branch and the outer slot is rebound there, so a non-assigning path
+still sees the old value and no merge phi is needed. If/else branches may each
+assign the same slot in one IF and share one parent copy.
 """
 
 import os
@@ -300,6 +301,99 @@ LEN_ZERO = """fn main() -> int:
         b : [int; 0], mut
         a = b
     return 0
+"""
+
+POD_STRUCT = """struct P:
+    x: int, y: bool
+
+fn main() -> int:
+    p : P, mut = P { x = 1, y = true }
+    c : ., mut = 0
+    if c == 0:
+        p = P { x = 7, y = false }
+    if p.y:
+        return p.x - 1
+    return p.x - 7
+"""
+
+POD_STRUCT_FALSE = """struct P:
+    x: int, y: bool
+
+fn main() -> int:
+    p : P, mut = P { x = 1, y = true }
+    c : ., mut = 3
+    if c == 0:
+        p = P { x = 7, y = false }
+    if p.y:
+        return p.x - 1
+    return p.x - 7
+"""
+
+POD_STRUCT_MUTATE = """struct P:
+    x: int, y: bool
+
+fn main() -> int:
+    p : P, mut = P { x = 1, y = true }
+    c : ., mut = 0
+    if c == 0:
+        p = P { x = 7, y = false }
+        p.x = 9
+    return p.x - 9
+"""
+
+POD_TUPLE = """fn main() -> int:
+    t : ., mut = (1, 2)
+    c : ., mut = 0
+    if c == 0:
+        t = (7, 8)
+    return t . 0 + t . 1 - 15
+"""
+
+POD_TUPLE_FALSE = """fn main() -> int:
+    t : ., mut = (1, 2)
+    c : ., mut = 3
+    if c == 0:
+        t = (7, 8)
+    return t . 0 + t . 1 - 3
+"""
+
+POD_TUPLE_MUTATE = """fn main() -> int:
+    t : ., mut = (1, 2)
+    c : ., mut = 0
+    if c == 0:
+        t = (7, 8)
+        t . 0 = 9
+    return t . 0 - 9
+"""
+
+POD_STRUCT_POINTER_FIELD = """struct H:
+    a: [int; 2], b: int
+
+fn main() -> int:
+    h : H, mut = H { a = [1, 2], b = 3 }
+    c : ., mut = 0
+    if c == 0:
+        h = H { a = [7, 8], b = 9 }
+    return h.a[0] - 7
+"""
+
+POD_STRUCT_STRING_FIELD = """struct S:
+    s: string, n: int
+
+fn main() -> int:
+    x : S, mut = S { s = "a", n = 1 }
+    c : ., mut = 0
+    if c == 0:
+        x = S { s = "b", n = 2 }
+    return x.n - 2
+"""
+
+POD_TUPLE_POINTER_ELEMENT = """fn main() -> int:
+    t : ., mut = ([1, 2], 3)
+    c : ., mut = 0
+    if c == 0:
+        t = ([7, 8], 9)
+    return t . 0 [0] - 7
 """
 
 BOTH_BRANCHES = """fn main() -> int:
@@ -693,6 +787,49 @@ def test_p29_string_array_blocks_merge():
     build_run(STRING_ARRAY, 0)
 
 
+def test_p31_pod_struct_merges():
+    for src in (POD_STRUCT, POD_STRUCT_FALSE):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p32_pod_struct_mutation_before_copy():
+    result = ccr(POD_STRUCT_MUTATE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(POD_STRUCT_MUTATE, 0)
+
+
+def test_p33_pod_tuple_merges():
+    for src in (POD_TUPLE, POD_TUPLE_FALSE, POD_TUPLE_MUTATE):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p34_pointer_fields_block_pod_merge():
+    for src in (POD_STRUCT_POINTER_FIELD, POD_TUPLE_POINTER_ELEMENT):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert not has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p35_string_field_blocks_pod_merge():
+    result = ccr(POD_STRUCT_STRING_FIELD)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    build_run(POD_STRUCT_STRING_FIELD, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_merge_copy_value,
@@ -725,6 +862,11 @@ if __name__ == "__main__":
         test_p28_loop_after_merge_uses_copy,
         test_p29_string_array_blocks_merge,
         test_p30_both_branch_mutations_copied,
+        test_p31_pod_struct_merges,
+        test_p32_pod_struct_mutation_before_copy,
+        test_p33_pod_tuple_merges,
+        test_p34_pointer_fields_block_pod_merge,
+        test_p35_string_field_blocks_pod_merge,
     ]
     failures = 0
     for test in tests:

@@ -14,6 +14,8 @@ g_plan_clear_sg : string, mut
 g_plan_clear_count : int, mut
 g_plan_clear_cap : int, mut
 g_plan_merge : string, mut
+g_plan_merge_kind : string, mut
+g_plan_merge_name : string, mut
 g_plan_merge_count : int, mut
 g_plan_merge_cap : int, mut
 g_plan_share : string, mut
@@ -32,6 +34,9 @@ g_rp_share_consumer : int, mut
 g_rp_share_exit : int, mut
 g_rp_share_mode : int, mut
 g_rp_share_reset_node : int, mut
+// Kind/name of the last eligible merge: 0=array, 1=struct, 2=tuple.
+g_rp_merge_kind : int, mut
+g_rp_merge_name : int, mut
 // Per-function transitive call-graph hazard bits:
 // 1 = unsafe region, 2 = g_current_arena read/write, 4 = arena/spawn/yield/
 // unknown call, 8 = heap/array/field/pointer store.
@@ -75,6 +80,8 @@ fn region_plan_reset():
     g_rp_share_exit = -1
     g_rp_share_mode = -1
     g_rp_share_reset_node = -1
+    g_rp_merge_kind = -1
+    g_rp_merge_name = -1
     g_share_bad = ""
     // A string global starts null; cap is the allocated-size witness. Each
     // table is cleared independently: merge/share can be allocated without a
@@ -94,6 +101,8 @@ fn region_plan_reset():
             if i >= g_plan_merge_cap:
                 break
             cell_store(g_plan_merge, i * 8, 0)
+            cell_store(g_plan_merge_kind, i * 8, -1)
+            cell_store(g_plan_merge_name, i * 8, -1)
             i = i + 1
     g_plan_merge_count = 0
     if g_plan_share_cap > 0:
@@ -132,23 +141,33 @@ fn region_plan_grow_merge(n: int):
             break
         nc = nc * 2
     nb := alloc(nc * 8)
+    nk := alloc(nc * 8)
+    nn := alloc(nc * 8)
     i : ., mut = 0
     loop:
         if i >= nc:
             break
         cell_store(nb, i * 8, 0)
+        cell_store(nk, i * 8, -1)
+        cell_store(nn, i * 8, -1)
         i = i + 1
     if g_plan_merge_cap > 0:
         cell_copy(g_plan_merge, g_plan_merge_cap * 8, nb)
+        cell_copy(g_plan_merge_kind, g_plan_merge_cap * 8, nk)
+        cell_copy(g_plan_merge_name, g_plan_merge_cap * 8, nn)
     g_plan_merge = nb
+    g_plan_merge_kind = nk
+    g_plan_merge_name = nn
     g_plan_merge_cap = nc
 
-fn region_plan_mark_merge(sg: int, elem_count: int):
-    if sg < 0 || elem_count <= 0:
+fn region_plan_mark_merge(sg: int, kind: int, elem_count: int, name: int):
+    if sg < 0 || elem_count <= 0 || kind < 0:
         return
     region_plan_grow_merge(sg + 1)
     if cell_load(g_plan_merge, sg * 8) == 0:
         cell_store(g_plan_merge, sg * 8, elem_count)
+        cell_store(g_plan_merge_kind, sg * 8, kind)
+        cell_store(g_plan_merge_name, sg * 8, name)
         g_plan_merge_count = g_plan_merge_count + 1
 
 fn region_plan_is_merge(sg: int) -> int:
@@ -156,9 +175,19 @@ fn region_plan_is_merge(sg: int) -> int:
         return 0
     return cell_load(g_plan_merge, sg * 8)
 
-// Element count of the parent copy for a merge IF (0 when not planned).
+// Element/field count of the parent copy for a merge IF (0 when not planned).
 fn region_plan_merge_len(sg: int) -> int:
     return region_plan_is_merge(sg)
+
+fn region_plan_merge_kind_of(sg: int) -> int:
+    if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
+        return -1
+    return cell_load(g_plan_merge_kind, sg * 8)
+
+fn region_plan_merge_name_of(sg: int) -> int:
+    if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
+        return -1
+    return cell_load(g_plan_merge_name, sg * 8)
 
 fn region_plan_grow_share(n: int):
     if n <= g_plan_share_cap:
@@ -1016,6 +1045,51 @@ fn rp_call_arg_uses_sel(s1: int, s2: int, ai1: int, ai2: int) -> int:
         return 1
     return 0
 
+// 0=array, 1=struct, 2=tuple; -1 when the allocation is not a candidate.
+fn rp_merge_alloc_kind(an: int) -> int:
+    if an < 0:
+        return -1
+    op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
+    if op == IR_ALLOC_STRUCT:
+        return 1
+    if op != IR_ALLOC_ARRAY:
+        return -1
+    ad := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    ti := irv_type(ad)
+    if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_ARRAY:
+        return 0
+    return 2
+
+// A tuple is POD when every element slot receives a scalar value. The tuple
+// type row is not carried by IR_ALLOC_ARRAY, so the stored value types are the
+// proof; any array/string/struct/tuple/pointer field rejects the copy.
+fn rp_tuple_pod(an: int, cnt: int, sg_start: int, sg_count: int) -> int:
+    if an < 0 || cnt <= 0 || cnt > 64:
+        return 0
+    ad := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    i : ., mut = 0
+    loop:
+        if i >= cnt:
+            return 1
+        found : ., mut = 0
+        ni : ., mut = sg_start
+        loop:
+            if ni >= sg_start + sg_count:
+                break
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+            s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+            if op == IR_STORE_FIELD && s1 == ad && s3 == i:
+                found = 1
+                if rp_scalar_elem(irv_type(s2)) == 0:
+                    return 0
+            ni = ni + 1
+        if found == 0:
+            return 0
+        i = i + 1
+    return 0
+
 // V2.2 merge: one direct constant-size scalar array is stored directly into an
 // outer local slot. An if/else may allocate one array per branch when both
 // arrays have the same element type and length; one parent copy is filled at
@@ -1029,6 +1103,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
     if rp_if_merge_ancestors_ok(sg) == 0:
         return 0
     alloc_count : ., mut = 0
+    kind : ., mut = -1
+    name1 : ., mut = -1
     an1 : ., mut = -1
     an2 : ., mut = -1
     ai1 : ., mut = -1
@@ -1039,18 +1115,25 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
             break
         an := cell_load(g_pa_alloc_nodes, ai * 8)
         if subgraph_containing(an) == sg:
-            aop := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
-            if aop != IR_ALLOC_ARRAY:
+            k := rp_merge_alloc_kind(an)
+            if k < 0:
                 return 0
-            alloc_count = alloc_count + 1
-            if alloc_count == 1:
+            if alloc_count == 0:
+                kind = k
+                name1 = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
                 an1 = an
                 ai1 = ai
-            else if alloc_count == 2:
+            else if alloc_count == 1:
+                if k != kind:
+                    return 0
+                if kind == 1:
+                    if cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3) != name1:
+                        return 0
                 an2 = an
                 ai2 = ai
             else:
                 return 0
+            alloc_count = alloc_count + 1
         ai = ai + 1
     if alloc_count < 1:
         return 0
@@ -1078,27 +1161,57 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                             return 0
         ai = ai + 1
     ad1 := cell_load(g_df_nodes, an1 * ESZ_DFNODE + OFF_DF_DEST)
-    at := irv_type(ad1)
-    if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
-        return 0
-    cnt := cell_load(g_df_nodes, an1 * ESZ_DFNODE + OFF_DF_S1)
-    if cnt <= 0 || cnt > 64:
-        return 0
-    elem := get_type_data(at)
-    if rp_scalar_elem(elem) == 0:
-        return 0
+    cnt : ., mut = 0
+    elem : ., mut = -1
+    if kind == 0:
+        at := irv_type(ad1)
+        if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
+            return 0
+        cnt = cell_load(g_df_nodes, an1 * ESZ_DFNODE + OFF_DF_S1)
+        if cnt <= 0 || cnt > 64:
+            return 0
+        elem = get_type_data(at)
+        if rp_scalar_elem(elem) == 0:
+            return 0
+    else if kind == 1:
+        si := find_struct_by_name(name1)
+        if si < 0:
+            return 0
+        cnt = si_field_count(si)
+        if cnt <= 0 || cnt > 64:
+            return 0
+        fi : ., mut = 0
+        loop:
+            if fi >= cnt:
+                break
+            if rp_scalar_elem(struct_row_field_ti(si, fi)) == 0:
+                return 0
+            fi = fi + 1
+    else:
+        cnt = cell_load(g_df_nodes, an1 * ESZ_DFNODE + OFF_DF_S1)
+        if rp_tuple_pod(an1, cnt, sg_start, sg_count) == 0:
+            return 0
     ad2 : ., mut = -1
     mid : ., mut = -1
     ni : ., mut = sg_start
     if alloc_count == 2:
         ad2 = cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_DEST)
-        at2 := irv_type(ad2)
-        if at2 < 0 || at2 >= g_type_count || get_type_kind(at2) != TYP_ARRAY:
-            return 0
-        if cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_S1) != cnt:
-            return 0
-        if get_type_data(at2) != elem:
-            return 0
+        if kind == 0:
+            at2 := irv_type(ad2)
+            if at2 < 0 || at2 >= g_type_count || get_type_kind(at2) != TYP_ARRAY:
+                return 0
+            if cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_S1) != cnt:
+                return 0
+            if get_type_data(at2) != elem:
+                return 0
+        else if kind == 1:
+            if cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_S3) != name1:
+                return 0
+        else:
+            if cell_load(g_df_nodes, an2 * ESZ_DFNODE + OFF_DF_S1) != cnt:
+                return 0
+            if rp_tuple_pod(an2, cnt, sg_start, sg_count) == 0:
+                return 0
         // The two arrays must occupy different branches: the then branch ends
         // at the first jump to the IF merge label, the else branch at the
         // second. Splitting here keeps one copy emission per branch range.
@@ -1187,6 +1300,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
     ni = nstart
     loop:
         if ni >= nstart + ncount:
+            g_rp_merge_kind = kind
+            g_rp_merge_name = name1
             return cnt
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         dv := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
@@ -1198,21 +1313,30 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
             value : ., mut = -1
             extra : ., mut = 0
             known : ., mut = 0
-            if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR:
-                base = s1
-                known = 1
-                if op == IR_LOAD_INDEX_VAR && rp_sel_pts(s2, ai1, ai2) != 0:
-                    extra = 1
-            else if op == IR_STORE_INDEX:
-                base = s1
-                value = s2
-                known = 1
-            else if op == IR_STORE_INDEX_VAR:
-                base = s1
-                value = dv
-                known = 1
-                if rp_sel_pts(s2, ai1, ai2) != 0:
-                    extra = 1
+            if kind == 0:
+                if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR:
+                    base = s1
+                    known = 1
+                    if op == IR_LOAD_INDEX_VAR && rp_sel_pts(s2, ai1, ai2) != 0:
+                        extra = 1
+                else if op == IR_STORE_INDEX:
+                    base = s1
+                    value = s2
+                    known = 1
+                else if op == IR_STORE_INDEX_VAR:
+                    base = s1
+                    value = dv
+                    known = 1
+                    if rp_sel_pts(s2, ai1, ai2) != 0:
+                        extra = 1
+            else:
+                if op == IR_LOAD_FIELD:
+                    base = s1
+                    known = 1
+                else if op == IR_STORE_FIELD:
+                    base = s1
+                    value = s2
+                    known = 1
             if known == 0:
                 if op == IR_STORE && s1 == dest && subgraph_containing(ni) == sg:
                     if s2 == ad1 || (alloc_count == 2 && s2 == ad2):
@@ -1261,6 +1385,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                     if rc_sg_is_ancestor(sg, subgraph_containing(ni)) == 0 && base != dest:
                         return 0
         ni = ni + 1
+    g_rp_merge_kind = kind
+    g_rp_merge_name = name1
     return cnt
 
 // V2.3 narrow share: a top-level IF allocates one scalar array into its child
@@ -1756,26 +1882,28 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
                           range_start: int, range_end: int) -> int:
     if copy_var < 0 || copy_instr < 0:
         return 0
+    kind := region_plan_merge_kind_of(sg)
+    if kind < 0:
+        return 0
     an : ., mut = -1
     ni : ., mut = range_start
     loop:
         if ni >= range_end:
             break
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        if op == IR_ALLOC_ARRAY && subgraph_containing(ni) == sg:
-            an = ni
-            break
+        if subgraph_containing(ni) == sg:
+            if kind == 1:
+                if op == IR_ALLOC_STRUCT:
+                    an = ni
+                    break
+            else:
+                if op == IR_ALLOC_ARRAY:
+                    an = ni
+                    break
         ni = ni + 1
     if an < 0:
         return 0
     alloc_dest := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
-    at := irv_type(alloc_dest)
-    if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
-        return 0
-    cnt := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
-    elem := get_type_data(at)
-    if cnt <= 0 || cnt > 64 || rp_scalar_elem(elem) == 0:
-        return 0
     dest : ., mut = -1
     ni = range_start
     loop:
@@ -1790,17 +1918,69 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
         ni = ni + 1
     if dest < 0:
         return 0
-    // The copy allocation was emitted with the planned element count and its
-    // size already charged to the parent arena; only the type row is patched.
-    irv_set_type(copy_var, alloc_type(TYP_ARRAY, elem, cnt))
-    i : ., mut = 0
-    loop:
-        if i >= cnt:
-            break
-        ev := new_ir_var("_merge_elem", elem)
-        emit(IR_LOAD_INDEX, ev, alloc_dest, 0, i, elem)
-        emit(IR_STORE_INDEX, -1, copy_var, ev, i, 0)
-        i = i + 1
+    cnt : ., mut = 0
+    if kind == 0:
+        at := irv_type(alloc_dest)
+        if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
+            return 0
+        cnt = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+        elem := get_type_data(at)
+        if cnt <= 0 || cnt > 64 || rp_scalar_elem(elem) == 0:
+            return 0
+        // The copy allocation was emitted with the planned element count and
+        // its size already charged to the parent arena; only the type row is
+        // patched.
+        irv_set_type(copy_var, alloc_type(TYP_ARRAY, elem, cnt))
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            ev := new_ir_var("_merge_elem", elem)
+            emit(IR_LOAD_INDEX, ev, alloc_dest, 0, i, elem)
+            emit(IR_STORE_INDEX, -1, copy_var, ev, i, 0)
+            i = i + 1
+    else if kind == 1:
+        name := region_plan_merge_name_of(sg)
+        si := find_struct_by_name(name)
+        if si < 0:
+            return 0
+        cnt = si_field_count(si)
+        if cnt <= 0 || cnt > 64:
+            return 0
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            ft := struct_row_field_ti(si, i)
+            ev := new_ir_var("_merge_field", ft)
+            emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
+            emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+            i = i + 1
+    else:
+        cnt = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+        if cnt <= 0 || cnt > 64:
+            return 0
+        irv_set_type(copy_var, irv_type(alloc_dest))
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            ft : ., mut = TI_INT
+            fi : ., mut = range_start
+            loop:
+                if fi >= range_end:
+                    break
+                op := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_OPCODE)
+                s1 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S1)
+                s2 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S2)
+                s3 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S3)
+                if op == IR_STORE_FIELD && s1 == alloc_dest && s3 == i:
+                    ft = irv_type(s2)
+                fi = fi + 1
+            ev := new_ir_var("_merge_field", ft)
+            emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
+            emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+            i = i + 1
     emit(IR_STORE, -1, dest, copy_var, 0, 0)
     return 1
 
@@ -1957,7 +2137,7 @@ fn region_plan_analyze():
                                 else:
                                     mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 0)
                                     if mc > 0:
-                                        region_plan_mark_merge(sg, mc)
+                                        region_plan_mark_merge(sg, g_rp_merge_kind, mc, g_rp_merge_name)
             sg = sg + 1
         fi = fi + 1
 
