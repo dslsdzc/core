@@ -29,6 +29,10 @@ g_plan_share_reset_mode : string, mut
 g_plan_share_reset_label : string, mut
 g_plan_share_reset_event : string, mut
 g_plan_share_after : string, mut
+g_plan_share_cow : string, mut
+g_plan_share_dest : string, mut
+g_plan_share_len : string, mut
+g_plan_share_elem : string, mut
 g_plan_share_count : int, mut
 g_plan_share_cap : int, mut
 g_plan_share_reset_emitted : int, mut
@@ -36,6 +40,10 @@ g_rp_share_consumer : int, mut
 g_rp_share_exit : int, mut
 g_rp_share_mode : int, mut
 g_rp_share_reset_node : int, mut
+g_rp_share_cow : int, mut
+g_rp_share_dest : int, mut
+g_rp_share_len : int, mut
+g_rp_share_elem : int, mut
 // Kind/name of the last eligible merge: 0=array, 1=struct, 2=tuple.
 g_rp_merge_kind : int, mut
 g_rp_merge_name : int, mut
@@ -85,6 +93,10 @@ fn region_plan_reset():
     g_rp_share_exit = -1
     g_rp_share_mode = -1
     g_rp_share_reset_node = -1
+    g_rp_share_cow = 0
+    g_rp_share_dest = -1
+    g_rp_share_len = 0
+    g_rp_share_elem = -1
     g_rp_merge_kind = -1
     g_rp_merge_name = -1
     g_rp_merge_str1 = -1
@@ -129,6 +141,10 @@ fn region_plan_reset():
             cell_store(g_plan_share_reset_label, i * 8, -1)
             cell_store(g_plan_share_reset_event, i * 8, -1)
             cell_store(g_plan_share_after, i * 8, 0)
+            cell_store(g_plan_share_cow, i * 8, 0)
+            cell_store(g_plan_share_dest, i * 8, -1)
+            cell_store(g_plan_share_len, i * 8, 0)
+            cell_store(g_plan_share_elem, i * 8, -1)
             i = i + 1
     g_plan_share_count = 0
 
@@ -244,6 +260,10 @@ fn region_plan_grow_share(n: int):
     nrl := alloc(nc * 8)
     nre := alloc(nc * 8)
     na := alloc(nc * 8)
+    ncw := alloc(nc * 8)
+    nd := alloc(nc * 8)
+    nl := alloc(nc * 8)
+    nel := alloc(nc * 8)
     i : ., mut = 0
     loop:
         if i >= nc:
@@ -257,6 +277,10 @@ fn region_plan_grow_share(n: int):
         cell_store(nrl, i * 8, -1)
         cell_store(nre, i * 8, -1)
         cell_store(na, i * 8, 0)
+        cell_store(ncw, i * 8, 0)
+        cell_store(nd, i * 8, -1)
+        cell_store(nl, i * 8, 0)
+        cell_store(nel, i * 8, -1)
         i = i + 1
     if g_plan_share_cap > 0:
         cell_copy(g_plan_share, g_plan_share_cap * 8, nb)
@@ -268,6 +292,10 @@ fn region_plan_grow_share(n: int):
         cell_copy(g_plan_share_reset_label, g_plan_share_cap * 8, nrl)
         cell_copy(g_plan_share_reset_event, g_plan_share_cap * 8, nre)
         cell_copy(g_plan_share_after, g_plan_share_cap * 8, na)
+        cell_copy(g_plan_share_cow, g_plan_share_cap * 8, ncw)
+        cell_copy(g_plan_share_dest, g_plan_share_cap * 8, nd)
+        cell_copy(g_plan_share_len, g_plan_share_cap * 8, nl)
+        cell_copy(g_plan_share_elem, g_plan_share_cap * 8, nel)
     g_plan_share = nb
     g_plan_share_exit = ne
     g_plan_share_mode = nm
@@ -277,6 +305,10 @@ fn region_plan_grow_share(n: int):
     g_plan_share_reset_label = nrl
     g_plan_share_reset_event = nre
     g_plan_share_after = na
+    g_plan_share_cow = ncw
+    g_plan_share_dest = nd
+    g_plan_share_len = nl
+    g_plan_share_elem = nel
     g_plan_share_cap = nc
 
 fn region_plan_unmark_merge(sg: int):
@@ -304,6 +336,10 @@ fn region_plan_mark_share(sg: int, exit_label: int, mode: int, event: int, own_p
         cell_store(g_plan_share_reset_mode, sg * 8, mode)
         cell_store(g_plan_share_reset_label, sg * 8, exit_label)
         cell_store(g_plan_share_reset_event, sg * 8, event)
+        cell_store(g_plan_share_cow, sg * 8, g_rp_share_cow)
+        cell_store(g_plan_share_dest, sg * 8, g_rp_share_dest)
+        cell_store(g_plan_share_len, sg * 8, g_rp_share_len)
+        cell_store(g_plan_share_elem, sg * 8, g_rp_share_elem)
         g_plan_share_count = g_plan_share_count + 1
 
 fn region_plan_is_share(sg: int) -> int:
@@ -338,6 +374,26 @@ fn region_plan_share_for_label(lbl: int) -> int:
 
 // Consumer SG -> share owner SG (or -1). The owner's reset is emitted after
 // the consumer's own arena reset.
+fn region_plan_share_cow(sg: int) -> int:
+    if region_plan_is_share(sg) == 0 || sg >= g_plan_share_cap:
+        return 0
+    return cell_load(g_plan_share_cow, sg * 8)
+
+fn region_plan_share_dest(sg: int) -> int:
+    if region_plan_is_share(sg) == 0 || sg >= g_plan_share_cap:
+        return -1
+    return cell_load(g_plan_share_dest, sg * 8)
+
+fn region_plan_share_len(sg: int) -> int:
+    if region_plan_is_share(sg) == 0 || sg >= g_plan_share_cap:
+        return 0
+    return cell_load(g_plan_share_len, sg * 8)
+
+fn region_plan_share_elem(sg: int) -> int:
+    if region_plan_is_share(sg) == 0 || sg >= g_plan_share_cap:
+        return -1
+    return cell_load(g_plan_share_elem, sg * 8)
+
 fn region_plan_share_after(cg: int) -> int:
     if cg < 0 || g_plan_share_count <= 0 || cg >= g_plan_share_cap:
         return -1
@@ -2035,6 +2091,10 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
     g_rp_share_exit = -1
     g_rp_share_mode = -1
     g_rp_share_reset_node = -1
+    g_rp_share_cow = 0
+    g_rp_share_dest = -1
+    g_rp_share_len = 0
+    g_rp_share_elem = -1
     // Same hard gates as the split/merge candidate scan.
     if rp_if_has_unsafe(sg_start, sg_count) != 0:
         return 0
@@ -2077,9 +2137,16 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
         ni = ni + 1
     if dest < 0:
         return 0
+    at := irv_type(alloc_dest)
+    if at < 0 || at >= g_type_count || get_type_kind(at) != TYP_ARRAY:
+        return 0
+    g_rp_share_dest = dest
+    g_rp_share_len = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    g_rp_share_elem = get_type_data(at)
     s_end := sg_start + sg_count
     func_end := nstart + ncount
     umax : ., mut = -1
+    wrote : ., mut = 0
     ni = s_end
     loop:
         if ni >= func_end:
@@ -2107,10 +2174,10 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
             if value >= 0 && rp_var_may_point(value) != 0 && pa_pts_has(value, ai_sel) != 0:
                 return 0
             if base >= 0 && rp_var_may_point(base) != 0 && pa_pts_has(base, ai_sel) != 0:
-                if op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR:
-                    return 0
                 if base != dest:
                     return 0
+                if op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR:
+                    wrote = 1
                 umax = ni
         else:
             literal_only : ., mut = 0
@@ -2143,6 +2210,8 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
         ni = ni + 1
     if umax < 0:
         return 0
+    if wrote != 0:
+        g_rp_share_cow = 1
     rp_pdom_prepare(nstart, ncount)
     if g_rp_pdom_ok == 0:
         return 0

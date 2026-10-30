@@ -687,6 +687,39 @@ WRITE_CONSUMER = """fn main() -> int:
     return total - 18
 """
 
+WRITE_ALIAS = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    q := arr
+    i : ., mut = 0
+    while i < 2:
+        q[0] = 9
+        total = total + arr[0]
+        i = i + 1
+    return total - 18
+"""
+
+WRITE_ONLY = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        arr[0] = 9
+        i = i + 1
+    return 0
+"""
+
 STRAIGHT_READ = """fn main() -> int:
     arr : ., mut = [5, 6]
     y : ., mut = 1
@@ -765,11 +798,11 @@ def test_p1_share_two_readers():
     build_run(TWO_READERS, 0)
 
 
-def test_p2_write_consumer_blocks_share():
+def test_p2_write_consumer_shares():
     result = ccr(WRITE_CONSUMER)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_share(diag), diag
+    assert has_share(diag), diag
     build_run(WRITE_CONSUMER, 0)
 
 
@@ -1026,10 +1059,26 @@ def test_p32_allocating_callee_blocks_share():
     assert not has_share(diag), diag
 
 
+def test_p33_write_through_alias_blocks_share():
+    result = ccr(WRITE_ALIAS)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+    build_run(WRITE_ALIAS, 0)
+
+
+def test_p34_write_only_consumer_shares():
+    result = ccr(WRITE_ONLY)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    build_run(WRITE_ONLY, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_share_two_readers,
-        test_p2_write_consumer_blocks_share,
+        test_p2_write_consumer_shares,
         test_p3_straight_line_reader_blocks_share,
         test_p4_parent_allocation_in_window_blocks_share,
         test_p5_nested_if_blocks_share,
@@ -1060,6 +1109,8 @@ if __name__ == "__main__":
         test_p30_overlapping_shares_reset_lifo,
         test_p31_ffi_in_consumer_window_blocks_share,
         test_p32_allocating_callee_blocks_share,
+        test_p33_write_through_alias_blocks_share,
+        test_p34_write_only_consumer_shares,
     ]
     failures = 0
     for test in tests:
