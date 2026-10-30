@@ -264,11 +264,11 @@ if all allocations pass: split(S) = 1
   - Q = 最后一个使用之后最早的、可作为 current-S 点的 label：函数级/普通 IF 的 label 用 label reset（mode 1，要求 Q 后支配 IF 汇合点）；顶层 loop/for/split-IF 的退出 label 用 after-SG reset（mode 0，退出后先 reset 该区域 arena 再 reset S）。顶层结构化退出不依赖后支配（无限循环路径不继续执行，因此无需 reset）。
   - 消费者可以是 LOOP/FOR、split IF、嵌套 loop（无 break/return/unsafe），也可以是普通 IF 后的 parent-level 读；窗口内不得有 call/spawn（跨函数证明除外）、`g_current_arena` 读、return、跳出窗口的 jump、跳到任一 loop/for 出口标签的 break、unsafe SG，或实际落入 S 槽的 allocation。allocation 归属按最近的、其 `IR_ARENA_NEW` 已在该节点之前的释放子图判定；Phase A 中 split/merge IF 的 arena 还未生成，按 SG 入口计。窗口内任何 merge IF 都拒绝（Phase B copy 会落入 S）。
   - 多个 share 按 SG 降序（内层先）启用；若更晚的 merge 候选落在较早候选的窗口内，较早候选保持 merge/v1。share 槽允许嵌套重叠：外层 share 的实际 reset 延后到内层 share 的有效 reset 点，同一事件按 SG 降序（内层先）发射 `IR_ARENA_RESET`，形成 LIFO。多个不重叠 share 也合法，各自 reset。
-  - 跨函数只读证明是传递的：每个函数计算 hazard 位（1=unsafe，2=`g_current_arena` 读写，4=arena/spawn/yield/await/未知调用，8=heap/array/field/pointer store），沿调用图做固定点传播。窗口内 `IR_CALL` 的 callee 必须清零 1/2/4；若实参包含共享数组，还须清零 8，且参数写/逃逸/返回别名/FFI 摘要位必须全空。非 arena infra、可解析的 callee 即可，允许调用链。
+  - 跨函数只读证明是传递的：每个函数计算 hazard 位（1=unsafe，2=`g_current_arena` 读写，4=arena/spawn/yield/await/未知调用/callee 分配或返回非标量，8=heap/array/field/pointer store 或取址/切片/指针视图），沿调用图做固定点传播。窗口内 `IR_CALL` 的 callee 必须清零 1/2/4；若实参包含共享数组，还须清零 8，且参数写/逃逸/返回别名/FFI 摘要位必须全空。非 arena infra、可解析的 callee 即可，允许调用链。窗口同时拒绝 `IR_CALL_EXTERN`/`IR_HOTPATCH_ROUTE`/`IR_DYN_DISPATCH`；callee 内分配或返回非标量值按 bit 4 拒绝，避免返回值在 share reset 后悬挂。
   - 同一函数内的 merge plan 若在 share 窗口内则阻止该 share。
   - early clear 与 share 共存：父槽 clear 在 share reset 之前的同一 label 发射，`arena_clear` 只重置父槽元数据、不切换 current，不影响共享槽。
   - S 的 arena 在 IF 入口创建，IF 汇合标签**不 reset**；Q 处发射 `IR_ARENA_RESET`（label hook 或 consumer SG reset 之后）。外层槽继续指向 S 内的数组，不复制。`RegionCheck` 的 lifetime exit 对该 SG 使用 Q 的 label id（`rc_sg_lexit` 在 Phase B 重新解析），而不是 IF 汇合点。
-  - 验收覆盖 `test_share.py` 30 例：两个/单个/for/嵌套 loop 消费者、IF 消费者、wider label LCPD、多个顺序 share、重叠 share 的 LIFO reset、false path、写/直读/窗口分配/嵌套 IF/break/unsafe/消费者后读拒绝、跨函数（含传递调用链）只读/写入/逃逸/current/arena/无数组叶调用，以及 share 与 early clear 共存；受 `src/ci/run.sh` selfhost-tests 挂钩。
+  - 验收覆盖 `test_share.py` 32 例：两个/单个/for/嵌套 loop 消费者、IF 消费者、wider label LCPD、多个顺序 share、重叠 share 的 LIFO reset、false path、写/直读/窗口分配/嵌套 IF/break/unsafe/消费者后读拒绝、跨函数（含传递调用链）只读/写入/逃逸/current/arena/无数组叶调用，以及 share 与 early clear 共存；受 `src/ci/run.sh` selfhost-tests 挂钩。
 ### V2.4 清零配置
 
 - `arena_zero_on_reset` 部署配置。

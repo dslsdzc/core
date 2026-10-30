@@ -625,6 +625,51 @@ OVERLAP_SHARE = """fn main() -> int:
     return total - 32
 """
 
+FFI_CONSUMER = """extern fn getchar() -> int
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0] + getchar()
+        i = i + 1
+    return 0
+"""
+
+ALLOC_CALLEE = """import fmt
+
+fn mk() -> string:
+    return concat("a", "b")
+
+fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    s : ., mut = ""
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        s = mk()
+        i = i + 1
+    if s == "ab":
+        return 0
+    return 1
+"""
+
 WRITE_CONSUMER = """fn main() -> int:
     arr : ., mut = [5, 6]
     y : ., mut = 1
@@ -967,6 +1012,20 @@ def test_p30_overlapping_shares_reset_lifo():
     build_run(OVERLAP_SHARE, 0)
 
 
+def test_p31_ffi_in_consumer_window_blocks_share():
+    result = ccr(FFI_CONSUMER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+
+
+def test_p32_allocating_callee_blocks_share():
+    result = ccr(ALLOC_CALLEE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_share(diag), diag
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_share_two_readers,
@@ -999,6 +1058,8 @@ if __name__ == "__main__":
         test_p28_transitive_current_blocks_share,
         test_p29_transitive_arena_blocks_share,
         test_p30_overlapping_shares_reset_lifo,
+        test_p31_ffi_in_consumer_window_blocks_share,
+        test_p32_allocating_callee_blocks_share,
     ]
     failures = 0
     for test in tests:

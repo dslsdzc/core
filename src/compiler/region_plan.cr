@@ -1603,9 +1603,24 @@ fn rp_share_bad_prepare():
                 s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
                 if op == IR_STORE && s1 == cav:
                     rp_share_bad_set(fi, 2)
-                if op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_FIELD || op == IR_STORE_PTR:
+                if op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_FIELD || op == IR_STORE_PTR || op == IR_ADDR_INDEX || op == IR_REF || op == IR_SLICE || op == IR_PTR_OF || op == IR_STR_OF:
                     rp_share_bad_set(fi, 8)
+                // A callee allocation can land in the caller's current share
+                // slot and die at the share reset. Reject it unless a later
+                // lifetime proof is added for returned values.
+                if op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_ALLOC_AT:
+                    rp_share_bad_set(fi, 4)
+                if op == IR_RETURN:
+                    rt := irv_type(s1)
+                    if rt >= 0 && rt < g_type_count:
+                        rk := get_type_kind(rt)
+                        if rk == TYP_ARRAY || rk == TYP_PTR || rk == TYP_REF || rk == TYP_SLICE || rk == TYP_TUPLE || rk == TYP_OPTIONAL:
+                            rp_share_bad_set(fi, 4)
+                        else if rk == TYP_BASE && get_type_data(rt) == TY_STRING:
+                            rp_share_bad_set(fi, 4)
                 if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+                    rp_share_bad_set(fi, 4)
+                if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
                     rp_share_bad_set(fi, 4)
                 if op == IR_CALL || op == IR_SPAWN:
                     if is_arena_infra_name(s3) != 0:
@@ -1795,6 +1810,8 @@ fn rp_share_window_ok(s_end: int, rn: int, mode: int, ai_sel: int, nstart: int, 
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
         if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+            return 0
+        if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
             return 0
         if op == IR_CALL:
             if rp_share_call_ok(s1, s2, s3, ai_sel) == 0:
