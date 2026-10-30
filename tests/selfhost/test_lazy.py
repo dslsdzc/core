@@ -158,6 +158,264 @@ fn main() -> int:
     return 0
 """
 
+MULTI_USE_TRUE = BOOM + """
+fn main() -> int:
+    v := boom()
+    c : ., mut = 1
+    if c == 1:
+        return v
+    if c == 1:
+        return v
+    return 0
+"""
+
+SITE_MEMO_SUM = """fn bump(x: int) -> int:
+    return x + 1
+""" + """
+fn main() -> int:
+    total : ., mut = 0
+    v := bump(1)
+    c : ., mut = 1
+    if c == 1:
+        total = total + v
+    if c == 1:
+        total = total + v
+    return total - 4
+"""
+
+SITE_MEMO_ARG = """fn ident(x: int) -> int:
+    return x
+""" + """
+fn main() -> int:
+    x : ., mut = 1
+    v := ident(x)
+    x = 2
+    c : ., mut = 1
+    if c == 1:
+        return v
+    if c == 1:
+        return v
+    return 0
+"""
+
+SITE_MEMO_POINTER = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    v := read(&arr[0])
+    c : ., mut = 1
+    if c == 1:
+        return v
+    if c == 1:
+        return v
+    return 0
+"""
+
+SITE_MEMO_POINTER_MUTATED = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    v := read(&arr[0])
+    arr[0] = 9
+    c : ., mut = 1
+    if c == 1:
+        return v
+    if c == 1:
+        return v
+    return 0
+"""
+
+LOOP_SITE_MEMO = """fn ident(x: int) -> int:
+    return x
+""" + """
+fn main() -> int:
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        x : ., mut = i
+        v := ident(x)
+        if i == 1:
+            total = total + v
+        if i == 1:
+            total = total + v
+        i = i + 1
+    return total - 2
+"""
+
+DOUBLE_ASSIGN = """fn bump(x: int) -> int:
+    return x + 1
+""" + """
+fn main() -> int:
+    v : ., mut = 0
+    v = bump(1)
+    v = bump(2)
+    return v - 3
+"""
+
+LOOP_GLOBAL_MUTATED = """g : int, mut = 0
+
+fn read(x: int) -> int:
+    return x
+
+fn bumpg():
+    g = g + 1
+""" + """
+fn main() -> int:
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        v := read(g)
+        bumpg()
+        if i == 1:
+            total = total + v
+        if i == 1:
+            total = total + v
+        i = i + 1
+    return total - 2
+"""
+
+GLOBAL_READER = """g : int, mut = 0
+
+fn cur() -> int:
+    return g
+
+fn bumpg():
+    g = g + 1
+""" + """
+fn main() -> int:
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        v := cur()
+        bumpg()
+        if i == 1:
+            total = total + v
+        if i == 1:
+            total = total + v
+        i = i + 1
+    return total - 2
+"""
+
+POINTER_READ = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    v := read(&arr[0])
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
+POINTER_READ_TRUE = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    v := read(&arr[0])
+    c : ., mut = 1
+    if c == 1:
+        return v
+    return 0
+"""
+
+POINTER_READ_MUTATED = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    v := read(&arr[0])
+    arr[0] = 9
+    c : ., mut = 1
+    if c == 1:
+        return v
+    return 0
+"""
+
+ARRAY_READ = """fn first(a: [int; 2]) -> int:
+    return a[0]
+""" + """
+fn main() -> int:
+    arr : [int; 2], mut = [1, 2]
+    v := first(arr)
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
+ARRAY_READ_TRUE = """fn first(a: [int; 2]) -> int:
+    return a[0]
+""" + """
+fn main() -> int:
+    arr : [int; 2], mut = [1, 2]
+    v := first(arr)
+    c : ., mut = 1
+    if c == 1:
+        return v
+    return 0
+"""
+
+ARRAY_READ_MUTATED = """fn first(a: [int; 2]) -> int:
+    return a[0]
+""" + """
+fn main() -> int:
+    arr : [int; 2], mut = [1, 2]
+    v := first(arr)
+    arr[0] = 9
+    c : ., mut = 1
+    if c == 1:
+        return v
+    return 0
+"""
+
+LOOP_POINTER_MEMO = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    p := &arr[0]
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        v := read(p)
+        if i == 5:
+            total = total + v
+        i = i + 1
+    return total
+"""
+
+LOOP_POINTER_MEMO_MUTATED = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    arr := [5, 6]
+    p := &arr[0]
+    i : ., mut = 0
+    while i < 2:
+        v := read(p)
+        arr[0] = i
+        if i == 1:
+            return v
+        i = i + 1
+    return 0
+"""
+
+SCALAR_POINTER_READ = """fn read(p: *int) -> int:
+    return *p
+""" + """
+fn main() -> int:
+    x : ., mut = 5
+    v := read(&x)
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
 MEMO_USE = BOOM + """
 fn main() -> int:
     v := boom()
@@ -298,12 +556,61 @@ def test_loop_conditional_sinks():
     build_run(LOOP_FALSE, 0)
 
 
-def test_multi_use_stays_eager():
+def test_multi_use_memoizes():
     result = ccr(MULTI_USE)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not call_is_in_block(diag, "boom"), diag
-    build_run(MULTI_USE, 1)
+    assert call_is_in_block(diag, "boom"), diag
+    assert "_lazy_flag" in diag, diag
+    build_run(MULTI_USE, 0)
+
+
+def test_multi_use_true_path_executes():
+    result = ccr(MULTI_USE_TRUE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(MULTI_USE_TRUE, 1)
+
+
+def test_site_memo_reads_once_in_both_branches():
+    result = ccr(SITE_MEMO_SUM)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(SITE_MEMO_SUM, 0)
+
+
+def test_site_memo_captures_argument():
+    result = ccr(SITE_MEMO_ARG)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(SITE_MEMO_ARG, 1)
+
+
+def test_site_memo_pointer_argument():
+    result = ccr(SITE_MEMO_POINTER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(SITE_MEMO_POINTER, 5)
+
+
+def test_site_memo_pointer_mutation_rejected():
+    result = ccr(SITE_MEMO_POINTER_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" not in diag, diag
+    build_run(SITE_MEMO_POINTER_MUTATED, 5)
+
+
+def test_loop_site_memo_per_iteration():
+    result = ccr(LOOP_SITE_MEMO)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(LOOP_SITE_MEMO, 0)
 
 
 def test_straight_line_stays_eager():
@@ -413,12 +720,124 @@ def test_loop_memo_mutated_arg_rejected():
     build_run(LOOP_MEMO_MUTATED, 0)
 
 
+def test_pointer_argument_sinks():
+    result = ccr(POINTER_READ)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "read"), diag
+    build_run(POINTER_READ, 0)
+
+
+def test_pointer_argument_true_path_reads_original_value():
+    result = ccr(POINTER_READ_TRUE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "read"), diag
+    build_run(POINTER_READ_TRUE, 5)
+
+
+def test_pointer_argument_mutation_keeps_eager_value():
+    result = ccr(POINTER_READ_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not call_is_in_block(diag, "read"), diag
+    build_run(POINTER_READ_MUTATED, 5)
+
+
+def test_array_argument_sinks():
+    result = ccr(ARRAY_READ)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "first"), diag
+    build_run(ARRAY_READ, 0)
+
+
+def test_array_argument_true_path_reads_original_value():
+    result = ccr(ARRAY_READ_TRUE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "first"), diag
+    build_run(ARRAY_READ_TRUE, 1)
+
+
+def test_array_argument_mutation_keeps_eager_value():
+    result = ccr(ARRAY_READ_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not call_is_in_block(diag, "first"), diag
+    build_run(ARRAY_READ_MUTATED, 1)
+
+
+def test_loop_pointer_argument_memoizes():
+    result = ccr(LOOP_POINTER_MEMO)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(LOOP_POINTER_MEMO, 0)
+
+
+def test_loop_pointer_argument_mutation_rejected():
+    result = ccr(LOOP_POINTER_MEMO_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" not in diag, diag
+    build_run(LOOP_POINTER_MEMO_MUTATED, 0)
+
+
+def test_untracked_scalar_pointer_stays_eager():
+    result = ccr(SCALAR_POINTER_READ)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not call_is_in_block(diag, "read"), diag
+    build_run(SCALAR_POINTER_READ, 0)
+
+
+def test_double_assignment_keeps_latest_def():
+    result = ccr(DOUBLE_ASSIGN)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    body = main_section(diag)
+    assert body.count("call bump(") == 2, body
+    build_run(DOUBLE_ASSIGN, 0)
+
+
+def test_loop_global_argument_uses_site_value():
+    result = ccr(LOOP_GLOBAL_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    # The global may change across iterations, so it cannot be hoisted with
+    # the loop memo. A site memo captures the value at each call site.
+    assert "_lazy_flag" in diag, diag
+    build_run(LOOP_GLOBAL_MUTATED, 0)
+
+
+def test_global_reading_callee_stays_eager():
+    result = ccr(GLOBAL_READER)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" not in diag, diag
+    body = main_section(diag)
+    # The eager call stays at the loop body head, before bumpg(); sinking it
+    # into the if would move it after bumpg().
+    assert body.index("call cur(") < body.index("call bumpg("), body
+    build_run(GLOBAL_READER, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_if_false_sinks_and_returns,
         test_if_true_executes_at_use,
         test_loop_conditional_sinks,
-        test_multi_use_stays_eager,
+        test_multi_use_memoizes,
+        test_multi_use_true_path_executes,
+        test_site_memo_reads_once_in_both_branches,
+        test_site_memo_captures_argument,
+        test_site_memo_pointer_argument,
+        test_site_memo_pointer_mutation_rejected,
+        test_loop_site_memo_per_iteration,
+        test_double_assignment_keeps_latest_def,
+        test_loop_global_argument_uses_site_value,
+        test_global_reading_callee_stays_eager,
         test_straight_line_stays_eager,
         test_local_allocating_callee_sinks,
         test_binary_use_sinks,
@@ -432,6 +851,15 @@ if __name__ == "__main__":
         test_loop_invariant_memoizes,
         test_loop_memo_true_path_executes_once,
         test_loop_memo_mutated_arg_rejected,
+        test_pointer_argument_sinks,
+        test_pointer_argument_true_path_reads_original_value,
+        test_pointer_argument_mutation_keeps_eager_value,
+        test_array_argument_sinks,
+        test_array_argument_true_path_reads_original_value,
+        test_array_argument_mutation_keeps_eager_value,
+        test_loop_pointer_argument_memoizes,
+        test_loop_pointer_argument_mutation_rejected,
+        test_untracked_scalar_pointer_stays_eager,
     ]
     failures = 0
     for test in tests:

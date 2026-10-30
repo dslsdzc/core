@@ -88,6 +88,8 @@ g_lazy_memo_func : string, mut
 g_lazy_memo_ti : string, mut
 g_lazy_memo_arg0 : string, mut
 g_lazy_memo_argc : string, mut
+// 0 = loop-invariant hoist (preheader init), 1 = site memo (init at call).
+g_lazy_memo_kind : string, mut
 g_lazy_memo_count : int, mut
 g_lazy_memo_cap : int, mut
 // Phase B runtime vars for memo entries (indexed by memo entry).
@@ -112,6 +114,7 @@ fn lazy_memo_grow(n: int):
     nc2 := alloc(nc * 8)
     nv := alloc(nc * 8)
     nfl := alloc(nc * 8)
+    nk := alloc(nc * 8)
     if g_lazy_memo_cap > 0:
         cell_copy(g_lazy_memo_ast, g_lazy_memo_cap * 8, na)
         cell_copy(g_lazy_memo_sg, g_lazy_memo_cap * 8, ns)
@@ -121,6 +124,7 @@ fn lazy_memo_grow(n: int):
         cell_copy(g_lazy_memo_argc, g_lazy_memo_cap * 8, nc2)
         cell_copy(g_lazy_memo_var, g_lazy_memo_cap * 8, nv)
         cell_copy(g_lazy_memo_flag, g_lazy_memo_cap * 8, nfl)
+        cell_copy(g_lazy_memo_kind, g_lazy_memo_cap * 8, nk)
     g_lazy_memo_ast = na
     g_lazy_memo_sg = ns
     g_lazy_memo_func = nf
@@ -129,9 +133,10 @@ fn lazy_memo_grow(n: int):
     g_lazy_memo_argc = nc2
     g_lazy_memo_var = nv
     g_lazy_memo_flag = nfl
+    g_lazy_memo_kind = nk
     g_lazy_memo_cap = nc
 
-fn lazy_memo_add(ast: int, sg: int, func_ni: int, ti: int, arg0: int, argc: int):
+fn lazy_memo_add(ast: int, sg: int, func_ni: int, ti: int, arg0: int, argc: int, kind: int):
     lazy_memo_grow(g_lazy_memo_count + 1)
     cell_store(g_lazy_memo_ast, g_lazy_memo_count * 8, ast)
     cell_store(g_lazy_memo_sg, g_lazy_memo_count * 8, sg)
@@ -139,6 +144,7 @@ fn lazy_memo_add(ast: int, sg: int, func_ni: int, ti: int, arg0: int, argc: int)
     cell_store(g_lazy_memo_ti, g_lazy_memo_count * 8, ti)
     cell_store(g_lazy_memo_arg0, g_lazy_memo_count * 8, arg0)
     cell_store(g_lazy_memo_argc, g_lazy_memo_count * 8, argc)
+    cell_store(g_lazy_memo_kind, g_lazy_memo_count * 8, kind)
     cell_store(g_lazy_memo_var, g_lazy_memo_count * 8, -1)
     cell_store(g_lazy_memo_flag, g_lazy_memo_count * 8, -1)
     g_lazy_memo_count = g_lazy_memo_count + 1
@@ -282,6 +288,12 @@ fn lazy_defer_store(src: int, target: int) -> int:
         if di >= g_lazy_def_count:
             return -1
         if cell_load(g_lazy_def_var, di * 8) == src:
+            // Memo defs (kind 1) describe a guard, not a call with explicit
+            // func/args fields. Copying one as a plain def would emit an empty
+            // call for an ordinary assignment like `v = hd`.
+            if cell_load(g_lazy_def_kind, di * 8) != 0:
+                di = di + 1
+                continue
             if cell_load(g_lazy_def_done, di * 8) != 0:
                 return -1
             cell_store(g_lazy_def_done, di * 8, 1)
@@ -328,6 +340,33 @@ fn lazy_memo_defer_store(src: int, target: int) -> int:
     lazy_memo_def_add(target, mi)
     return 1
 
+fn lazy_memo_ensure_vars(mi: int) -> int:
+    if mi < 0 || mi >= g_lazy_memo_count:
+        return 0
+    if cell_load(g_lazy_memo_var, mi * 8) >= 0:
+        return 1
+    memo := new_ir_var("_lazy_memo", cell_load(g_lazy_memo_ti, mi * 8))
+    flag := new_ir_var("_lazy_flag", TI_INT)
+    cell_store(g_lazy_memo_var, mi * 8, memo)
+    cell_store(g_lazy_memo_flag, mi * 8, flag)
+    return 1
+
+// Site memo: the flag is reset where the source call stood, so every dynamic
+// pass through the call site gets at most one evaluation. Arguments are packed
+// there as well, preserving the call's original inputs.
+fn lazy_memo_site_begin(mi: int, first_arg: int, ac: int) -> int:
+    if lazy_memo_ensure_vars(mi) == 0:
+        return 0
+    if cell_load(g_lazy_memo_kind, mi * 8) != 1:
+        return 0
+    arg0 := lazy_pack_args(first_arg, ac)
+    cell_store(g_lazy_memo_arg0, mi * 8, arg0)
+    flag := cell_load(g_lazy_memo_flag, mi * 8)
+    z := new_ir_var("_memo_init", TI_INT)
+    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+    emit(IR_STORE, -1, flag, z, 0, 0)
+    return 1
+
 fn lazy_memo_guard(mi: int, target: int) -> int:
     if mi < 0 || mi >= g_lazy_memo_count:
         return 0
@@ -362,14 +401,12 @@ fn lazy_memo_emit_for_sg(sg: int):
         if mi >= g_lazy_memo_count:
             return
         if cell_load(g_lazy_memo_sg, mi * 8) == sg:
-            if cell_load(g_lazy_memo_var, mi * 8) < 0:
-                memo := new_ir_var("_lazy_memo", cell_load(g_lazy_memo_ti, mi * 8))
-                flag := new_ir_var("_lazy_flag", TI_INT)
-                cell_store(g_lazy_memo_var, mi * 8, memo)
-                cell_store(g_lazy_memo_flag, mi * 8, flag)
-                z := new_ir_var("_memo_init", TI_INT)
-                emit(IR_CONST, z, 0, 0, 0, TI_INT)
-                emit(IR_STORE, -1, flag, z, 0, 0)
+            if cell_load(g_lazy_memo_kind, mi * 8) == 0:
+                if lazy_memo_ensure_vars(mi) != 0:
+                    flag := cell_load(g_lazy_memo_flag, mi * 8)
+                    z := new_ir_var("_memo_init", TI_INT)
+                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                    emit(IR_STORE, -1, flag, z, 0, 0)
         mi = mi + 1
 
 fn lazy_def_emit(var: int) -> int:
@@ -3057,6 +3094,125 @@ fn lazy_pts_only_local(var: int, cs: int, cc: int) -> int:
 // g_current_arena, write globals, call anything, use unsafe, form pointers that
 // escape, or store through a parameter/external pointer. Local array/struct
 // writes are allowed because the callee's own function arena owns them.
+fn lazy_pointer_arg_safe(av: int) -> int:
+    ti := irv_type(av)
+    if ti < 0 || ti >= g_type_count:
+        return 0
+    k := get_type_kind(ti)
+    if k == TYP_ARRAY:
+        if rp_scalar_elem(get_type_data(ti)) == 0:
+            return 0
+    else if k != TYP_PTR && k != TYP_REF:
+        return 0
+    if k != TYP_ARRAY && rp_var_may_point(av) == 0:
+        return 0
+    found : ., mut = 0
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            return found
+        if pa_pts_has(av, ai) != 0:
+            an := cell_load(g_pa_alloc_nodes, ai * 8)
+            if rc_releasing_region(an) >= 0:
+                return 0
+            found = 1
+        ai = ai + 1
+    return 0
+
+fn lazy_memory_write(op: int) -> int:
+    if op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_PTR:
+        return 1
+    return 0
+
+fn lazy_op_may_mutate_memory(op: int) -> int:
+    if lazy_memory_write(op) != 0:
+        return 1
+    if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH || op == IR_YIELD || op == IR_AWAIT:
+        return 1
+    return 0
+
+// Pointer arguments are captured by value, so the pointee's contents must not
+// change between the original call site and the force point. Direct scalar
+// stores are fine (their values are captured); aggregate/pointer stores and
+// any other call could mutate the pointee.
+fn lazy_range_pointee_stable(lo: int, hi: int, skip_call: int) -> int:
+    ni : ., mut = lo
+    loop:
+        if ni >= hi:
+            return 1
+        if ni != skip_call:
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            if lazy_op_may_mutate_memory(op) != 0:
+                return 0
+        ni = ni + 1
+    return 1
+
+// A loop memo may execute the call on a later iteration. The pointee must be
+// stable for every dynamic pass through the loop, so no aggregate/pointer
+// store and no other call may appear in the loop body.
+fn lazy_loop_pointee_stable(ls: int, le: int, skip_call: int) -> int:
+    ni : ., mut = ls
+    loop:
+        if ni >= le:
+            return 1
+        if ni != skip_call:
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            if lazy_op_may_mutate_memory(op) != 0:
+                return 0
+        ni = ni + 1
+    return 1
+
+// Exact variable-read scan for a call-free callee body. Unused and literal
+// fields (operators, field indices, label ids, sizes) must not be mistaken for
+// variable reads; global var 0 in particular collides with every zero field.
+fn lazy_node_reads_var(op: int, d: int, s1: int, s2: int, s3: int, aux: int, var: int) -> int:
+    if op == IR_BINARY || op == IR_STORE_INDEX || op == IR_LOAD_INDEX_VAR || op == IR_STORE_FIELD:
+        return s1 == var || s2 == var
+    // Constant-index loads carry the index in the literal s3 field.
+    if op == IR_LOAD_INDEX:
+        return s1 == var
+    if op == IR_STORE_INDEX_VAR:
+        return d == var || s1 == var || s2 == var
+    if op == IR_UNARY || op == IR_RETURN || op == IR_LOAD || op == IR_LOAD_FIELD || op == IR_LOAD_ENUM_TAG || op == IR_DEREF || op == IR_MATCH || op == IR_ARENA_RESET || op == IR_ARENA_CLEAR || op == IR_YIELD || op == IR_AWAIT || op == IR_DYN_TAG || op == IR_DYN_VAL || op == IR_DYN_PACK || op == IR_DYN_DISPATCH || op == IR_PTR_OF || op == IR_STR_OF || op == IR_I2F || op == IR_F2I || op == IR_LAZY_THUNK || op == IR_LAZY_FORCE:
+        return s1 == var
+    if op == IR_STORE:
+        return s2 == var
+    if op == IR_STORE_PTR:
+        return s1 == var || s2 == var
+    if op == IR_SLICE:
+        return s1 == var || s2 == var || s3 == var
+    if op == IR_BOUNDS_CHECK:
+        if s1 == var:
+            return 1
+        if aux != 0 && s2 == var:
+            return 1
+        return 0
+    if op == IR_ADDR_INDEX:
+        return s1 == var || s2 == var
+    if op == IR_REF:
+        return s1 == var
+    if op == IR_PHI:
+        return s1 == var || s2 == var
+    return 0
+
+fn lazy_callee_reads_var(cs: int, cc: int, var: int) -> int:
+    if var < 0:
+        return 0
+    ni : ., mut = cs
+    loop:
+        if ni >= cs + cc:
+            return 0
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        aux := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
+        if lazy_node_reads_var(op, d, s1, s2, s3, aux, var) != 0:
+            return 1
+        ni = ni + 1
+    return 0
+
 fn lazy_callee_safe(fi: int) -> int:
     if fi < 0:
         return 0
@@ -3065,8 +3221,18 @@ fn lazy_callee_safe(fi: int) -> int:
     if cs < 0 || cc <= 0:
         return 0
     cav := rp_global_var_named("g_current_arena")
-    if cav >= 0 && rp_if_reads_var(cs, cc, cav) != 0:
-        return 0
+    // Any mutable global read may observe a different value at the force
+    // point. The language has no immutable-global marker in the IR table, so
+    // keep every global-reading callee eager; callers that need laziness pass
+    // the value as an argument, which is captured at the call site.
+    gi : ., mut = 0
+    loop:
+        if gi >= g_ir_global_count:
+            break
+        gv := cell_load(g_ir_globals, gi * 24 + 8)
+        if gv >= 0 && lazy_callee_reads_var(cs, cc, gv) != 0:
+            return 0
+        gi = gi + 1
     ni : ., mut = cs
     loop:
         if ni >= cs + cc:
@@ -3137,11 +3303,26 @@ fn lazy_last_label(node: int, nstart: int) -> int:
         tj = tj + 1
     return r
 
-fn lazy_arg_invariant(av: int, ls: int, le: int) -> int:
+fn lazy_arg_invariant(av: int, ls: int, le: int, nstart: int, ncount: int) -> int:
     if av < 0:
         return 0
+    // A global can be rewritten by any call in the loop; its value at the
+    // first force need not equal its value at the original call site.
+    if rc_is_global_var(av) != 0:
+        return 0
+    // If the slot's address escapes anywhere in the function, an indirect
+    // store or a callee can mutate it across the hoisted region.
+    ni : ., mut = nstart
+    loop:
+        if ni >= nstart + ncount:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        if (op == IR_REF || op == IR_ADDR_INDEX) && s1 == av:
+            return 0
+        ni = ni + 1
     // Any write to the argument slot inside the loop makes it non-invariant.
-    ni : ., mut = ls
+    ni = ls
     loop:
         if ni >= le:
             break
@@ -3225,16 +3406,25 @@ fn lazy_memo_analyze():
                 ni = ni + 1
                 continue
             args_ok : ., mut = 1
+            has_ptr_arg : ., mut = 0
             ai : ., mut = 0
             loop:
                 if ai >= ac:
                     break
                 av := s1 + ai
-                if av < 0 || rp_scalar_elem(irv_type(av)) == 0 || lazy_arg_invariant(av, ls, le) == 0:
+                if av < 0 || lazy_arg_invariant(av, ls, le, nstart, ncount) == 0:
                     args_ok = 0
                     break
+                if rp_scalar_elem(irv_type(av)) == 0:
+                    if lazy_pointer_arg_safe(av) == 0:
+                        args_ok = 0
+                        break
+                    has_ptr_arg = 1
                 ai = ai + 1
             if args_ok == 0:
+                ni = ni + 1
+                continue
+            if has_ptr_arg != 0 && lazy_loop_pointee_stable(ls, le, ni) == 0:
                 ni = ni + 1
                 continue
             // Follow thunk/force; every use must stay inside the loop.
@@ -3293,7 +3483,7 @@ fn lazy_memo_analyze():
             if ok == 0:
                 ni = ni + 1
                 continue
-            lazy_memo_add(ast, lsg, s3, irv_type(dest), s1, ac)
+            lazy_memo_add(ast, lsg, s3, irv_type(dest), s1, ac, 0)
             ni = ni + 1
         fi = fi + 1
 
@@ -3312,7 +3502,6 @@ fn lazy_plan_analyze():
             if ni >= nstart + ncount:
                 break
             op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-            if op == IR_CALL:
             if op != IR_CALL:
                 ni = ni + 1
                 continue
@@ -3383,7 +3572,10 @@ fn lazy_plan_analyze():
                 fd = store_target
                 force_node = store_node
             use : ., mut = -1
+            last_use : ., mut = -1
             uc : ., mut = 0
+            reads : ., mut = 0
+            writes : ., mut = 0
             block0 : ., mut = -1
             same_block : ., mut = 1
             tj = force_node + 1
@@ -3393,37 +3585,91 @@ fn lazy_plan_analyze():
                 op2 := cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE)
                 s1b := cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1)
                 if op2 == IR_STORE && s1b == fd:
+                    writes = writes + 1
                     uc = uc + 2
                 else if rp_if_reads_var(tj, 1, fd) != 0:
+                    reads = reads + 1
                     uc = uc + 1
                     if use < 0:
                         use = tj
                         block0 = lazy_last_label(tj, nstart)
                     else if lazy_last_label(tj, nstart) != block0:
                         same_block = 0
+                    last_use = tj
                 tj = tj + 1
-            // Multiple reads are memoizable only inside one basic block: the
-            // first force defines the value, later reads in the same block see
-            // it. Uses split across branches would need a runtime flag.
-            if uc < 1 || use < 0 || same_block == 0:
+            if uc < 1 || use < 0:
                 ni = ni + 1
                 continue
+            // Any later write to the bound slot would either clobber the
+            // deferred result or make an earlier def win for a later
+            // assignment. Keep that shape eager.
+            if writes != 0:
+                ni = ni + 1
+                continue
+            // Reads in one basic block reuse the call emitted at the first
+            // force. Reads split across blocks use a runtime memo flag instead:
+            // every read guards, the first one evaluates, later ones reuse.
+            memo_use : ., mut = 0
+            if same_block == 0:
+                if writes != 0 || reads < 2:
+                    ni = ni + 1
+                    continue
+                if lazy_memo_index_of_ast(ast) >= 0:
+                    // The loop hoist memo already covers this call.
+                    ni = ni + 1
+                    continue
+                csg0 := subgraph_containing(ni)
+                la0 := lazy_loop_ancestor(ni)
+                ok_uses : ., mut = 1
+                tj = force_node + 1
+                loop:
+                    if tj >= nstart + ncount:
+                        break
+                    if rp_if_reads_var(tj, 1, fd) != 0:
+                        if lazy_loop_ancestor(tj) != la0:
+                            ok_uses = 0
+                            break
+                        usg := subgraph_containing(tj)
+                        if usg != csg0 && rc_sg_is_ancestor(csg0, usg) == 0:
+                            ok_uses = 0
+                            break
+                    tj = tj + 1
+                if ok_uses == 0:
+                    ni = ni + 1
+                    continue
+                memo_use = 1
             // Argument expressions are still evaluated at the original site;
             // Phase B captures scalar values into stable temporaries, so a
             // later mutation cannot change the deferred call's inputs. Pointer
             // arguments are rejected because their pointee may die before the
             // force point.
             args_ok : ., mut = 1
+            has_ptr_arg : ., mut = 0
             ai : ., mut = 0
             loop:
                 if ai >= ac:
                     break
                 av := s1 + ai
-                if av < 0 || rp_scalar_elem(irv_type(av)) == 0:
+                if av < 0:
                     args_ok = 0
                     break
+                if rp_scalar_elem(irv_type(av)) == 0:
+                    if lazy_pointer_arg_safe(av) == 0:
+                        args_ok = 0
+                        break
+                    has_ptr_arg = 1
                 ai = ai + 1
             if args_ok == 0:
+                ni = ni + 1
+                continue
+            // The call is materialized at the first read, not at the local
+            // store that merely binds the forced value. Scan through the last
+            // read so a pointee mutation on any path to a force is caught.
+            if has_ptr_arg != 0 && lazy_range_pointee_stable(ni + 1, last_use + 1, ni) == 0:
+                ni = ni + 1
+                continue
+            if memo_use != 0:
+                lazy_memo_add(ast, -1, s3, irv_type(dest), -1, ac, 1)
                 ni = ni + 1
                 continue
             target : ., mut = -1
@@ -3597,5 +3843,5 @@ fn region_plan_analyze():
             sg = sg + 1
         fi = fi + 1
 
-    lazy_plan_analyze()
     lazy_memo_analyze()
+    lazy_plan_analyze()

@@ -227,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	4950bcd1f00981c85ed0dd266ba695f3481c2b0b96cfe308b3869647226cd22a	131250
-gt_static_ccr	gt_st.bin.ccr	52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e99f5e23ed78c2	131472
+gt_ccr	gt.ccr	2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a	132546
+gt_static_ccr	gt_st.bin.ccr	e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8	132768
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -652,3 +652,22 @@ gt_static_ccr	gt_st.bin.ccr	52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e9
 #   gt_ccr        4950bcd1f00981c85ed0dd266ba695f3481c2b0b96cfe308b3869647226cd22a 131250
 #   gt_static_ccr 52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e99f5e23ed78c2 131472
 
+# ── 「本次重锁 2026-10-30」控制流惰性：跨基本块多使用 memo ──
+# 性质 = 新惰性切片带来的合法 IR 增长，不是发射面回归。
+# 变更：Phase A 对同一纯调用结果的多个读使用（不同基本块）注册 site memo；
+# Phase B 在原调用点捕获实参并初始化 flag，每个读点发射 guard，首次动态
+# 读执行调用、后续读复用。循环不变量调用仍走 preheader hoist memo。
+# 同时修正两处前置缺陷：延迟定义的局部槽继承调用结果类型（原 TI_UNIT 会被
+# 误判为 alloc 字节缓冲）；`lazy_defer_store` 不再把 memo def（kind=1）复制成
+# 普通调用 def（原会发射空 `call ()`）。
+# 读数：gt_ccr 131250→132546（+1296B），gt_static 131472→132768（+1296B）；
+# pa_ccr / pa_static / ELF 不变。差分定位 = `generics_test.cr` 的 main 多使用
+# 纯调用（id_int 等）与 `toml_get_int_list` 的两处 `_toml_hex_digit` 调用。
+# canary ELF 560dbd25… 61622 不变；D1 5/5 PASS；`test_lazy.py` 35/35；
+# suite ALL PASS；`corec check src/compiler` ok。
+# 旧值留痕（自本次起作废）：
+#   gt_ccr        4950bcd1f00981c85ed0dd266ba695f3481c2b0b96cfe308b3869647226cd22a 131250
+#   gt_static_ccr 52c178b49c0f46dc972631613a16f57b2df1e6145cb523b029e99f5e23ed78c2 131472
+# 新值：
+#   gt_ccr        2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a 132546
+#   gt_static_ccr e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8 132768

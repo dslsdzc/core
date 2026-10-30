@@ -3418,9 +3418,13 @@ fn gen_expr(node: int) -> int:
             lv := find_local(name_idx)
             if lv >= 0:
                 if lazy_memo_defer_store(val_var, lv) != 0:
+                    if irv_type(lv) == TI_UNIT && irv_type(val_var) >= 0:
+                        irv_set_type(lv, irv_type(val_var))
                     return lv
                 deferred_ti := lazy_defer_store(val_var, lv)
                 if deferred_ti >= 0:
+                    if irv_type(lv) == TI_UNIT && irv_type(val_var) >= 0:
+                        irv_set_type(lv, irv_type(val_var))
                     return lv
                 if irv_type(lv) == TI_DYN:
                     // Dyn variable assignment: pack value with type tag
@@ -4253,6 +4257,8 @@ fn gen_expr(node: int) -> int:
         if g_plan_active != 0:
             mi := lazy_memo_index_of_ast(node)
             if mi >= 0:
+                if cell_load(g_lazy_memo_var, mi * 8) < 0:
+                    lazy_memo_site_begin(mi, first_arg_var, ac)
                 mv := cell_load(g_lazy_memo_var, mi * 8)
                 if mv >= 0:
                     return mv
@@ -5415,12 +5421,20 @@ fn gen_expr(node: int) -> int:
         if val_node >= 0:
             val_var : ., mut = gen_expr(val_node)
             if lazy_memo_defer_store(val_var, var) != 0:
+                // The local is defined at a force point, so its inferred slot
+                // type must come from the deferred result. Leaving it TI_UNIT
+                // makes later byte-buffer/pointer classification misread the
+                // slot (`v` in `total + v` became OP_BYTE_ADD).
+                if declared_ti == TI_UNIT && irv_type(val_var) >= 0:
+                    irv_set_type(var, irv_type(val_var))
                 bind_local(var_ni, var)
                 if is_apx != 0:
                     emit(IR_APPROX, -1, 0, 0, 0, 0)
                 return var
             deferred_ti := lazy_defer_store(val_var, var)
             if deferred_ti >= 0:
+                if declared_ti == TI_UNIT && irv_type(val_var) >= 0:
+                    irv_set_type(var, irv_type(val_var))
                 bind_local(var_ni, var)
                 if is_apx != 0:
                     emit(IR_APPROX, -1, 0, 0, 0, 0)
