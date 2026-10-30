@@ -312,6 +312,41 @@ BOTH_BRANCHES = """fn main() -> int:
     return arr[0] - 7
 """
 
+BOTH_BRANCHES_FALSE = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 3
+    if y < 2:
+        arr = [7, 8]
+    else:
+        arr = [9, 10]
+    return arr[0] - 9
+"""
+
+BOTH_BRANCH_MUTATE = """fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    if y < 2:
+        a : [int; 2], mut
+        a[0] = 7
+        a[1] = 8
+        a[1] = a[0] + 1
+        arr = a
+    else:
+        b : [int; 2], mut
+        b[0] = 9
+        b[1] = 10
+        b[1] = b[0] + 1
+        arr = b
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        total = total + arr[1]
+        i = i + 1
+    return total - 16
+"""
+
 MULTI_MERGE = """fn main() -> int:
     a : ., mut = [0]
     b : ., mut = [0]
@@ -590,12 +625,22 @@ def test_p22_length_zero_blocks_merge():
     build_run(LEN_ZERO, 0)
 
 
-def test_p23_both_branches_allocate_blocks_merge():
+def test_p23_both_branches_allocate_share_one_copy():
     result = ccr(BOTH_BRANCHES)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not has_merge(diag), diag
+    assert has_merge(diag), diag
+    assert diag.count("_merge_copy") >= 1, diag
     build_run(BOTH_BRANCHES, 0)
+    build_run(BOTH_BRANCHES_FALSE, 0)
+
+
+def test_p30_both_branch_mutations_copied():
+    result = ccr(BOTH_BRANCH_MUTATE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(BOTH_BRANCH_MUTATE, 0)
 
 
 def test_p24_two_merges_in_one_function():
@@ -672,13 +717,14 @@ if __name__ == "__main__":
         test_p20_length_64_and_parent_budget,
         test_p21_length_65_blocks_merge,
         test_p22_length_zero_blocks_merge,
-        test_p23_both_branches_allocate_blocks_merge,
+        test_p23_both_branches_allocate_share_one_copy,
         test_p24_two_merges_in_one_function,
         test_p25_dynamic_index_read_write,
         test_p26_pre_assignment_use_and_condition_read,
         test_p27_bool_and_char_elements,
         test_p28_loop_after_merge_uses_copy,
         test_p29_string_array_blocks_merge,
+        test_p30_both_branch_mutations_copied,
     ]
     failures = 0
     for test in tests:
