@@ -1073,12 +1073,50 @@ fn rp_if_merge_ancestors_ok(sg: int) -> int:
         k := cell_load(g_sgs, p * ESZ_SG + OFF_SG_KIND)
         if k == SG_FUNC:
             return 1
-        if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
+        // Identity inside unsafe is observable; no merge there.
+        if k == SG_UNSAFE:
             return 0
-        // The merge copy is allocated in the current slot. An enclosing IF arena
-        // would reset it at the outer merge while the rebound slot may live on.
-        if k == SG_IF && (region_plan_is_split(p) != 0 || region_plan_is_merge(p) != 0):
-            return 0
+        p = cell_load(g_sgs, p * ESZ_SG + OFF_SG_PARENT)
+
+// The copy is allocated in the nearest releasing ancestor's arena (loop/for/
+// unsafe/planned IF). It may be merged only when the rebound outer slot has no
+// use at or after that ancestor's exit, and is not aliased into another
+// variable that could outlive the arena.
+fn rp_merge_lifetime_ok(sg: int, dest: int, nstart: int, ncount: int) -> int:
+    s_end := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NSTART) + cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NCOUNT)
+    p : ., mut = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+    loop:
+        if p < 0:
+            return 1
+        k := cell_load(g_sgs, p * ESZ_SG + OFF_SG_KIND)
+        if k == SG_FUNC:
+            return 1
+        if rc_sg_releases(p) != 0:
+            pe := cell_load(g_sgs, p * ESZ_SG + OFF_SG_EXIT)
+            ni : ., mut = s_end
+            loop:
+                if ni >= nstart + ncount:
+                    break
+                if ni >= pe:
+                    if rp_if_reads_var(ni, 1, dest) != 0:
+                        return 0
+                ni = ni + 1
+            // Any alias of the slot could be used after the arena dies.
+            ni = s_end
+            loop:
+                if ni >= nstart + ncount:
+                    return 1
+                op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+                d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+                s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+                s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+                if op == IR_STORE && s2 == dest && s1 != dest:
+                    return 0
+                if (op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_FIELD || op == IR_STORE_PTR) && s2 == dest:
+                    return 0
+                if op == IR_STORE_INDEX_VAR && d == dest:
+                    return 0
+                ni = ni + 1
         p = cell_load(g_sgs, p * ESZ_SG + OFF_SG_PARENT)
 
 // True when `var` may point to either selected allocation.
@@ -1515,6 +1553,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
     if stores1 != 1 || dest < 0 || rc_is_global_var(dest) != 0:
         return 0
     if alloc_count == 2 && stores2 != 1:
+        return 0
+    if rp_merge_lifetime_ok(sg, dest, nstart, ncount) == 0:
         return 0
     prod := cell_load(g_df_var_producer, dest * 8)
     if prod < 0:

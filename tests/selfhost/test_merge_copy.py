@@ -470,6 +470,56 @@ fn main() -> int:
     return 1
 """
 
+LOOP_LOCAL_MERGE = """fn main() -> int:
+    total : ., mut = 0
+    i : ., mut = 0
+    y : ., mut = 1
+    while i < 2:
+        arr : [int; 2], mut
+        arr[0] = 5
+        arr[1] = 6
+        if y < 2:
+            b : [int; 2], mut
+            b[0] = 7
+            b[1] = 8
+            arr = b
+        total = total + arr[0]
+        i = i + 1
+    return total - 14
+"""
+
+LOOP_ESCAPE = """fn main() -> int:
+    arr : [int; 2], mut
+    arr[0] = 5
+    arr[1] = 6
+    y : ., mut = 1
+    i : ., mut = 0
+    while i < 2:
+        if y < 2:
+            b : [int; 2], mut
+            b[0] = 7
+            b[1] = 8
+            arr = b
+        i = i + 1
+    return arr[0] - 7
+"""
+
+FOR_LOCAL_MERGE = """fn main() -> int:
+    total : ., mut = 0
+    y : ., mut = 1
+    for i in 0..2:
+        arr : [int; 2], mut
+        arr[0] = 5
+        arr[1] = 6
+        if y < 2:
+            b : [int; 2], mut
+            b[0] = 7
+            b[1] = 8
+            arr = b
+        total = total + arr[0]
+    return total - 14
+"""
+
 POD_STRUCT = """struct P:
     x: int, y: bool
 
@@ -1100,6 +1150,24 @@ def test_p43_string_array_and_tuple_deep_copy():
         run_interp(src, 0)
 
 
+def test_p44_loop_local_merge():
+    for src in (LOOP_LOCAL_MERGE, FOR_LOCAL_MERGE):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p45_loop_escape_blocks_merge():
+    result = ccr(LOOP_ESCAPE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not has_merge(diag), diag
+    assert not has_split(diag), diag
+    build_run(LOOP_ESCAPE, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_merge_copy_value,
@@ -1145,6 +1213,8 @@ if __name__ == "__main__":
         test_p41_dynamic_string_arena_switch_path,
         test_p42_pure_string_builtin_call_merges,
         test_p43_string_array_and_tuple_deep_copy,
+        test_p44_loop_local_merge,
+        test_p45_loop_escape_blocks_merge,
     ]
     failures = 0
     for test in tests:
