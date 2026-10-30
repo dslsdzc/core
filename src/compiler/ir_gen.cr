@@ -6269,6 +6269,12 @@ fn inject_global_inits():
                         v = box_for_optional_slot(vn, v, global_decl_ti(name_idx))
                     emit(IR_STORE, -1, gv, v, 0, 0)
         i = i + 1
+    if g_cfg_arena_zero_on_reset != 0:
+        gz := global_var_of(str_intern("g_arena_zero_on_reset"))
+        if gz >= 0:
+            zv := new_ir_var("arena_zero_cfg", TI_INT)
+            emit(IR_CONST, zv, 1, 0, 0, TI_INT)
+            emit(IR_STORE, -1, gz, zv, 0, 0)
     g_cur_lib = saved_lib
 
 // Register one IR global, deduplicated by name_idx.

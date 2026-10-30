@@ -253,6 +253,7 @@ fn corec_main() -> int:
     cli_cmd("selftest-lib", "Run LibManager self tests")
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
+    cli_flag_bool("arena-zero-on-reset", "", "Zero each arena slot's used prefix on reset (V2.4; default off)")
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
@@ -276,6 +277,9 @@ fn corec_main() -> int:
         return 1
     if cli_has("dump-params") != 0:
         g_dump_params_on = 1
+    g_cfg_arena_zero_on_reset = 0
+    if cli_has("arena-zero-on-reset") != 0:
+        g_cfg_arena_zero_on_reset = 1
     // Parse -O flag (default O1)
     g_opt_level = 1
     ol : ., mut = cli_get("opt-level")

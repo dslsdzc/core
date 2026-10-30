@@ -1,6 +1,6 @@
 # 区域 v2：自动提前回收（split / merge / share + IR 回收点）
 
-> 状态：V2.0、V2.1（含 V2.1b 后支配版）、V2.2 与 V2.3 窄切片已实现（2026-10-30）；V2.4 待实施
+> 状态：V2.0、V2.1（含 V2.1b 后支配版）、V2.2、V2.3 与 V2.4 已实现（2026-10-30）
 > 日期：2026-10-29
 > 关联：`docs/maintainer/design/region-model.md`、`docs/maintainer/adr/adr-0007-graph-anchored-regions.md`、`docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
@@ -267,6 +267,7 @@ if all allocations pass: split(S) = 1
 
 - `arena_zero_on_reset` 部署配置。
 - 验收：开启时 reset 后 slot 前缀为零；关闭时字节行为与 v1 一致；两种模式的 canary 分别记录。
+- 实现（2026-10-30）：运行时新增 `g_arena_zero_on_reset`（默认 0）与 `arena_set_zero_on_reset(v)`；`arena_reset` 在归还 slot 前按配置清零。当前 slot 清已用前缀（静态槽 = `g_arena_cursors`，动态槽 = `g_arena_slot_cursor`），链上更老的槽按整 1MB 清；大对象 extent 仍 `munmap`。编译器新增 `--arena-zero-on-reset`，在 `main` 的全局初始化后把运行时全局置 1；未加 flag 时字节行为与 v1 一致。覆盖 `test_arena_interp.py` 的 setter-on、默认 off、compiler-flag 三组（解释器 + ELF）。
 
 ## 九、测试计划
 

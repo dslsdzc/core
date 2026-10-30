@@ -134,6 +134,64 @@ fn main() -> int:
     return 0
 """
 
+ZERO_ON_RESET_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new_sized(65536)
+    p := alloc(65528)
+    cell_store(p, 0, 123)
+    cell_store(p, 65520, 456)
+    arena_set_zero_on_reset(1)
+    arena_reset(a)
+    if cell_load(p, 0) != 0:
+        return 1
+    if cell_load(p, 65520) != 0:
+        return 2
+    return 0
+"""
+
+ZERO_RESET_OFF_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new_sized(65536)
+    p := alloc(65528)
+    cell_store(p, 0, 123)
+    cell_store(p, 65520, 456)
+    arena_reset(a)
+    if cell_load(p, 0) != 123:
+        return 1
+    if cell_load(p, 65520) != 456:
+        return 2
+    return 0
+"""
+
+ZERO_RESET_FLAG_SRC = """\
+import arena
+g_current_arena : int, mut = -1
+g_arena_pool_data : string, mut
+g_arena_free_list : int, mut = -1
+fn main() -> int:
+    arena_init(67108864, 65536)
+    a := arena_new_sized(65536)
+    p := alloc(65528)
+    cell_store(p, 0, 123)
+    cell_store(p, 65520, 456)
+    arena_reset(a)
+    if cell_load(p, 0) != 0:
+        return 1
+    if cell_load(p, 65520) != 0:
+        return 2
+    return 0
+"""
+
 PERF_SRC = """\
 import arena
 g_current_arena : int, mut = -1
@@ -185,9 +243,11 @@ def run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
 
 
 def run_pair(root: Path, name: str, source: str, *,
-             interp_timeout: int = 300, native_timeout: int = 120) -> int:
+             interp_timeout: int = 300, native_timeout: int = 120,
+             corec_flags: list[str] | None = None) -> int:
     """Run one source under corec run and as a static ELF. Returns 0 on pass."""
-    interp = run([str(COREC), "run", source], timeout=interp_timeout)
+    flags = corec_flags or []
+    interp = run([str(COREC), "run", *flags, source], timeout=interp_timeout)
     if interp.returncode != 0:
         print(f"FAIL interp {name} rc={interp.returncode}")
         print(interp.stdout)
@@ -196,7 +256,7 @@ def run_pair(root: Path, name: str, source: str, *,
     src = root / f"{name}.cr"
     src.write_text(source, encoding="utf-8")
     elf = root / name
-    build = run([str(COREC), "build", str(src), "--static", "-o", str(elf)])
+    build = run([str(COREC), "build", str(src), "--static", *flags, "-o", str(elf)])
     if build.returncode != 0:
         print(f"FAIL build {name}")
         print(build.stdout)
@@ -296,6 +356,14 @@ def main() -> int:
         # still failing if the interpreter goes back to zeroing per node.
         if run_pair(root, "arena_bulk_zero", PERF_SRC,
                     interp_timeout=30) != 0:
+            return 1
+
+        if run_pair(root, "arena_zero_on_reset", ZERO_ON_RESET_SRC) != 0:
+            return 1
+        if run_pair(root, "arena_zero_reset_off", ZERO_RESET_OFF_SRC) != 0:
+            return 1
+        if run_pair(root, "arena_zero_reset_flag", ZERO_RESET_FLAG_SRC,
+                    corec_flags=["--arena-zero-on-reset"]) != 0:
             return 1
 
         for idx, (label, source) in enumerate(FAIL_SOURCES.items()):

@@ -32,6 +32,9 @@ g_arena_live : string, mut          // int[] — 1 while the arena id is allocat
 g_arena_scalars : string, mut       // raw scalar cells shared with the stub
 g_arena_scalars_ready : int, mut = 0 // 1 after the scalar buffer exists
 g_arena_suspend : int, mut = 0     // 1 while arena metadata is being rebuilt
+// V2.4 deployment switch: zero each slot's used prefix before returning it to
+// the pool. Default off; set by arena_set_zero_on_reset or --arena-zero-on-reset.
+g_arena_zero_on_reset : int, mut = 0
 g_arena_large_head : string, mut    // string[] — mmap extent list per arena
 g_arena_large_count : string, mut   // int[] — extent count per arena
 g_arena_slot_next : string, mut     // int[] — next slot in an arena chain
@@ -103,6 +106,34 @@ fn arena_scalar_set(off: int, val: int):
 fn arena_set_current(val: int):
     arena_scalar_set(0, val)
     g_current_arena = val
+
+fn arena_set_zero_on_reset(v: int), pub:
+    g_arena_zero_on_reset = v
+
+fn _arena_zero_reset_slots(ai: int):
+    if g_arena_zero_on_reset == 0:
+        return
+    slot : ., mut = cell_load(g_arena_slot, ai * 8)
+    first : ., mut = 1
+    loop:
+        if slot < 0:
+            return
+        base := _arena_slot_base(slot)
+        if _arena_word(base) != 0:
+            used : ., mut = 1048576
+            if first != 0:
+                if cell_load(g_arena_static, ai * 8) != 0:
+                    used = cell_load(g_arena_cursors, ai * 8)
+                else:
+                    used = cell_load(g_arena_slot_cursor, ai * 8)
+                if used < 0:
+                    used = 0
+                if used > 1048576:
+                    used = 1048576
+                first = 0
+            if used > 0:
+                _memzero(base, used)
+        slot = cell_load(g_arena_slot_next, slot * 8)
 
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
@@ -475,6 +506,8 @@ fn arena_reset(ai: int), pub:
         ln = ln - 1
     cell_store(g_arena_large_count, ai * 8, 0)
     cell_store(g_arena_large_head, ai * 8, -1)
+
+    _arena_zero_reset_slots(ai)
 
     // Return every slot in the arena chain to the pool free list.
     sl : ., mut = cell_load(g_arena_slot, ai * 8)
