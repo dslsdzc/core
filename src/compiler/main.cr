@@ -700,6 +700,11 @@ fn corec_main() -> int:
             if region_plan_is_merge(pi) != 0:
                 print("merge ")
                 println(int_str(pi))
+            if region_plan_is_share(pi) != 0:
+                print("share ")
+                print(int_str(pi))
+                print(" ")
+                println(int_str(region_plan_share_exit(pi)))
             pi = pi + 1
         ci : ., mut = 0
         loop:

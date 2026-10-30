@@ -93,7 +93,7 @@ fn rc_sg_releases(sg: int) -> int:
     k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
     if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
         return 1
-    if k == SG_IF && (region_plan_is_split(sg) != 0 || region_plan_is_merge(sg) != 0):
+    if k == SG_IF && (region_plan_is_split(sg) != 0 || region_plan_is_merge(sg) != 0 || region_plan_is_share(sg) != 0):
         return 1
     return 0
 
@@ -113,6 +113,16 @@ fn rc_releasing_region(alloc_node: int) -> int:
         if rc_sg_releases(sg) != 0:
             return sg
         sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+
+// Lifetime exit for a releasing region. A share IF's slot lives until the last
+// consumer loop's exit, not until the IF merge label.
+fn rc_sg_lexit(sg: int) -> int:
+    lbl := region_plan_share_exit(sg)
+    if lbl >= 0:
+        n := rc_ctl_label_node(lbl)
+        if n >= 0:
+            return n
+    return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
 
 // True when every allocation bit is a fixed-address placement. Such memory is
 // external/program-lifetime, never callee-owned storage, so a store through it
@@ -153,7 +163,7 @@ fn rc_bit_exit(bi: int) -> int:
     sg := rc_releasing_region(alloc_node)
     if sg < 0:
         return -1
-    return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    return rc_sg_lexit(sg)
 
 // Escape judgment for one allocation bit. mode 0 = ordinary use at or after
 // the releasing region's exit. mode 1 = return: a return inside the releasing
@@ -164,7 +174,7 @@ fn rc_bit_escapes(bi: int, ni: int, mode: int) -> int:
     sg := rc_releasing_region(alloc_node)
     if sg < 0:
         return 0
-    ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    ex := rc_sg_lexit(sg)
     if ni >= ex:
         return 1
     if mode != 0:
@@ -378,7 +388,7 @@ fn rc_stack_value_escapes(val: int, at_node: int, ni: int, lo: int, mode: int, d
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg < 0:
         return 0
-    ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    ex := rc_sg_lexit(sg)
     if ni >= ex:
         return 1
     if mode != 0 && rc_sg_is_ancestor(sg, subgraph_containing(ni)) != 0:
@@ -422,7 +432,7 @@ fn rc_stack_value_outlives(val: int, at_node: int, dest: int, lo: int, depth: in
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg < 0:
         return 0
-    vexit := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    vexit := rc_sg_lexit(sg)
     if dest == -1 || dest > vexit:
         return 1
     return 0
@@ -771,7 +781,7 @@ fn rc_scalar_value_escapes(val: int, at_node: int, escape_ni: int, lo: int,
     sg := rc_stack_release_sg_rec(val, at_node, lo, 1)
     if sg < 0:
         return 0
-    ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    ex := rc_sg_lexit(sg)
     if escape_ni >= ex:
         return 1
     if mode != 0 && rc_sg_is_ancestor(sg, subgraph_containing(escape_ni)) != 0:
@@ -1797,7 +1807,7 @@ fn rc_var_escapes(ptr_var: int, ni: int, mode: int) -> int:
         sg := rc_stack_release_sg_rec(ptr_var, ni, lo, 0)
         if sg < 0:
             return 0
-        ex := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+        ex := rc_sg_lexit(sg)
         escaped : ., mut = 0
         if ni >= ex:
             escaped = 1
@@ -1851,7 +1861,7 @@ fn rc_node_exit(node_seq: int) -> int:
     sg := rc_releasing_region(node_seq)
     if sg < 0:
         return -1
-    return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    return rc_sg_lexit(sg)
 
 fn rc_last_store_before(ptr_var: int, lo: int, hi: int) -> int:
     if ptr_var < 0 || hi <= lo:
@@ -2005,7 +2015,7 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
         lo := rc_func_nstart(use_ni)
         vsg := rc_stack_release_sg_rec(val_var, use_ni, lo, 0)
         if vsg >= 0:
-            vexit := cell_load(g_sgs, vsg * ESZ_SG + OFF_SG_EXIT)
+            vexit := rc_sg_lexit(vsg)
             if dest == -1 || dest > vexit:
                 return 1
         si := rc_last_store_before(val_var, lo, use_ni)

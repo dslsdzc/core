@@ -309,9 +309,18 @@ fn sg_alloc_push(kind: int):
 fn sg_alloc_pop_split():
     if g_sg_count <= 0:
         return
-    arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
+    top := g_sg_count - 1
+    arena_var := cell_load(g_sg_arena_var, top * 8)
     sg_pop()
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+    region_plan_emit_share_after(top)
+
+// Close a share IF without resetting its slot. The slot stays live and current
+// until the consumer SG's reset hook emits IR_ARENA_RESET for it.
+fn sg_alloc_pop_share():
+    if g_sg_count <= 0:
+        return
+    sg_pop()
 
 fn sg_alloc_pop():
     top := g_sg_count - 1
@@ -329,6 +338,7 @@ fn sg_alloc_pop():
             cell_store(g_sg_alloc_unknown, pi * 8, 1)
     sg_pop()
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+    region_plan_emit_share_after(top)
 
 fn track_alloc_size(size: int):
     if g_cur_sg >= 0 && str_len(g_sg_alloc_total) > 0:
@@ -4213,8 +4223,11 @@ fn gen_expr(node: int) -> int:
         sg_idx := g_sg_count
         split := region_plan_is_split(sg_idx)
         merge := region_plan_is_merge(sg_idx)
+        share := region_plan_is_share(sg_idx)
+        if merge != 0 && share != 0:
+            check_error(EC_B_LIFETIME, "IF cannot be both merge and share", 0, 0)
         child : ., mut = split
-        if merge != 0:
+        if merge != 0 || share != 0:
             child = 1
         merge_copy_var : ., mut = -1
         merge_copy_instr : ., mut = -1
@@ -4319,7 +4332,10 @@ fn gen_expr(node: int) -> int:
             peak := sg_alloc_cur_total()
             if g_no_auto_arena == 0 && peak != 0:
                 iri_set_s1(arena_instr, peak)
-            sg_alloc_pop_split()
+            if share != 0:
+                sg_alloc_pop_share()
+            else:
+                sg_alloc_pop_split()
         else:
             sg_pop()
         return result_var
@@ -4356,6 +4372,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // While loop
@@ -4393,6 +4410,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // For loop: for var in start..end { body }
@@ -4533,6 +4551,7 @@ fn gen_expr(node: int) -> int:
         // Exit
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // Match expression
@@ -6850,6 +6869,9 @@ fn ir_gen_all():
         ir_gen_func(i)
         df_end_func(ir_func_idx)
         i = i + 1
+
+    if g_plan_active != 0 && g_plan_share_count > 0 && g_plan_share_reset_emitted == 0:
+        check_error(EC_B_LIFETIME, "share reset was not emitted", 0, 0)
 
     // 纯度 + 状态依赖边序列最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
     // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。

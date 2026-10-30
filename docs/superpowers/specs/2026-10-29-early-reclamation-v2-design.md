@@ -1,6 +1,6 @@
 # 区域 v2：自动提前回收（split / merge / share + IR 回收点）
 
-> 状态：V2.0、V2.1（含 V2.1b 后支配版）、V2.2 窄切片已实现（2026-10-30）；V2.3–V2.4 待实施
+> 状态：V2.0、V2.1（含 V2.1b 后支配版）、V2.2 与 V2.3 窄切片已实现（2026-10-30）；V2.4 待实施
 > 日期：2026-10-29
 > 关联：`docs/maintainer/design/region-model.md`、`docs/maintainer/adr/adr-0007-graph-anchored-regions.md`、`docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
@@ -254,6 +254,14 @@ if all allocations pass: split(S) = 1
 
 - 只读共享 + LCPD reset。
 - 验收：两个消费者只读同一槽，reset 在两者都退出之后；有写消费者时退回父槽。
+- 实现（2026-10-30，窄切片）：
+  - 候选 S 是顶层 IF（SG parent = FUNC），与 V2.2 merge 同形的单个常量长度标量数组，存入外层局部槽。
+  - IF 之后只允许元素读（`IR_LOAD_INDEX`/`IR_LOAD_INDEX_VAR`）经该外层槽；任何写、切片、取址、指针比较、FFI、调用或身份观察都拒绝。
+  - 所有 IF 后的读必须落在消费者循环内；最外层消费者必须是 LOOP/FOR。消费者内不得有嵌套 loop/for/unsafe、break、return；`continue` 允许（经过 per-iteration reset）。
+  - 窗口（IF 出口到消费者出口）内不得有 call/spawn、`g_current_arena` 读、return、跳出窗口的 jump、跳到任一 loop/for 出口标签的 break，也不得有实际落入 S 槽的 allocation。allocation 的归属按“最近的、其 `IR_ARENA_NEW` 已在该节点之前的释放子图”判定；循环条件在 body arena 创建之前，条件里的 allocation 因此会落入父槽并被拒绝。
+  - 同一函数内不得有其它 merge plan（merge 副本可能落入 S）；候选自身的 merge mark 被撤销。当前一个程序最多一个 share；share 函数跳过 early clear。
+  - S 的 arena 在 IF 入口创建，IF 汇合标签**不 reset**；在最后消费者循环的 `sg_pop` 之后发射 `IR_ARENA_RESET`。外层槽继续指向 S 内的数组，不复制。`RegionCheck` 的 lifetime exit 对该 SG 使用消费者出口标签（`rc_sg_lexit` 在 Phase B 重新解析 label id），而不是 IF 汇合点。
+  - 验收覆盖 `test_share.py` 16 例：两个消费者、单消费者、for、false path、写/调用/直读/窗口分配/嵌套 IF/嵌套 loop/break/unsafe/消费者后读全部保持 v1；受 `src/ci/run.sh` selfhost-tests 挂钩。
 
 ### V2.4 清零配置
 
