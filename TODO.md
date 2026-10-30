@@ -2676,9 +2676,11 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
 - 实现状态（2026-10-30，第一切片）：
   - `compute_usage_counts()` 已移到 `df_state_finalize()` 之后调用，并改为幂等清零重算；Phase A 的 use_count 真实可用。
   - `compute_all_purity` 不再把写本地标量槽的 `IR_STORE` 当外部效应；全局写/数组/字段/指针写仍保守不纯。
-  - Phase A 选纯标量调用（实参为常量或调用前未被重写；单 force、唯一读使用、同 loop 迭代、if/loop 条件内、callee 无 alloc/call/extern）；Phase B 将调用延迟到 force 点，`v := call` 的赋值目标也延迟定义。
-  - `tests/selfhost/test_lazy.py` 12 例：if 假/真、loop/for 条件、二元使用、常量实参、实参改写、多使用、直写、分配 callee、全局效应 callee；已挂 selfhost-tests。
-  - 仍待：可变实参/跨 loop 迭代 hoist、alloc 下沉的 arena 归属、多使用 memo/升级策略。
+  - Phase A 选纯标量调用（标量实参、单 force、同 loop 迭代、if/loop 条件内、callee 本地分配安全）；Phase B 在原求值点捕获实参，将调用延迟到 force 点，`v := call` 的赋值目标也延迟定义。
+  - 同一基本块的多使用共享首次调用（memo）；跨分支多使用保持 eager。
+  - callee 允许本地数组/结构体分配与写，只要不逃逸、不调用/不 unsafe、不读写 `g_current_arena`；逃逸分配保持 eager。
+  - `tests/selfhost/test_lazy.py` 14 例：if 假/真、loop/for 条件、二元使用、常量/可变实参、同块 memo、多分支多使用、直写、本地分配 callee、逃逸分配/全局效应 callee；已挂 selfhost-tests。
+  - 仍待：跨 loop 迭代 hoist/memo、指针实参。
 - 旧现状（源码核实，2026-08-09）：
   - IR_LAZY_THUNK(46)/IR_LAZY_FORCE(47) 已存在（ast.cr:571）；ir_gen 在纯函数调用后包 THUNK（ir_gen.cr:1106），`force_if_thunk()` 在所有操作数位置发 FORCE
   - 但当前 thunk 不产生实际延迟：IR_CALL 在 THUNK 之前已急切发射，ELF 后端（instr.cr:1091，注释明言 "Calls are currently emitted eagerly… typed value transfer"）和解释器（interp.cr:194）都按纯值搬运降级：语义上是 no-op，只保证输出不变

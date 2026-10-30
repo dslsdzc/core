@@ -2864,6 +2864,73 @@ fn lazy_loop_ancestor(node: int) -> int:
         sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
     return -1
 
+fn lazy_pts_only_local(var: int, cs: int, cc: int) -> int:
+    if var < 0 || rp_var_may_point(var) == 0:
+        return 0
+    found : ., mut = 0
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            return found
+        if pa_pts_has(var, ai) != 0:
+            an := cell_load(g_pa_alloc_nodes, ai * 8)
+            if an < cs || an >= cs + cc:
+                return 0
+            found = 1
+        ai = ai + 1
+    return 0
+
+// A deferred callee may allocate/write local aggregates, but must not read
+// g_current_arena, write globals, call anything, use unsafe, form pointers that
+// escape, or store through a parameter/external pointer. Local array/struct
+// writes are allowed because the callee's own function arena owns them.
+fn lazy_callee_safe(fi: int) -> int:
+    if fi < 0:
+        return 0
+    cs := cell_load(g_df_func_node_start, fi * 8)
+    cc := cell_load(g_df_func_node_count, fi * 8)
+    if cs < 0 || cc <= 0:
+        return 0
+    cav := rp_global_var_named("g_current_arena")
+    if cav >= 0 && rp_if_reads_var(cs, cc, cav) != 0:
+        return 0
+    ni : ., mut = cs
+    loop:
+        if ni >= cs + cc:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
+            return 0
+        if op == IR_STORE_PTR || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ADDR_INDEX || op == IR_SLICE || op == IR_REF || op == IR_FNADDR:
+            return 0
+        if op == IR_ALLOC_AT || op == IR_ARENA_CLEAR:
+            return 0
+        if op == IR_STORE:
+            if s1 >= 0 && rc_is_global_var(s1) != 0:
+                return 0
+            if s1 == cav:
+                return 0
+        if op == IR_STORE_INDEX || op == IR_STORE_FIELD:
+            if lazy_pts_only_local(s1, cs, cc) == 0:
+                return 0
+        if op == IR_STORE_INDEX_VAR:
+            if lazy_pts_only_local(s1, cs, cc) == 0:
+                return 0
+        ni = ni + 1
+    d : ., mut = 0
+    loop:
+        if d >= g_sg_count:
+            return 1
+        ds := cell_load(g_sgs, d * ESZ_SG + OFF_SG_NSTART)
+        if ds >= cs && ds < cs + cc:
+            if cell_load(g_sgs, d * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
+                return 0
+        d = d + 1
+    return 1
+
 fn lazy_callee_no_alloc(fi: int) -> int:
     if fi < 0:
         return 0
@@ -2886,6 +2953,17 @@ fn lazy_callee_no_alloc(fi: int) -> int:
 // Select zero-argument pure scalar calls whose single force point sits in a
 // conditional branch/loop body within the same loop iteration. The plan is
 // keyed by the AST call node id; Phase B defers the call to the force point.
+fn lazy_last_label(node: int, nstart: int) -> int:
+    r : ., mut = -1
+    tj : ., mut = nstart
+    loop:
+        if tj >= node:
+            return r
+        if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
+            r = tj
+        tj = tj + 1
+    return r
+
 fn lazy_plan_analyze():
     fi : ., mut = 0
     loop:
@@ -2921,10 +2999,7 @@ fn lazy_plan_analyze():
                 ni = ni + 1
                 continue
             cfi := rc_func_by_name(s3)
-            if cfi < 0 || fi_ispure(cfi) == 0:
-                ni = ni + 1
-                continue
-            if lazy_callee_no_alloc(cfi) == 0:
+            if cfi < 0 || lazy_callee_safe(cfi) == 0:
                 ni = ni + 1
                 continue
             // Follow the eager lazy-thunk wrapper emitted in Phase A.
@@ -2954,12 +3029,6 @@ fn lazy_plan_analyze():
             if fcount != 1 || fd < 0:
                 ni = ni + 1
                 continue
-            if fd >= g_var_use_count_cap:
-                ni = ni + 1
-                continue
-            if cell_load(g_var_use_count, fd * 8) != 1:
-                ni = ni + 1
-                continue
             // A forced value assigned to a local slot: defer the call to the
             // slot's unique use, so `v := pure()` is not evaluated at the LET.
             store_node : ., mut = -1
@@ -2982,6 +3051,8 @@ fn lazy_plan_analyze():
                 force_node = store_node
             use : ., mut = -1
             uc : ., mut = 0
+            block0 : ., mut = -1
+            same_block : ., mut = 1
             tj = force_node + 1
             loop:
                 if tj >= nstart + ncount:
@@ -2992,56 +3063,31 @@ fn lazy_plan_analyze():
                     uc = uc + 2
                 else if rp_if_reads_var(tj, 1, fd) != 0:
                     uc = uc + 1
-                    use = tj
+                    if use < 0:
+                        use = tj
+                        block0 = lazy_last_label(tj, nstart)
+                    else if lazy_last_label(tj, nstart) != block0:
+                        same_block = 0
                 tj = tj + 1
-            if uc != 1 || use < 0:
+            // Multiple reads are memoizable only inside one basic block: the
+            // first force defines the value, later reads in the same block see
+            // it. Uses split across branches would need a runtime flag.
+            if uc < 1 || use < 0 || same_block == 0:
                 ni = ni + 1
                 continue
-            // Arguments may be deferred only when each is a constant-valued
-            // temporary and is not rewritten before the force point.
+            // Argument expressions are still evaluated at the original site;
+            // Phase B captures scalar values into stable temporaries, so a
+            // later mutation cannot change the deferred call's inputs. Pointer
+            // arguments are rejected because their pointee may die before the
+            // force point.
             args_ok : ., mut = 1
             ai : ., mut = 0
             loop:
                 if ai >= ac:
                     break
                 av := s1 + ai
-                if av < 0:
+                if av < 0 || rp_scalar_elem(irv_type(av)) == 0:
                     args_ok = 0
-                    break
-                pv := cell_load(g_df_var_producer, av * 8)
-                if pv < 0:
-                    args_ok = 0
-                    break
-                pop : ., mut = cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE)
-                if pop == IR_STORE:
-                    sv := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S2)
-                    pv2 := cell_load(g_df_var_producer, sv * 8)
-                    if pv2 < 0:
-                        args_ok = 0
-                        break
-                    pop = cell_load(g_df_nodes, pv2 * ESZ_DFNODE + OFF_DF_OPCODE)
-                if pop != IR_CONST && pop != IR_CONST_BIG:
-                    args_ok = 0
-                    break
-                // Reject a rewrite of the argument temp between call and use.
-                tj2 : ., mut = ni + 1
-                loop:
-                    if tj2 >= use:
-                        break
-                    op3 := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_OPCODE)
-                    s1c := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_S1)
-                    s2c := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_S2)
-                    if op3 == IR_STORE && s1c == av:
-                        args_ok = 0
-                        break
-                    if (op3 == IR_STORE_INDEX || op3 == IR_STORE_INDEX_VAR) && s1c == av:
-                        args_ok = 0
-                        break
-                    if op3 == IR_STORE_INDEX_VAR && s2c == av:
-                        args_ok = 0
-                        break
-                    tj2 = tj2 + 1
-                if args_ok == 0:
                     break
                 ai = ai + 1
             if args_ok == 0:

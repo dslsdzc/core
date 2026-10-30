@@ -97,6 +97,32 @@ fn main() -> int:
     return 0
 """
 
+ALLOC_ESCAPE = """g_arr : [int; 2], mut = [0, 0]
+
+fn leak() -> int:
+    a : [int; 2], mut
+    a[0] = 1
+    a[1] = 2
+    g_arr = a
+    return 7 / (1 - 1)
+""" + """
+fn main() -> int:
+    v := leak()
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
+MEMO_USE = BOOM + """
+fn main() -> int:
+    v := boom()
+    c : ., mut = 0
+    if c == 1:
+        return v + v
+    return 0
+"""
+
 BINARY_USE = BOOM + """
 fn main() -> int:
     v := boom()
@@ -244,11 +270,11 @@ def test_straight_line_stays_eager():
     build_run(STRAIGHT, 1)
 
 
-def test_allocating_callee_stays_eager():
+def test_local_allocating_callee_sinks():
     result = ccr(ALLOC_CALLEE)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not call_is_in_block(diag, "make"), diag
+    assert call_is_in_block(diag, "make"), diag
     build_run(ALLOC_CALLEE, 0)
 
 
@@ -292,12 +318,30 @@ def test_constant_argument_true_path_runs():
     build_run(ARG_TRUE, 1)
 
 
-def test_mutated_argument_stays_eager():
+def test_mutated_argument_is_captured():
     result = ccr(ARG_MUTATED)
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
-    assert not call_is_in_block(diag, "boom"), diag
-    build_run(ARG_MUTATED, 1)
+    assert call_is_in_block(diag, "boom"), diag
+    build_run(ARG_MUTATED, 0)
+
+
+def test_same_block_multi_use_memoizes():
+    result = ccr(MEMO_USE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "boom"), diag
+    body = main_section(diag)
+    assert body.count("call boom()") == 1, body
+    build_run(MEMO_USE, 0)
+
+
+def test_escaping_allocation_callee_stays_eager():
+    result = ccr(ALLOC_ESCAPE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not call_is_in_block(diag, "leak"), diag
+    build_run(ALLOC_ESCAPE, 1)
 
 
 if __name__ == "__main__":
@@ -307,13 +351,15 @@ if __name__ == "__main__":
         test_loop_conditional_sinks,
         test_multi_use_stays_eager,
         test_straight_line_stays_eager,
-        test_allocating_callee_stays_eager,
+        test_local_allocating_callee_sinks,
         test_binary_use_sinks,
         test_for_conditional_sinks,
         test_impure_callee_stays_eager,
         test_constant_argument_sinks,
         test_constant_argument_true_path_runs,
-        test_mutated_argument_stays_eager,
+        test_mutated_argument_is_captured,
+        test_same_block_multi_use_memoizes,
+        test_escaping_allocation_callee_stays_eager,
     ]
     failures = 0
     for test in tests:

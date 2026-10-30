@@ -1992,6 +1992,28 @@ fn is_hotpatch_func(name_idx: int) -> int:
 
 // Helper: if a variable's producer is IR_LAZY_THUNK, emit IR_LAZY_FORCE
 // to extract the real value and return the forced variable.
+// Capture deferred-call arguments at the original evaluation point. The
+// temporaries are consecutive (IR_CALL convention) and hold scalar values, so
+// later mutations of the source variables cannot change the deferred call.
+fn lazy_pack_args(first_arg: int, ac: int) -> int:
+    if ac <= 0 || first_arg < 0:
+        return -1
+    first : ., mut = -1
+    ai : ., mut = 0
+    loop:
+        if ai >= ac:
+            return first
+        av := first_arg + ai
+        ti : ., mut = TI_INT
+        if av >= 0:
+            ti = irv_type(av)
+        pv := new_ir_var("_lazy_arg", ti)
+        if first < 0:
+            first = pv
+        emit(IR_STORE, -1, pv, av, 0, 0)
+        ai = ai + 1
+    return first
+
 fn force_if_thunk(var_idx: int) -> int:
     if var_idx < 0:
         return var_idx
@@ -4225,7 +4247,8 @@ fn gen_expr(node: int) -> int:
             // point instead of evaluating the pure call here. Constant args
             // were already materialized as IR vars, so the deferred call can
             // reuse their contiguous argument block.
-            lazy_def_add(dest, func_ni, call_ti, first_arg_var, ac)
+            arg0 := lazy_pack_args(first_arg_var, ac)
+            lazy_def_add(dest, func_ni, call_ti, arg0, ac)
             return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
