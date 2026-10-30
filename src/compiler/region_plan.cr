@@ -792,7 +792,7 @@ fn rp_pdom_prepare(nstart: int, ncount: int):
     g_rp_pdom_nstart = nstart
     g_rp_pdom_ncount = ncount
     g_rp_pdom_ok = 0
-    if ncount <= 0 || ncount > 2000:
+    if ncount <= 0 || ncount > 8000:
         return
     words : ., mut = (ncount + 62) / 63
     if words < 1:
@@ -2610,6 +2610,18 @@ fn region_plan_analyze():
     // reproduce the per-function instance path exactly, so keep them on v1.
     if g_gen_instance_count > 0:
         return
+    if g_cfg_region_plan_max_nodes > 0:
+        total_nodes : ., mut = 0
+        ti : ., mut = 0
+        loop:
+            if ti >= g_ir_func_count:
+                break
+            nc := cell_load(g_df_func_node_count, ti * 8)
+            if nc > 0:
+                total_nodes = total_nodes + nc
+            ti = ti + 1
+        if total_nodes > g_cfg_region_plan_max_nodes:
+            return
     gs : ., mut = 0
     loop:
         if gs >= g_func_count:

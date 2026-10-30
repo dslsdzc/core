@@ -37,6 +37,17 @@ def ccr(src):
     return result, artifact
 
 
+def ccr_limit(src, limit):
+    result, output_path, artifact = _run(
+        ["ccr", "--region-plan-max-nodes", str(limit),
+         "--dump-region-plan", "--dump-ir-text"], src, ".ccr")
+    try:
+        os.unlink(output_path)
+    except FileNotFoundError:
+        pass
+    return result, artifact
+
+
 def build_run(src):
     result, binary, artifact = _run(["build", "--static"], src, ".elf")
     if result.returncode != 0 or not artifact:
@@ -206,6 +217,19 @@ def test_p8_no_plan_program_unchanged():
     assert_value(src, 7)
 
 
+def test_plan_node_limit_skips_two_phase():
+    result, artifact = ccr_limit(BASIC, 1)
+    diagnostic = result.stdout + result.stderr
+    assert result.returncode == 0, diagnostic
+    assert artifact
+    assert not any(ln.split(" ", 1)[0] in ("split", "merge", "share", "clear")
+                   for ln in diagnostic.splitlines()), diagnostic
+    result, rc = build_run(BASIC)
+    diagnostic = result.stdout + result.stderr
+    assert result.returncode == 0, diagnostic
+    assert rc == 0, diagnostic
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_if_local_allocation_splits,
@@ -217,6 +241,7 @@ if __name__ == "__main__":
         test_p7_nested_loop_keeps_v1,
         test_p8_no_plan_program_unchanged,
         test_p9_nested_allocation_escape_keeps_v1,
+        test_plan_node_limit_skips_two_phase,
     ]
     failures = 0
     for test in tests:

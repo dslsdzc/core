@@ -254,6 +254,7 @@ fn corec_main() -> int:
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
     cli_flag_bool("arena-zero-on-reset", "", "Zero each arena slot's used prefix on reset (V2.4; default off)")
+    cli_flag("region-plan-max-nodes", "", "Skip V2 region planning above this IR node count (0 = unlimited; default 200000)")
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
@@ -280,6 +281,11 @@ fn corec_main() -> int:
     g_cfg_arena_zero_on_reset = 0
     if cli_has("arena-zero-on-reset") != 0:
         g_cfg_arena_zero_on_reset = 1
+    mn := cli_get("region-plan-max-nodes")
+    if str_len(mn) > 0:
+        g_cfg_region_plan_max_nodes = str_int(mn)
+        if g_cfg_region_plan_max_nodes < 0:
+            g_cfg_region_plan_max_nodes = 0
     // Parse -O flag (default O1)
     g_opt_level = 1
     ol : ., mut = cli_get("opt-level")

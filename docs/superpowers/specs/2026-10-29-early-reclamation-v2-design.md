@@ -289,10 +289,10 @@ if all allocations pass: split(S) = 1
 
 ## 十、风险与未决
 
-1. **两阶段编译成本**：Phase B 使 IR 生成和四个 pass 各跑两次。若某个程序的 plan 非空，编译时间约翻倍；需要测量并设阈值。
+1. **两阶段编译成本**：Phase B 使 IR 生成和四个 pass 各跑两次。已加 `--region-plan-max-nodes`（默认 200000，0 为不限）；总 IR 节点超过阈值时跳过 plan，回到 v1。
 2. **merge 复制语义**：指针身份、别名、聚合内部指针是主要风险；V2.2 只做可拷贝类型。
 3. **share 的写检测**：BytePermission 当前按值/分配推断，跨函数只读证明可能不足；不足时不 share。
-4. **early clear 的后支配成本**：大函数上后支配固定点可能较慢；按函数缓存。
+4. **early clear 的后支配成本**：大函数上后支配固定点可能较慢；按函数缓存。PDOM 节点上限已从 2000 提到 8000，7601 节点直函数可正常 clear。
 5. **canary 换代**：任何实际 split/reset 都会改变 `.ccr`/ELF；需要按阶段更新值表，不能静默改判据。
 6. **并发**：每 G 独立 arena 已接入调度切换（G+80 保存嵌套 current；raw current 内建；go/chan_recv 验证）。split/merge/share 仍只对单线程区域树生成计划，spawn/yield/await 在 share 窗口内保持拒绝。
 

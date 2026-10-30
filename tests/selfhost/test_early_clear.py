@@ -49,6 +49,18 @@ def run_program(src, expected):
                 pass
 
 
+BIG_LINES = ["fn main() -> int:", "    a := [1, 2]", "    x := a[0]", "    t : ., mut = x"]
+for _ in range(2100):
+    BIG_LINES.append("    t = t + 1")
+BIG_LINES.extend([
+    "    if t > 0:",
+    "        z := 1",
+    "    t = t + z",
+    "    b := [3, 4]",
+    "    return b[0] - 3",
+])
+BIG_FUNCTION = "\n".join(BIG_LINES) + "\n"
+
 POSITIVE = """fn sink(p: &int) -> int:
     return *p
 fn main() -> int:
@@ -190,6 +202,15 @@ def test_p4_loop_backedge_no_clear():
     run_program(BACKEDGE, 0)
 
 
+def test_p5_large_function_clear():
+    """PDOM cap raised to 8000: a 7601-node straight-line function still clears."""
+    result = run_ccr(BIG_FUNCTION)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert any(ln.startswith("clear ") for ln in diag.splitlines()), diag
+    run_program(BIG_FUNCTION, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_early_clear_emitted,
@@ -199,6 +220,7 @@ if __name__ == "__main__":
         test_p2_pointer_used_after_keeps_v1,
         test_p3_no_later_allocation_no_clear,
         test_p4_loop_backedge_no_clear,
+        test_p5_large_function_clear,
     ]
     failures = 0
     for test in tests:

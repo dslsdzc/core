@@ -546,6 +546,7 @@ g_spec_cap : int, mut
 // Optimization levels and metadata (extensible key-value store)
 g_opt_level : int, mut     // 0=none, 1=regalloc, 2=stackshare, 3=cse
 g_cfg_arena_zero_on_reset : int, mut  // V2.4 deployment switch (default off)
+g_cfg_region_plan_max_nodes : int, mut = 200000  // V2 plan two-phase guard; 0 = unlimited
 g_arena_pool_limit_cfg : int, mut = 0
 g_opt_meta : string, mut   // metadata buffer for .ccr v3+
 g_opt_meta_count : int, mut
