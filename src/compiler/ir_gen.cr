@@ -2017,6 +2017,12 @@ fn lazy_pack_args(first_arg: int, ac: int) -> int:
 fn force_if_thunk(var_idx: int) -> int:
     if var_idx < 0:
         return var_idx
+    // Loop-invariant memo: the first dynamic force executes the call and sets
+    // the flag; later forces read the memo slot.
+    mi := lazy_memo_index_of_var(var_idx)
+    if mi >= 0:
+        if lazy_memo_guard(mi, -1) != 0:
+            return var_idx
     // A deferred pure call is materialized at its first (and planned only)
     // force point. Subsequent forces see the call producer.
     if lazy_def_emit(var_idx) != 0:
@@ -3411,6 +3417,8 @@ fn gen_expr(node: int) -> int:
             name_idx := ast_int_val(target)
             lv := find_local(name_idx)
             if lv >= 0:
+                if lazy_memo_defer_store(val_var, lv) != 0:
+                    return lv
                 deferred_ti := lazy_defer_store(val_var, lv)
                 if deferred_ti >= 0:
                     return lv
@@ -4242,6 +4250,12 @@ fn gen_expr(node: int) -> int:
             else:
                 track_alloc_unknown()
         lazy_ast_set(g_ir_instr_count, node)
+        if g_plan_active != 0:
+            mi := lazy_memo_index_of_ast(node)
+            if mi >= 0:
+                mv := cell_load(g_lazy_memo_var, mi * 8)
+                if mv >= 0:
+                    return mv
         if g_plan_active != 0 && lazy_plan_has(node) != 0:
             // Compile-time lazy sink: define the result at its unique force
             // point instead of evaluating the pure call here. Constant args
@@ -4457,6 +4471,7 @@ fn gen_expr(node: int) -> int:
         header_lbl := new_label()
         body_lbl := new_label()
         exit_lbl := new_label()
+        lazy_memo_emit_for_sg(g_sg_count)
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         // SG_LOOP region covers [header, exit) — the back-edge jump to the
         // header lands on the region enter (region iteration in interp.cr).
@@ -4497,6 +4512,7 @@ fn gen_expr(node: int) -> int:
         // Keep while loops on the same SG_LOOP protocol as loop/for: the
         // region owns the condition, body, back-edge, and exit label so sg_pop
         // can add the termination dependency and advance the state chain.
+        lazy_memo_emit_for_sg(g_sg_count)
         sg_alloc_push(SG_LOOP)
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
@@ -4618,6 +4634,7 @@ fn gen_expr(node: int) -> int:
         // The SG_FOR region covers [header, exit): the back-edge jump to the
         // header is then a jump to the region enter, so the interpreter can
         // drive loop iteration from region boundaries (region iteration).
+        lazy_memo_emit_for_sg(g_sg_count)
         sg_alloc_push(SG_FOR)
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
@@ -5397,6 +5414,11 @@ fn gen_expr(node: int) -> int:
             irv_set_type(var, declared_ti)
         if val_node >= 0:
             val_var : ., mut = gen_expr(val_node)
+            if lazy_memo_defer_store(val_var, var) != 0:
+                bind_local(var_ni, var)
+                if is_apx != 0:
+                    emit(IR_APPROX, -1, 0, 0, 0, 0)
+                return var
             deferred_ti := lazy_defer_store(val_var, var)
             if deferred_ti >= 0:
                 bind_local(var_ni, var)

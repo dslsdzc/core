@@ -114,6 +114,50 @@ fn main() -> int:
     return 0
 """
 
+LOOP_MEMO = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    x : ., mut = 1
+    i : ., mut = 0
+    total : ., mut = 0
+    while i < 2:
+        v := boom(x)
+        if i == 99:
+            total = total + v
+        i = i + 1
+    return total
+"""
+
+LOOP_MEMO_TRUE = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    x : ., mut = 1
+    i : ., mut = 0
+    while i < 2:
+        v := boom(x)
+        if i == 1:
+            return v
+        i = i + 1
+    return 0
+"""
+
+LOOP_MEMO_MUTATED = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    x : ., mut = 1
+    i : ., mut = 0
+    while i < 2:
+        v := boom(x)
+        x = 2
+        if i == 99:
+            return v
+        i = i + 1
+    return 0
+"""
+
 MEMO_USE = BOOM + """
 fn main() -> int:
     v := boom()
@@ -344,6 +388,31 @@ def test_escaping_allocation_callee_stays_eager():
     build_run(ALLOC_ESCAPE, 1)
 
 
+def test_loop_invariant_memoizes():
+    result = ccr(LOOP_MEMO)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    assert call_is_in_block(diag, "boom"), diag
+    build_run(LOOP_MEMO, 0)
+
+
+def test_loop_memo_true_path_executes_once():
+    result = ccr(LOOP_MEMO_TRUE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" in diag, diag
+    build_run(LOOP_MEMO_TRUE, 1)
+
+
+def test_loop_memo_mutated_arg_rejected():
+    result = ccr(LOOP_MEMO_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_lazy_flag" not in diag, diag
+    build_run(LOOP_MEMO_MUTATED, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_if_false_sinks_and_returns,
@@ -360,6 +429,9 @@ if __name__ == "__main__":
         test_mutated_argument_is_captured,
         test_same_block_multi_use_memoizes,
         test_escaping_allocation_callee_stays_eager,
+        test_loop_invariant_memoizes,
+        test_loop_memo_true_path_executes_once,
+        test_loop_memo_mutated_arg_rejected,
     ]
     failures = 0
     for test in tests:

@@ -77,8 +77,83 @@ g_lazy_def_ti : string, mut
 g_lazy_def_args : string, mut
 g_lazy_def_argc : string, mut
 g_lazy_def_done : string, mut
+g_lazy_def_kind : string, mut
+g_lazy_def_memo : string, mut
 g_lazy_def_count : int, mut
 g_lazy_def_cap : int, mut
+// Loop-invariant memo plan: call AST -> loop SG/function/return type/args.
+g_lazy_memo_ast : string, mut
+g_lazy_memo_sg : string, mut
+g_lazy_memo_func : string, mut
+g_lazy_memo_ti : string, mut
+g_lazy_memo_arg0 : string, mut
+g_lazy_memo_argc : string, mut
+g_lazy_memo_count : int, mut
+g_lazy_memo_cap : int, mut
+// Phase B runtime vars for memo entries (indexed by memo entry).
+g_lazy_memo_var : string, mut
+g_lazy_memo_flag : string, mut
+
+fn lazy_memo_grow(n: int):
+    if n <= g_lazy_memo_cap:
+        return
+    nc : ., mut = g_lazy_memo_cap * 2
+    if nc < 32:
+        nc = 32
+    loop:
+        if nc >= n:
+            break
+        nc = nc * 2
+    na := alloc(nc * 8)
+    ns := alloc(nc * 8)
+    nf := alloc(nc * 8)
+    nt := alloc(nc * 8)
+    n0 := alloc(nc * 8)
+    nc2 := alloc(nc * 8)
+    nv := alloc(nc * 8)
+    nfl := alloc(nc * 8)
+    if g_lazy_memo_cap > 0:
+        cell_copy(g_lazy_memo_ast, g_lazy_memo_cap * 8, na)
+        cell_copy(g_lazy_memo_sg, g_lazy_memo_cap * 8, ns)
+        cell_copy(g_lazy_memo_func, g_lazy_memo_cap * 8, nf)
+        cell_copy(g_lazy_memo_ti, g_lazy_memo_cap * 8, nt)
+        cell_copy(g_lazy_memo_arg0, g_lazy_memo_cap * 8, n0)
+        cell_copy(g_lazy_memo_argc, g_lazy_memo_cap * 8, nc2)
+        cell_copy(g_lazy_memo_var, g_lazy_memo_cap * 8, nv)
+        cell_copy(g_lazy_memo_flag, g_lazy_memo_cap * 8, nfl)
+    g_lazy_memo_ast = na
+    g_lazy_memo_sg = ns
+    g_lazy_memo_func = nf
+    g_lazy_memo_ti = nt
+    g_lazy_memo_arg0 = n0
+    g_lazy_memo_argc = nc2
+    g_lazy_memo_var = nv
+    g_lazy_memo_flag = nfl
+    g_lazy_memo_cap = nc
+
+fn lazy_memo_add(ast: int, sg: int, func_ni: int, ti: int, arg0: int, argc: int):
+    lazy_memo_grow(g_lazy_memo_count + 1)
+    cell_store(g_lazy_memo_ast, g_lazy_memo_count * 8, ast)
+    cell_store(g_lazy_memo_sg, g_lazy_memo_count * 8, sg)
+    cell_store(g_lazy_memo_func, g_lazy_memo_count * 8, func_ni)
+    cell_store(g_lazy_memo_ti, g_lazy_memo_count * 8, ti)
+    cell_store(g_lazy_memo_arg0, g_lazy_memo_count * 8, arg0)
+    cell_store(g_lazy_memo_argc, g_lazy_memo_count * 8, argc)
+    cell_store(g_lazy_memo_var, g_lazy_memo_count * 8, -1)
+    cell_store(g_lazy_memo_flag, g_lazy_memo_count * 8, -1)
+    g_lazy_memo_count = g_lazy_memo_count + 1
+
+fn lazy_memo_index_of_ast(ast: int) -> int:
+    if ast < 0:
+        return -1
+    mi : ., mut = 0
+    loop:
+        if mi >= g_lazy_memo_count:
+            return -1
+        if cell_load(g_lazy_memo_ast, mi * 8) == ast:
+            return mi
+        mi = mi + 1
+    return -1
 
 fn lazy_plan_grow(n: int):
     if n <= g_lazy_plan_cap:
@@ -164,6 +239,8 @@ fn lazy_def_grow(n: int):
     na := alloc(nc * 8)
     nac := alloc(nc * 8)
     nd := alloc(nc * 8)
+    nk := alloc(nc * 8)
+    nm := alloc(nc * 8)
     if g_lazy_def_cap > 0:
         cell_copy(g_lazy_def_var, g_lazy_def_cap * 8, nv)
         cell_copy(g_lazy_def_func, g_lazy_def_cap * 8, nf)
@@ -171,12 +248,16 @@ fn lazy_def_grow(n: int):
         cell_copy(g_lazy_def_args, g_lazy_def_cap * 8, na)
         cell_copy(g_lazy_def_argc, g_lazy_def_cap * 8, nac)
         cell_copy(g_lazy_def_done, g_lazy_def_cap * 8, nd)
+        cell_copy(g_lazy_def_kind, g_lazy_def_cap * 8, nk)
+        cell_copy(g_lazy_def_memo, g_lazy_def_cap * 8, nm)
     g_lazy_def_var = nv
     g_lazy_def_func = nf
     g_lazy_def_ti = nt
     g_lazy_def_args = na
     g_lazy_def_argc = nac
     g_lazy_def_done = nd
+    g_lazy_def_kind = nk
+    g_lazy_def_memo = nm
     g_lazy_def_cap = nc
 
 fn lazy_def_add(var: int, func_ni: int, ti: int, args: int, argc: int):
@@ -187,6 +268,8 @@ fn lazy_def_add(var: int, func_ni: int, ti: int, args: int, argc: int):
     cell_store(g_lazy_def_args, g_lazy_def_count * 8, args)
     cell_store(g_lazy_def_argc, g_lazy_def_count * 8, argc)
     cell_store(g_lazy_def_done, g_lazy_def_count * 8, 0)
+    cell_store(g_lazy_def_kind, g_lazy_def_count * 8, 0)
+    cell_store(g_lazy_def_memo, g_lazy_def_count * 8, -1)
     g_lazy_def_count = g_lazy_def_count + 1
 
 // Turn `target := <deferred pure call>` into a deferred target definition.
@@ -212,6 +295,83 @@ fn lazy_defer_store(src: int, target: int) -> int:
         di = di + 1
     return -1
 
+fn lazy_memo_def_add(var: int, memo_idx: int):
+    lazy_def_grow(g_lazy_def_count + 1)
+    cell_store(g_lazy_def_var, g_lazy_def_count * 8, var)
+    cell_store(g_lazy_def_func, g_lazy_def_count * 8, -1)
+    cell_store(g_lazy_def_ti, g_lazy_def_count * 8, -1)
+    cell_store(g_lazy_def_args, g_lazy_def_count * 8, -1)
+    cell_store(g_lazy_def_argc, g_lazy_def_count * 8, 0)
+    cell_store(g_lazy_def_done, g_lazy_def_count * 8, 0)
+    cell_store(g_lazy_def_kind, g_lazy_def_count * 8, 1)
+    cell_store(g_lazy_def_memo, g_lazy_def_count * 8, memo_idx)
+    g_lazy_def_count = g_lazy_def_count + 1
+
+fn lazy_memo_index_of_var(var: int) -> int:
+    if var < 0:
+        return -1
+    mi : ., mut = 0
+    loop:
+        if mi >= g_lazy_memo_count:
+            return -1
+        if cell_load(g_lazy_memo_var, mi * 8) == var:
+            return mi
+        mi = mi + 1
+    return -1
+
+fn lazy_memo_defer_store(src: int, target: int) -> int:
+    if src < 0 || target < 0 || rc_is_global_var(target) != 0:
+        return 0
+    mi := lazy_memo_index_of_var(src)
+    if mi < 0:
+        return 0
+    lazy_memo_def_add(target, mi)
+    return 1
+
+fn lazy_memo_guard(mi: int, target: int) -> int:
+    if mi < 0 || mi >= g_lazy_memo_count:
+        return 0
+    memo := cell_load(g_lazy_memo_var, mi * 8)
+    flag := cell_load(g_lazy_memo_flag, mi * 8)
+    if memo < 0 || flag < 0:
+        return 0
+    z := new_ir_var("_memo_zero", TI_INT)
+    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+    cond := new_ir_var("_memo_cond", TI_BOOL)
+    emit(IR_BINARY, cond, flag, z, OP_EQ, 0)
+    body := new_label()
+    done := new_label()
+    emit_cond_match(cond, done, body)
+    emit(IR_LABEL, -1, body, 0, 0, 0)
+    emit(IR_CALL, memo,
+         cell_load(g_lazy_memo_arg0, mi * 8),
+         cell_load(g_lazy_memo_argc, mi * 8),
+         cell_load(g_lazy_memo_func, mi * 8),
+         cell_load(g_lazy_memo_ti, mi * 8))
+    one := new_ir_var("_memo_one", TI_INT)
+    emit(IR_CONST, one, 1, 0, 0, TI_INT)
+    emit(IR_STORE, -1, flag, one, 0, 0)
+    emit(IR_LABEL, -1, done, 0, 0, 0)
+    if target >= 0:
+        emit(IR_STORE, -1, target, memo, 0, 0)
+    return 1
+
+fn lazy_memo_emit_for_sg(sg: int):
+    mi : ., mut = 0
+    loop:
+        if mi >= g_lazy_memo_count:
+            return
+        if cell_load(g_lazy_memo_sg, mi * 8) == sg:
+            if cell_load(g_lazy_memo_var, mi * 8) < 0:
+                memo := new_ir_var("_lazy_memo", cell_load(g_lazy_memo_ti, mi * 8))
+                flag := new_ir_var("_lazy_flag", TI_INT)
+                cell_store(g_lazy_memo_var, mi * 8, memo)
+                cell_store(g_lazy_memo_flag, mi * 8, flag)
+                z := new_ir_var("_memo_init", TI_INT)
+                emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                emit(IR_STORE, -1, flag, z, 0, 0)
+        mi = mi + 1
+
 fn lazy_def_emit(var: int) -> int:
     if var < 0:
         return 0
@@ -220,6 +380,11 @@ fn lazy_def_emit(var: int) -> int:
         if di >= g_lazy_def_count:
             return 0
         if cell_load(g_lazy_def_var, di * 8) == var:
+            if cell_load(g_lazy_def_kind, di * 8) == 1:
+                // Memo target: guard at every force site; the runtime flag
+                // prevents duplicate calls.
+                lazy_memo_guard(cell_load(g_lazy_def_memo, di * 8), var)
+                return 1
             if cell_load(g_lazy_def_done, di * 8) == 0:
                 cell_store(g_lazy_def_done, di * 8, 1)
                 emit(IR_CALL, var,
@@ -234,6 +399,13 @@ fn lazy_def_emit(var: int) -> int:
 
 fn lazy_gen_reset():
     g_lazy_def_count = 0
+    mi : ., mut = 0
+    loop:
+        if mi >= g_lazy_memo_count:
+            break
+        cell_store(g_lazy_memo_var, mi * 8, -1)
+        cell_store(g_lazy_memo_flag, mi * 8, -1)
+        mi = mi + 1
     g_lazy_call_ast_cap = 0
     g_lazy_call_ast = ""
 
@@ -271,6 +443,7 @@ fn region_plan_reset():
             cell_store(g_lazy_plan_nodes, li * 8, 0)
             li = li + 1
     g_lazy_def_count = 0
+    g_lazy_memo_count = 0
     g_plan_share_reset_emitted = 0
     g_rp_share_consumer = -1
     g_rp_share_exit = -1
@@ -646,7 +819,7 @@ fn region_plan_has_clear() -> int:
     return 0
 
 fn region_plan_has_plan() -> int:
-    if g_lazy_plan_count > 0:
+    if g_lazy_plan_count > 0 || g_lazy_memo_count > 0:
         return 1
     if g_plan_split_count > 0 || g_plan_clear_count > 0 || g_plan_merge_count > 0 || g_plan_share_count > 0:
         return 1
@@ -2964,6 +3137,166 @@ fn lazy_last_label(node: int, nstart: int) -> int:
         tj = tj + 1
     return r
 
+fn lazy_arg_invariant(av: int, ls: int, le: int) -> int:
+    if av < 0:
+        return 0
+    // Any write to the argument slot inside the loop makes it non-invariant.
+    ni : ., mut = ls
+    loop:
+        if ni >= le:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        if op == IR_STORE && s1 == av:
+            return 0
+        if (op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_STORE_FIELD) && s1 == av:
+            return 0
+        if op == IR_STORE_INDEX_VAR && d == av:
+            return 0
+        ni = ni + 1
+    pv := cell_load(g_df_var_producer, av * 8)
+    if pv < ls || pv >= le:
+        return 1
+    op := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE)
+    if op == IR_CONST || op == IR_CONST_BIG:
+        return 1
+    if op == IR_STORE:
+        sv := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S2)
+        pv2 := cell_load(g_df_var_producer, sv * 8)
+        if pv2 >= 0:
+            op2 := cell_load(g_df_nodes, pv2 * ESZ_DFNODE + OFF_DF_OPCODE)
+            if op2 == IR_CONST || op2 == IR_CONST_BIG:
+                return 1
+    return 0
+
+fn lazy_uses_inside(var: int, lo: int, hi: int, nstart: int, ncount: int) -> int:
+    if var < 0:
+        return 0
+    uses : ., mut = 0
+    ni : ., mut = nstart
+    loop:
+        if ni >= nstart + ncount:
+            return uses
+        if rp_if_reads_var(ni, 1, var) != 0:
+            if ni < lo || ni >= hi:
+                return -1
+            uses = uses + 1
+        ni = ni + 1
+    return uses
+
+fn lazy_memo_analyze():
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            return
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
+        if nstart < 0 || ncount <= 0:
+            fi = fi + 1
+            continue
+        ni : ., mut = nstart
+        loop:
+            if ni >= nstart + ncount:
+                break
+            op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+            if op != IR_CALL:
+                ni = ni + 1
+                continue
+            lsg := lazy_loop_ancestor(ni)
+            if lsg < 0:
+                ni = ni + 1
+                continue
+            ls := cell_load(g_sgs, lsg * ESZ_SG + OFF_SG_NSTART)
+            le := cell_load(g_sgs, lsg * ESZ_SG + OFF_SG_EXIT)
+            ac := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+            s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+            dest := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+            if dest < 0 || rp_scalar_elem(irv_type(dest)) == 0:
+                ni = ni + 1
+                continue
+            ast := lazy_ast_get(ni)
+            if ast < 0:
+                ni = ni + 1
+                continue
+            cfi := rc_func_by_name(s3)
+            if cfi < 0 || lazy_callee_safe(cfi) == 0:
+                ni = ni + 1
+                continue
+            args_ok : ., mut = 1
+            ai : ., mut = 0
+            loop:
+                if ai >= ac:
+                    break
+                av := s1 + ai
+                if av < 0 || rp_scalar_elem(irv_type(av)) == 0 || lazy_arg_invariant(av, ls, le) == 0:
+                    args_ok = 0
+                    break
+                ai = ai + 1
+            if args_ok == 0:
+                ni = ni + 1
+                continue
+            // Follow thunk/force; every use must stay inside the loop.
+            res : ., mut = dest
+            tj : ., mut = nstart
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LAZY_THUNK:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1) == res:
+                        res = cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_DEST)
+                        break
+                tj = tj + 1
+            forces : ., mut = 0
+            tj = nstart
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LAZY_FORCE:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1) == res:
+                        forces = forces + 1
+                tj = tj + 1
+            if forces <= 0:
+                ni = ni + 1
+                continue
+            // Validate each force's uses (or its local store target) stay in loop.
+            ok : ., mut = 1
+            tj = nstart
+            loop:
+                if tj >= nstart + ncount:
+                    break
+                if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LAZY_FORCE:
+                    if cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_S1) == res:
+                        fd := cell_load(g_df_nodes, tj * ESZ_DFNODE + OFF_DF_DEST)
+                        target : ., mut = fd
+                        using : ., mut = -1
+                        scan : ., mut = tj + 1
+                        loop:
+                            if scan >= nstart + ncount:
+                                break
+                            if rp_if_reads_var(scan, 1, fd) != 0:
+                                using = scan
+                                break
+                            scan = scan + 1
+                        if using >= 0:
+                            op2 := cell_load(g_df_nodes, using * ESZ_DFNODE + OFF_DF_OPCODE)
+                            if op2 == IR_STORE:
+                                t2 := cell_load(g_df_nodes, using * ESZ_DFNODE + OFF_DF_S1)
+                                if t2 >= 0 && rc_is_global_var(t2) == 0:
+                                    target = t2
+                        u := lazy_uses_inside(target, ls, le, nstart, ncount)
+                        if u <= 0:
+                            ok = 0
+                            break
+                tj = tj + 1
+            if ok == 0:
+                ni = ni + 1
+                continue
+            lazy_memo_add(ast, lsg, s3, irv_type(dest), s1, ac)
+            ni = ni + 1
+        fi = fi + 1
+
 fn lazy_plan_analyze():
     fi : ., mut = 0
     loop:
@@ -3265,3 +3598,4 @@ fn region_plan_analyze():
         fi = fi + 1
 
     lazy_plan_analyze()
+    lazy_memo_analyze()
