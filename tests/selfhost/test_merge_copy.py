@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """V2.2 merge-copy regression.
 
-The candidate is a constant-size scalar array, a POD struct, or a POD tuple
-stored directly into an outer local slot. One copy runs at the end of each
-assigning branch and the outer slot is rebound there, so a non-assigning path
-still sees the old value and no merge phi is needed. If/else branches may each
-assign the same slot in one IF and share one parent copy.
+The candidate is a constant-size scalar array, a POD struct, a POD tuple, or a
+string literal stored directly into an outer local slot. One copy runs at the
+end of each assigning branch and the outer slot is rebound there, so a
+non-assigning path still sees the old value and no merge phi is needed. If/else
+branches may each assign the same slot in one IF and share one parent copy.
 """
 
 import os
@@ -51,6 +51,12 @@ def build_run(src, expected):
                 os.unlink(p)
             except FileNotFoundError:
                 pass
+
+
+def run_interp(src, expected):
+    result = _run(["./build/corec", "run", src])
+    diag = result.stdout + result.stderr
+    assert result.returncode == expected, f"interp rc={result.returncode}:\n{diag}"
 
 
 def has_merge(diag):
@@ -300,6 +306,99 @@ LEN_ZERO = """fn main() -> int:
     if y < 2:
         b : [int; 0], mut
         a = b
+    return 0
+"""
+
+STRING_MERGE = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = "hello"
+    if s == "hello":
+        return 0
+    return 1
+"""
+
+STRING_MERGE_FALSE = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 3
+    if c == 0:
+        s = "hello"
+    if s == "old":
+        return 0
+    return 1
+"""
+
+STRING_MERGE_ELSE_TRUE = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = "cat"
+    else:
+        s = "birds"
+    if s == "cat":
+        return 0
+    if s == "birds":
+        return 1
+    return 2
+"""
+
+STRING_MERGE_ELSE_FALSE = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 3
+    if c == 0:
+        s = "cat"
+    else:
+        s = "birds"
+    if s == "cat":
+        return 0
+    if s == "birds":
+        return 1
+    return 2
+"""
+
+STRING_MERGE_EMPTY = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = ""
+    if s == "":
+        return 0
+    return 1
+"""
+
+STRING_DYNAMIC = """fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        t := s
+        s = t
+    if s == "old":
+        return 0
+    return 1
+"""
+
+STRING_CONCAT = """import fmt
+
+fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = concat("a", "b")
+    if s == "ab":
+        return 0
+    return 1
+"""
+
+STRING_LONG = """import fmt
+
+fn main() -> int:
+    s : ., mut = "old"
+    c : ., mut = 0
+    if c == 0:
+        s = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    if str_len(s) != 300:
+        return 1
     return 0
 """
 
@@ -830,6 +929,45 @@ def test_p35_string_field_blocks_pod_merge():
     build_run(POD_STRUCT_STRING_FIELD, 0)
 
 
+def test_p36_string_literal_merges():
+    for src in (STRING_MERGE, STRING_MERGE_FALSE, STRING_MERGE_EMPTY):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, 0)
+        run_interp(src, 0)
+
+
+def test_p37_string_else_literals_merge():
+    for src, expected in ((STRING_MERGE_ELSE_TRUE, 0),
+                          (STRING_MERGE_ELSE_FALSE, 1)):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert has_merge(diag), diag
+        build_run(src, expected)
+        run_interp(src, expected)
+
+
+def test_p38_nonliteral_string_blocks_merge():
+    for src in (STRING_DYNAMIC, STRING_CONCAT):
+        result = ccr(src)
+        diag = result.stdout + result.stderr
+        assert result.returncode == 0, diag
+        assert not has_merge(diag), diag
+        build_run(src, 0)
+
+
+def test_p39_long_string_copy_charged_to_parent():
+    result = ccr(STRING_LONG)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_merge(diag), diag
+    build_run(STRING_LONG, 0)
+    run_interp(STRING_LONG, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_merge_copy_value,
@@ -867,6 +1005,10 @@ if __name__ == "__main__":
         test_p33_pod_tuple_merges,
         test_p34_pointer_fields_block_pod_merge,
         test_p35_string_field_blocks_pod_merge,
+        test_p36_string_literal_merges,
+        test_p37_string_else_literals_merge,
+        test_p38_nonliteral_string_blocks_merge,
+        test_p39_long_string_copy_charged_to_parent,
     ]
     failures = 0
     for test in tests:

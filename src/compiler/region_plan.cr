@@ -16,6 +16,8 @@ g_plan_clear_cap : int, mut
 g_plan_merge : string, mut
 g_plan_merge_kind : string, mut
 g_plan_merge_name : string, mut
+g_plan_merge_str1 : string, mut
+g_plan_merge_str2 : string, mut
 g_plan_merge_count : int, mut
 g_plan_merge_cap : int, mut
 g_plan_share : string, mut
@@ -37,6 +39,8 @@ g_rp_share_reset_node : int, mut
 // Kind/name of the last eligible merge: 0=array, 1=struct, 2=tuple.
 g_rp_merge_kind : int, mut
 g_rp_merge_name : int, mut
+g_rp_merge_str1 : int, mut
+g_rp_merge_str2 : int, mut
 // Per-function transitive call-graph hazard bits:
 // 1 = unsafe region, 2 = g_current_arena read/write, 4 = arena/spawn/yield/
 // unknown call, 8 = heap/array/field/pointer store.
@@ -82,6 +86,8 @@ fn region_plan_reset():
     g_rp_share_reset_node = -1
     g_rp_merge_kind = -1
     g_rp_merge_name = -1
+    g_rp_merge_str1 = -1
+    g_rp_merge_str2 = -1
     g_share_bad = ""
     // A string global starts null; cap is the allocated-size witness. Each
     // table is cleared independently: merge/share can be allocated without a
@@ -103,6 +109,8 @@ fn region_plan_reset():
             cell_store(g_plan_merge, i * 8, 0)
             cell_store(g_plan_merge_kind, i * 8, -1)
             cell_store(g_plan_merge_name, i * 8, -1)
+            cell_store(g_plan_merge_str1, i * 8, -1)
+            cell_store(g_plan_merge_str2, i * 8, -1)
             i = i + 1
     g_plan_merge_count = 0
     if g_plan_share_cap > 0:
@@ -143,6 +151,8 @@ fn region_plan_grow_merge(n: int):
     nb := alloc(nc * 8)
     nk := alloc(nc * 8)
     nn := alloc(nc * 8)
+    ns1 := alloc(nc * 8)
+    ns2 := alloc(nc * 8)
     i : ., mut = 0
     loop:
         if i >= nc:
@@ -150,17 +160,24 @@ fn region_plan_grow_merge(n: int):
         cell_store(nb, i * 8, 0)
         cell_store(nk, i * 8, -1)
         cell_store(nn, i * 8, -1)
+        cell_store(ns1, i * 8, -1)
+        cell_store(ns2, i * 8, -1)
         i = i + 1
     if g_plan_merge_cap > 0:
         cell_copy(g_plan_merge, g_plan_merge_cap * 8, nb)
         cell_copy(g_plan_merge_kind, g_plan_merge_cap * 8, nk)
         cell_copy(g_plan_merge_name, g_plan_merge_cap * 8, nn)
+        cell_copy(g_plan_merge_str1, g_plan_merge_cap * 8, ns1)
+        cell_copy(g_plan_merge_str2, g_plan_merge_cap * 8, ns2)
     g_plan_merge = nb
     g_plan_merge_kind = nk
     g_plan_merge_name = nn
+    g_plan_merge_str1 = ns1
+    g_plan_merge_str2 = ns2
     g_plan_merge_cap = nc
 
-fn region_plan_mark_merge(sg: int, kind: int, elem_count: int, name: int):
+fn region_plan_mark_merge(sg: int, kind: int, elem_count: int, name: int,
+                          str1: int, str2: int):
     if sg < 0 || elem_count <= 0 || kind < 0:
         return
     region_plan_grow_merge(sg + 1)
@@ -168,6 +185,8 @@ fn region_plan_mark_merge(sg: int, kind: int, elem_count: int, name: int):
         cell_store(g_plan_merge, sg * 8, elem_count)
         cell_store(g_plan_merge_kind, sg * 8, kind)
         cell_store(g_plan_merge_name, sg * 8, name)
+        cell_store(g_plan_merge_str1, sg * 8, str1)
+        cell_store(g_plan_merge_str2, sg * 8, str2)
         g_plan_merge_count = g_plan_merge_count + 1
 
 fn region_plan_is_merge(sg: int) -> int:
@@ -188,6 +207,16 @@ fn region_plan_merge_name_of(sg: int) -> int:
     if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
         return -1
     return cell_load(g_plan_merge_name, sg * 8)
+
+fn region_plan_merge_str1_of(sg: int) -> int:
+    if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
+        return -1
+    return cell_load(g_plan_merge_str1, sg * 8)
+
+fn region_plan_merge_str2_of(sg: int) -> int:
+    if region_plan_is_merge(sg) == 0 || sg >= g_plan_merge_cap:
+        return -1
+    return cell_load(g_plan_merge_str2, sg * 8)
 
 fn region_plan_grow_share(n: int):
     if n <= g_plan_share_cap:
@@ -1090,6 +1119,117 @@ fn rp_tuple_pod(an: int, cnt: int, sg_start: int, sg_count: int) -> int:
         i = i + 1
     return 0
 
+// Narrow string merge: the IF has no direct allocations and assigns a string
+// value into one outer local slot, once per assigning branch. The copy is made
+// at the branch exit by switching to the parent arena and calling str_sub, so
+// the result lives in the parent slot even when the source string was built in
+// the child arena. Plan name carries the outer destination variable.
+fn rp_if_string_merge_eligible(sg: int, sg_start: int, sg_count: int,
+                               nstart: int, ncount: int) -> int:
+    ai : ., mut = 0
+    loop:
+        if ai >= g_pa_alloc_count:
+            break
+        an := cell_load(g_pa_alloc_nodes, ai * 8)
+        if subgraph_containing(an) == sg:
+            return 0
+        ai = ai + 1
+    dest : ., mut = -1
+    count : ., mut = 0
+    st1 : ., mut = -1
+    st2 : ., mut = -1
+    src1 : ., mut = -1
+    src2 : ., mut = -1
+    lit1 : ., mut = -1
+    lit2 : ., mut = -1
+    ni : ., mut = sg_start
+    loop:
+        if ni >= sg_start + sg_count:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_STORE:
+            s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+            s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            if s1 >= 0 && irv_type(s2) == TI_STR:
+                if subgraph_containing(ni) != sg:
+                    return 0
+                if dest < 0:
+                    dest = s1
+                else if dest != s1:
+                    return 0
+                // Narrow slice: the assigned value is a string literal. Its
+                // bytes are materialized into the parent arena before the child
+                // arena exists, so the branch exit only rebinds the slot.
+                pv := cell_load(g_df_var_producer, s2 * 8)
+                if pv < 0:
+                    return 0
+                if cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE) != IR_CONST:
+                    return 0
+                lit := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S1)
+                if lit < 0:
+                    return 0
+                count = count + 1
+                if count == 1:
+                    st1 = ni
+                    src1 = s2
+                    lit1 = lit
+                else if count == 2:
+                    st2 = ni
+                    src2 = s2
+                    lit2 = lit
+                else:
+                    return 0
+        ni = ni + 1
+    if count < 1 || dest < 0 || rc_is_global_var(dest) != 0:
+        return 0
+    if irv_type(dest) != TI_STR:
+        return 0
+    prod := cell_load(g_df_var_producer, dest * 8)
+    if prod < 0:
+        return 0
+    if rc_sg_is_ancestor(sg, subgraph_containing(prod)) != 0:
+        return 0
+    // No other write to the outer slot inside the IF.
+    ni = sg_start
+    loop:
+        if ni >= sg_start + sg_count:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == dest:
+            if irv_type(s2) != TI_STR:
+                return 0
+        ni = ni + 1
+    if count == 2:
+        mnode := sg_start + sg_count - 1
+        if cell_load(g_df_nodes, mnode * ESZ_DFNODE + OFF_DF_OPCODE) != IR_LABEL:
+            return 0
+        j1 : ., mut = -1
+        j2 : ., mut = -1
+        jc : ., mut = 0
+        ni = sg_start
+        loop:
+            if ni >= sg_start + sg_count:
+                break
+            if cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE) == IR_JUMP:
+                if rc_ctl_label_node(cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)) == mnode:
+                    jc = jc + 1
+                    if jc == 1:
+                        j1 = ni
+                    else if jc == 2:
+                        j2 = ni
+                    else:
+                        return 0
+            ni = ni + 1
+        if jc != 2 || st1 >= j1 || st2 <= j1 || st2 >= j2:
+            return 0
+    g_rp_merge_kind = 3
+    g_rp_merge_name = dest
+    g_rp_merge_str1 = lit1
+    g_rp_merge_str2 = lit2
+    return 1
+
 // V2.2 merge: one direct constant-size scalar array is stored directly into an
 // outer local slot. An if/else may allocate one array per branch when both
 // arrays have the same element type and length; one parent copy is filled at
@@ -1102,6 +1242,8 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
     // merge IF inside a loop stays v1. Unsafe blocks are also identity-observable.
     if rp_if_merge_ancestors_ok(sg) == 0:
         return 0
+    if rp_if_string_merge_eligible(sg, sg_start, sg_count, nstart, ncount) != 0:
+        return 1
     alloc_count : ., mut = 0
     kind : ., mut = -1
     name1 : ., mut = -1
@@ -1878,12 +2020,74 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
 // allocation was emitted before the child arena, so it lives in the parent slot.
 // The child array is copied element by element and the outer slot is rebound
 // before the branch jumps to the merge label; the other path keeps the old value.
-fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
-                          range_start: int, range_end: int) -> int:
-    if copy_var < 0 || copy_instr < 0:
+fn rp_emit_merge_arg(av: int, ti: int) -> int:
+    pv := new_ir_var("_merge_arg", ti)
+    emit(IR_STORE, -1, pv, av, 0, 0)
+    return pv
+
+// Materialize a literal string copy in the parent arena before the IF child
+// arena is created. str_sub allocates in the current arena and returns a value
+// that survives the child reset.
+fn rp_emit_parent_str_copy(lit: int) -> int:
+    if lit < 0:
+        return -1
+    litv := new_ir_var("_merge_lit", TI_STR)
+    emit(IR_CONST, litv, lit, 0, 0, TI_STR)
+    zv := new_ir_var("_merge_zero", TI_INT)
+    emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+    lv := new_ir_var("_merge_len", TI_INT)
+    emit(IR_CONST, lv, istr_len(lit), 0, 0, TI_INT)
+    a0 := rp_emit_merge_arg(litv, TI_STR)
+    a1 := rp_emit_merge_arg(zv, TI_INT)
+    a2 := rp_emit_merge_arg(lv, TI_INT)
+    // str_sub allocates len+1 bytes; charge the parent slot before the call so
+    // a static arena peak includes the surviving copy.
+    track_alloc_size(((istr_len(lit) + 1 + 15) / 8) * 8)
+    cp := new_ir_var("_merge_str", TI_STR)
+    emit(IR_CALL, cp, a0, 3, str_intern("str_sub"), TI_STR)
+    return cp
+
+// The string copies were materialized in the parent arena at the IF entry.
+// Each assigning branch only rebinds the outer slot to its precomputed copy.
+fn rp_emit_string_merge(sg: int, copy1: int, copy2: int, range_start: int,
+                        range_end: int) -> int:
+    dest := region_plan_merge_name_of(sg)
+    if dest < 0:
         return 0
+    lit : ., mut = -1
+    ni : ., mut = range_start
+    loop:
+        if ni >= range_end:
+            break
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        if op == IR_STORE && s1 == dest && irv_type(s2) == TI_STR:
+            pv := cell_load(g_df_var_producer, s2 * 8)
+            if pv >= 0 && cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST:
+                lit = cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S1)
+        ni = ni + 1
+    if lit < 0:
+        return 0
+    cp : ., mut = -1
+    if lit == region_plan_merge_str1_of(sg):
+        cp = copy1
+    else if lit == region_plan_merge_str2_of(sg):
+        cp = copy2
+    if cp < 0:
+        return 0
+    emit(IR_STORE, -1, dest, cp, 0, 0)
+    return 1
+
+fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
+                          str1_var: int, str2_var: int, range_start: int,
+                          range_end: int) -> int:
     kind := region_plan_merge_kind_of(sg)
     if kind < 0:
+        return 0
+    if kind == 3:
+        return rp_emit_string_merge(sg, str1_var, str2_var, range_start, range_end)
+    if copy_var < 0 || copy_instr < 0:
         return 0
     an : ., mut = -1
     ni : ., mut = range_start
@@ -2137,7 +2341,7 @@ fn region_plan_analyze():
                                 else:
                                     mc := rp_if_merge_eligible(sg, sg_start, sg_count, nstart, ncount, 0)
                                     if mc > 0:
-                                        region_plan_mark_merge(sg, g_rp_merge_kind, mc, g_rp_merge_name)
+                                        region_plan_mark_merge(sg, g_rp_merge_kind, mc, g_rp_merge_name, g_rp_merge_str1, g_rp_merge_str2)
             sg = sg + 1
         fi = fi + 1
 

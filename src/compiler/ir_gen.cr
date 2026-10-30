@@ -4231,6 +4231,8 @@ fn gen_expr(node: int) -> int:
             child = 1
         merge_copy_var : ., mut = -1
         merge_copy_instr : ., mut = -1
+        merge_str1_var : ., mut = -1
+        merge_str2_var : ., mut = -1
         merge_emitted : ., mut = 0
         if merge != 0:
             // Allocate the surviving copy in the parent arena before the child
@@ -4239,15 +4241,26 @@ fn gen_expr(node: int) -> int:
             // type row is patched at the assigning branch exit.
             merge_cnt := region_plan_merge_len(sg_idx)
             merge_kind := region_plan_merge_kind_of(sg_idx)
-            merge_copy_var = new_ir_var("_merge_copy", TI_UNIT)
-            if merge_kind == 1:
-                merge_name := region_plan_merge_name_of(sg_idx)
-                track_alloc_struct(merge_name)
-                emit(IR_ALLOC_STRUCT, merge_copy_var, 0, 0, merge_name, 0)
+            if merge_kind == 3:
+                ms1 := region_plan_merge_str1_of(sg_idx)
+                ms2 := region_plan_merge_str2_of(sg_idx)
+                merge_str1_var = rp_emit_parent_str_copy(ms1)
+                if merge_str1_var < 0:
+                    check_error(EC_B_LIFETIME, "string merge copy failed", 0, 0)
+                if ms2 >= 0 && ms2 != ms1:
+                    merge_str2_var = rp_emit_parent_str_copy(ms2)
+                else:
+                    merge_str2_var = merge_str1_var
             else:
-                track_alloc_array(merge_cnt)
-                emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
-            merge_copy_instr = g_ir_instr_count - 1
+                merge_copy_var = new_ir_var("_merge_copy", TI_UNIT)
+                if merge_kind == 1:
+                    merge_name := region_plan_merge_name_of(sg_idx)
+                    track_alloc_struct(merge_name)
+                    emit(IR_ALLOC_STRUCT, merge_copy_var, 0, 0, merge_name, 0)
+                else:
+                    track_alloc_array(merge_cnt)
+                    emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
+                merge_copy_instr = g_ir_instr_count - 1
         arena_instr : ., mut = -1
         if child != 0:
             sg_alloc_push(SG_IF)
@@ -4296,7 +4309,7 @@ fn gen_expr(node: int) -> int:
         if merge != 0:
             // The copy runs at the end of the assigning branch: the false path
             // never sees the child pointer, so no merge phi is needed.
-            if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, then_body_start, g_ir_instr_count) != 0:
+            if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, merge_str1_var, merge_str2_var, then_body_start, g_ir_instr_count) != 0:
                 merge_emitted = 1
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         if else_node >= 0:
@@ -4316,7 +4329,7 @@ fn gen_expr(node: int) -> int:
                 if result_rep >= 0:
                     emit_rep_set(result_rep, rep_enc_of_expr(else_node, else_val))
             if merge != 0:
-                if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, else_body_start, g_ir_instr_count) != 0:
+                if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, merge_str1_var, merge_str2_var, else_body_start, g_ir_instr_count) != 0:
                     merge_emitted = 1
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         other_t := sg_alloc_cur_total()
