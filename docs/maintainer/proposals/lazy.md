@@ -1,6 +1,6 @@
 # Core 惰性求值
 
-> 定位：受众 = 维护者/贡献者；状态 = 部分实现。图具有惰性的论点成立，eager 是当前策略；调用级 thunk 仍是 eager 兼容形态；控制流级第一切片（纯零参数标量调用下沉到唯一 if/loop 条件 force 点）已实现，带参/alloc/跨迭代下沉未做。
+> 定位：受众 = 维护者/贡献者；状态 = 部分实现。图具有惰性的论点成立，eager 是当前策略；调用级 thunk 仍是 eager 兼容形态；控制流级第一切片（纯标量调用，含常量/未重写值实参，下沉到唯一 if/loop 条件 force 点）已实现；可变实参/alloc/跨迭代 hoist 未做。
 
 ## 设计原则
 
@@ -65,7 +65,7 @@ z := x + 1         // x 这里也被用了，必须求值
 
 更新（2026-08-09）：控制流级惰性方向定为编译期指令变换路线。纯调用移到唯一消费点（分支内），不引入运行时 thunk、flag 或 9 字节结构，interp / ELF 后端零改动；见 TODO.md“控制流自动惰性”。
 
-更新（2026-10-30）：第一切片已实现。`compute_usage_counts()` 在 `df_state_finalize()` 后运行；纯度分析不再把本地标量写当外部效应；Phase A 选零参数纯标量调用，Phase B 把调用（含 `v := call` 的赋值目标）延迟到唯一 force 点。if/loop 条件、for 循环、多使用/直写/分配 callee/全局效应负例由 `tests/selfhost/test_lazy.py` 覆盖。
+更新（2026-10-30）：第一切片已实现。`compute_usage_counts()` 在 `df_state_finalize()` 后运行；纯度分析不再把本地标量写当外部效应；Phase A 选纯标量调用（实参为常量或调用前未被重写的值），Phase B 把调用（含 `v := call` 的赋值目标）延迟到唯一 force 点。if/loop 条件、for 循环、常量实参、实参改写、多使用/直写/分配 callee/全局效应负例由 `tests/selfhost/test_lazy.py` 12 例覆盖。
 
 当前核实的两点：
 

@@ -3,7 +3,7 @@
 
 > 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
-状态：调用级子集已实现（2026-08-08）；控制流级在 2026-10-30 落第一切片：纯零参数标量调用在 Phase A 用真实 use_count/纯度选中，Phase B 延迟到唯一 if/loop 条件 force 点，赋值目标也随之下沉（不做运行时 thunk）。`IR_LAZY_THUNK`/`IR_LAZY_FORCE` 仍是 eager 兼容形态。带参调用、跨 loop 迭代/hoist、alloc 下沉仍待扩展。
+状态：调用级子集已实现（2026-08-08）；控制流级在 2026-10-30 落第一切片：纯标量调用（含常量/未重写值实参）在 Phase A 用真实 use_count/纯度选中，Phase B 延迟到唯一 if/loop 条件 force 点，赋值目标也随之下沉（不做运行时 thunk）。`IR_LAZY_THUNK`/`IR_LAZY_FORCE` 仍是 eager 兼容形态。可变实参/跨 loop 迭代 hoist、alloc 下沉仍待扩展。
 
 ## 概述
 

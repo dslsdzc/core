@@ -74,6 +74,8 @@ g_lazy_call_ast_cap : int, mut
 g_lazy_def_var : string, mut
 g_lazy_def_func : string, mut
 g_lazy_def_ti : string, mut
+g_lazy_def_args : string, mut
+g_lazy_def_argc : string, mut
 g_lazy_def_done : string, mut
 g_lazy_def_count : int, mut
 g_lazy_def_cap : int, mut
@@ -159,23 +161,31 @@ fn lazy_def_grow(n: int):
     nv := alloc(nc * 8)
     nf := alloc(nc * 8)
     nt := alloc(nc * 8)
+    na := alloc(nc * 8)
+    nac := alloc(nc * 8)
     nd := alloc(nc * 8)
     if g_lazy_def_cap > 0:
         cell_copy(g_lazy_def_var, g_lazy_def_cap * 8, nv)
         cell_copy(g_lazy_def_func, g_lazy_def_cap * 8, nf)
         cell_copy(g_lazy_def_ti, g_lazy_def_cap * 8, nt)
+        cell_copy(g_lazy_def_args, g_lazy_def_cap * 8, na)
+        cell_copy(g_lazy_def_argc, g_lazy_def_cap * 8, nac)
         cell_copy(g_lazy_def_done, g_lazy_def_cap * 8, nd)
     g_lazy_def_var = nv
     g_lazy_def_func = nf
     g_lazy_def_ti = nt
+    g_lazy_def_args = na
+    g_lazy_def_argc = nac
     g_lazy_def_done = nd
     g_lazy_def_cap = nc
 
-fn lazy_def_add(var: int, func_ni: int, ti: int):
+fn lazy_def_add(var: int, func_ni: int, ti: int, args: int, argc: int):
     lazy_def_grow(g_lazy_def_count + 1)
     cell_store(g_lazy_def_var, g_lazy_def_count * 8, var)
     cell_store(g_lazy_def_func, g_lazy_def_count * 8, func_ni)
     cell_store(g_lazy_def_ti, g_lazy_def_count * 8, ti)
+    cell_store(g_lazy_def_args, g_lazy_def_count * 8, args)
+    cell_store(g_lazy_def_argc, g_lazy_def_count * 8, argc)
     cell_store(g_lazy_def_done, g_lazy_def_count * 8, 0)
     g_lazy_def_count = g_lazy_def_count + 1
 
@@ -194,7 +204,9 @@ fn lazy_defer_store(src: int, target: int) -> int:
             cell_store(g_lazy_def_done, di * 8, 1)
             fn_ni := cell_load(g_lazy_def_func, di * 8)
             ti := cell_load(g_lazy_def_ti, di * 8)
-            lazy_def_add(target, fn_ni, ti)
+            args := cell_load(g_lazy_def_args, di * 8)
+            argc := cell_load(g_lazy_def_argc, di * 8)
+            lazy_def_add(target, fn_ni, ti, args, argc)
             irv_set_type(target, ti)
             return ti
         di = di + 1
@@ -210,7 +222,9 @@ fn lazy_def_emit(var: int) -> int:
         if cell_load(g_lazy_def_var, di * 8) == var:
             if cell_load(g_lazy_def_done, di * 8) == 0:
                 cell_store(g_lazy_def_done, di * 8, 1)
-                emit(IR_CALL, var, -1, 0,
+                emit(IR_CALL, var,
+                     cell_load(g_lazy_def_args, di * 8),
+                     cell_load(g_lazy_def_argc, di * 8),
                      cell_load(g_lazy_def_func, di * 8),
                      cell_load(g_lazy_def_ti, di * 8))
                 return 1
@@ -2892,9 +2906,10 @@ fn lazy_plan_analyze():
                 ni = ni + 1
                 continue
             ac := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+            s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
             s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
             dest := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
-            if ac != 0 || dest < 0:
+            if dest < 0:
                 ni = ni + 1
                 continue
             ti := irv_type(dest)
@@ -2980,6 +2995,56 @@ fn lazy_plan_analyze():
                     use = tj
                 tj = tj + 1
             if uc != 1 || use < 0:
+                ni = ni + 1
+                continue
+            // Arguments may be deferred only when each is a constant-valued
+            // temporary and is not rewritten before the force point.
+            args_ok : ., mut = 1
+            ai : ., mut = 0
+            loop:
+                if ai >= ac:
+                    break
+                av := s1 + ai
+                if av < 0:
+                    args_ok = 0
+                    break
+                pv := cell_load(g_df_var_producer, av * 8)
+                if pv < 0:
+                    args_ok = 0
+                    break
+                pop : ., mut = cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_OPCODE)
+                if pop == IR_STORE:
+                    sv := cell_load(g_df_nodes, pv * ESZ_DFNODE + OFF_DF_S2)
+                    pv2 := cell_load(g_df_var_producer, sv * 8)
+                    if pv2 < 0:
+                        args_ok = 0
+                        break
+                    pop = cell_load(g_df_nodes, pv2 * ESZ_DFNODE + OFF_DF_OPCODE)
+                if pop != IR_CONST && pop != IR_CONST_BIG:
+                    args_ok = 0
+                    break
+                // Reject a rewrite of the argument temp between call and use.
+                tj2 : ., mut = ni + 1
+                loop:
+                    if tj2 >= use:
+                        break
+                    op3 := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_OPCODE)
+                    s1c := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_S1)
+                    s2c := cell_load(g_df_nodes, tj2 * ESZ_DFNODE + OFF_DF_S2)
+                    if op3 == IR_STORE && s1c == av:
+                        args_ok = 0
+                        break
+                    if (op3 == IR_STORE_INDEX || op3 == IR_STORE_INDEX_VAR) && s1c == av:
+                        args_ok = 0
+                        break
+                    if op3 == IR_STORE_INDEX_VAR && s2c == av:
+                        args_ok = 0
+                        break
+                    tj2 = tj2 + 1
+                if args_ok == 0:
+                    break
+                ai = ai + 1
+            if args_ok == 0:
                 ni = ni + 1
                 continue
             target : ., mut = -1

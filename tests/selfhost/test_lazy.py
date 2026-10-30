@@ -62,6 +62,41 @@ fn main() -> int:
     return v
 """
 
+ARG_CONST = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    v := boom(1)
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
+ARG_TRUE = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    v := boom(1)
+    c : ., mut = 1
+    if c == 1:
+        return v
+    return 0
+"""
+
+ARG_MUTATED = """fn boom(x: int) -> int:
+    return 7 / (x - 1)
+""" + """
+fn main() -> int:
+    x : ., mut = 1
+    v := boom(x)
+    x = 2
+    c : ., mut = 0
+    if c == 1:
+        return v
+    return 0
+"""
+
 BINARY_USE = BOOM + """
 fn main() -> int:
     v := boom()
@@ -241,6 +276,30 @@ def test_impure_callee_stays_eager():
     build_run(IMPURE_GLOBAL, 1)
 
 
+def test_constant_argument_sinks():
+    result = ccr(ARG_CONST)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "boom"), diag
+    build_run(ARG_CONST, 0)
+
+
+def test_constant_argument_true_path_runs():
+    result = ccr(ARG_TRUE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert call_is_in_block(diag, "boom"), diag
+    build_run(ARG_TRUE, 1)
+
+
+def test_mutated_argument_stays_eager():
+    result = ccr(ARG_MUTATED)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert not call_is_in_block(diag, "boom"), diag
+    build_run(ARG_MUTATED, 1)
+
+
 if __name__ == "__main__":
     tests = [
         test_if_false_sinks_and_returns,
@@ -252,6 +311,9 @@ if __name__ == "__main__":
         test_binary_use_sinks,
         test_for_conditional_sinks,
         test_impure_callee_stays_eager,
+        test_constant_argument_sinks,
+        test_constant_argument_true_path_runs,
+        test_mutated_argument_stays_eager,
     ]
     failures = 0
     for test in tests:

@@ -4220,10 +4220,12 @@ fn gen_expr(node: int) -> int:
             else:
                 track_alloc_unknown()
         lazy_ast_set(g_ir_instr_count, node)
-        if g_plan_active != 0 && ac == 0 && lazy_plan_has(node) != 0:
+        if g_plan_active != 0 && lazy_plan_has(node) != 0:
             // Compile-time lazy sink: define the result at its unique force
-            // point instead of evaluating the pure call here.
-            lazy_def_add(dest, func_ni, call_ti)
+            // point instead of evaluating the pure call here. Constant args
+            // were already materialized as IR vars, so the deferred call can
+            // reuse their contiguous argument block.
+            lazy_def_add(dest, func_ni, call_ti, first_arg_var, ac)
             return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
