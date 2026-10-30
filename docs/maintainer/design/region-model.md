@@ -165,7 +165,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
   pts 流不敏感）见 `TODO.md` 条目 `#2026-09-20-1`
 - 字节权限的持久化/运行期表示、每字节子区间尚未实现
 - `alloc_at` v1 只接受编译期字面量、固定 `*int`、8 字节 cell；部署配置地址、显式元素类型、对齐的运行时落实尚未实现
-- 并发区域：每 G 独立 arena 尚未实现；本轮 arena 边界设计明确不含并发
+- 并发区域（2026-10-30）：每 G 独立 arena 已接入调度切换。G 结构体 +80 保存嵌套 current arena；`sched_schedule`/`sched_worker_run` 在 fiber_switch 前后保存/恢复；`sched_go`/`fiber_spawn` 创建 G arena 后恢复 spawner current。编译器内建 `arena_current_unchecked`/`arena_set_current_unchecked` 直接读写 allocator scalar，不创建函数 arena。`test_go_arena.py` 用 raw-int 构建验证 go/chan_recv 后 main 的 current arena 保持一致。
 
 ---
 

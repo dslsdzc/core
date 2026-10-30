@@ -294,7 +294,7 @@ if all allocations pass: split(S) = 1
 3. **share 的写检测**：BytePermission 当前按值/分配推断，跨函数只读证明可能不足；不足时不 share。
 4. **early clear 的后支配成本**：大函数上后支配固定点可能较慢；按函数缓存。
 5. **canary 换代**：任何实际 split/reset 都会改变 `.ccr`/ELF；需要按阶段更新值表，不能静默改判据。
-6. **并发**：每 G 独立 arena 不在本轮；split 只在单线程区域树上定义。
+6. **并发**：每 G 独立 arena 已接入调度切换（G+80 保存嵌套 current；raw current 内建；go/chan_recv 验证）。split/merge/share 仍只对单线程区域树生成计划，spawn/yield/await 在 share 窗口内保持拒绝。
 
 ## 十一、已定与待批决策
 
