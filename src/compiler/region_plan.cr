@@ -787,6 +787,116 @@ fn region_plan_share_elem(sg: int) -> int:
         return -1
     return cell_load(g_plan_share_elem, sg * 8)
 
+// Walk from an open SG to the nearest share owner. The share array is
+// allocated directly in the IF SG, so a LET/ASSIGN inside that IF finds it by
+// walking parents (nested structured regions may sit between).
+fn region_plan_share_owner_of_sg(sg: int) -> int:
+    cur : ., mut = sg
+    loop:
+        if cur < 0:
+            return -1
+        if region_plan_is_share(cur) != 0:
+            return cur
+        cur = cell_load(g_sgs, cur * ESZ_SG + OFF_SG_PARENT)
+    return -1
+
+// Record the Phase B outer-slot variable for a COW share. Matching by the
+// current-generation variable avoids carrying Phase A ids across the
+// regeneration, which shifts ids when the COW copy is allocated.
+fn region_plan_record_share_base(var: int) -> int:
+    if var < 0 || g_cur_sg < 0:
+        return 0
+    ti := irv_type(var)
+    if ti < 0 || ti >= g_type_count || get_type_kind(ti) != TYP_ARRAY:
+        return 0
+    owner := region_plan_share_owner_of_sg(g_cur_sg)
+    if owner < 0 || region_plan_share_cow(owner) == 0:
+        return 0
+    cell_store(g_sg_cow_base, owner * 8, var)
+    return 1
+
+// A write through the outer slot after the IF. Writes inside the owner IF
+// (then/else construction) are not consumer writes and must not copy.
+fn region_plan_cow_owner_of_base(base: int) -> int:
+    s : ., mut = 0
+    loop:
+        if s >= g_sg_count:
+            return -1
+        if region_plan_is_share(s) != 0 && region_plan_share_cow(s) != 0:
+            if cell_load(g_sg_cow_base, s * 8) == base:
+                if g_cur_sg >= 0 && rc_sg_is_ancestor(s, g_cur_sg) != 0:
+                    s = s + 1
+                    continue
+                return s
+        s = s + 1
+    return -1
+
+fn rp_emit_cow_copy(src: int, dst: int, cnt: int, elem: int):
+    if cnt <= 8:
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            ev := new_ir_var("_cow_elem", elem)
+            emit(IR_LOAD_INDEX, ev, src, 0, i, elem)
+            emit(IR_STORE_INDEX, -1, dst, ev, i, 0)
+            i = i + 1
+    else:
+        iv := new_ir_var("_cow_i", TI_INT)
+        zv := new_ir_var("_cow_zero_i", TI_INT)
+        emit(IR_CONST, zv, 0, 0, 0, TI_INT)
+        emit(IR_STORE, -1, iv, zv, 0, 0)
+        cv := new_ir_var("_cow_cnt", TI_INT)
+        emit(IR_CONST, cv, cnt, 0, 0, TI_INT)
+        one := new_ir_var("_cow_one_i", TI_INT)
+        emit(IR_CONST, one, 1, 0, 0, TI_INT)
+        head := new_label()
+        body := new_label()
+        done := new_label()
+        emit(IR_JUMP, -1, head, 0, 0, 0)
+        emit(IR_LABEL, -1, head, 0, 0, 0)
+        cond := new_ir_var("_cow_loop_cond", TI_BOOL)
+        emit(IR_BINARY, cond, iv, cv, OP_LT, 0)
+        emit_cond_match(cond, done, body)
+        emit(IR_LABEL, -1, body, 0, 0, 0)
+        ev := new_ir_var("_cow_elem", elem)
+        emit(IR_LOAD_INDEX_VAR, ev, src, iv, 0, elem)
+        emit(IR_STORE_INDEX_VAR, ev, dst, iv, 0, 0)
+        nv := new_ir_var("_cow_next", TI_INT)
+        emit(IR_BINARY, nv, iv, one, OP_ADD, 0)
+        emit(IR_STORE, -1, iv, nv, 0, 0)
+        emit(IR_JUMP, -1, head, 0, 0, 0)
+        emit(IR_LABEL, -1, done, 0, 0, 0)
+
+// First write through a COW share copies the elements into the preallocated
+// parent-arena array and rebinds the outer slot; later writes see flag=1 and
+// go straight to the copy.
+fn region_plan_emit_cow_write(base: int) -> int:
+    owner := region_plan_cow_owner_of_base(base)
+    if owner < 0:
+        return 0
+    copy := cell_load(g_sg_cow_var, owner * 8)
+    flag := cell_load(g_sg_cow_flag, owner * 8)
+    cnt := region_plan_share_len(owner)
+    elem := region_plan_share_elem(owner)
+    if copy < 0 || flag < 0 || cnt <= 0 || elem < 0:
+        return 0
+    z := new_ir_var("_cow_zero", TI_INT)
+    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+    cond := new_ir_var("_cow_cond", TI_BOOL)
+    emit(IR_BINARY, cond, flag, z, OP_EQ, 0)
+    body := new_label()
+    done := new_label()
+    emit_cond_match(cond, done, body)
+    emit(IR_LABEL, -1, body, 0, 0, 0)
+    rp_emit_cow_copy(base, copy, cnt, elem)
+    emit(IR_STORE, -1, base, copy, 0, 0)
+    one := new_ir_var("_cow_one", TI_INT)
+    emit(IR_CONST, one, 1, 0, 0, TI_INT)
+    emit(IR_STORE, -1, flag, one, 0, 0)
+    emit(IR_LABEL, -1, done, 0, 0, 0)
+    return 1
+
 fn region_plan_share_after(cg: int) -> int:
     if cg < 0 || g_plan_share_count <= 0 || cg >= g_plan_share_cap:
         return -1

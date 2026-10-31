@@ -52,6 +52,12 @@ def build_run(src, expected):
                 pass
 
 
+def run_interp(src, expected):
+    result = _run(["./build/corec", "run", src])
+    diag = result.stdout + result.stderr
+    assert result.returncode == expected, f"interp rc={result.returncode}, expected {expected}:\n{diag}"
+
+
 def has_share(diag):
     return any(ln.startswith("share ") for ln in diag.splitlines())
 
@@ -720,6 +726,76 @@ WRITE_ONLY = """fn main() -> int:
     return 0
 """
 
+COW_FALSE_WRITE = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 3
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        arr[0] = 9
+        total = total + arr[0]
+        i = i + 1
+    return total - 18
+"""
+
+COW_READ_WRITE = """fn main() -> int:
+    arr : ., mut = [5, 6]
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 2], mut
+        b[0] = 7
+        b[1] = 8
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        total = total + arr[0]
+        arr[0] = 9
+        total = total + arr[0]
+        i = i + 1
+    return total - 34
+"""
+
+COW_LONG_ARRAY = """fn main() -> int:
+    arr : [int; 10], mut
+    arr[0] = 1
+    arr[1] = 2
+    arr[2] = 3
+    arr[3] = 4
+    arr[4] = 5
+    arr[5] = 6
+    arr[6] = 7
+    arr[7] = 8
+    arr[8] = 9
+    arr[9] = 10
+    y : ., mut = 1
+    total : ., mut = 0
+    if y < 2:
+        b : [int; 10], mut
+        b[0] = 11
+        b[1] = 12
+        b[2] = 13
+        b[3] = 14
+        b[4] = 15
+        b[5] = 16
+        b[6] = 17
+        b[7] = 18
+        b[8] = 19
+        b[9] = 20
+        arr = b
+    i : ., mut = 0
+    while i < 2:
+        arr[0] = 30
+        total = total + arr[9]
+        i = i + 1
+    return total - 40
+"""
+
 STRAIGHT_READ = """fn main() -> int:
     arr : ., mut = [5, 6]
     y : ., mut = 1
@@ -803,7 +879,14 @@ def test_p2_write_consumer_shares():
     diag = result.stdout + result.stderr
     assert result.returncode == 0, diag
     assert has_share(diag), diag
+    assert "_cow_copy" in diag, diag
+    assert "_cow_flag" in diag, diag
+    assert "_cow_cond" in diag, diag
+    # One consumer write site: the binary and its MATCH mention the condition
+    # twice. Writes used to build `b` inside the IF must not add barriers.
+    assert diag.count("_cow_cond") == 2, diag
     build_run(WRITE_CONSUMER, 0)
+    run_interp(WRITE_CONSUMER, 0)
 
 
 def test_p3_straight_line_reader_blocks_share():
@@ -1075,6 +1158,35 @@ def test_p34_write_only_consumer_shares():
     build_run(WRITE_ONLY, 0)
 
 
+def test_p35_cow_false_path_copies_old_array():
+    result = ccr(COW_FALSE_WRITE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert has_share(diag), diag
+    assert "_cow_copy" in diag, diag
+    build_run(COW_FALSE_WRITE, 0)
+    run_interp(COW_FALSE_WRITE, 0)
+
+
+def test_p36_cow_read_before_write():
+    result = ccr(COW_READ_WRITE)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_cow_copy" in diag, diag
+    build_run(COW_READ_WRITE, 0)
+    run_interp(COW_READ_WRITE, 0)
+
+
+def test_p37_cow_long_array_uses_loop_copy():
+    result = ccr(COW_LONG_ARRAY)
+    diag = result.stdout + result.stderr
+    assert result.returncode == 0, diag
+    assert "_cow_copy" in diag, diag
+    assert "_cow_i" in diag, diag
+    build_run(COW_LONG_ARRAY, 0)
+    run_interp(COW_LONG_ARRAY, 0)
+
+
 if __name__ == "__main__":
     tests = [
         test_p1_share_two_readers,
@@ -1111,6 +1223,9 @@ if __name__ == "__main__":
         test_p32_allocating_callee_blocks_share,
         test_p33_write_through_alias_blocks_share,
         test_p34_write_only_consumer_shares,
+        test_p35_cow_false_path_copies_old_array,
+        test_p36_cow_read_before_write,
+        test_p37_cow_long_array_uses_loop_copy,
     ]
     failures = 0
     for test in tests:

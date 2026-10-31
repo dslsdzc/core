@@ -272,8 +272,8 @@ if all allocations pass: split(S) = 1
   - 同一函数内的 merge plan 若在 share 窗口内则阻止该 share。
   - early clear 与 share 共存：父槽 clear 在 share reset 之前的同一 label 发射，`arena_clear` 只重置父槽元数据、不切换 current，不影响共享槽。
   - S 的 arena 在 IF 入口创建，IF 汇合标签**不 reset**；Q 处发射 `IR_ARENA_RESET`（label hook 或 consumer SG reset 之后）。外层槽继续指向 S 内的数组，不复制。`RegionCheck` 的 lifetime exit 对该 SG 使用 Q 的 label id（`rc_sg_lexit` 在 Phase B 重新解析），而不是 IF 汇合点。
-  - COW 未采用：同一外层槽、别名/身份观察已被硬门排除，顺序控制流下写后读必须看到同一个对象；首次写复制只会增加开销并改变被拒绝观察的指针身份。将来若引入多所有者或并发 share，再按 copy-on-write 处理。
-  - 验收覆盖 `test_share.py` 34 例：两个/单个/for/嵌套 loop 消费者、IF 消费者、wider label LCPD、多个顺序 share、重叠 share 的 LIFO reset、false path、写/直读/窗口分配/嵌套 IF/break/unsafe/消费者后读拒绝、跨函数（含传递调用链）只读/写入/逃逸/current/arena/无数组叶调用，以及 share 与 early clear 共存；受 `src/ci/run.sh` selfhost-tests 挂钩。
+  - COW（2026-10-31）：写消费者不再直接写 share 槽。候选检测到写时置 `g_rp_share_cow`；Phase B 在 IF 子 arena 创建前于父 arena 分配同长度 `_cow_copy` 和 `_cow_flag=0`。IF 之后第一次经外层槽写时，guard 检查 flag，复制元素到 `_cow_copy`、把外层槽重绑到副本并置 flag=1；后续写直接落副本。只读 share 不分配副本。Q 仍 reset 子 arena，副本在父 arena 存活到父 reset；没有新增别名/身份观察。阈值/是否按大小分档仍是映射调优参数。这是 share 槽的软件 COW；消息边界的页级 COW 仍属 message-copy 设计。
+  - 验收覆盖 `test_share.py` 37 例：两个/单个/for/嵌套 loop 消费者、IF 消费者、wider label LCPD、多个顺序 share、重叠 share 的 LIFO reset、false path、写/直读/窗口分配/嵌套 IF/break/unsafe/消费者后读拒绝、跨函数（含传递调用链）只读/写入/逃逸/current/arena/无数组叶调用，以及 share 与 early clear 共存；受 `src/ci/run.sh` selfhost-tests 挂钩。
 ### V2.4 清零配置
 
 - `arena_zero_on_reset` 部署配置。

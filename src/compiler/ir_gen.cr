@@ -12,6 +12,12 @@ g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
 g_sg_arena_var   : string, mut    // per-sg: IR var for arena ID
 g_sg_arena_var_cap : int, mut
+// Per-SG share COW state. base = the outer slot variable (Phase B id), var =
+// the parent-arena copy, flag = 0 until the first write copies the elements.
+g_sg_cow_base : string, mut
+g_sg_cow_var  : string, mut
+g_sg_cow_flag : string, mut
+g_sg_cow_cap  : int, mut
 g_ir_source_hash : int, mut
 g_ir_source_hash_ready : int, mut
 
@@ -296,11 +302,35 @@ fn grow_sg_arena_var(needed: int):
     g_sg_arena_var = nb
     g_sg_arena_var_cap = nc
 
+fn grow_sg_cow(needed: int):
+    if needed < g_sg_cow_cap:
+        return
+    nc : ., mut = g_sg_cow_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    nv := alloc(nc * 8)
+    nf := alloc(nc * 8)
+    if g_sg_cow_cap > 0:
+        cell_copy(g_sg_cow_base, g_sg_cow_cap * 8, nb)
+        cell_copy(g_sg_cow_var, g_sg_cow_cap * 8, nv)
+        cell_copy(g_sg_cow_flag, g_sg_cow_cap * 8, nf)
+    g_sg_cow_base = nb
+    g_sg_cow_var = nv
+    g_sg_cow_flag = nf
+    g_sg_cow_cap = nc
+
 fn sg_alloc_push(kind: int):
     grow_sg_alloc(g_sg_count + 1)
     grow_sg_arena_var(g_sg_count + 1)
+    grow_sg_cow(g_sg_count + 1)
     cell_store(g_sg_alloc_total, g_sg_count * 8, 0)
     cell_store(g_sg_alloc_unknown, g_sg_count * 8, 0)
+    cell_store(g_sg_cow_base, g_sg_count * 8, -1)
+    cell_store(g_sg_cow_var, g_sg_count * 8, -1)
+    cell_store(g_sg_cow_flag, g_sg_count * 8, -1)
     sg_push(kind)
 
 // Close a split child without adding its bytes to the parent's arena peak.
@@ -3442,6 +3472,7 @@ fn gen_expr(node: int) -> int:
                     if forced2 != 0:
                         val_var = box_for_slot_flag(val_node, val_var, 1)
                     emit(IR_STORE, -1, lv, val_var, 0, 0)
+                    region_plan_record_share_base(lv)
                     // 可选表示：赋值写点置位（同 LET，解包点据此分派）
                     if rpv0 >= 0:
                         if forced2 != 0:
@@ -3490,12 +3521,14 @@ fn gen_expr(node: int) -> int:
                 emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
                 emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
                 if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
+                    region_plan_emit_cow_write(arr_var)
                     emit(IR_STORE_INDEX, -1, arr_data_store, val_var, ast_int_val(idx_node), 0)
             else:
                 idx_var : ., mut = gen_expr(idx_node)
                 idx_var = force_if_thunk(idx_var)
                 emit_slice_bounds(arr_var, idx_var)
                 if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
+                    region_plan_emit_cow_write(arr_var)
                     emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, 0, 0)
             return val_var
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
@@ -4374,9 +4407,33 @@ fn gen_expr(node: int) -> int:
                     track_alloc_array(merge_cnt)
                     emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
                 merge_copy_instr = g_ir_instr_count - 1
+        cow_pending : ., mut = 0
+        cow_cnt : ., mut = 0
+        cow_elem : ., mut = -1
+        cow_var : ., mut = -1
+        cow_flag : ., mut = -1
+        if share != 0 && region_plan_share_cow(sg_idx) != 0:
+            cow_cnt = region_plan_share_len(sg_idx)
+            cow_elem = region_plan_share_elem(sg_idx)
+            if cow_cnt > 0 && cow_elem >= 0:
+                cow_pending = 1
+                // Allocate and emit the copy while the current SG is still the
+                // parent: the instruction must execute in the parent arena and
+                // RegionCheck must see the parent lifetime. The per-SG plan
+                // vars are stored after sg_alloc_push, which resets them.
+                track_alloc_array(cow_cnt)
+                cow_var = new_ir_var("_cow_copy", alloc_type(TYP_ARRAY, cow_elem, cow_cnt))
+                emit(IR_ALLOC_ARRAY, cow_var, cow_cnt, 0, 0, 0)
+                cow_flag = new_ir_var("_cow_flag", TI_INT)
+                cow_zero := new_ir_var("_cow_init", TI_INT)
+                emit(IR_CONST, cow_zero, 0, 0, 0, TI_INT)
+                emit(IR_STORE, -1, cow_flag, cow_zero, 0, 0)
         arena_instr : ., mut = -1
         if child != 0:
             sg_alloc_push(SG_IF)
+            if cow_pending != 0:
+                cell_store(g_sg_cow_var, sg_idx * 8, cow_var)
+                cell_store(g_sg_cow_flag, sg_idx * 8, cow_flag)
             arena_var := new_ir_var("_arena", TI_INT)
             cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
             emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
@@ -5502,6 +5559,7 @@ fn gen_expr(node: int) -> int:
                     emit_rep_set(rep_var, oe_boxed())
                 else:
                     emit_rep_set(rep_var, rep_enc_of_expr(val_node, val_var))
+        region_plan_record_share_base(var)
         bind_local(var_ni, var)
         if is_apx != 0:
             emit(IR_APPROX, -1, 0, 0, 0, 0)
