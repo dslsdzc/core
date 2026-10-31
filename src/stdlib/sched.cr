@@ -22,7 +22,7 @@ fn sched_init(), pub:
         return
 
     // Initialize arena system (required by goroutine/chan)
-    arena_init(1048576, 65536)  // 1MB pool, 64KB chunks
+    arena_init(g_arena_pool_limit, 1048576)  // limit from Core.toml, 1MB slots
 
     // Initialize M workers (one per CPU)
     // For now: single-threaded (1 M, cooperative)
@@ -38,7 +38,7 @@ fn sched_init(), pub:
     // Register the main thread as G 0 so it can block/wake via channels.
     // Its stack_ptr is filled in by fiber_switch the first time it yields
     // (fiber_switch saves the current RSP into [G+16]).
-    main_g := alloc(80)
+    main_g := alloc(88)
     cell_store(main_g, 0, 0)     // id = 0
     cell_store(main_g, 8, 1)     // _Grunning
     cell_store(main_g, 16, 0)    // stack_ptr (filled on first yield)
@@ -49,6 +49,7 @@ fn sched_init(), pub:
     cell_store(main_g, 56, 0)    // saved_fn = 0 (never dispatched by a wrapper)
     cell_store(main_g, 64, 0)    // saved_arg = 0
     cell_store(main_g, 72, 0)    // temp_val = 0
+    cell_store(main_g, 80, -1)   // saved_current_arena = none/base
     cell_store(m, 8, main_g)     // M[0].cur_g = main_g
     g_set_curg(main_g)
     g_sched_inited = 1
@@ -127,11 +128,21 @@ fn sched_schedule():
         g_set_curg(next_g)
         cell_store(next_g, 8, 1)  // _Grunning
 
+        // Per-G arena: save the nested current arena of the outgoing G and
+        // restore the incoming G's base/saved arena before it runs. The raw
+        // builtins lower to cell accesses without creating a function arena.
+        if old_g >= 0:
+            cell_store(old_g, 80, arena_current_unchecked())
+        next_cur : ., mut = cell_load(next_g, 80)
+        if next_cur < 0:
+            next_cur = cell_load(next_g, 32)
+        arena_set_current_unchecked(next_cur)
         if old_g >= 0:
             // Save old_g's sp, switch to next_g's sp
             old_sp_addr := @ptr_add(old_g, 16)  // &g.stack_ptr
             next_sp := cell_load(next_g, 16)  // g.stack_ptr
             fiber_switch(old_sp_addr, next_sp)
+            arena_set_current_unchecked(cell_load(old_g, 80))
         // else: first goroutine, just start it
 
 // sched_worker_run: main loop for worker threads.
@@ -150,9 +161,16 @@ fn sched_worker_run(m_idx: int):
             cell_store(next_g, 8, 1)  // _Grunning
 
             if old_g >= 0:
+                cell_store(old_g, 80, arena_current_unchecked())
+            next_cur : ., mut = cell_load(next_g, 80)
+            if next_cur < 0:
+                next_cur = cell_load(next_g, 32)
+            arena_set_current_unchecked(next_cur)
+            if old_g >= 0:
                 old_sp_addr := @ptr_add(old_g, 16)
                 next_sp := cell_load(next_g, 16)
                 fiber_switch(old_sp_addr, next_sp)
+                arena_set_current_unchecked(cell_load(old_g, 80))
             // else: first goroutine on this M, start it
         // If no work, yield to OS
         // For now: spin-wait (will add proper blocking later)
@@ -165,8 +183,10 @@ fn sched_go(fn_ptr: int, arg: int) -> string, pub:
     // Create a 1-element channel for collecting the result
     ch := chan_make(8, 1)
 
-    // Create a new goroutine via g_new
+    // Create a new goroutine via g_new, then restore the spawner's arena.
+    saved_cur := arena_current_unchecked()
     g := g_new(fn_ptr, arg, 0)
+    arena_set_current_unchecked(saved_cur)
 
     // Store result channel in G struct (offset 40)
     cell_store(g, 40, ch)

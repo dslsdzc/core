@@ -211,9 +211,9 @@ fn purity_selftest_run() -> int:
     total : ., mut = 0
 
     // Test program: positive controls plus negative cases 1 through 6, including an SCC and an effectful generic.
-    src : ., mut = "fn pure_add(a: int, b: int) -> int:\n    return a + b\n"
+    src : ., mut = "g_test : int, mut = 0\nfn pure_add(a: int, b: int) -> int:\n    return a + b\n"
     src = src + "fn pure_caller(a: int, b: int) -> int:\n    return pure_add(a, b)\n"
-    src = src + "fn effect():\n    st : ., mut = 0\n    st = 1\n"
+    src = src + "fn effect():\n    g_test = 1\n"
     src = src + "fn call_effect():\n    effect()\n"
     src = src + "extern fn ext_probe(x: int) -> int\n"
     src = src + "fn call_extern(x: int) -> int:\n    return ext_probe(x)\n"
@@ -225,21 +225,21 @@ fn purity_selftest_run() -> int:
     // `gid[int]` monomorph instances the purity fixed-point checks below use.
     src = src + "fn id(x) -> int:\n    return x\n"
     src = src + "fn use_id(x: int) -> int:\n    return id(x)\n"
-    src = src + "fn gid(x) -> int:\n    gst : ., mut = 0\n    gst = 1\n    return x\n"
+    src = src + "fn gid(x) -> int:\n    g_test = 1\n    return x\n"
     src = src + "fn use_gid(x: int) -> int:\n    return gid(x)\n"
     // State dependency cases: an effectful call between stores, a pure call with
     // the same shape, and a loop.
-    src = src + "fn chain_effect() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    a = 2\n    return a\n"
+    src = src + "fn chain_effect() -> int:\n    g_test = 1\n    effect()\n    g_test = 2\n    return g_test\n"
     src = src + "fn chain_pure() -> int:\n    a : ., mut = 0\n    a = 1\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
-    src = src + "fn chain_loop() -> int:\n    acc : ., mut = 0\n    i : ., mut = 0\n    loop:\n        if i >= 3:\n            break\n        acc = acc + 1\n        i = i + 1\n    return acc\n"
+    src = src + "fn chain_loop() -> int:\n    acc : ., mut = 0\n    i : ., mut = 0\n    loop:\n        if i >= 3:\n            break\n        g_test = g_test + 1\n        acc = acc + 1\n        i = i + 1\n    return acc\n"
     // Two calls to an effectful function, a pure call with the same shape, and the
     // IR_CALL_EXTERN, IR_SPAWN, and IR_YIELD opcodes. Each case has a store before
     // and after, so the expected touch value is 3.
-    src = src + "fn chain_two() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    effect()\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
-    src = src + "fn chain_extern_op(x: int) -> int:\n    a : ., mut = 0\n    a = 1\n    r := ext_probe(a)\n    a = 2\n    return a + r\n"
+    src = src + "fn chain_two() -> int:\n    a : ., mut = 0\n    g_test = 1\n    effect()\n    effect()\n    b := pure_add(a, 1)\n    g_test = 2\n    return g_test + b\n"
+    src = src + "fn chain_extern_op(x: int) -> int:\n    a : ., mut = 0\n    g_test = 1\n    r := ext_probe(a)\n    g_test = 2\n    return g_test + r\n"
     src = src + "fn spawnee(x: int) -> int:\n    return x + 1\n"
-    src = src + "fn chain_spawn_op() -> int:\n    a : ., mut = 0\n    a = 1\n    r := go i 0..2 spawnee(i)\n    a = 2\n    return a\n"
-    src = src + "flow fn chain_yield_op(n: int) -> int:\n    a : ., mut = 0\n    a = 1\n    yield n\n    a = 2\n    return a\n"
+    src = src + "fn chain_spawn_op() -> int:\n    a : ., mut = 0\n    g_test = 1\n    r := go i 0..2 spawnee(i)\n    g_test = 2\n    return g_test\n"
+    src = src + "flow fn chain_yield_op(n: int) -> int:\n    a : ., mut = 0\n    g_test = 1\n    yield n\n    g_test = 2\n    return g_test\n"
     src = src + "fn main() -> int:\n    return 0\n"
 
     if ps_compile(src) != 0:

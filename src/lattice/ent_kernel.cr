@@ -386,6 +386,8 @@ fn ir_op_kind_name(op: int) -> string:
         return "ALLOC_STRUCT"
     if op == IR_ALLOC_ARRAY:
         return "ALLOC_ARRAY"
+    if op == IR_ALLOC_AT:
+        return "ALLOC_AT"
     if op == IR_STORE:
         return "STORE"
     if op == IR_CONST:

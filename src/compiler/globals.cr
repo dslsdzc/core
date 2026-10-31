@@ -352,6 +352,7 @@ g_gen_map_count : int, mut
 g_func_ret_ti : string, mut
 g_func_ret_count : int, mut
 g_func_ret_cap : int, mut
+g_alloc_at_ptr_ti : int, mut = -1
 g_infer_ret_active : int, mut
 g_infer_ret_ti : int, mut
 // Globally unique suffix for synthesized `__inferN` / `__retN` names. Function
@@ -544,6 +545,9 @@ g_spec_cap : int, mut
 
 // Optimization levels and metadata (extensible key-value store)
 g_opt_level : int, mut     // 0=none, 1=regalloc, 2=stackshare, 3=cse
+g_cfg_arena_zero_on_reset : int, mut  // V2.4 deployment switch (default off)
+g_cfg_region_plan_max_nodes : int, mut = 200000  // V2 plan two-phase guard; 0 = unlimited
+g_arena_pool_limit_cfg : int, mut = 0
 g_opt_meta : string, mut   // metadata buffer for .ccr v3+
 g_opt_meta_count : int, mut
 g_opt_meta_cap : int, mut
@@ -568,10 +572,17 @@ g_plugin_rtypes : string, mut
 g_plugin_rtype_count : int, mut
 g_plugin_rtype_cap : int, mut
 
-// Pointer analysis storage
+// Pointer analysis storage.
+// Each points-to set is a fixed-width bitset of `g_pts_words` 63-lane cells.
+// The width is derived from a pre-scan of all allocation nodes, so the analysis
+// is not limited to 64 allocations. `g_pts_cap`/`g_alloc_pts_cap` count sets,
+// not cells.
 g_pts : string, mut
 g_pts_count : int, mut
 g_pts_cap : int, mut
+g_pts_force_rebuild : int, mut
+g_pts_words : int, mut
+g_pa_alloc_max : int, mut
 g_offsets : string, mut
 g_offsets_count : int, mut
 g_offsets_cap : int, mut
@@ -794,6 +805,7 @@ fn reset_frontend_state():
     g_enum_count = 0
     g_sym_count = 0
     g_type_count = 0
+    g_alloc_at_ptr_ti = -1
     g_iface_count = 0
     g_impl_for_count = 0
     g_method_count = 0
@@ -833,5 +845,7 @@ fn reset_frontend_state():
     g_df_state_finalized = 0   // state chain is rebuilt once per compilation
     g_line_count = 0
     g_unsafe_depth = 0
-    g_alloc_pts_cap = 0
+    g_pts_count = 0
+    g_pa_alloc_max = 0
+    g_pa_alloc_count = 0
     g_checker_current_fi = 0

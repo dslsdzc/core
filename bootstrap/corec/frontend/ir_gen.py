@@ -17,6 +17,7 @@ class IRGen:
         self.enum_variants = {}
         self.module_functions = {}
         self.block_counter = 0
+        self.current_impl_type = None
 
     def new_temp(self, name="t"):
         self.temp_counter += 1
@@ -55,12 +56,14 @@ class IRGen:
                 self.gen_function(decl)
             elif isinstance(decl, ImplDecl):
                 struct_name = decl.for_type[-1]
+                self.current_impl_type = decl.for_type
                 for method in decl.methods:
                     full_name = f"{struct_name}.{method.name}"
                     method.name = full_name
                     if not self.symtab.lookup(full_name):
                         self.symtab.define(full_name, SymbolKind.FUNCTION, method.return_type, method)
                     self.gen_function(method)
+                self.current_impl_type = None
         return self.mod
 
     def gen_let_decl(self, decl: LetDecl):
@@ -380,6 +383,8 @@ class IRGen:
         if depth > 10:
             return None
         if isinstance(expr, Ident):
+            if expr.name == "self" and self.current_impl_type is not None:
+                return self.current_impl_type[-1]
             sym = self.symtab.lookup(expr.name)
             if sym and sym.type:
                 typ = sym.type
@@ -388,8 +393,12 @@ class IRGen:
                 if isinstance(typ, (PathType, GenericApplyType)):
                     return typ.path[-1]
             var = self.local_vars.get(expr.name)
-            if var and var.type and isinstance(var.type, PathType):
-                return var.type.path[-1]
+            if var and var.type:
+                typ = var.type
+                if isinstance(typ, RefType):
+                    typ = typ.inner
+                if isinstance(typ, PathType):
+                    return typ.path[-1]
             return None
         if isinstance(expr, Index):
             arr_type = self._resolve_expr_type(expr.object)

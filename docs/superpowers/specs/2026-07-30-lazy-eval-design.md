@@ -3,7 +3,7 @@
 
 > 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
-状态：调用级子集已实现（2026-08-08）；控制流级方向在 2026-08-09 定为编译期指令下沉路线（不做运行时 thunk），详见 `docs/lazy.md` 与 `TODO.md`「控制流自动惰性」。本 spec 的运行时 thunk 设计（flag + 9 字节结构 + asm 草案）已被取代，`IR_LAZY_THUNK`/`IR_LAZY_FORCE` 编号保留。
+状态：调用级子集已实现（2026-08-08）；控制流级在 2026-10-30 落第一切片：纯标量调用在 Phase A 用真实 use_count/纯度选中，Phase B 延迟到唯一 if/loop 条件 force 点，赋值目标也随之下沉（不做运行时 thunk）。实参在原求值点捕获为标量临时量，允许可变实参；同一基本块的多使用共享首次调用；跨基本块的多使用在每个读点发 guard，首次动态读执行、后续复用（site memo/flag）；循环内实参不变的调用在循环 preheader 建 memo/flag，首次动态 force 执行一次、后续迭代复用（loop-invariant memo/hoist）。callee 的本地数组/结构体分配与写允许，只要不逃逸、不调用/不 unsafe、不读写全局（含 `g_current_arena`）。指针/数组实参允许，前提是 pointee 在调用点到每个 force 点之间不被聚合写/调用改变，且不在释放区域；循环 hoist 还要求整个循环内无此类写。`IR_LAZY_THUNK`/`IR_LAZY_FORCE` 仍是 eager 兼容形态。
 
 ## 概述
 

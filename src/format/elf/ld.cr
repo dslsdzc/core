@@ -789,11 +789,30 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     if g_so_sz <= 0:
         return -1
 
-    // Layout: 176 header + .so code + user code
+    // Layout: 176 header + user code + .so code
+    // The user code must stay at its original offset (176). elf_gen patched
+    // absolute and RIP-relative references to the BSS and to the BigInt blob
+    // against that placement; moving the code by the .so size leaves those
+    // references pointing into the wrong page. The .so text follows the user
+    // code instead, in the gap before the BSS page.
     hdr_sz : ., mut = 176
-    so_out := hdr_sz                    // .so .text starts right after header
-    user_out := so_out + g_so_sz        // user code after .so
-    total := user_out + g_user_size
+    user_out := hdr_sz
+    so_out := hdr_sz + g_user_size
+    total := so_out + g_so_sz
+    // Use the BSS page that elf_gen actually patched into the user code. It
+    // is computed before the 22-byte bss_init stub, so deriving it from the
+    // final file size can land one page too high.
+    if g_elf_bss_va <= 0 || g_elf_entry_off <= 0:
+        println("error: 静态链接缺少 ELF 布局信息")
+        return -1
+    bss_page := g_elf_bss_va
+    // The .so text has no separate PT_LOAD: it lives in the gap between the
+    // user code and the BSS page. Reject larger shims loudly instead of
+    // letting them overwrite the writable heap. Supporting arbitrary sizes
+    // needs a third PT_LOAD.
+    if so_out + g_so_sz > bss_page - 0x400000:
+        println("error: 静态链接的 .so 文本超过用户代码与 BSS 之间的间隙")
+        return -1
 
     zi : ., mut = 0
     loop:
@@ -834,10 +853,9 @@ fn ctx_emit_static(buf: string, path: string) -> int:
             if sym_addr >= g_so_addr && sym_addr < g_so_addr + g_so_sz:
                 func_off := sym_addr - g_so_addr
                  // Relocations are recorded against the full ELF buffer
-                 // (the user code starts at offset 176), but ctx_emit_static
-                 // copies that code to user_out after the embedded .so text.
-                 // Convert the absolute emission position to a user-code
-                 // relative offset before applying the new placement.
+                 // (the user code starts at offset 176). ctx_emit_static
+                 // keeps that placement, so only the .so target address
+                 // changes.
                 code_off := abs_pos - 176
                 if code_off < 0 || code_off >= g_user_size:
                     unresolved = unresolved + 1
@@ -870,7 +888,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     w16(buf,16,2)
     w16(buf,18,62)
     w32(buf,20,1)
-    cell_store(buf,24,0x400000 + user_out)  // entry = user code's _start
+    cell_store(buf,24,TEXT_BASE + g_elf_entry_off)  // entry = bss_init -> _start
     cell_store(buf,32,64)
     cell_store(buf,40,0)
     w16(buf,52,64)
@@ -891,11 +909,9 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     cell_store(buf,96,total)
     cell_store(buf,104,total)
     cell_store(buf,112,4096)
-    // The embedded user code still contains RIP-relative references to the
-    // original frontend BSS page, shifted by the copied .so text. Map a
-    // writable anonymous load at the next page so allocator/global slots do
-    // not fault when the linked executable starts.
-    bss_page := 0x400000 + ((total + 4095) / 4096) * 4096 + 4096
+    // Map the writable anonymous load at the BSS page that elf_gen used for
+    // the original code image. User code keeps its original offset, so its
+    // absolute and RIP-relative global references land here.
     write_phdr(buf, 1, 1, 6, 0, bss_page, bss_page, 0, 1073741824, 4096)
 
     fd := syscall3(2, path, 577, linux_mode_exec())  // 0755: executable ELF output

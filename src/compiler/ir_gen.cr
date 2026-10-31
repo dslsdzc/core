@@ -5,10 +5,19 @@
 // (IR globals declared in globals.cr)
 
 // Subgraph-level arena tracking for compile-time size estimation
+g_no_auto_arena : int, mut = 0    // 1 while generating arena infrastructure
+g_program_has_arena : int, mut = 0 // 1 when the program imports the arena library
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
+g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
 g_sg_arena_var   : string, mut    // per-sg: IR var for arena ID
 g_sg_arena_var_cap : int, mut
+// Per-SG share COW state. base = the outer slot variable (Phase B id), var =
+// the parent-arena copy, flag = 0 until the first write copies the elements.
+g_sg_cow_base : string, mut
+g_sg_cow_var  : string, mut
+g_sg_cow_flag : string, mut
+g_sg_cow_cap  : int, mut
 g_ir_source_hash : int, mut
 g_ir_source_hash_ready : int, mut
 
@@ -145,6 +154,7 @@ fn make_slice_header(data_var: int, len_code: int, len_var: int) -> int:
     if elem < 0:
         elem = TI_INT
     hdr := new_ir_var("slice_arg", alloc_type(TYP_SLICE, elem, 0))
+    track_alloc_array(2)
     emit(IR_ALLOC_ARRAY, hdr, 2, 0, 0, 0)
     emit(IR_STORE_INDEX, -1, hdr, data_var, 0, 0)
     if len_var >= 0:
@@ -274,6 +284,9 @@ fn grow_sg_alloc(needed: int):
     nb := alloc(nc * 8)
     cell_copy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb)
     g_sg_alloc_total = nb
+    nb2 := alloc(nc * 8)
+    cell_copy(g_sg_alloc_unknown, g_sg_alloc_cap * 8, nb2)
+    g_sg_alloc_unknown = nb2
     g_sg_alloc_cap = nc
 
 fn grow_sg_arena_var(needed: int):
@@ -289,22 +302,120 @@ fn grow_sg_arena_var(needed: int):
     g_sg_arena_var = nb
     g_sg_arena_var_cap = nc
 
+fn grow_sg_cow(needed: int):
+    if needed < g_sg_cow_cap:
+        return
+    nc : ., mut = g_sg_cow_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    nv := alloc(nc * 8)
+    nf := alloc(nc * 8)
+    if g_sg_cow_cap > 0:
+        cell_copy(g_sg_cow_base, g_sg_cow_cap * 8, nb)
+        cell_copy(g_sg_cow_var, g_sg_cow_cap * 8, nv)
+        cell_copy(g_sg_cow_flag, g_sg_cow_cap * 8, nf)
+    g_sg_cow_base = nb
+    g_sg_cow_var = nv
+    g_sg_cow_flag = nf
+    g_sg_cow_cap = nc
+
 fn sg_alloc_push(kind: int):
     grow_sg_alloc(g_sg_count + 1)
     grow_sg_arena_var(g_sg_count + 1)
+    grow_sg_cow(g_sg_count + 1)
     cell_store(g_sg_alloc_total, g_sg_count * 8, 0)
+    cell_store(g_sg_alloc_unknown, g_sg_count * 8, 0)
+    cell_store(g_sg_cow_base, g_sg_count * 8, -1)
+    cell_store(g_sg_cow_var, g_sg_count * 8, -1)
+    cell_store(g_sg_cow_flag, g_sg_count * 8, -1)
     sg_push(kind)
 
-fn sg_alloc_pop():
-    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-    arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
+// Close a split child without adding its bytes to the parent's arena peak.
+// The child arena was created by sg_alloc_push; its reset is emitted after the
+// SG closes, so uses after the IF merge are outside the region exit.
+fn sg_alloc_pop_split():
+    if g_sg_count <= 0:
+        return
+    top := g_sg_count - 1
+    arena_var := cell_load(g_sg_arena_var, top * 8)
     sg_pop()
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+    region_plan_emit_share_after(top)
+
+// Close a share IF without resetting its slot. The slot stays live and current
+// until the consumer SG's reset hook emits IR_ARENA_RESET for it.
+fn sg_alloc_pop_share():
+    if g_sg_count <= 0:
+        return
+    sg_pop()
+
+fn sg_alloc_pop():
+    top := g_sg_count - 1
+    total := cell_load(g_sg_alloc_total, top * 8)
+    unk := cell_load(g_sg_alloc_unknown, top * 8)
+    arena_var := cell_load(g_sg_arena_var, top * 8)
+    // The parent is the SG's recorded parent, not `top - 1`: siblings may have
+    // been popped in between, so the high-water neighbor can be a closed slot.
+    pi := cell_load(g_sgs, top * ESZ_SG + OFF_SG_PARENT)
+    if pi >= 0:
+        ptotal := cell_load(g_sg_alloc_total, pi * 8)
+        cell_store(g_sg_alloc_total, pi * 8, ptotal + total)
+        punk := cell_load(g_sg_alloc_unknown, pi * 8)
+        if unk != 0:
+            cell_store(g_sg_alloc_unknown, pi * 8, 1)
+    sg_pop()
+    emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+    region_plan_emit_share_after(top)
 
 fn track_alloc_size(size: int):
-    if g_sg_count > 0 && str_len(g_sg_alloc_total) > 0:
-        prev := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-        cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, prev + size)
+    if g_cur_sg >= 0 && str_len(g_sg_alloc_total) > 0:
+        prev := cell_load(g_sg_alloc_total, g_cur_sg * 8)
+        cell_store(g_sg_alloc_total, g_cur_sg * 8, prev + size)
+
+fn track_alloc_unknown():
+    if g_cur_sg >= 0 && str_len(g_sg_alloc_unknown) > 0:
+        cell_store(g_sg_alloc_unknown, g_cur_sg * 8, 1)
+
+fn track_alloc_array(count: int):
+    if count > 0 && count < 100000:
+        track_alloc_size(count * 8 + 8)
+    else:
+        track_alloc_unknown()
+
+fn track_alloc_struct(name_ni: int):
+    si := find_struct_by_name(name_ni)
+    if si >= 0:
+        track_alloc_size(si_field_count(si) * 8 + 8)
+    else:
+        track_alloc_unknown()
+
+fn sg_alloc_cur_total() -> int:
+    if g_cur_sg < 0:
+        return 0
+    return cell_load(g_sg_alloc_total, g_cur_sg * 8)
+
+fn sg_alloc_cur_unknown() -> int:
+    if g_cur_sg < 0:
+        return 0
+    return cell_load(g_sg_alloc_unknown, g_cur_sg * 8)
+
+fn sg_alloc_set(total: int, unknown: int):
+    if g_cur_sg >= 0:
+        cell_store(g_sg_alloc_total, g_cur_sg * 8, total)
+        cell_store(g_sg_alloc_unknown, g_cur_sg * 8, unknown)
+
+fn sg_peak_of_current() -> int:
+    if g_cur_sg < 0:
+        return 0
+    if cell_load(g_sg_alloc_unknown, g_cur_sg * 8) != 0:
+        return -1
+    total := cell_load(g_sg_alloc_total, g_cur_sg * 8)
+    if total <= 0:
+        return 0
+    return total
 
 fn new_ir_var(name: string, type_idx: int) -> int:
     idx := g_ir_var_count
@@ -1619,6 +1730,19 @@ fn is_byte_buf_var(var_idx: int) -> int:
             return 1
     return 0
 
+// Value of a compile-time integer producer, or -1 when the variable is not an
+// IR_CONST integer. Used by declarative placement (alloc_at) and align().
+fn ir_const_int_of_var(var: int) -> int:
+    if var < 0:
+        return -1
+    prod := cell_load(g_df_var_producer, var * 8)
+    if prod < 0:
+        return -1
+    op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    if op != IR_CONST:
+        return -1
+    return cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+
 fn ir_call_return_type(func_ni: int) -> int:
     if func_ni < 0:
         return TI_UNIT
@@ -1898,8 +2022,40 @@ fn is_hotpatch_func(name_idx: int) -> int:
 
 // Helper: if a variable's producer is IR_LAZY_THUNK, emit IR_LAZY_FORCE
 // to extract the real value and return the forced variable.
+// Capture deferred-call arguments at the original evaluation point. The
+// temporaries are consecutive (IR_CALL convention) and hold scalar values, so
+// later mutations of the source variables cannot change the deferred call.
+fn lazy_pack_args(first_arg: int, ac: int) -> int:
+    if ac <= 0 || first_arg < 0:
+        return -1
+    first : ., mut = -1
+    ai : ., mut = 0
+    loop:
+        if ai >= ac:
+            return first
+        av := first_arg + ai
+        ti : ., mut = TI_INT
+        if av >= 0:
+            ti = irv_type(av)
+        pv := new_ir_var("_lazy_arg", ti)
+        if first < 0:
+            first = pv
+        emit(IR_STORE, -1, pv, av, 0, 0)
+        ai = ai + 1
+    return first
+
 fn force_if_thunk(var_idx: int) -> int:
     if var_idx < 0:
+        return var_idx
+    // Loop-invariant memo: the first dynamic force executes the call and sets
+    // the flag; later forces read the memo slot.
+    mi := lazy_memo_index_of_var(var_idx)
+    if mi >= 0:
+        if lazy_memo_guard(mi, -1) != 0:
+            return var_idx
+    // A deferred pure call is materialized at its first (and planned only)
+    // force point. Subsequent forces see the call producer.
+    if lazy_def_emit(var_idx) != 0:
         return var_idx
     prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod >= 0:
@@ -3291,6 +3447,15 @@ fn gen_expr(node: int) -> int:
             name_idx := ast_int_val(target)
             lv := find_local(name_idx)
             if lv >= 0:
+                if lazy_memo_defer_store(val_var, lv) != 0:
+                    if irv_type(lv) == TI_UNIT && irv_type(val_var) >= 0:
+                        irv_set_type(lv, irv_type(val_var))
+                    return lv
+                deferred_ti := lazy_defer_store(val_var, lv)
+                if deferred_ti >= 0:
+                    if irv_type(lv) == TI_UNIT && irv_type(val_var) >= 0:
+                        irv_set_type(lv, irv_type(val_var))
+                    return lv
                 if irv_type(lv) == TI_DYN:
                     // Dyn variable assignment: pack value with type tag
                     tag : ., mut = irv_type(val_var)
@@ -3307,6 +3472,7 @@ fn gen_expr(node: int) -> int:
                     if forced2 != 0:
                         val_var = box_for_slot_flag(val_node, val_var, 1)
                     emit(IR_STORE, -1, lv, val_var, 0, 0)
+                    region_plan_record_share_base(lv)
                     // 可选表示：赋值写点置位（同 LET，解包点据此分派）
                     if rpv0 >= 0:
                         if forced2 != 0:
@@ -3355,12 +3521,14 @@ fn gen_expr(node: int) -> int:
                 emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
                 emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
                 if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
+                    region_plan_emit_cow_write(arr_var)
                     emit(IR_STORE_INDEX, -1, arr_data_store, val_var, ast_int_val(idx_node), 0)
             else:
                 idx_var : ., mut = gen_expr(idx_node)
                 idx_var = force_if_thunk(idx_var)
                 emit_slice_bounds(arr_var, idx_var)
                 if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
+                    region_plan_emit_cow_write(arr_var)
                     emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, 0, 0)
             return val_var
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
@@ -3517,6 +3685,7 @@ fn gen_expr(node: int) -> int:
             return -1
         // Allocate results array
         arr_var := new_ir_var("go_arr", TI_UNIT)
+        track_alloc_array(range_count)
         emit(IR_ALLOC_ARRAY, arr_var, range_count, 0, 0, 0)
         // Spawn each iteration
         if ast_kind(body) == EXPR_CALL:
@@ -3841,6 +4010,49 @@ fn gen_expr(node: int) -> int:
             cell_store(arg_nodes, ac * 8, ast_a(an))
             ac = ac + 1
             an = ast_b(an)
+        // Raw current-arena access. These names are compiler builtins: a normal
+        // function call would create its own function arena first and read the
+        // wrong current. Lower directly to cell_load/cell_store plus the
+        // g_current_arena global so scheduler context switches see the real
+        // allocator state.
+        if func_ni >= 0:
+            bname := istr_get(func_ni)
+            if str_eq(bname, "arena_current_unchecked") != 0 && ac == 0:
+                dest := new_ir_var("arena_current", TI_INT)
+                sv := global_var_of(str_intern("g_arena_scalars"))
+                if sv >= 0:
+                    z := new_ir_var("_arena_zero", TI_INT)
+                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                    a0 := new_ir_var("_arena_arg", TI_STR)
+                    emit(IR_STORE, -1, a0, sv, 0, 0)
+                    a1 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a1, z, 0, 0)
+                    emit(IR_CALL, dest, a0, 2, str_intern("cell_load"), TI_INT)
+                else:
+                    gv := global_var_of(str_intern("g_current_arena"))
+                    if gv >= 0:
+                        emit(IR_LOAD, dest, gv, 0, 0, TI_INT)
+                    else:
+                        emit(IR_CONST, dest, 0, 0, 0, TI_INT)
+                return dest
+            if str_eq(bname, "arena_set_current_unchecked") != 0 && ac == 1:
+                av := cell_load(arg_vars, 0)
+                sv := global_var_of(str_intern("g_arena_scalars"))
+                if sv >= 0:
+                    z := new_ir_var("_arena_zero", TI_INT)
+                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
+                    a0 := new_ir_var("_arena_arg", TI_STR)
+                    emit(IR_STORE, -1, a0, sv, 0, 0)
+                    a1 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a1, z, 0, 0)
+                    a2 := new_ir_var("_arena_arg", TI_INT)
+                    emit(IR_STORE, -1, a2, av, 0, 0)
+                    emit(IR_CALL, -1, a0, 3, str_intern("cell_store"), TI_INT)
+                gv := global_var_of(str_intern("g_current_arena"))
+                if gv >= 0:
+                    emit(IR_STORE, -1, gv, av, 0, 0)
+                return -1
+
         // dex 边界规则：dex 参数在调用点按被调方形式处理，
         //   Core 函数：一律精确形式（scaled），apx 位模式参数转 scaled（F2I(bits×S)）；
         //   extern 函数：C ABI 契约（module.cr：dex 编码 3 = binary64 跨 C 边界），
@@ -3962,6 +4174,35 @@ fn gen_expr(node: int) -> int:
         if handled >= 0:
             return handled
 
+        // `align(n)` is a declaration-time identity: allocation placement only
+        // needs the numeric value, never a runtime call.
+        if func_ni >= 0 && ac >= 1 && str_eq(istr_get(func_ni), "align") != 0:
+            return cell_load(arg_vars, 0)
+
+        // Declarative placement: the address, size and alignment are physical
+        // facts and must be compile-time integers. The node gets provenance like
+        // any other allocation, then the ordinary passes track it.
+        if func_ni >= 0 && ac >= 3 && str_eq(istr_get(func_ni), "alloc_at") != 0:
+            av0 := cell_load(arg_vars, 0 * 8)
+            av1 := cell_load(arg_vars, 1 * 8)
+            av2 := cell_load(arg_vars, 2 * 8)
+            addr := ir_const_int_of_var(av0)
+            size := ir_const_int_of_var(av1)
+            al := ir_const_int_of_var(av2)
+            if addr < 0 || size < 0 || al < 0:
+                check_error(EC_TK_SIZE_TYPE,
+                    "alloc_at requires compile-time integer address, size and align",
+                    0, 0)
+                return new_ir_var("alloc_at", alloc_at_ptr_ti())
+            if size <= 0 || size % 8 != 0:
+                check_error(EC_TK_SIZE_TYPE,
+                    "alloc_at size must be a positive multiple of 8 bytes",
+                    0, 0)
+                return new_ir_var("alloc_at", alloc_at_ptr_ti())
+            dest := new_ir_var("alloc_at", alloc_at_ptr_ti())
+            emit(IR_ALLOC_AT, dest, addr, size, al, TI_INT)
+            return dest
+
         // For method calls (EXPR_FIELD), func_ni was set by checker
         // Use it directly
         call_ti := ir_call_return_type(func_ni)
@@ -4036,6 +4277,32 @@ fn gen_expr(node: int) -> int:
                     an3 = cell_load(arg_nodes, ai3 * 8)
                 emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3))
                 ai3 = ai3 + 1
+        if func_ni >= 0 && runtime_frontend_builtin_is_alloc(func_ni) != 0:
+            if ac >= 1:
+                an := cell_load(arg_nodes, 0)
+                if an >= 0 && ast_kind(an) == EXPR_INT:
+                    track_alloc_size(((ast_int_val(an) + 15) / 8) * 8)
+                else:
+                    track_alloc_unknown()
+            else:
+                track_alloc_unknown()
+        lazy_ast_set(g_ir_instr_count, node)
+        if g_plan_active != 0:
+            mi := lazy_memo_index_of_ast(node)
+            if mi >= 0:
+                if cell_load(g_lazy_memo_var, mi * 8) < 0:
+                    lazy_memo_site_begin(mi, first_arg_var, ac)
+                mv := cell_load(g_lazy_memo_var, mi * 8)
+                if mv >= 0:
+                    return mv
+        if g_plan_active != 0 && lazy_plan_has(node) != 0:
+            // Compile-time lazy sink: define the result at its unique force
+            // point instead of evaluating the pure call here. Constant args
+            // were already materialized as IR vars, so the deferred call can
+            // reuse their contiguous argument block.
+            arg0 := lazy_pack_args(first_arg_var, ac)
+            lazy_def_add(dest, func_ni, call_ti, arg0, ac)
+            return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
         // the row on the call result lets a later match recover the payload form
@@ -4085,7 +4352,94 @@ fn gen_expr(node: int) -> int:
 
     // If expression
     if ast_kind(node) == EXPR_IF:
-        sg_push(SG_IF)  // conditional region: covers [condition, merge)
+        // V2.0: a planned IF owns a child arena. The plan is filled in Phase A
+        // after PointerAnalysis/RegionCheck and read only during Phase B.
+        sg_idx := g_sg_count
+        split := region_plan_is_split(sg_idx)
+        merge := region_plan_is_merge(sg_idx)
+        share := region_plan_is_share(sg_idx)
+        if merge != 0 && share != 0:
+            check_error(EC_B_LIFETIME, "IF cannot be both merge and share", 0, 0)
+        child : ., mut = split
+        if merge != 0 || share != 0:
+            child = 1
+        merge_copy_var : ., mut = -1
+        merge_copy_instr : ., mut = -1
+        merge_str1_var : ., mut = -1
+        merge_str2_var : ., mut = -1
+        merge_parent_var : ., mut = -1
+        merge_emitted : ., mut = 0
+        if merge != 0:
+            // Allocate the surviving copy in the parent arena before the child
+            // arena is created. The element count is already known from the
+            // plan, so the parent arena peak includes the copy. The element
+            // type row is patched at the assigning branch exit.
+            merge_cnt := region_plan_merge_len(sg_idx)
+            merge_kind := region_plan_merge_kind_of(sg_idx)
+            // Capture the parent arena before the child is created. Array and
+            // struct copies may contain string leaves that need a parent-side
+            // str_sub allocation.
+            gv := global_var_of(str_intern("g_current_arena"))
+            if gv >= 0:
+                merge_parent_var = new_ir_var("_merge_parent", TI_INT)
+                emit(IR_LOAD, merge_parent_var, gv, 0, 0, TI_INT)
+            if merge_kind == 3:
+                ms1 := region_plan_merge_str1_of(sg_idx)
+                ms2 := region_plan_merge_str2_of(sg_idx)
+                if ms1 < 0:
+                    if merge_parent_var < 0:
+                        check_error(EC_B_LIFETIME, "string merge requires g_current_arena", 0, 0)
+                else:
+                    merge_str1_var = rp_emit_parent_str_copy(ms1)
+                    if merge_str1_var < 0:
+                        check_error(EC_B_LIFETIME, "string merge copy failed", 0, 0)
+                    if ms2 >= 0 && ms2 != ms1:
+                        merge_str2_var = rp_emit_parent_str_copy(ms2)
+                    else:
+                        merge_str2_var = merge_str1_var
+            else:
+                merge_copy_var = new_ir_var("_merge_copy", TI_UNIT)
+                if merge_kind == 1:
+                    merge_name := region_plan_merge_name_of(sg_idx)
+                    track_alloc_struct(merge_name)
+                    emit(IR_ALLOC_STRUCT, merge_copy_var, 0, 0, merge_name, 0)
+                else:
+                    track_alloc_array(merge_cnt)
+                    emit(IR_ALLOC_ARRAY, merge_copy_var, merge_cnt, 0, 0, 0)
+                merge_copy_instr = g_ir_instr_count - 1
+        cow_pending : ., mut = 0
+        cow_cnt : ., mut = 0
+        cow_elem : ., mut = -1
+        cow_var : ., mut = -1
+        cow_flag : ., mut = -1
+        if share != 0 && region_plan_share_cow(sg_idx) != 0:
+            cow_cnt = region_plan_share_len(sg_idx)
+            cow_elem = region_plan_share_elem(sg_idx)
+            if cow_cnt > 0 && cow_elem >= 0:
+                cow_pending = 1
+                // Allocate and emit the copy while the current SG is still the
+                // parent: the instruction must execute in the parent arena and
+                // RegionCheck must see the parent lifetime. The per-SG plan
+                // vars are stored after sg_alloc_push, which resets them.
+                track_alloc_array(cow_cnt)
+                cow_var = new_ir_var("_cow_copy", alloc_type(TYP_ARRAY, cow_elem, cow_cnt))
+                emit(IR_ALLOC_ARRAY, cow_var, cow_cnt, 0, 0, 0)
+                cow_flag = new_ir_var("_cow_flag", TI_INT)
+                cow_zero := new_ir_var("_cow_init", TI_INT)
+                emit(IR_CONST, cow_zero, 0, 0, 0, TI_INT)
+                emit(IR_STORE, -1, cow_flag, cow_zero, 0, 0)
+        arena_instr : ., mut = -1
+        if child != 0:
+            sg_alloc_push(SG_IF)
+            if cow_pending != 0:
+                cell_store(g_sg_cow_var, sg_idx * 8, cow_var)
+                cell_store(g_sg_cow_flag, sg_idx * 8, cow_flag)
+            arena_var := new_ir_var("_arena", TI_INT)
+            cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+            emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
+            arena_instr = g_ir_instr_count - 1
+        else:
+            sg_push(SG_IF)  // conditional region: covers [condition, merge)
         cond := ast_a(node)
         then_node := ast_b(node)
         else_node := ast_c(node)
@@ -4104,8 +4458,14 @@ fn gen_expr(node: int) -> int:
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
+        then_body_start := g_ir_instr_count
+        base_t := sg_alloc_cur_total()
+        base_u := sg_alloc_cur_unknown()
         then_val : ., mut = gen_expr(then_node)
         then_val = force_if_thunk(then_val)
+        then_t := sg_alloc_cur_total()
+        then_u := sg_alloc_cur_unknown()
+        sg_alloc_set(base_t, base_u)
         if else_node >= 0 && then_val >= 0:
             result_var = new_ir_var("if_res", irv_type(then_val))
             emit(IR_ALLOC, result_var, 0, 0, 0, irv_type(then_val))
@@ -4116,9 +4476,15 @@ fn gen_expr(node: int) -> int:
             emit(IR_STORE, -1, result_var, then_val, 0, 0)
             if result_rep >= 0:
                 emit_rep_set(result_rep, rep_enc_of_expr(then_node, then_val))
+        if merge != 0:
+            // The copy runs at the end of the assigning branch: the false path
+            // never sees the child pointer, so no merge phi is needed.
+            if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, merge_str1_var, merge_str2_var, merge_parent_var, then_body_start, g_ir_instr_count) != 0:
+                merge_emitted = 1
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
         if else_node >= 0:
             emit(IR_LABEL, -1, else_lbl, 0, 0, 0)
+            else_body_start := g_ir_instr_count
             else_val : ., mut = gen_expr(else_node)
             else_val = force_if_thunk(else_val)
             if result_var < 0 && else_val >= 0:
@@ -4132,9 +4498,35 @@ fn gen_expr(node: int) -> int:
                 emit(IR_STORE, -1, result_var, else_val, 0, 0)
                 if result_rep >= 0:
                     emit_rep_set(result_rep, rep_enc_of_expr(else_node, else_val))
+            if merge != 0:
+                if region_plan_emit_merge(sg_idx, merge_copy_var, merge_copy_instr, merge_str1_var, merge_str2_var, merge_parent_var, else_body_start, g_ir_instr_count) != 0:
+                    merge_emitted = 1
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
+        other_t := sg_alloc_cur_total()
+        other_u := sg_alloc_cur_unknown()
+        td := then_t - base_t
+        ed := other_t - base_t
+        pk : ., mut = td
+        if ed > pk:
+            pk = ed
+        sg_alloc_set(base_t + pk, base_u)
+        if then_u != 0 || other_u != 0:
+            sg_alloc_set(base_t + pk, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
-        sg_pop()
+        if child != 0:
+            if merge != 0 && merge_emitted == 0:
+                check_error(EC_B_LIFETIME,
+                    "merge copy plan could not be materialized",
+                    0, 0)
+            peak := sg_alloc_cur_total()
+            if g_no_auto_arena == 0 && peak != 0:
+                iri_set_s1(arena_instr, peak)
+            if share != 0:
+                sg_alloc_pop_share()
+            else:
+                sg_alloc_pop_split()
+        else:
+            sg_pop()
         return result_var
 
     // Loop
@@ -4142,6 +4534,7 @@ fn gen_expr(node: int) -> int:
         header_lbl := new_label()
         body_lbl := new_label()
         exit_lbl := new_label()
+        lazy_memo_emit_for_sg(g_sg_count)
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         // SG_LOOP region covers [header, exit) — the back-edge jump to the
         // header lands on the region enter (region iteration in interp.cr).
@@ -4161,14 +4554,15 @@ fn gen_expr(node: int) -> int:
         gen_expr(ast_a(node))
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if g_no_auto_arena == 0 && peak != 0:
+            iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)  // arena reused per iteration
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // While loop
@@ -4181,7 +4575,8 @@ fn gen_expr(node: int) -> int:
         // Keep while loops on the same SG_LOOP protocol as loop/for: the
         // region owns the condition, body, back-edge, and exit label so sg_pop
         // can add the termination dependency and advance the state chain.
-        sg_push(SG_LOOP)
+        lazy_memo_emit_for_sg(g_sg_count)
+        sg_alloc_push(SG_LOOP)
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
@@ -4198,14 +4593,15 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if g_no_auto_arena == 0 && peak != 0:
+            iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // For loop: for var in start..end { body }
@@ -4301,6 +4697,7 @@ fn gen_expr(node: int) -> int:
         // The SG_FOR region covers [header, exit): the back-edge jump to the
         // header is then a jump to the region enter, so the interpreter can
         // drive loop iteration from region boundaries (region iteration).
+        lazy_memo_emit_for_sg(g_sg_count)
         sg_alloc_push(SG_FOR)
         arena_var := new_ir_var("_arena", TI_INT)
         cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
@@ -4330,9 +4727,9 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if g_no_auto_arena == 0 && peak != 0:
+            iri_set_s1(arena_instr, peak)
         // Increment ivar and jump to header (arena reset runs on every path,
         // including the continue path, so per-iteration memory is reused)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
@@ -4346,6 +4743,7 @@ fn gen_expr(node: int) -> int:
         // Exit
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
+        region_plan_emit_share_after(g_sg_count - 1)
         return -1
 
     // Match expression
@@ -4608,11 +5006,16 @@ fn gen_expr(node: int) -> int:
             emit(IR_STORE, -1, fb1, fbz, 0, 0)
             match_first_var = new_ir_var("m_first", TI_INT)
             emit(IR_CALL, match_first_var, fb0, 2, str_intern("load8"), TI_INT)
+        m_base_t := sg_alloc_cur_total()
+        m_base_u := sg_alloc_cur_unknown()
+        m_peak : ., mut = 0
+        m_unk : ., mut = 0
         an : ., mut = first_arm
         arm_idx : ., mut = 0
         loop:
             if an < 0:
                 break
+            sg_alloc_set(m_base_t, m_base_u)
             arm_pat := ast_a(an)
             arm_body := ast_b(an)
             pat_kind : ., mut = -1
@@ -4985,6 +5388,12 @@ fn gen_expr(node: int) -> int:
                 bind_local(ident_ni, match_val)
             body_val : ., mut = gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
+            ad := sg_alloc_cur_total() - m_base_t
+            if ad > m_peak:
+                m_peak = ad
+            if sg_alloc_cur_unknown() != 0:
+                m_unk = 1
+            sg_alloc_set(m_base_t, m_base_u)
             if body_val >= 0:
                 emit(IR_STORE, -1, result_var, body_val, 0, 0)
                 // 容量阶段 T2：结果槽表示位置位（同 LET/赋值的写入规则，解包点据此分派）
@@ -4996,6 +5405,9 @@ fn gen_expr(node: int) -> int:
                 emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
             arm_idx = arm_idx + 1
+        sg_alloc_set(m_base_t + m_peak, m_base_u)
+        if m_unk != 0:
+            sg_alloc_set(m_base_t + m_peak, 1)
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
         return result_var
 
@@ -5048,6 +5460,7 @@ fn gen_expr(node: int) -> int:
                 if sz > 0:
                     // Array stride is a target fact; corearch reconstructs it from
                     // the allocation count. src2/src3 stay zero on the wire.
+                    track_alloc_array(sz)
                     emit(IR_ALLOC_ARRAY, var, sz, 0, 0, 0)
                     is_arr = 1
                     // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
@@ -5056,7 +5469,7 @@ fn gen_expr(node: int) -> int:
         // For dyn vars with initializer: skip allocation (value is packed below)
         if is_dyn_var == 0 || val_node < 0:
             if is_arr == 0:
-                emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
+                    emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
         // Declared scalar/pointer locals keep their declared IR row even without
         // an initializer. Leaving them TI_UNIT made uninitialized `x : int` look
         // like an alloc byte buffer / pointer to later passes.
@@ -5064,6 +5477,25 @@ fn gen_expr(node: int) -> int:
             irv_set_type(var, declared_ti)
         if val_node >= 0:
             val_var : ., mut = gen_expr(val_node)
+            if lazy_memo_defer_store(val_var, var) != 0:
+                // The local is defined at a force point, so its inferred slot
+                // type must come from the deferred result. Leaving it TI_UNIT
+                // makes later byte-buffer/pointer classification misread the
+                // slot (`v` in `total + v` became OP_BYTE_ADD).
+                if declared_ti == TI_UNIT && irv_type(val_var) >= 0:
+                    irv_set_type(var, irv_type(val_var))
+                bind_local(var_ni, var)
+                if is_apx != 0:
+                    emit(IR_APPROX, -1, 0, 0, 0, 0)
+                return var
+            deferred_ti := lazy_defer_store(val_var, var)
+            if deferred_ti >= 0:
+                if declared_ti == TI_UNIT && irv_type(val_var) >= 0:
+                    irv_set_type(var, irv_type(val_var))
+                bind_local(var_ni, var)
+                if is_apx != 0:
+                    emit(IR_APPROX, -1, 0, 0, 0, 0)
+                return var
             val_var = force_if_thunk(val_var)
             // 可选表示：推断槽按初值表示补配表示位（有表示位可拷贝 / Some/None 构造 /
             // 未覆盖情形回落值，回落配位无害：默认 1 = 装箱 = 既有语义）
@@ -5127,6 +5559,7 @@ fn gen_expr(node: int) -> int:
                     emit_rep_set(rep_var, oe_boxed())
                 else:
                     emit_rep_set(rep_var, rep_enc_of_expr(val_node, val_var))
+        region_plan_record_share_base(var)
         bind_local(var_ni, var)
         if is_apx != 0:
             emit(IR_APPROX, -1, 0, 0, 0, 0)
@@ -5292,6 +5725,7 @@ fn gen_expr(node: int) -> int:
                 if ka == TYP_ARRAY || ka == TYP_SLICE:
                     elem_ti_s = get_type_data(ati)
                 v = new_ir_var("slice", alloc_type(TYP_SLICE, elem_ti_s, 0))
+                track_alloc_array(2)
                 emit(IR_ALLOC_ARRAY, v, 2, 0, 0, 0)
                 emit(IR_STORE_INDEX, -1, v, data_var, 0, 0)
             // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
@@ -5380,6 +5814,7 @@ fn gen_expr(node: int) -> int:
         if si >= 0:
             name_ni = si_name(si)
         s := new_ir_var("struct", TI_UNIT)
+        track_alloc_struct(name_ni)
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0)
         fi : ., mut = 0
         fn2 : ., mut = ast_b(node)
@@ -5411,6 +5846,7 @@ fn gen_expr(node: int) -> int:
         // F5 契约（见 parser.cr 下标分支）：a=首 wrapper（连续）、b=元素个数；wrapper.a=元素值
         // 节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移直取相邻节点。
         v : ., mut = new_ir_var("arr", TI_UNIT)
+        track_alloc_unknown()
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0)
         elem_ti : ., mut = TI_INT
         // (A) T3：数组级元素可选性预扫，元素序在后的 Some/None 也必须影响
@@ -5489,9 +5925,9 @@ fn gen_expr(node: int) -> int:
         emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
         arena_instr := g_ir_instr_count - 1
         ret := gen_expr(ast_a(node))
-        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
-        if total > 0:
-            iri_set_s1(arena_instr, total)
+        peak := sg_peak_of_current()
+        if g_no_auto_arena == 0 && peak != 0:
+            iri_set_s1(arena_instr, peak)
         sg_alloc_pop()
         return ret
     if ast_kind(node) == EXPR_AS:
@@ -5578,6 +6014,7 @@ fn gen_expr(node: int) -> int:
         ec : ., mut = ast_b(node)
         tv := new_ir_var("tuple", TI_INT)
         // Element stride is a target fact; corearch reconstructs it.
+        track_alloc_array(ec)
         emit(IR_ALLOC_ARRAY, tv, ec, 0, 0, 0)
         // Store each element at its offset
         e : ., mut = 0
@@ -5602,6 +6039,28 @@ fn gen_expr(node: int) -> int:
 
 // --- Generate IR for one function ---
 
+fn is_arena_infra_name(name_idx: int) -> int:
+    n := istr_get(name_idx)
+    if str_eq(n, "arena_init") != 0:
+        return 1
+    if str_eq(n, "arena_new") != 0:
+        return 1
+    if str_eq(n, "arena_new_sized") != 0:
+        return 1
+    if str_eq(n, "arena_reset") != 0:
+        return 1
+    if str_eq(n, "arena_grow_pool") != 0:
+        return 1
+    if str_eq(n, "_grow_arena_meta") != 0:
+        return 1
+    if str_eq(n, "_arena_copy_cells") != 0:
+        return 1
+    if str_eq(n, "arena_avail") != 0:
+        return 1
+    if str_eq(n, "arena_alloc") != 0:
+        return 1
+    return 0
+
 fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
@@ -5609,6 +6068,12 @@ fn ir_gen_func(fi: int):
     g_cir_has_match = 0
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
+    g_no_auto_arena = is_arena_infra_name(name_idx)
+    // main's automatic arena would be created before the user's arena_init
+    // call and would share ids with the explicit arena. Arena programs use the
+    // explicit arena instead.
+    if g_program_has_arena != 0 && str_eq(istr_get(name_idx), "main") != 0:
+        g_no_auto_arena = 1
     first_param := ast_b(fn_node)
     param_count := ast_c(fn_node)
     // 返回类型：从 FuncInfo 取原始 TY_* 常量（ast_type_val(fn_node) 是返回类型
@@ -5775,10 +6240,12 @@ fn ir_gen_func(fi: int):
     g_cur_ret_opt = 0
     g_cur_ret_dex_opt = 0
 
-    // Patch arena size and reset before return
-    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
-    if total > 0:
-        iri_set_s1(arena_instr, total)
+    // Patch arena size and reset before return. Arena infrastructure functions
+    // must not create automatic arenas: their epilogue reset would re-enter
+    // arena_reset and recurse.
+    peak := sg_peak_of_current()
+    if g_no_auto_arena == 0 && peak != 0:
+        iri_set_s1(arena_instr, peak)
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
     // Add return at end if not already terminated（可达 = 后备 return；不可达 = 死码，
@@ -5786,6 +6253,7 @@ fn ir_gen_func(fi: int):
     if g_cur_ret_opt != 0:
         emit_rep_set(g_optrep_ret_cell, oe_boxed())
     emit(IR_RETURN, -1, -1, 0, 0, 0)
+    g_no_auto_arena = 0
 
     cell_store(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - cell_load(g_ir_func_instr_start, func_idx * 8))
     cell_store(g_ir_func_var_count, func_idx * 8, g_ir_var_count - cell_load(g_ir_func_var_start, func_idx * 8))
@@ -5799,6 +6267,8 @@ fn ir_gen_func(fi: int):
 // need to be written at startup — unlike find_global_const_node which
 // only folds immutable constants at compile time).
 fn global_init_val(name_idx: int) -> int:
+    if g_arena_pool_limit_cfg > 0 && str_eq(istr_get(name_idx), "g_arena_pool_limit") != 0:
+        return g_arena_pool_limit_cfg
     i : ., mut = g_global_let_count - 1
     loop:
         if i < 0:
@@ -5999,6 +6469,7 @@ fn inject_global_inits():
                     cnt := agg_elem_count_of(ast_b(lnode))
                     if cnt > 0:
                         v = new_ir_var("ginit", TI_UNIT)
+                        track_alloc_array(cnt)
                         emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0)
                         irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt))
                 if v >= 0:
@@ -6010,6 +6481,12 @@ fn inject_global_inits():
                         v = box_for_optional_slot(vn, v, global_decl_ti(name_idx))
                     emit(IR_STORE, -1, gv, v, 0, 0)
         i = i + 1
+    if g_cfg_arena_zero_on_reset != 0:
+        gz := global_var_of(str_intern("g_arena_zero_on_reset"))
+        if gz >= 0:
+            zv := new_ir_var("arena_zero_cfg", TI_INT)
+            emit(IR_CONST, zv, 1, 0, 0, TI_INT)
+            emit(IR_STORE, -1, gz, zv, 0, 0)
     g_cur_lib = saved_lib
 
 // Register one IR global, deduplicated by name_idx.
@@ -6115,6 +6592,13 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_heap_ptr"))
     reg_one_global(str_intern("g_heap_end"))
     reg_one_global(str_intern("g_current_arena"))
+    // Both allocator bodies write this failure witness before trapping.
+    // Register it for every program so the legacy body's witness does not
+    // fall back to an unpatched RIP-relative store.
+    reg_one_global(str_intern("g_alloc_fail_request"))
+    reg_one_global(str_intern("g_alloc_fail_class"))
+    reg_one_global(str_intern("g_alloc_fail_cursor"))
+    reg_one_global(str_intern("g_alloc_fail_limit"))
     reg_one_global(str_intern("g_arena_cursors"))
     reg_one_global(str_intern("g_arena_sizes"))
     reg_one_global(str_intern("g_arena_parents"))
@@ -6529,6 +7013,7 @@ fn ccr_set_raw_mode_from_source():
     // the tagged BigInt semantics by default. The .ccr header carries this flag
     // to corearch so both sides agree before code generation.
     g_ccr_emit_raw_int = 0
+    g_program_has_arena = ccr_source_has_marker("fn arena_init")
     if ccr_source_has_marker("fn parse_expr") != 0:
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:
@@ -6545,6 +7030,25 @@ fn ccr_set_raw_mode_from_source():
 fn ir_gen_all():
     ccr_set_raw_mode_from_source()
     saved_lib := g_cur_lib
+    if g_plan_active == 0:
+        region_plan_reset()
+    lazy_gen_reset()
+    g_sg_count = 0
+    g_cur_sg = -1
+    rc_ctl_invalidate()
+    // Second IR runs inherit whole-program facts from Phase A. Reset the
+    // generation-time optimistic purity and usage counts so Phase B matches a
+    // cold v1 generation (lazy thunks depend on both).
+    gs : ., mut = 0
+    loop:
+        if gs >= g_func_count:
+            break
+        fi_set_ispure(gs, 1)
+        gs = gs + 1
+    g_purity_inst_count = 0
+    g_var_use_count = ""
+    g_var_use_count_cap = 0
+    g_df_state_finalized = 0
     g_ir_var_count = 0
     g_ir_instr_count = 0
     g_ir_func_count = 0
@@ -6584,6 +7088,9 @@ fn ir_gen_all():
         ir_gen_func(i)
         df_end_func(ir_func_idx)
         i = i + 1
+
+    if g_plan_active != 0 && g_plan_share_count > 0 && g_plan_share_reset_emitted != g_plan_share_count:
+        check_error(EC_B_LIFETIME, "share resets were not emitted for every planned slot", 0, 0)
 
     // 纯度 + 状态依赖边序列最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
     // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。

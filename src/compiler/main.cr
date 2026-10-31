@@ -248,10 +248,13 @@ fn corec_main() -> int:
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
     cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)")
+    cli_cmd("selftest-stub-regalloc", "Run runtime-stub register allocation self tests")
     cli_cmd("selftest-source", "Run SourceManager self tests")
     cli_cmd("selftest-lib", "Run LibManager self tests")
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
+    cli_flag_bool("arena-zero-on-reset", "", "Zero each arena slot's used prefix on reset (V2.4; default off)")
+    cli_flag("region-plan-max-nodes", "", "Skip V2 region planning above this IR node count (0 = unlimited; default 200000)")
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
     // Debug channels are printed in their own help group.
     cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
@@ -260,6 +263,8 @@ fn corec_main() -> int:
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
     cli_flag_bool_debug("dump-tk-terms", "", "Debug: dump per-DFNode type terms")
     cli_flag_bool_debug("dump-case-model", "", "Debug: report semantic CASE model vs derived wire counts")
+    cli_flag_bool_debug("dump-region-plan", "", "Debug: report V2 split plan SG indices")
+    cli_flag_bool_debug("dump-ir-text", "", "Debug: print IR text after the safety passes")
     // The old type-shadow CLI channels were removed; the judgment path has no
     // switch and always goes through the engine.
     cli_flag_bool_debug("verify-named-dedup", "", "Debug: verify type side-table consistency")
@@ -273,6 +278,14 @@ fn corec_main() -> int:
         return 1
     if cli_has("dump-params") != 0:
         g_dump_params_on = 1
+    g_cfg_arena_zero_on_reset = 0
+    if cli_has("arena-zero-on-reset") != 0:
+        g_cfg_arena_zero_on_reset = 1
+    mn := cli_get("region-plan-max-nodes")
+    if str_len(mn) > 0:
+        g_cfg_region_plan_max_nodes = str_int(mn)
+        if g_cfg_region_plan_max_nodes < 0:
+            g_cfg_region_plan_max_nodes = 0
     // Parse -O flag (default O1)
     g_opt_level = 1
     ol : ., mut = cli_get("opt-level")
@@ -436,6 +449,10 @@ fn corec_main() -> int:
     if cli_eq(cmd, "selftest-purity"):
         return purity_selftest_run()
 
+    // === selftest-stub-regalloc: runtime-stub register assignment cases; no artifact ===
+    if cli_eq(cmd, "selftest-stub-regalloc"):
+        return stub_regalloc_selftest_run()
+
     // === selftest-source: SourceManager self tests; no source file, no artifact ===
     if cli_eq(cmd, "selftest-source"):
         return sm_selftest()
@@ -500,6 +517,7 @@ fn corec_main() -> int:
     g_ccr_case_cap = 0
     g_cir_has_match = 0
     init_df()
+    region_plan_reset()
     // This path does not use ir_gen_all, so initialize optional representation
     // state here, before ir_gen_globals, because the hidden channels depend on
     // variable ordering.
@@ -635,6 +653,7 @@ fn corec_main() -> int:
     // consumer. True purity needs the whole program, and chain construction depends
     // on it.
     df_state_finalize()
+    compute_usage_counts()
     timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived
@@ -670,17 +689,76 @@ fn corec_main() -> int:
         return 0
 
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
-    base_diags := g_diag_count
+    base_diags : ., mut = g_diag_count
     ptr_analysis_all()
     timing_mark("ptr_analysis")
     region_check_all()
     timing_mark("region_check")
+    // Phase A may reject the v1 program. Do not plan on top of a failed graph.
+    if g_diag_count > base_diags:
+        print_diagnostics()
+        return 1
+
+    // The cross-function share proof reads g_bp_param_write. Compute the
+    // Phase A summary before planning; the plan-regeneration path recomputes
+    // it after Phase B as before.
+    byte_permission_all()
+    timing_mark("byte_permission_plan")
+    if g_diag_count > base_diags:
+        print_diagnostics()
+        return 1
+    region_plan_analyze()
+    if cli_has("dump-region-plan") != 0:
+        pi : ., mut = 0
+        loop:
+            if pi >= g_sg_count:
+                break
+            if region_plan_is_split(pi) != 0:
+                print("split ")
+                println(int_str(pi))
+            if region_plan_is_merge(pi) != 0:
+                print("merge ")
+                println(int_str(pi))
+            if region_plan_is_share(pi) != 0:
+                print("share ")
+                print(int_str(pi))
+                print(" ")
+                println(int_str(region_plan_share_exit(pi)))
+            pi = pi + 1
+        ci : ., mut = 0
+        loop:
+            if ci >= g_plan_clear_count:
+                break
+            print("clear ")
+            print(int_str(cell_load(g_plan_clear_label, ci * 8)))
+            print(" ")
+            println(int_str(cell_load(g_plan_clear_sg, ci * 8)))
+            ci = ci + 1
+
+    // V2.0 Phase B: regenerate the whole IR with split IFs, then re-validate.
+    // The plan is empty for the common case, so v1 artifacts stay byte-identical.
+    if region_plan_has_plan() != 0:
+        g_plan_active = 1
+        ir_gen_all()
+        g_plan_active = 0
+        g_pts_force_rebuild = 1
+        base_diags = g_diag_count
+        ptr_analysis_all()
+        timing_mark("ptr_analysis_plan")
+        region_check_all()
+        timing_mark("region_check_plan")
+
+    byte_permission_all()
+    timing_mark("byte_permission")
     provenance_verify_all()
     timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.
     if g_diag_count > base_diags:
         print_diagnostics()
         return 1
+
+    if cli_has("dump-ir-text") != 0:
+        print(cir_text_dump())
 
     // build and ccr need lower_to_ccr. O2 allocation and consistency checks run
     // in corearch after loading the .ccr; corec keeps only semantic CSE.

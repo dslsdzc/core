@@ -571,6 +571,10 @@ fn bi_from_uword(raw: int) -> int:
 
 fn bi_to_word_checked(a: int) -> int:
     g_bi_error = 0
+    // Fast path: even words in the immediate range are tagged small ints.
+    // Untag directly instead of boxing them. Odd words are big-int pointers.
+    if a % 2 == 0 && a >= BI_IMM_MIN && a <= BI_IMM_MAX:
+        return a / 2
     p := bi_as_big(a)
     n := bi_len_of(p)
     if n > 3:

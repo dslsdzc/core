@@ -172,6 +172,14 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_struct_impl.py   # struct/impl 矩阵：推断字段经方法/接口读取、关联函数不带接收者且可返回 struct、`Self` 类型、`self: T` 与游离 `self` 拒绝、`&mut self`、返回推断字段结构体时省略返回型（14 例）
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
+    python3 tests/selfhost/test_early_clear.py  # V2.1 early clear：直线后缀回收点、指针逃逸/无后续分配/回边保持 v1
+    python3 tests/selfhost/test_lazy.py  # control-flow lazy: pure zero-arg scalar calls sink to unique if/loop force point
+    python3 tests/selfhost/test_region_plan.py  # V2.0 IF split：无逃逸 if 建子 arena；逃逸/return/call/unsafe/嵌套循环保持 v1
+    python3 tests/selfhost/test_merge_copy.py  # V2.2 merge copy：单标量数组跨 IF 复制/重绑；长度 0/1/64/65、双分支、动态下标、嵌套逃逸、父槽预算
+    python3 tests/selfhost/test_share.py  # V2.3 read-only share：顶层 IF 标量数组由消费者循环只读共享，reset 在最后消费者退出后；写/调用/窗口分配/g_current_arena 保持 v1
+    python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/chan_recv (raw-int scheduler build)
+    python3 tests/selfhost/test_alloc_at.py  # ALLOC_AT 声明式固定地址放置：编译期地址/大小/对齐、IR 节点、静态边界、静态 ELF、固定地址程序寿命
+    python3 tests/selfhost/test_byte_permission.py  # 字节权限层：字符串字面量/只读全局只读，alloc 缓冲区可读写，unsafe 跳过；B012 两向固定用例
     python3 tests/selfhost/test_region_escape.py  # TODO #2026-09-20-1：RegionCheck 三条逃逸检查的真实触发条件。**两向固定用例**——正向 P1 循环内分配+紧邻解引用（修前 rc=0 静默通过，根因 = 半开区间 [NSTART, EXIT) 被当成闭区间，`ni > EXIT` 漏掉紧邻格）· P2 隔句同形 · P3 返回逃逸=**B10**（修前误用 B11）· P4 存储逃逸（修前判定值被整行丢弃 ⇒ 检查从不触发）· P5 if 内分配按父链归到外层循环 · P6 重赋值清除的负控；反向对照必须 rc=0：if 型（修前误报 rc=1，R2 附 build+run 反证「内存没释放」）· 函数级返回型 · 重赋值型（修前误报 rc=1）· 循环内使用型 · 非指针面 · 存活指针 · 无堆分配。**面 = `ccr`/`build`**（`check` 面在 IR 生成前早退，region_check 根本不跑 ⇒ 旧 test_region_cfg 那条「逃逸」断言靠 `or 'error'` 兜底，不是固定用例）= 14 例
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归
     python3 tests/selfhost/test_at_rename.py      # `@no_bounds_check` → `@NoBoundsCheck` 更名（维护者 2026-09-17）：旧名**响亮失败**（build/check/run 三面 rc=1 + 定位 + 零产物，绝不静默）+ 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行/语句形态零 IR = F4 语义保持）+ 分派点四处同步守门 + IR 常量 35 固定 = 14 例
@@ -190,6 +198,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_suite_hygiene.py
     python3 tests/selfhost/test_move_keyword_removed.py  # TODO #2026-09-17-18：move 关键字退役（M1/M2 负控 + M3 名字域 + M4 静态清点）
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
+    python3 tests/selfhost/test_interp_float.py   # 解释器 dex/enum/pointer 回归（含 dex+int 混合运算）
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存规则）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）
     python3 tests/selfhost/test_cir_cache_narrow.py # 缓存膨胀阶段（`CIR_CACHE_VER 19→20`，plans/2026-09-17-cir-cache-bloat.md）：段粒度按函数收窄 + 边端点相对 id + 尾部基线见证 trailer——P1 结构性（大累计图语料里 tiny 条目 956B ≤ 4096B；非空转 = 最大条目 ≥10×，实测 60×）/ P2a·P2b 部分 rebuild（单函数编辑 ⇒ 其后条目 **fail-closed 重写** + 图段与冷跑逐段同）/ P2c 命中恢复保真（同源再跑 41/41 真命中 + 图段同冷——固定装载期链重建）/ P4 截断（**16 种长度** ⇒ rc=0 + 图段同冷 + 条目重建）= **5 例**；实测时长 ~3.5 min（含 41 函数夹具多次编译）
@@ -379,6 +388,22 @@ case "$CI_JOB_NAME" in
     # 负控 = 6 类仍拒（string/bool/array/slice/ref_type/struct，check 面 rc=1 + TF07 + 文案含 or pointer）+ 既有 dex/int 仍受；
     # **负控只写 check 面**：TF07 是 build-scope 豁免码 ⇒ 「build 面零产物」在本次恒假（豁免未撤，撤条归 (甲) 刀 4）。
     python3 tests/selfhost/test_raw_int_ptr.py
+    # Allocator blob: generator relocations, simple/arena parity, ELF wiring,
+    # trap paths, stale-blob check, and clang reference parity. The clang-based
+    # tests skip only when clang is absent.
+    python3 tools/gen_alloc_blob.py --check
+    python3 tests/selfhost/test_alloc_blob_relocs.py
+    python3 tests/selfhost/test_alloc_simple_parity.py
+    python3 tests/selfhost/test_alloc_simple_elf.py
+    python3 tests/selfhost/test_alloc_arena_parity.py
+    python3 tests/selfhost/test_alloc_arena_llvm.py
+    python3 tests/selfhost/test_alloc_llvm_parity.py
+    python3 tests/selfhost/test_arena_interp.py
+    python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/chan_recv (raw-int scheduler build)
+    # BigInt machine-word and FFI boundary: rawbuf byte access, cell_store
+    # word-range traps, and the --link --static layout (user code keeps its
+    # original offset so BigInt BSS references stay valid).
+    python3 tests/selfhost/test_bigint_boundaries.py
     ;;
 
   suite)

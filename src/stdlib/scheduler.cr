@@ -102,7 +102,10 @@ fn fiber_spawn(fn_idx: int) -> int, pub:
             break
         if cell_load(g_fibers, i * 32 + 16) == FIBER_FREE:
             cell_store(g_fibers, i * 32, fn_idx)
-            cell_store(g_fibers, i * 32 + 8, arena.arena_new())
+            saved := arena_current_unchecked()
+            aid := arena.arena_new()
+            arena_set_current_unchecked(saved)
+            cell_store(g_fibers, i * 32 + 8, aid)
             cell_store(g_fibers, i * 32 + 16, FIBER_RUNNABLE)
             runq_push(i)
             return i
@@ -117,7 +120,10 @@ fn fiber_spawn(fn_idx: int) -> int, pub:
     g_fiber_count = g_fiber_count + 1
     off := fi * 32
     cell_store(g_fibers, off, fn_idx)
-    cell_store(g_fibers, off + 8, arena.arena_new())
+    saved := arena_current_unchecked()
+    aid := arena.arena_new()
+    arena_set_current_unchecked(saved)
+    cell_store(g_fibers, off + 8, aid)
     cell_store(g_fibers, off + 16, FIBER_RUNNABLE)
     cell_store(g_fibers, off + 24, 0)
     runq_push(fi)

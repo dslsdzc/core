@@ -1511,7 +1511,7 @@
 - 状态：已完成（2026-10-24）：`T_MOVE`、`EXPR_MOVE`、六处消费者、`grammar/tokens.ebnf` 的 `'move'`、LSP 补全项和 B020-B022 错误码均已删除。负控见 `tests/selfhost/test_move_keyword_removed.py`。
 - 关联：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md` 第13节 I2 / 第16节 G8。
 
-### 2026-09-17-19. 注：注： （不报错·安全网失效）`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起不报错不追踪）+ 计数器从不复位（2026-09-17 并发模型规格 G3 裁定：先裁“pts 表示升级”；本条为必立的不报错缺陷）
+### 2026-09-17-19. 注：注： （不报错·安全网失效）`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起不报错不追踪）+ 计数器从不复位（2026-09-17 并发模型规格 G3 裁定：先裁“pts 表示升级”；本条为必立的不报错缺陷）——**2026-10-29 已修**
 
 - 现象（读码实核）：`src/compiler/ptr_analysis.cr:213` 的 `if g_pa_alloc_count < 64 {` ： 每个 `IR_ALLOC_STRUCT` / `IR_ALLOC_ARRAY` 节点按序取一位 pts 位号（`:216` `pa_set_bit(0, g_pa_alloc_count)`，位号写入 `g_pa_alloc_nodes`）；达到 64 后该分支恒假 ⇒ 第 65 个及其后的分配不登记（无映射表项、该 dst var 的 `pts` 不置位），且零诊断、零产物差异。
 - 后果链（读码推断，非本轮实测）：该分配的 pts 恒空 ⇒ 1 `region_check` 的 DEREF/返回逃逸检查走 `pts != 0` 分支（`region_check.cr:122-143`）⇒ 跳过；2 `provenance_verify` 的越界检查同样遍历 pts（`provenance_verify.cr:77-129`）⇒ 跳过，且运行期边界检查回填（`:117-129` 需 `runtime_targets == 1`）也不发生 ⇒ 安全网在该分配上不报错失效（形态 = 漏检，非错值）。
@@ -1519,7 +1519,12 @@
 - 判定：S（不报错）：安全网不报错失效属本仓最忌类；第二面附带非确定性（依赖编译序）。
 - 裁定（G3）：pts 表示升级（不选“接受退化”）。理由：G1 裁定“可观察语义含时间（预算等价）”⇒ 分析精度是预算可证明的前提；且本条本身即不报错缺陷。
 - 验收要求（修复时；RED 本轮未跑：只读规划轮零构建）：1 RED 实测：构造 >64 个分配的语料（第 65 个分配上带可被判定的越界/逃逸形态）+ ≤64 的同形对照 ⇒ 修复前应观测“对照有诊断 / ≥65 无诊断”的不报错差；2 表示升级：`pts` 由“单 int 64 位位图”改为可增长表示（或多字分摊），消除 `g_pa_alloc_count` 上限；3 计数器随 `reset_frontend_state` 复位（或明确限定为编译单元作用域）；4 回归：`check src/compiler` rc=0 + 三点 pass 既有检查（`tests/selfhost/test_pointer_safety.py` 等）逐项不变；5 ELF canary 按阶段约定重定（表示升级可能改动发射面时）。
-- 状态：登记，未修；RED 未跑（2026-09-17 只读规划轮：零构建、零源码改动）。
+- 状态：已修（2026-10-29）。
+  - `g_pts`/`g_alloc_pts` 改为按分配预扫描定宽的可增长位集（`g_pts_words`，行内 64 位 lane），分配数不再有 64 上限；`pa_pts_has`/`pa_pts_add`/`pa_pts_empty` 为唯一访问器。
+  - `g_pa_alloc_count`、`g_pa_alloc_max`、`g_pts_cap`、`g_alloc_pts_cap`、`g_pa_alloc_nodes_cap` 随 `reset_frontend_state` 复位；`ptr_analysis_all` 也重新预扫描，长驻进程不累计额度。
+  - 固定点不再有 `iter >= 10` 的静默上限；集合只增，按 `changed == 0` 终止。
+  - 检查：`tests/selfhost/test_region_escape.py::test_p10_more_than_64_allocations_are_tracked`（70 个字面量分配 + 第 71 个循环分配逃逸 ⇒ B11；旧实现漏检）。
+  - 回归：`test_region_escape` 22/22、`test_pointer_safety` PASS、`test_region_cfg` 22/22、`check src/compiler` ok、canary 5/5 且五条哈希不变。
 - 关联：并发模型规格 `docs/superpowers/specs/2026-09-17-concurrency-model-design.md` 第15.2节 步 1 / 第16节 G3 · `TODO #2026-09-17-1`（不报错内存类邻域，非同根因）。
 - 触发器（拟）：`g_pa_alloc_count ≥ 64`（= 既有上限本身）⇒ 本条升为修复阶段前置：该计数在编译器内已有，全语料/自源编译时打印即可观测（机械）。
 
@@ -2147,6 +2152,7 @@
 - 附带（已完整流程）：该档旧断言 `'B010' in out or 'error' in out` 的第一支从来没有内容，长期靠第二支命中 TF01（`&x` 当时是 `PTR`、返回型声明 `&int` ⇒ 返回型不符）而绿：是裁定二把它照出来的，不是改判弄坏的；该断言已由 PR #153 重定为“只断言真实成立的性质”（`&x` 与 `&int` 同 kind ⇒ 无 TF01/TA02），并在 docstring 内逐字保留原断言。
 - 6 同面第三形态（2026-09-20 收尾时新增）：返回点在区域“内”的逃逸仍漏检：`while i < 1 { arr := [7, 8]; return &arr[0]; }`（RETURN 节点在区内 ⇒ `ni < EXIT`）本判定形态看不见。修前同样漏（rc=0），非本次引入；本次的边界修复只覆盖“使用点在区域关闭之后”一格 ⇒ 不修、并入本条目作为同一面的第 6 项（与 1–5 同面：都是 escape/lifetime 的漏检与零覆盖形态；拆条会让“这个面到底多烂”看不出来）。
 - 状态（2026-09-20 收尾）：1–5 本次已修并落检查；6 与下段三条保留登记。
+  - 2026-10-29 续修：6（区域内 return）已修，`test_p8_return_inside_loop_escapes` 覆盖；`rc_store_escape` 的双边寿命比较已实现（目标区域比被存值长寿 ⇒ B11 `destination outlives`），`test_p11_store_outlives_destination` 覆盖；pts 位图升级为动态宽度，>64 分配已覆盖（见 `#2026-09-17-19`）。
   - 位置：`src/compiler/region_check.cr`（判定抽单源 `rc_var_dead` + 6 个分解函数，三份副本收敛为一份）；检查 `tests/selfhost/test_region_escape.py`（15 例，已挂 `src/ci/run.sh` 的 selfhost-tests）；文档 `pointer-model.md` 第五节（四点判定）同阶段对齐。
   - 三条根因：ⓐ 区间半开 `[NSTART, EXIT)` 被当闭区间用 ⇒ `ni > EXIT` 漏掉“使用点紧邻区域”格（`adr-0007` 记的判定式是 `cur_seq < exit_seq`，取非即 `>=`）；ⓑ 把“任何区域关闭”当内存归还点 ⇒ `SG_IF` 不建 arena、`SG_FUNC` 的 arena 在函数出口才重置 ⇒ `if x { arr := [..]; p = &arr[0]; } *p` 被误报 rc=1（执行级反证：把读点藏进一次调用后 build+run 得 rc=0，`*p` 仍是原值 ⇒ 内存根本没释放）；ⓒ `pts` 是流不敏感并集却被当事实用 ⇒ 循环后重赋值给活对象再解引用被误报（加重赋值清除：仅当区间内写入值明确不逃逸时才清除，任一写可能逃逸则保守照报）。
   - 1 收尾：`EC_B_ESCAPE`（渲染为 `B10`）现有 raise 点：返回逃逸改报 B10（按 `docs/developer/errors.md:245`“Reference to local escapes the function”归位；修前误用 B11 = 码位错配）。
@@ -2154,7 +2160,31 @@
   - 4 收尾：`SG_FUNC` 单点特例被“归还区域”谓词（出口发 `IR_ARENA_RESET` 者）一般化：函数级分配自然放行，不再依赖一句特判。
   - 5 收尾：判定值接回 `check_error`（B11）：该点从“连 raise 点都没有”变为可触发。
   - 检查读数（基线 = `84a4debe` vs `84a4debe`+本次，空缓存状态逐档）：65 档语料（`tests/suite` 36 + `tests/probes` 29）rc + 诊断码集 0 变化（修前基线 B010/B011 零命中 ⇒ 零新增诊断）；canary 5/5 值未变（无需更新基准值）；自举链 SUCCESS + 自源零 `error[B01x]`；与 S6 扩谓词正交已实测（`&x` → `TYP_REF` 路径：基线“仅 S6”时反例 rc=0，本次 rc=1 + 具体码 ⇒ 走的是修好的判定，非被放宽后绕过的另一条路）。S6 原在三处门各写一份的 `TYP_PTR ∪ TYP_REF` 放宽，本次收敛为 `rc_var_dead` 一处（三条检查同时保持放宽）。
-  - 保留登记（未实现/不完整，勿当已实现）：6 本条；传参逃逸 = 设计未实现（`region_check_func` 无 `IR_CALL` 分支，本文件全历史逐提交核过 = 零出现；完整语义需函数摘要，而 `ptr_analysis.cr` 的 CALL 分支是 `pts = 0`、头注声称的 summary propagation 未实现）；`rc_store_escape` 的双边 outlives 比较未实现（`ptr_var` 参数当前未用）；pts 流不敏感致重赋值类真阳性转漏检（值为跨调用结果时 pts 空 ⇒ 被当作“明确不逃逸”而清除）。
+  - 2026-10-29 复审续修：标量槽位 `&x`（`IR_ALLOC` 无 pts 位）改走声明区追踪，return/store 均可判定；REF 目标寿命取被取址变量的声明区，而不是 REF 节点所在区；全局/参数没有本地 `IR_ALLOC` 时按函数/程序级寿命，不再误报；条件/PHI/循环内的标量指针改用 **CFG 到达定义**（`IR_JUMP` + `IR_MATCH` CASE 目标）逐 use 求值，值追踪递归到被拷贝变量的到达定义（`test_p16`–`p20`）；条件分支里的安全重赋值不再清除逃逸判定（`test_p15`）；“两支都覆盖更早死定义”不再保守误报（`test_r15`）；`rc_last_store` 每次 pass 只分配一次、按函数变量区重置；同宽重复编译复用 pts 缓冲。
+  - 2026-10-29 参数逃逸：`rc_param_summaries` 建立参数别名 + 逃逸摘要（全局/参数指针/未知目标；本地槽位/`&param` 参数槽/`alloc()` 本地堆安全），两个 32 位字覆盖 64 形参，跳过 unsafe，沿调用图固定点传递；`rc_call_check` 对归还区实参报 B11；直接全局 `IR_STORE` 也报 `global outlives`。覆盖 `test_p21`/`p22`/`p23`/`r16`/`r17`，含 64 形参探针。
+  - 2026-10-29 堆指针使用点：`rc_var_escapes`/`rc_value_has_release` 先取 reaching definitions，再按到达值检查 pts/标量寿命；循环内先写死再写活后循环外使用不再误报（`test_r18`）。pts 内容集仍是包含式，不是流敏感 points-to。
+  - 2026-10-29 返回值与 out 参数摘要：`g_rc_ret_alias` 记录"返回哪个形参"，调用结果经 lazy thunk/force 链继续沿实参求值；`g_rc_out_pairs` 记录"源形参 j 可能经目标形参 i 写出"，调用点用 `rc_store_outlives` 比较目标实参与源实参的寿命，同区 out 参数不再保守误报；`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 接入摘要与直接检查（含全局结构体/数组字段）；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容，沿形参转发。覆盖 `test_p24`–`p32`、`r19`–`r24`。
+  - 2026-10-29 FFI 边界：非 `unsafe` 域的 `IR_CALL_EXTERN` 传归还区指针实参报 B11；`g_rc_param_ffi` 把"形参转发给 extern"的约束沿包装函数传回调用点。覆盖 `test_p33`/`p34`/`r25`/`r26`。
+  - 2026-10-29 pointee 内容经 out 参数：`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，调用点按目标寿命（`rc_dest_max_exit`）比较内容值；覆盖 `test_p35`/`p36`/`p37`/`r27`。
+  - 2026-10-29 字节权限层（验证器侧）：新增 `src/compiler/byte_permission.cr` 与 B012。权限状态两个 bit、只降不升；字符串字面量为只读，Core 分配/未知值可读写，全局槽字节可写（`mut` 只限制按名赋值）。检查 `cell_store`/`store8` 写入、`cell_load`/`load8`/`str_len` 读取、经只读分配的指针写入；`g_bp_param_write` 摘要沿调用图传播。覆盖 `test_byte_permission.py` 13 例。剩余：持久化/运行期表示、每字节子区间、`alloc_at` 权限声明。
+  - 2026-10-29 `alloc_at` 声明式放置：`IR_ALLOC_AT`（opcode 55）+ `alloc_at`/`align` 声明期识别 + ptr_analysis 分配根 + provenance 边界（字节 → 8 字节 cell）+ 固定地址程序寿命 + 后端地址常量 + 解释器响亮拒绝。覆盖 `test_alloc_at.py` 11 例。v1 只接受编译期字面量、固定 `*int`；部署配置地址、显式元素类型、运行时对齐尚未实现。
+  - 2026-10-29 区域 V2.0：IF split 落地。`region_plan.cr` 在 Phase A 标记无逃逸的 SG_IF，Phase B 用 `ir_gen_all` 重生成 IR，在 IF 入口/出口发射子 arena。当前门：无 return/call/unsafe/非局部跳转、无 `g_current_arena` 读、无取址局部槽中转、嵌套 loop 分配不计数。覆盖 `test_region_plan.py` 8 例；无 plan 程序 canary 5/5 不变。剩余 V2.1–V2.4 见设计文档。
+  - 2026-10-30 区域 V2.4：清零配置。运行时 `g_arena_zero_on_reset`（默认 0）+ `arena_set_zero_on_reset`；`arena_reset` 归还 slot 前清零：当前槽按已用前缀（静态 `g_arena_cursors` / 动态 `g_arena_slot_cursor`），链上旧槽整 1MB；大对象 extent 仍 munmap。编译器新增 `--arena-zero-on-reset`，main 全局初始化后置 1。覆盖 `test_arena_interp.py` setter-on/默认 off/flag 三组（解释器 + ELF）；canary 5/5 不变。
+  - 2026-10-30 区域 V2.3（写共享）：允许消费者经外层槽直接写（`IR_STORE_INDEX`/`_VAR`），要求 base == 外层槽、写入值/下标不指向共享数组；别名写仍拒绝。
+  - 2026-10-31 区域 V2.3 COW：写候选置 `g_rp_share_cow`；Phase B 在 IF 子 arena 前于父 arena 分配 `_cow_copy`/`_cow_flag`，IF 后第一次写复制元素、重绑外层槽，后续写落副本；只读 share 不分配副本。Q 仍 reset 子 arena，副本存活到父 reset。`test_share.py` 增至 37 例（写消费者 COW、false 路径复制旧数组、读后写、长数组循环复制、只读 share 无副本）。
+  - 2026-10-30 区域 V2.3（安全边界）：share 消费者窗口显式拒绝 `IR_CALL_EXTERN`/`IR_HOTPATCH_ROUTE`/`IR_DYN_DISPATCH`；hazard 位把 callee 内 `IR_ALLOC_ARRAY/STRUCT/AT`、非标量 `IR_RETURN`、`IR_ADDR_INDEX/REF/SLICE/PTR_OF/STR_OF` 计入，避免返回分配在 share reset 后悬挂。`test_share.py` 增至 32 例（FFI 窗口、分配 callee）；suite、canary 不变。
+  - 2026-10-30 区域 V2.3（广义）：read-only share。顶层 IF 的单个常量长度标量数组存入外层局部槽；IF 后只读共享，IF 出口不 reset，在 Q（最后一个使用后的安全 label 或顶层 loop/for/split-IF 退出）发射 `IR_ARENA_RESET`；不复制。支持 LOOP/FOR、split IF、嵌套 loop（无 break/return/unsafe）、parent-level 读、多个 share（含嵌套重叠，按 SG 降序 LIFO reset），以及传递的跨函数只读证明（函数级 hazard 位 1=unsafe/2=current/4=arena 或未知调用/8=heap store，沿调用图固定点传播；共享数组实参要求 heap-readonly，参数写/逃逸/返回/FFI 摘要为空）。窗口内任何 merge IF 阻断 share；`RegionCheck` lifetime exit 用 Q 的 label id；父槽 early clear 与 share 在同一 label 共存（先 clear 后 share reset，`arena_clear` 不切换 current）。覆盖 `test_share.py` 30 例，已挂 selfhost-tests；canary 5/5 不变。
+  - 2026-10-30 区域（规模阈值）：PDOM early-clear 上限 2000→8000，7601 节点直函数可 clear（`test_early_clear.py` 8/8）；新增 `--region-plan-max-nodes`（默认 200000，0=不限），总 IR 节点超阈值时跳过 plan（`test_region_plan.py` 10/10）。suite/canary 不变。
+  - 2026-10-30 区域（每 G 独立 arena）：G 结构体扩到 88B，+80 保存嵌套 current arena；`sched_schedule`/`sched_worker_run` 在 fiber_switch 前后保存/恢复，`sched_go`/`fiber_spawn` 创建 G arena 后恢复 spawner current。依赖 raw `arena_current_unchecked`/`arena_set_current_unchecked`。新增 `tests/selfhost/test_go_arena.py`（raw-int ccr+corearch，go/chan_recv 后检查 main current 仍为原 arena），已挂 selfhost-tests。suite/canary 不变。
+  - 2026-10-30 区域（per-G 前置）：新增编译器内建 `arena_current_unchecked()` / `arena_set_current_unchecked(v)`，在调用点直接降为 `cell_load`/`cell_store(g_arena_scalars,0)` + `g_current_arena`，不创建函数 arena，避免辅助函数自身 arena 污染 current。`test_arena_interp.py` 增加 raw current/set 的解释器 + ELF parity。per-G 调度切换仍待接。
+  - 2026-10-30 区域 V2.2（祖先生命周期）：merge 允许位于 loop/for/已规划 IF 内，副本分配在最近的释放祖先 arena；扫描外层槽在祖先 exit 后的使用及别名，有逃逸则拒绝。unsafe 祖先仍拒绝。`test_merge_copy.py` 增至 45 例（loop/for 局部 merge、循环外逃逸拒绝）。
+  - 2026-10-30 区域 V2.2（字符串/长度扩展）：字符串 merge 支持字面量、参数/局部值、`fmt` 纯构造调用（按 owner 校验），动态值在分支出口临时切换 current arena 深复制；数组/结构体/元组的字符串叶子逐元素复制。数组长度放开到任意常量，>8 用 IR 循环复制；长度 0 无 allocation 节点保持 v1。`test_merge_copy.py` 增至 43 例（动态字符串、arena switch、字符串数组/字段/元组、长数组循环）。suite/canary 待本轮终验。
+  - 2026-10-30 区域 V2.2（字符串）：IF 无直接分配时，允许每个赋值分支把一个字符串字面量写入同一外层槽。副本在 IF 入口、子 arena 创建前用 `str_sub(lit, 0, len)` 生成到父 arena，分支出口只重绑外层槽；双分支可用不同长度，空串和解释器路径均验证。非字面量字符串表达式（变量、concat 等）保持 v1。`test_merge_copy.py` 增至 39 例（含 300 字节长串的父槽 peak）；suite、canary 不变。
+  - 2026-10-30 区域 V2.2（POD 聚合）：结构体字面量（`IR_ALLOC_STRUCT`）和元组字面量（非数组类型行的 `IR_ALLOC_ARRAY`）可 merge。结构体逐字段 `IR_LOAD_FIELD`/`IR_STORE_FIELD` 复制，字段类型必须全为 int/bool/char/dex；元组逐元素槽复制，每个元素写入值必须是标量。含数组/字符串/结构体/指针/optional 字段保持 v1；双分支结构体要求同名，元组要求同元素数。`test_merge_copy.py` 增至 35 例（POD 结构体/元组真假路径、分支内改写、指针字段/字符串字段/指针元素拒绝）；suite、canary 不变。
+  - 2026-10-30 区域 V2.2（多分支）：if/else 两分支各分配同元素类型、同长度的常量标量数组并存入同一外层槽时，复用一个父槽 `_merge_copy`，每个赋值分支出口分别复制并重绑；eligibility 用指向 IF 汇合 label 的两个 jump 切分分支范围，要求每支一个分配、各绑定一次，外层槽其他写入和嵌套逃逸仍拒绝。`test_merge_copy.py` 增至 30 例。
+  - 2026-10-30 区域 V2.2（窄切片）：merge 复制。仅单个常量长度标量数组（int/bool/char/dex，1..64）在 IF 顶层直接存入外层局部槽；IF 无 call/return/unsafe/非局部跳转，不位于 loop/for/unsafe 内；子数组只允许元素读写，其他逃逸/身份观察拒绝。复制在赋值分支出口写入父槽副本并重绑外层槽，未赋值路径保留旧值，无需汇合 phi；子槽仍在汇合标签 reset。覆盖 `test_merge_copy.py` 29 例（长度 0/1/64/65、双分支、多 merge、动态下标、赋值前读/条件读、bool/char、IF 后循环、字符串拒绝）；修正 `IR_STORE_INDEX_VAR` 的 DF 映射（dest=值、s1=数组、s2=下标，s3 为字面量 0；旧代码把 s3 当下标并把 dest 记为定义，`arr[i]=i` 产生自环）；v7 数据边基准与 multibranch unknown-opcode 夹具同步。同期修正 arena peak 记账（按 `g_cur_sg` 累计、按 `OFF_SG_PARENT` 回加），已知大小程序的父槽预算包含副本。canary 5/5 不变。
+  - 2026-10-30 区域 V2.1/V2.1b：`IR_ARENA_CLEAR`（opcode 56）+ `arena_clear` + 后支配 clear plan。控制邻接上构建后支配集合，候选 label 必须后支配该槽候选点之前所有分配的使用；仍要求同基本块后续同槽分配、无回边。指针使用扫描接受 unit 槽但 pts 非空的载体（修正 `a := [..]` 经槽中转的漏计）。覆盖 `test_early_clear.py` 7 例；gt canary 保持 2026-10-29 基线值（此前 +56B 的 clear 由该漏计导致，已撤销重锁）。
+  - 不适用（已核）："被返回的本地堆对象"不单列摘要。`alloc()` 的返回类型是 `string`，走全局堆而非区域 arena（实测循环后返回并解引用仍有效）；`IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` 是栈/区域槽，只能通过 `&` 引用逃逸，已由指针路径覆盖。
 
 ### 2026-09-24-1. （声明但不校验 / 有码但不 raise）前端不报错面清单（v4 迁移调研产出；只登记未修；取号基准 = 当天已有最大 N 无 ⇒ 1）
 
@@ -2644,7 +2674,18 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
 
 ### 控制流自动惰性（2026-08-09 记）
 - 目标：控制流结构（if / while / for 等）的分支表达式自动惰性求值：未被执行的路径不产生求值开销。判定表见 `docs/lazy.md`：结果只用一个分支 → 延迟；有副作用（IO/FFI/unsafe/volatile）→ 永远 eager；循环体内每次都用 → eager；循环体内条件性用 → 惰性
-- 现状（源码核实，2026-08-09）：
+- 实现状态（2026-10-30，第一切片）：
+  - `compute_usage_counts()` 已移到 `df_state_finalize()` 之后调用，并改为幂等清零重算；Phase A 的 use_count 真实可用。
+  - `compute_all_purity` 不再把写本地标量槽的 `IR_STORE` 当外部效应；全局写/数组/字段/指针写仍保守不纯。
+  - Phase A 选纯标量调用（标量实参、单 force、同 loop 迭代、if/loop 条件内、callee 本地分配安全）；Phase B 在原求值点捕获实参，将调用延迟到 force 点，`v := call` 的赋值目标也延迟定义。
+  - 同一基本块的多使用共享首次调用（memo）；跨基本块多使用用 site memo/flag，首次动态读执行、后续复用。
+  - 循环内实参不变的调用在循环 preheader 建 memo/flag，首次动态 force 执行一次、后续迭代复用（loop-invariant memo/hoist）；全局实参与地址暴露的实参拒绝 hoist。
+  - callee 允许本地数组/结构体分配与写，只要不逃逸、不调用/不 unsafe、不读写全局（含 `g_current_arena`）；逃逸分配与读全局的 callee 保持 eager。
+  - 指针/数组实参允许，前提是 pointee 在调用点到每个 force 点之间不被聚合写/调用改变且不在释放区域；循环 hoist 要求整个循环内无此类写。
+  - 延迟定义的局部槽继承调用结果类型，避免 TI_UNIT 槽被误判为 alloc 字节缓冲。
+  - `tests/selfhost/test_lazy.py` 35 例：if 假/真、loop/for 条件、二元使用、常量/可变实参、同块/跨块/循环 memo、指针/数组实参、多分支多使用、直写、本地分配 callee、逃逸分配/全局效应/pointee 改写负例；已挂 selfhost-tests。
+  - 仍待：跨函数指针摘要、函数指针/接口间接逃逸、嵌套聚合深拷贝。
+- 旧现状（源码核实，2026-08-09）：
   - IR_LAZY_THUNK(46)/IR_LAZY_FORCE(47) 已存在（ast.cr:571）；ir_gen 在纯函数调用后包 THUNK（ir_gen.cr:1106），`force_if_thunk()` 在所有操作数位置发 FORCE
   - 但当前 thunk 不产生实际延迟：IR_CALL 在 THUNK 之前已急切发射，ELF 后端（instr.cr:1091，注释明言 "Calls are currently emitted eagerly… typed value transfer"）和解释器（interp.cr:194）都按纯值搬运降级：语义上是 no-op，只保证输出不变
   - use_count 时序问题：`compute_usage_counts()`（dataflow.cr:325）在全部 ir_gen 之后才运行（dataflow.cr:381），而 THUNK 判定在 ir_gen 当时读 `g_var_use_count`（ir_gen.cr:1108）→ 判定时恒 0/未初始化，`use_count <= 1` 恒真，实际每个纯调用都被包："单次使用"条件名存实亡

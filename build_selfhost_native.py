@@ -56,6 +56,8 @@ hit_engine_files = [
 # 语义内核段（lattice——范式无关，corec/corearch 双 concat 共享）。
 kernel_files = [
     'src/lattice/ent_kernel.cr',
+    'src/lattice/regalloc_cag.cr',
+    'src/lattice/stub_regalloc.cr',
 ]
 
 # ① 架构轴 x86_64：寄存器分配 CAG + 指令编码 + 字节尺寸单源（sizes.cr）
@@ -73,6 +75,7 @@ arch_x86_64_files = [
     'src/arch/x86_64/sizes.cr',
     'src/arch/x86_64/int_rep.cr',
     'src/runtime/bigint_blob.cr',
+    'src/runtime/alloc_blob.cr',
     'src/arch/x86_64/instr.cr',
     'src/arch/x86_64/frame.cr',
 ]
