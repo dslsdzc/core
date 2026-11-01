@@ -9,25 +9,25 @@ import sched
 fn goroutine_wrapper_addr() -> int:
     return 0
 
-// Goroutine ID counter
-g_next_id : int, mut = 1
-
+// Goroutine IDs are per-M (g_next_id_m is allocated by sched_init_n).
 // Fiber stack size for one G. This is an execution policy constant, not a
 // frontend type-layout rule.
 G_STACK_SIZE : int = 16384
 
-// G struct layout (88 bytes):
+// G struct layout (104 bytes):
 //   0: id
 //   8: status (0=runnable, 1=running, 2=waiting, 3=dead)
 //  16: sp (stack pointer for fiber)
 //  24: stack_lo (lowest address of stack)
 //  32: arena_id
 //  40: result_ch (result channel, set by sched_go)
-//  48: next (linked list for run queue / send_wait / recv_wait)
+//  48: next (run queue / channel wait list link)
 //  56: saved_fn (entry function ptr, for wrapper dispatch)
 //  64: saved_arg (saved argument, for wrapper dispatch)
-//  72: temp_val (temp value for wait queue handoff)
+//  72: temp_val (legacy channel handoff storage; removed in Task 3)
 //  80: saved_current_arena (nested region current; -1 = use base arena)
+//  88: home_m (0A: G never migrates)
+//  96: dead_next (deferred reclamation list; never reuse run-queue next)
 
 fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     // Create the goroutine's arena FIRST: the fiber stack and G struct must
@@ -48,10 +48,13 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     wrap_addr := goroutine_wrapper_addr()
     sp := fiber_init(stack_top, wrap_addr)
 
-    // Allocate G struct (88 bytes; offset 80 saves the nested current arena)
-    g := alloc(88)
-    id := g_next_id
-    g_next_id = g_next_id + 1
+    // Allocate G struct (104 bytes; +80 saved arena, +88 home M, +96 dead next)
+    g := alloc(104)
+    home : ., mut = rt_m_idx()
+    if home < 0:
+        home = 0
+    id := cell_load(g_next_id_m, home * 8)
+    cell_store(g_next_id_m, home * 8, id + 1)
     cell_store(g, 0, id)           // id
     cell_store(g, 8, 0)            // _Grunnable
     cell_store(g, 16, sp)          // stack pointer
@@ -61,14 +64,18 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     cell_store(g, 48, -1)          // next = -1
     cell_store(g, 56, entry_fn)    // saved_fn = entry function ptr
     cell_store(g, 64, arg)         // saved_arg
-    cell_store(g, 72, 0)           // temp_val = 0
+    cell_store(g, 72, 0)           // temp_val = 0 (legacy until Task 3)
     cell_store(g, 80, -1)          // saved_current_arena = base
+    cell_store(g, 88, home)        // 0A: fixed home M
+    cell_store(g, 96, -1)          // dead_next
 
     return g
 
 fn g_free(g: string), pub:
-    // Reset arena (reclaims the fiber stack + G struct, which live in it)
-    aid := cell_load(g, 32)
-    arena_reset(aid)
-    // Mark G dead so it is never re-enqueued (status 3 = _Gdead)
-    cell_store(g, 8, 3)
+    // Mark dead and defer arena reset until the home M is off this stack.
+    home : ., mut = cell_load(g, 88)
+    if home < 0:
+        home = 0
+    rt_atomic_store(g, 8, 3)       // _Gdead
+    cell_store(g, 96, cell_load(g_dead_head_m, home * 8))
+    cell_store(g_dead_head_m, home * 8, g)

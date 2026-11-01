@@ -287,6 +287,10 @@ fn _grow_arena_meta(needed: int):
 
 // ── Public API ──
 
+// 0A Task 2 compatibility wrapper. Task 4 replaces this with per-M partitions.
+fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
+    arena_init(pool_size, arena_size)
+
 fn arena_init(pool_size: int, arena_size: int), pub:
     // Metadata rebuilds allocate tagged big-int boxes. Those must go to the
     // global heap, never into a half-built arena.

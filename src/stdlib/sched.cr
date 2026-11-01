@@ -1,164 +1,201 @@
-// M:N scheduler — M OS threads, N goroutines
-// Channels are single-producer/single-consumer edges, so the runtime needs
-// no locks: each M owns its run queue and only its own thread touches it.
+// M:N scheduler — 0A lock-free foundation.
+//
+// Gs are pinned to their home M (G+88). Each M owns one tagged Treiber stack
+// (M+16). Producers CAS-push; the owner is the only popper. The 15-bit tag in
+// bits 48..62 prevents ABA while keeping the value positive in Core ints.
+//
+// 0A is still single-M by default (sched_init); sched_init_n(n) is the
+// explicit multi-M entry point. Work stealing and futex idling are 0C.
 import goroutine
 import chan
 import arena
 
-// M struct layout (32 bytes): id(0), cur_g(8), runq_head(16), runq_tail(24)
-g_machines : string, mut    // M array
+// M struct (48 bytes): id(0), cur_g(8), ready_head(16), sched_sp(24),
+// spawn_head(32), pad(40).
+g_machines : string, mut
 g_machine_count : int, mut
+g_num_workers : int, mut = 0
+g_sched_inited : int, mut = 0
 
-// Index of the M running the current thread. Each worker sets it on entry
-// (sched_worker_run); the scheduler uses it to enqueue/dequeue on the
-// current M's LOCAL queue instead of contending on a shared global one.
-g_current_m_idx : int, mut = 0
+// Per-M deferred-reclamation list and per-M G id counter.
+g_dead_head_m : string, mut
+g_next_id_m : string, mut
 
-g_num_workers : int, mut = 0        // number of worker threads
-g_sched_inited : int, mut = 0       // 0 = not initialized, 1 = initialized
+// Tagged head: (tag << 48) | 48-bit user address.
+PTR_MASK : int = 281474976710656   // 2^48
+TAG_MAX : int = 32767
 
 fn sched_init(), pub:
+    sched_init_n(1)
+
+fn sched_init_n(n: int), pub:
     if g_sched_inited != 0:
         return
+    if n < 1:
+        n = 1
 
-    // Initialize arena system (required by goroutine/chan)
-    arena_init(g_arena_pool_limit, 1048576)  // limit from Core.toml, 1MB slots
+    arena_init_m(g_arena_pool_limit, 1048576, n)
 
-    // Initialize M workers (one per CPU)
-    // For now: single-threaded (1 M, cooperative)
-    m := alloc(32)
-    cell_store(m, 0, 0)     // id = 0
-    cell_store(m, 8, -1)     // cur_g = none
-    cell_store(m, 16, -1)    // runq_head = empty
-    cell_store(m, 24, -1)    // runq_tail = empty
+    m := alloc(n * 48)
+    g_dead_head_m = alloc(n * 8)
+    g_next_id_m = alloc(n * 8)
+
+    mi : ., mut = 0
+    loop:
+        if mi >= n:
+            break
+        cell_store(m, mi * 48, mi)        // id
+        cell_store(m, mi * 48 + 8, -1)    // cur_g
+        cell_store(m, mi * 48 + 16, 0)    // ready_head = (tag 0, ptr 0)
+        cell_store(m, mi * 48 + 24, 0)    // sched_sp
+        cell_store(m, mi * 48 + 32, 0)    // spawn_head (Task 5)
+        cell_store(g_dead_head_m, mi * 8, -1)
+        cell_store(g_next_id_m, mi * 8, 1)
+        mi = mi + 1
+
+    // Main thread is G0, permanently pinned to M0. Its stack_ptr is filled
+    // by fiber_switch on the first yield.
+    main_g := alloc(104)
+    cell_store(main_g, 0, 0)      // id
+    cell_store(main_g, 8, 1)      // _Grunning
+    cell_store(main_g, 16, 0)     // stack_ptr
+    cell_store(main_g, 24, 0)     // stack_lo (OS thread stack)
+    cell_store(main_g, 32, -1)    // arena_id
+    cell_store(main_g, 40, -1)    // result_ch
+    cell_store(main_g, 48, -1)    // next
+    cell_store(main_g, 56, 0)     // saved_fn
+    cell_store(main_g, 64, 0)     // saved_arg
+    cell_store(main_g, 72, 0)     // temp_val
+    cell_store(main_g, 80, -1)    // saved_current_arena
+    cell_store(main_g, 88, 0)     // home_m
+    cell_store(main_g, 96, -1)    // dead_next
+
     g_machines = m
-    g_machine_count = 1
-    g_current_m_idx = 0
-
-    // Register the main thread as G 0 so it can block/wake via channels.
-    // Its stack_ptr is filled in by fiber_switch the first time it yields
-    // (fiber_switch saves the current RSP into [G+16]).
-    main_g := alloc(88)
-    cell_store(main_g, 0, 0)     // id = 0
-    cell_store(main_g, 8, 1)     // _Grunning
-    cell_store(main_g, 16, 0)    // stack_ptr (filled on first yield)
-    cell_store(main_g, 24, 0)    // stack_lo (thread stack — no arena)
-    cell_store(main_g, 32, -1)   // arena_id = none
-    cell_store(main_g, 40, -1)   // result_ch = none (never dispatched by a wrapper)
-    cell_store(main_g, 48, -1)   // next = -1
-    cell_store(main_g, 56, 0)    // saved_fn = 0 (never dispatched by a wrapper)
-    cell_store(main_g, 64, 0)    // saved_arg = 0
-    cell_store(main_g, 72, 0)    // temp_val = 0
-    cell_store(main_g, 80, -1)   // saved_current_arena = none/base
-    cell_store(m, 8, main_g)     // M[0].cur_g = main_g
+    g_machine_count = n
+    g_num_workers = n - 1
+    cell_store(m, 8, main_g)
     g_set_curg(main_g)
     g_sched_inited = 1
 
-// sched_current_m_idx: index of the M currently executing (set by
-// sched_worker_run / sched_init). The asm goroutine wrapper calls
-// sched_schedule without an argument, so the scheduler always resolves the
-// current M through this.
+    if n > 1:
+        sched_spawn_workers(n)
+
 fn sched_current_m_idx() -> int:
-    return g_current_m_idx
-
-fn sched_enqueue(g: string):
-    // Add to the current M's local queue. There is no shared global queue, so
-    // workers do not contend; each M touches only its own list.
-    m_idx : ., mut = sched_current_m_idx()
-    if m_idx < 0:
-        m_idx = 0
-    m := g_machines + m_idx * 32
-    head := cell_load(m, 16)
-    if head < 0:
-        cell_store(m, 16, g)      // runq_head = g
-        cell_store(m, 24, g)      // runq_tail = g
-    else:
-        tail := cell_load(m, 24)
-        cell_store(tail, 48, g)   // tail.next = g
-        cell_store(m, 24, g)      // runq_tail = g
-    cell_store(g, 48, -1)
-
-fn sched_dequeue(m_idx: int) -> int:
-    if m_idx < 0:
-        m_idx = 0
-    m := g_machines + m_idx * 32
-    head := cell_load(m, 16)
-    if head < 0:
-        return -1
-    cell_store(m, 16, cell_load(head, 48))
-    if cell_load(m, 16) < 0:
-        cell_store(m, 24, -1)
-    cell_store(head, 48, -1)
-    return head
+    return rt_m_idx()
 
 fn sched_get_curg() -> int, pub:
     return g_get_curg()
 
-// G pointers live in int slots as mathematical ints; @ptr_add untags both
-// operands and returns the raw address word for cell memory / fiber_switch.
+fn sched_enqueue(g: string):
+    hm : ., mut = cell_load(g, 88)
+    if hm < 0:
+        hm = 0
+    m := g_machines + hm * 48
+    gp : ., mut = 0
+    unsafe:
+        gp = @ptr_of(g)
+    loop:
+        old := rt_atomic_load(m, 16)
+        tag : ., mut = old / PTR_MASK + 1
+        if tag > TAG_MAX:
+            tag = 1
+        ptr := old % PTR_MASK
+        cell_store(g, 48, ptr)
+        newv := tag * PTR_MASK + gp
+        if rt_atomic_cas(m, 16, old, newv) != 0:
+            return
+
+fn sched_dequeue(m_idx: int) -> int:
+    if m_idx < 0:
+        m_idx = 0
+    m := g_machines + m_idx * 48
+    loop:
+        old := rt_atomic_load(m, 16)
+        ptr := old % PTR_MASK
+        if ptr == 0:
+            return -1
+        nxt := cell_load(ptr, 48)
+        tag : ., mut = old / PTR_MASK + 1
+        if tag > TAG_MAX:
+            tag = 1
+        newv := tag * PTR_MASK + nxt
+        if rt_atomic_cas(m, 16, old, newv) != 0:
+            cell_store(ptr, 48, -1)
+            return ptr
+
+fn sched_reap_dead(m_idx: int, cur_g: int):
+    loop:
+        g := cell_load(g_dead_head_m, m_idx * 8)
+        if g < 0:
+            break
+        if g == cur_g:
+            break
+        cell_store(g_dead_head_m, m_idx * 8, cell_load(g, 96))
+        aid := cell_load(g, 32)
+        saved := rt_current_arena()
+        arena_reset(aid)
+        rt_set_current_arena(saved)
 
 fn sched_yield():
-    // Current goroutine yields
     cur_g := sched_get_curg()
-
-    // Re-enqueue current G only if it is still runnable.
-    // Blocked (_Gwaiting) Gs stay on their channel wait lists until a
-    // sender/receiver handoff wakes them — re-enqueueing would double-schedule.
-    // Dead (_Gdead) Gs must never be re-enqueued (goroutine exit path).
     if cur_g >= 0:
-        st := cell_load(cur_g, 8)
+        st := rt_atomic_load(cur_g, 8)
         if st != 2 && st != 3:
-            // not _Gwaiting, not _Gdead
-            cell_store(cur_g, 8, 0)  // _Grunnable
+            rt_atomic_store(cur_g, 8, 0)
             sched_enqueue(cur_g)
-
-    // Schedule next
     sched_schedule()
 
-// sched_schedule: switch to the next runnable G from the current M's local
-// queue. No m_idx parameter: the current M index is tracked in
-// g_current_m_idx, and the assembly goroutine_entry_wrapper calls this
-// directly (rdi is unspecified there) on the goroutine exit path.
+// sched_schedule: switch from the current G to the next queued G on this M.
+// Blocking paths must call this directly, not sched_yield: a waker may have
+// already pushed the blocked G, and re-enqueueing would duplicate it.
 fn sched_schedule():
     m_idx := sched_current_m_idx()
-    next_g := sched_dequeue(m_idx)
-    if next_g >= 0:
-        old_g := cell_load(g_machines, m_idx * 32 + 8)
-        cell_store(g_machines, m_idx * 32 + 8, next_g)
-        g_set_curg(next_g)
-        cell_store(next_g, 8, 1)  // _Grunning
+    old_g := sched_get_curg()
+    sched_reap_dead(m_idx, old_g)
 
-        // Per-G arena: save the nested current arena of the outgoing G and
-        // restore the incoming G's base/saved arena before it runs. The raw
-        // builtins lower to cell accesses without creating a function arena.
-        if old_g >= 0:
-            cell_store(old_g, 80, arena_current_unchecked())
-        next_cur : ., mut = cell_load(next_g, 80)
-        if next_cur < 0:
-            next_cur = cell_load(next_g, 32)
-        arena_set_current_unchecked(next_cur)
-        if old_g >= 0:
-            // Save old_g's sp, switch to next_g's sp
-            old_sp_addr := @ptr_add(old_g, 16)  // &g.stack_ptr
-            next_sp := cell_load(next_g, 16)  // g.stack_ptr
-            fiber_switch(old_sp_addr, next_sp)
-            arena_set_current_unchecked(cell_load(old_g, 80))
-        // else: first goroutine, just start it
-
-// sched_worker_run: main loop for worker threads.
-// Each worker dequeues and runs goroutines from ITS OWN M's local queue.
-fn sched_worker_run(m_idx: int):
-    // Store this worker's index in its M struct
-    cell_store(g_machines, m_idx * 32, m_idx)  // m.id = m_idx
-    g_current_m_idx = m_idx
-
+    next_g : ., mut = -1
     loop:
+        next_g = sched_dequeue(m_idx)
+        if next_g >= 0:
+            break
+        if old_g < 0:
+            return
+        // 0A single-M/main-M path: spin. Task 5 adds worker parking.
+        continue
+
+    if next_g == old_g:
+        return
+
+    m := g_machines + m_idx * 48
+    cell_store(m, 8, next_g)
+    g_set_curg(next_g)
+    rt_atomic_store(next_g, 8, 1)
+
+    if old_g >= 0:
+        cell_store(old_g, 80, arena_current_unchecked())
+    next_cur : ., mut = cell_load(next_g, 80)
+    if next_cur < 0:
+        next_cur = cell_load(next_g, 32)
+    arena_set_current_unchecked(next_cur)
+
+    if old_g >= 0:
+        old_sp_addr := @ptr_add(old_g, 16)
+        next_sp := cell_load(next_g, 16)
+        fiber_switch(old_sp_addr, next_sp)
+        arena_set_current_unchecked(cell_load(old_g, 80))
+
+// Worker entry. Task 5 extends this with spawn requests and parking.
+fn sched_worker_run(m_idx: int):
+    cell_store(g_machines, m_idx * 48, m_idx)
+    loop:
+        sched_reap_dead(m_idx, -1)
         next_g := sched_dequeue(m_idx)
         if next_g >= 0:
-            old_g := cell_load(g_machines, m_idx * 32 + 8)
-            cell_store(g_machines, m_idx * 32 + 8, next_g)
+            m := g_machines + m_idx * 48
+            old_g := cell_load(m, 8)
+            cell_store(m, 8, next_g)
             g_set_curg(next_g)
-            cell_store(next_g, 8, 1)  // _Grunning
+            rt_atomic_store(next_g, 8, 1)
 
             if old_g >= 0:
                 cell_store(old_g, 80, arena_current_unchecked())
@@ -166,52 +203,25 @@ fn sched_worker_run(m_idx: int):
             if next_cur < 0:
                 next_cur = cell_load(next_g, 32)
             arena_set_current_unchecked(next_cur)
+
             if old_g >= 0:
-                old_sp_addr := @ptr_add(old_g, 16)
-                next_sp := cell_load(next_g, 16)
-                fiber_switch(old_sp_addr, next_sp)
+                fiber_switch(@ptr_add(old_g, 16), cell_load(next_g, 16))
                 arena_set_current_unchecked(cell_load(old_g, 80))
-            // else: first goroutine on this M, start it
-        // If no work, yield to OS
-        // For now: spin-wait (will add proper blocking later)
-        // yield(); // sched_yield_to_os() — future
+            else:
+                fiber_switch(@ptr_add(m, 24), cell_load(next_g, 16))
+                g_set_curg(-1)
 
-// sched_go: spawn a goroutine that calls fn_ptr(arg), return a channel for the result.
-// fn_ptr is the function's address (resolved by the backend at link time).
-// arg is the single argument passed to the spawned function.
 fn sched_go(fn_ptr: int, arg: int) -> string, pub:
-    // Create a 1-element channel for collecting the result
     ch := chan_make(8, 1)
-
-    // Create a new goroutine via g_new, then restore the spawner's arena.
     saved_cur := arena_current_unchecked()
     g := g_new(fn_ptr, arg, 0)
     arena_set_current_unchecked(saved_cur)
-
-    // Store result channel in G struct (offset 40)
     cell_store(g, 40, ch)
-
-    // Enqueue goroutine to the scheduler
     sched_enqueue(g)
-
-    // Return the channel so the caller can await the result
     return ch
 
-// sched_spawn_workers: create n worker threads via m_start_workers (rt.s)
-fn sched_spawn_workers(n: int):
+fn sched_spawn_workers(n: int), pub:
     if n <= 1:
         return
-    total_ms := alloc(n * 32)
-    mi : ., mut = 0
-    loop:
-        if mi >= n:
-            break
-        cell_store(total_ms, mi * 32, mi)          // m.id
-        cell_store(total_ms, mi * 32 + 8, -1)      // m.cur_g = none
-        cell_store(total_ms, mi * 32 + 16, -1)     // runq_head
-        cell_store(total_ms, mi * 32 + 24, -1)     // runq_tail
-        mi = mi + 1
-    g_machines = total_ms
-    g_machine_count = n
     g_num_workers = n - 1
-    m_start_workers(n)  // launch workers (assembly in rt.s)
+    m_start_workers(n)
