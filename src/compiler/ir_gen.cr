@@ -3660,8 +3660,9 @@ fn gen_expr(node: int) -> int:
                     arg_var = force_if_thunk(arg_var)
                 // Function address via IR_FNADDR — the movabs placeholder is
                 // patched to the function's absolute VA at ELF link time
-                // (elf.cr Phase 3). goroutine_entry_wrapper reads it back
-                // from G+56 (saved_fn) and calls saved_fn(saved_arg).
+                // (elf.cr Phase 3). The conc activation wrapper reads it and
+                // calls entry(saved_arg); CP-4 no longer uses the old
+                // goroutine_entry_wrapper for the default single-go path.
                 fnaddr_var := new_ir_var("_go_fnaddr", TI_INT)
                 emit(IR_FNADDR, fnaddr_var, func_ni, 0, 0, 0)
                 // Create contiguous argument variables for the sched_go call:

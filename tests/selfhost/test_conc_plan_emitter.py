@@ -514,7 +514,7 @@ def main() -> int:
         td.cleanup()
 
     negatives = [
-        ("multi_go", MULTI_GO, "exactly one sched_go", False),
+        ("multi_go", MULTI_GO, "exactly one go", False),
         ("dynamic_cap", DYNAMIC_CAP, "chan_make cap is not a unique literal", False),
         ("int_go", INT_GO, "go target parameter must be a string/channel", False),
         ("go_literal", GO_LITERAL, "literal or missing go argument", False),
@@ -527,12 +527,12 @@ def main() -> int:
         ("loop_cap", LOOP_CAP, "chan_make cap is not a unique literal", False),
         ("alias_cap", ALIAS_CAP, "chan_make cap is not a unique literal", False),
         ("no_chan", NO_CHAN, "at least one chan_make", False),
-        ("go_helper", GO_HELPER, "exactly one sched_go", False),
+        ("go_helper", GO_HELPER, "exactly one go", False),
         ("discard", DISCARD, "cannot resolve chan_make handle", False),
         ("reassign", REASSIGN, "go argument is not a chan_make handle", False),
         ("main_helper_go", MAIN_HELPER_GO, "go outside main", False),
         ("long_chain", LONG_CHAIN, "worker channel chain is too long", False),
-        ("preexisting", MULTI_GO, "exactly one sched_go", True),
+        ("preexisting", MULTI_GO, "exactly one go", True),
     ]
     for name, source, needle, precreate in negatives:
         code, text, diag, plan, td = emit(name, source, "OLD\n" if precreate else None)

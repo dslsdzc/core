@@ -1,25 +1,13 @@
-// Channel: SPSC lock-free ring.
+// Channel surface backed by the CP-4 conc runtime.
 //
-// head is consumer-owned and only advanced by recv; tail is producer-owned and
-// only advanced by send. The two wait slots hold at most one G each (SPSC
-// contract). `xchg` claims a waiter, so close and the opposite side cannot wake
-// the same G twice.
-//
-// Layout (64 bytes):
-//   0 buf, 8 cap, 16 head, 24 tail, 32 esize,
-//  40 send_wait, 48 recv_wait, 56 closed.
+// chan_make/send/recv/close keep the existing source-level signatures, but the
+// storage and waiting protocol live in conc/conc_sched: a conc channel payload
+// (magic, buf, cap, len, head, esize, owner region, epoch) plus per-channel
+// cooperative wait queues. send/recv block the current activation when the
+// channel is full/empty; close wakes all waiters.
 import conc_sched
-import sched
-
-g_chan_inited : int, mut = 0
-
-fn _chan_ensure_init():
-    if g_chan_inited == 0:
-        sched_init()
-        g_chan_inited = 1
 
 fn chan_make(elemsize: int, cap: int) -> string, pub:
-    // CP-4 default path: the channel surface is backed by the conc runtime.
     return conc_chan_make(elemsize, cap)
 
 fn chan_send(ch: string, val: int), pub:

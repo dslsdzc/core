@@ -1,10 +1,11 @@
 // CP-2 restricted concurrency-plan emitter.
 //
-// Recognizes one vertical slice: exactly one `sched_go` in `main`, with
-// literal `chan_make` arguments in `main`, no nested loop/if around either
-// call, and a 0/1-parameter string-typed spawn target. Anything else fails
-// closed with no artifact. The emitted plan is target-neutral text; it does
-// not enter `.ccr`.
+// Recognizes one vertical slice: exactly one `go`/`conc_go` in `main`, with
+// `chan_make` arguments that have unique reaching definitions in `main`, no
+// nested loop/if around either call, and a 0/1-parameter string-typed spawn
+// target. Multiple channels are bound by the handle store after `chan_make`.
+// Anything else fails closed with no artifact. The emitted plan is
+// target-neutral text; it does not enter `.ccr`.
 
 CONC_EMIT_UNKNOWN : int = -999999
 
@@ -346,7 +347,7 @@ fn conc_plan_emit_write(path: string) -> int:
         i = i + 1
 
     if go_count != 1:
-        return _conc_emit_error("exactly one sched_go in main is supported")
+        return _conc_emit_error("exactly one go in main is supported")
     if chan_count < 1:
         return _conc_emit_error("at least one chan_make in main is required")
 

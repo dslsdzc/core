@@ -354,6 +354,10 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     r : ., mut = _conc_global_region_get()
     if r < 0:
         return ""
+    if cap <= 0 || elemsize <= 0:
+        return ""
+    if cap > 1099511627776 / elemsize:
+        return ""
     need : ., mut = 128 + cap * elemsize
     if need < 1048576:
         need = 1048576
