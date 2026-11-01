@@ -101,9 +101,9 @@ PASS conc_negative
 - region：两次分配地址不同；reset 后再次分配复用同一地址；`conc_same` 按指针比较；`conc_region_new(64)` 能失败而不崩溃。
 - arena 生命周期：先在 `arena_init` 后记录 current arena，`make_region()` 返回后 current arena 不变；`arena_new_sized` + `arena_reset` 后 region payload 仍可读。这是“runtime 对象不落 function arena”的直接回归。
 - 容量/对齐/overflow：region 耗尽时 `conc_alloc` 返回空而不写只读内存；`conc_channel_new` 超容量返回空；`conc_recv` 分配失败返回 `CONC_ERR_NOMEM` 且不消费；极大 size/cap 被拒绝；连续 8 轮强制 8-mod-16 的全局偏移后，payload 仍 16 字节对齐。
-- channel：16 字节元素（两个 8 字节字）完整往返；12 字节元素跨 8 字节块/尾部复制；ring wrap；send 后覆盖源数据仍保留副本；空 recv 返回 `CONC_ERR_EMPTY`。
-- plan：body/channel/edge 计数、未知 kind、负 entry、TASK params>1、cap<=0、非 SPSC 拒绝；20 个 body/channel 的 growth 与 edge 端点校验。
-- CPU/SIMT：同一 body list、同一 `par` 入口、逐项值一致；TASK params=0 走 `sched_call_0`，params=1 走 `sched_call_1`。
+- channel：16 字节元素（两个 8 字节字）完整往返；12 字节元素的两个 8 字节字/尾部复制；ring wrap；send 后覆盖源数据仍保留副本；空 recv 返回 `CONC_ERR_EMPTY`；非法 handle 的 `len/elemsize` 返回 `-1`。
+- plan：body/channel/edge 计数、未知 kind、负 entry、TASK params>1、cap<=0、非 SPSC 拒绝；20 个 body/channel 与 15 条 edge 的 growth、edge 端点校验。
+- CPU/SIMT：同一 body list、同一 `par` 入口、逐项值一致；TASK params=0 走 `sched_call_0`，params=1 走 `sched_call_1`；SIMT 子区间 `4..8` 只写对应索引。
 - lifetime：reset 前消息在 reset 后 send 被拒绝，channel 的 recv 返回空。
 - negative：满 channel send 返回 `1` 且不覆盖旧元素；未知 body kind 返回 `-1`；TASK plan 交给 SIMT 返回 `-1`。
 
@@ -118,9 +118,14 @@ nice -n 19 python3 tests/selfhost/test_raw_abi_boundary.py   # PASS
 nice -n 19 python3 tests/selfhost/test_import_graph.py       # 7/7
 ```
 
-完整 `selfhost-tests` 跑到 `test_merge_copy.py` 时停在既存失败：
+完整 `selfhost-tests` 中 CP-1 gate 已执行并通过，随后停在 `test_merge_copy.py` 的既存失败：
 
 ```text
+PASS conc_region
+...
+PASS conc_negative
+13/13 passed
+
 FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11, expected 0
 44/45 passed
 CI_EXIT=1
