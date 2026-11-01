@@ -45,6 +45,23 @@ test_chan_handle_model.py   11/11
 - loader：`conc_plan_bind_count` / `conc_plan_param_channel`；bind channel 越界、重复 bind、body 越界均返回 `-1`。
 - E2E：compiler plan 的 `bind` 指向 channel 0；runtime 用 channel table 执行 body 1，原始 `chan_recv` worker 返回 41。不再手写传 channel 给 body。
 
+完整 `selfhost-tests` 中 CP-1/2/3 gate 先执行并通过：
+
+```text
+PASS conc_region ... PASS conc_negative     13/13
+PASS emitter_fixture ... PASS emitter_fail_closed_preexisting  21/21
+PASS conc_plan_load
+PASS conc_plan_simt
+PASS conc_plan_negative
+PASS conc_plan_e2e                           4/4
+
+FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
+44/45 passed
+CI_EXIT=1
+```
+
+p41 仍是 CP-1 基线 `1e47f93f` 上已复现的旧 0A 问题，不是 CP-3 引入。
+
 ## 3. 边界（CP-4+）
 
 - 多 channel 的 go 实参→channel id 显式绑定；当前只支持单 `go` + 单 `chan_make`。
