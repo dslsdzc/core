@@ -218,6 +218,19 @@ if g_opt_level >= 1 && g_func_count > 0 {
     return 0
 
 // Determine default output path from source path (strip .cr, add extension)
+fn conc_plan_output_path(src_path: string) -> string:
+    out : ., mut = cli_get("output")
+    if str_len(out) == 0:
+        if g_is_project_mode != 0:
+            out = g_project_name + ".plan"
+        else:
+            sl := str_len(src_path)
+            if sl > 3 && str_eq(str_sub(src_path, sl - 3, 3), ".cr") != 0:
+                out = str_sub(src_path, 0, sl - 3) + ".plan"
+            else:
+                out = src_path + ".plan"
+    return out
+
 fn default_out_path(src_path: string, ext: string) -> string:
     out : ., mut = ""
     if g_is_project_mode != 0:
@@ -469,6 +482,10 @@ fn corec_main() -> int:
         println(" requires a source file or directory")
         return 1
     src_path := cli_arg(0)
+    if cli_eq(cmd, "conc-plan"):
+        explicit_out := cli_get("output")
+        if str_len(explicit_out) > 0:
+            _conc_emit_remove(explicit_out)
 
     if read_source_or_project(src_path) != 0:
         return 1
@@ -482,6 +499,9 @@ fn corec_main() -> int:
         g_prelude_src = rt_src
         g_prelude_path = target_static_runtime_source()
         g_prelude_pending = 1
+
+    if cli_eq(cmd, "conc-plan"):
+        _conc_emit_remove(conc_plan_output_path(src_path))
 
     fe_rc := run_frontend(src_path)
     if fe_rc != 0:
@@ -782,17 +802,7 @@ fn corec_main() -> int:
 
     // === conc-plan: target-neutral plan artifact (CP-2) ===
     if cli_eq(cmd, "conc-plan"):
-        out : ., mut = cli_get("output")
-        if str_len(out) == 0:
-            if g_is_project_mode != 0:
-                out = g_project_name + ".plan"
-            else:
-                sl := str_len(src_path)
-                if sl > 3 && str_eq(str_sub(src_path, sl - 3, 3), ".cr") != 0:
-                    out = str_sub(src_path, 0, sl - 3) + ".plan"
-                else:
-                    out = src_path + ".plan"
-        return conc_plan_emit_write(out)
+        return conc_plan_emit_write(conc_plan_output_path(src_path))
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr"):

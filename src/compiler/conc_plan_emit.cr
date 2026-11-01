@@ -70,8 +70,13 @@ fn _conc_emit_const_before(var: int, call_ii: int, func_start: int) -> int:
             if i >= limit:
                 break
             op := iri_op(i)
+            if op == IR_REF || op == IR_PTR_OF:
+                if iri_s1(i) == v:
+                    return CONC_EMIT_UNKNOWN
             if iri_dest(i) == v:
                 if op != IR_ALLOC:
+                    if _conc_emit_in_nested(i) != 0:
+                        return CONC_EMIT_UNKNOWN
                     defs = defs + 1
                     def_at = i
                     if op == IR_CONST:
@@ -81,6 +86,8 @@ fn _conc_emit_const_before(var: int, call_ii: int, func_start: int) -> int:
             else:
                 if op == IR_STORE:
                     if iri_s1(i) == v:
+                        if _conc_emit_in_nested(i) != 0:
+                            return CONC_EMIT_UNKNOWN
                         defs = defs + 1
                         def_at = i
                         def_val = CONC_EMIT_UNKNOWN
@@ -118,12 +125,16 @@ fn _conc_emit_fnaddr_before(var: int, call_ii: int, func_start: int) -> int:
             if op == IR_FNADDR:
                 if iri_dest(i) == v:
                     if op != IR_ALLOC:
+                        if _conc_emit_in_nested(i) != 0:
+                            return -1
                         defs = defs + 1
                         def_at = i
                         fn_ni = iri_s1(i)
             else:
                 if op == IR_STORE:
                     if iri_s1(i) == v:
+                        if _conc_emit_in_nested(i) != 0:
+                            return -1
                         defs = defs + 1
                         def_at = i
                         src = iri_s2(i)
@@ -189,8 +200,8 @@ fn conc_plan_emit_write(path: string) -> int:
 
     if go_count != 1:
         return _conc_emit_error("exactly one sched_go in main is supported")
-    if chan_count < 1:
-        return _conc_emit_error("at least one chan_make in main is required")
+    if chan_count != 1:
+        return _conc_emit_error("exactly one chan_make in main is supported")
 
     target_fi := _conc_emit_find_func(go_fn_ni)
     if target_fi < 0:

@@ -237,6 +237,57 @@ fn main() -> int:
     return 0
 """
 
+BRANCH_CAP = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    cap : int, mut
+    if 0 != 0:
+        cap = 1
+    req := chan_make(8, cap)
+    h := go worker(req)
+    return 0
+"""
+
+ALIAS_CAP = """\
+import chan
+import sched
+
+fn bump(p: &int):
+    *p = 2
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    cap : ., mut = 1
+    bump(&cap)
+    req := chan_make(8, cap)
+    h := go worker(req)
+    return 0
+"""
+
+MULTI_CHAN = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    unused := chan_make(8, 2)
+    req := chan_make(8, 1)
+    h := go worker(req)
+    return 0
+"""
+
 LOOP_GO = """\
 import chan
 import sched
@@ -326,6 +377,24 @@ def main() -> int:
     finally:
         td.cleanup()
 
+    # Frontend/lowering failure must also remove a pre-existing output.
+    td = tempfile.TemporaryDirectory(prefix="conc_emit_frontend_fail_")
+    root = Path(td.name)
+    bad_src = root / "bad.cr"
+    bad_plan = root / "bad.plan"
+    bad_src.write_text('fn main() -> int:\n    x := 1 + "s"\n    return 0\n', encoding="utf-8")
+    bad_plan.write_text("OLD\n", encoding="utf-8")
+    r = run([str(COREC), "conc-plan", str(bad_src), "-o", str(bad_plan)])
+    checks += 1
+    try:
+        if r.returncode == 0 or bad_plan.exists():
+            print(f"FAIL emitter_frontend_failure_zero_artifact: rc={r.returncode} plan={bad_plan.exists()}")
+            failures += 1
+        else:
+            print("PASS emitter_frontend_failure_zero_artifact")
+    finally:
+        td.cleanup()
+
     negatives = [
         ("multi_go", MULTI_GO, "exactly one sched_go", False),
         ("dynamic_cap", DYNAMIC_CAP, "chan_make cap is not a unique literal", False),
@@ -336,7 +405,10 @@ def main() -> int:
         ("main_param", MAIN_PARAM, "main with parameters", False),
         ("global_cap", GLOBAL_CAP, "chan_make cap is not a unique literal", False),
         ("loop_go", LOOP_GO, "go inside loop/if", False),
-        ("no_chan", NO_CHAN, "at least one chan_make", False),
+        ("branch_cap", BRANCH_CAP, "chan_make cap is not a unique literal", False),
+        ("alias_cap", ALIAS_CAP, "chan_make cap is not a unique literal", False),
+        ("multi_chan", MULTI_CHAN, "exactly one chan_make", False),
+        ("no_chan", NO_CHAN, "exactly one chan_make", False),
         ("go_helper", GO_HELPER, "exactly one sched_go", False),
         ("preexisting", MULTI_GO, "exactly one sched_go", True),
     ]
