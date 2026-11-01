@@ -16,7 +16,9 @@ heap_start:
     .space 1024 * 1024 * 1024
 heap_end:
 .balign 8
-current_g: .space 8  # current goroutine pointer (set via g_set_curg)
+current_g: .space 8  # legacy slot; current G now lives in %fs:0
+main_tls:
+    .space 32        # +0 current_g, +8 m_idx, +16 current_arena, +24 arena_suspend
 
 .section .data
 heap_ptr: .quad 0
@@ -43,6 +45,20 @@ _start:
     mov [rax], rdi
     lea rax, [rip + rt_argv]
     mov [rax], rsi
+
+    # Per-thread runtime state: %fs base -> main_tls.
+    lea rsi, [rip + main_tls]
+    mov edi, 0x1002          # ARCH_SET_FS
+    mov eax, 158             # arch_prctl
+    syscall
+    mov rax, -1
+    mov qword ptr fs:[0], rax
+    xor eax, eax
+    mov qword ptr fs:[8], rax
+    mov rax, -1
+    mov qword ptr fs:[16], rax
+    xor eax, eax
+    mov qword ptr fs:[24], rax
 
     # Initialize bump allocator heap pointer
     lea rax, [rip + heap_start]
@@ -249,22 +265,85 @@ fiber_init:
 
     ret
 
-# g_set_curg(ptr) — set current goroutine pointer
-# Core-side bridge: rt.s cannot reference Core globals directly
-# (they are managed by the ELF backend), so the current G lives here.
+# g_set_curg(ptr) — set current goroutine pointer (per-thread)
 .globl g_set_curg
 .type g_set_curg, @function
 g_set_curg:
-    lea rax, [rip + current_g]
-    mov [rax], rdi
+    mov qword ptr fs:[0], rdi
     ret
 
-# g_get_curg() — get current goroutine pointer
+# g_get_curg() — get current goroutine pointer (per-thread)
 .globl g_get_curg
 .type g_get_curg, @function
 g_get_curg:
-    lea rax, [rip + current_g]
-    mov rax, [rax]
+    mov rax, qword ptr fs:[0]
+    ret
+
+# Per-thread runtime state accessors.
+.globl rt_m_idx
+.type rt_m_idx, @function
+rt_m_idx:
+    mov rax, qword ptr fs:[8]
+    ret
+
+.globl rt_current_arena
+.type rt_current_arena, @function
+rt_current_arena:
+    mov rax, qword ptr fs:[16]
+    ret
+
+.globl rt_set_current_arena
+.type rt_set_current_arena, @function
+rt_set_current_arena:
+    mov qword ptr fs:[16], rdi
+    ret
+
+.globl rt_arena_suspend
+.type rt_arena_suspend, @function
+rt_arena_suspend:
+    mov rax, qword ptr fs:[24]
+    ret
+
+.globl rt_set_arena_suspend
+.type rt_set_arena_suspend, @function
+rt_set_arena_suspend:
+    mov qword ptr fs:[24], rdi
+    ret
+
+# Atomic primitives. Offsets are byte offsets; callers keep them 8-byte aligned.
+.globl rt_atomic_load
+.type rt_atomic_load, @function
+rt_atomic_load:
+    mov rax, qword ptr [rdi + rsi]
+    ret
+
+.globl rt_atomic_store
+.type rt_atomic_store, @function
+rt_atomic_store:
+    mov qword ptr [rdi + rsi], rdx
+    ret
+
+.globl rt_atomic_xchg
+.type rt_atomic_xchg, @function
+rt_atomic_xchg:
+    mov rax, rdx
+    xchg qword ptr [rdi + rsi], rax
+    ret
+
+.globl rt_atomic_cas
+.type rt_atomic_cas, @function
+rt_atomic_cas:
+    mov rax, rdx
+    lock cmpxchg qword ptr [rdi + rsi], rcx
+    sete al
+    movzx eax, al
+    ret
+
+.globl rt_atomic_fetch_add
+.type rt_atomic_fetch_add, @function
+rt_atomic_fetch_add:
+    mov rax, rdx
+    lock xadd qword ptr [rdi + rsi], rax
     ret
 
 # m_start_workers(n: int) — launch N worker threads via clone

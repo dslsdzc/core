@@ -29,6 +29,16 @@ class NameResolver:
             ('g_set_curg', BaseType('unit')),
             ('g_get_curg', BaseType('int')),
             ('m_start_workers', BaseType('unit')),
+            ('rt_m_idx', BaseType('int')),
+            ('rt_current_arena', BaseType('int')),
+            ('rt_set_current_arena', BaseType('unit')),
+            ('rt_arena_suspend', BaseType('int')),
+            ('rt_set_arena_suspend', BaseType('unit')),
+            ('rt_atomic_load', BaseType('int')),
+            ('rt_atomic_store', BaseType('unit')),
+            ('rt_atomic_xchg', BaseType('int')),
+            ('rt_atomic_cas', BaseType('int')),
+            ('rt_atomic_fetch_add', BaseType('int')),
         ]
         for name, typ in rt_funcs:
             self.symtab.define(name, SymbolKind.FUNCTION, typ)

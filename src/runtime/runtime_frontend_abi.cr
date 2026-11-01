@@ -22,6 +22,16 @@ fn runtime_frontend_builtin_register():
     prelude_builtin_add("m_start_workers", TI_UNIT, 0)
     prelude_builtin_add("g_set_curg", TI_UNIT, 0)
     prelude_builtin_add("g_get_curg", TI_INT, 0)
+    prelude_builtin_add("rt_m_idx", TI_INT, 0)
+    prelude_builtin_add("rt_current_arena", TI_INT, 0)
+    prelude_builtin_add("rt_set_current_arena", TI_UNIT, 0)
+    prelude_builtin_add("rt_arena_suspend", TI_INT, 0)
+    prelude_builtin_add("rt_set_arena_suspend", TI_UNIT, 0)
+    prelude_builtin_add("rt_atomic_load", TI_INT, 0)
+    prelude_builtin_add("rt_atomic_store", TI_UNIT, 0)
+    prelude_builtin_add("rt_atomic_xchg", TI_INT, 0)
+    prelude_builtin_add("rt_atomic_cas", TI_INT, 0)
+    prelude_builtin_add("rt_atomic_fetch_add", TI_INT, 0)
 
 fn runtime_frontend_builtin_is_alloc(name_ni: int) -> int:
     if name_ni < 0:

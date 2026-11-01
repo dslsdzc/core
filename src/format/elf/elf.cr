@@ -829,41 +829,218 @@ fn sched_tramp_sz(n: int) -> int:
 // Size: 11 bytes each: must match Phase 2 estimate.
 fn emit_curg_stubs(buf: string, pos: int, curg_va: int) -> int:
     cp : ., mut = 0
-    // g_set_curg: lea rax, [rip + curg_va]; mov [rax], rdi; ret
-    fva := TEXT_BASE + pos + cp
+    // g_set_curg: mov qword ptr fs:[0], rdi; ret  (11 bytes)
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
     w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 5)  // lea rax, [rip+disp32]
-    e2_w32(buf, pos+cp+3, curg_va - (fva + 7))
-    cp = cp + 7
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 56)
-    cp = cp + 3  // mov [rax], rdi
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 60)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, 0)
+    cp = cp + 4
+    w8(buf, pos+cp, 144)
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-    // g_get_curg: lea rax, [rip + curg_va]; mov rax, [rax]; ret
-    fva2 := TEXT_BASE + pos + cp
+    cp = cp + 1
+    // g_get_curg: mov rax, qword ptr fs:[0]; ret  (11 bytes)
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
     w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 5)  // lea rax, [rip+disp32]
-    e2_w32(buf, pos+cp+3, curg_va - (fva2 + 7))
-    cp = cp + 7
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 0)
-    cp = cp + 3  // mov rax, [rax]
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, 0)
+    cp = cp + 4
+    w8(buf, pos+cp, 144)
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
+    cp = cp + 1
     return cp
-// ── Goroutine runtime stubs (pure-static self-contained runtime) ──
-// rt.s equivalents emitted into the binary so `go f()` works without
-// linking rt.s: fiber_init, fiber_switch, goroutine_entry_wrapper.
-// The wrapper is the fiber entry for every G (g_new sets it via @addr);
-// it reads saved_fn/saved_arg from the G struct (offsets 56/64), calls
-// saved_fn(saved_arg), sends the result to result_ch (G+40), then yields
-// forever. chan_send/sched_yield are Core functions: recorded as call
-// patches resolved by the Phase 3 patch loop (user function names).
+
+fn rt_pad16(buf: string, pos: int, cp: int) -> int:
+    loop:
+        if cp % 16 == 0:
+            break
+        w8(buf, pos+cp, 144)
+        cp = cp + 1
+    return cp
+
+fn rt_emit_fs_load(buf: string, pos: int, disp: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, disp)
+    cp = cp + 4
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_fs_store_rdi(buf: string, pos: int, disp: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 60)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, disp)
+    cp = cp + 4
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_load(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_store(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 20)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_xchg(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 135)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_cas(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 240)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 177)
+    cp = cp + 1
+    w8(buf, pos+cp, 12)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 148)
+    cp = cp + 1
+    w8(buf, pos+cp, 192)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 182)
+    cp = cp + 1
+    w8(buf, pos+cp, 192)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_fetch_add(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 240)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 193)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 8)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 16)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 16)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 24)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 24)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_load(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_store(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_xchg(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_cas(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_fetch_add(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    return cp
+
 fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
@@ -1356,6 +1533,7 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int):
 
 // ── _start 共享状态（发射序本体 = OS 轴 src/os/linux/entry.cr）──
 g_call_main_pos : int, mut  // set by emit_start (OS 轴 entry.cr), used for patching call main
+g_start_tls_patch_pos : int, mut = -1  // disp32 slot for the main TLS block VA
 gv_argc : int, mut   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
 gv_current_arena : int, mut = -1
@@ -1681,6 +1859,8 @@ fn elf_gen(buf: string) -> int:
         cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
         total_code = total_code + 11
+        // per-thread TLS + atomic stubs: 10 * 16 bytes
+        total_code = total_code + 160
 
     hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE
     rodata_base := total_code
@@ -1863,7 +2043,8 @@ fn elf_gen(buf: string) -> int:
         globals_size = 256
     if g_x86_emit_rt_stubs != 0:
         globals_size = globals_size + 8
-    // + current_g slot
+    globals_size = globals_size + 32   // main TLS block at the end of BSS
+    // + current_g slot + main TLS block
     alloc_sz := emit_alloc_body(buf, cp, bss_va, globals_size)
     alloc_start := cp
     g_curg_stub_start : ., mut = -1
@@ -1970,6 +2151,20 @@ fn elf_gen(buf: string) -> int:
             if str_eq(nm2, "g_get_curg") != 0:
                 cell_store(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176 + 11)
             gsi2 = gsi2 + 1
+
+        // TLS/atomic stubs: fixed 16-byte slots.
+        tls_start := cp
+        cp = cp + emit_rt_tls_stubs(buf, cp)
+        sched_reg_one("rt_m_idx", 0, tls_start)
+        sched_reg_one("rt_current_arena", 0, tls_start + 16)
+        sched_reg_one("rt_set_current_arena", 0, tls_start + 32)
+        sched_reg_one("rt_arena_suspend", 0, tls_start + 48)
+        sched_reg_one("rt_set_arena_suspend", 0, tls_start + 64)
+        sched_reg_one("rt_atomic_load", 0, tls_start + 80)
+        sched_reg_one("rt_atomic_store", 0, tls_start + 96)
+        sched_reg_one("rt_atomic_xchg", 0, tls_start + 112)
+        sched_reg_one("rt_atomic_cas", 0, tls_start + 128)
+        sched_reg_one("rt_atomic_fetch_add", 0, tls_start + 144)
 
     // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
     // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init
@@ -2179,6 +2374,12 @@ fn elf_gen(buf: string) -> int:
     // +1 ensures BSS is on a different page from code.
     bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
     g_elf_bss_va = bss_va
+
+    // Fill the main TLS block VA now that the final BSS base is known.
+    if g_start_tls_patch_pos >= 0:
+        tls_va := bss_va + 16 + globals_size - 32
+        w32(buf, g_start_tls_patch_pos,
+            tls_va - (TEXT_BASE + g_start_tls_patch_pos + 4))
 
     // The allocator was emitted earlier with a provisional BSS address.
     // Re-emit it in place now that the final data-segment VA is known.

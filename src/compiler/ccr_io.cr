@@ -447,6 +447,8 @@ fn ccr_raw_abi_builtin(name: string) -> int:
         return 1
     if name == "fiber_switch" || name == "fiber_init" || name == "sched_go" || name == "m_start_workers" || name == "g_set_curg" || name == "g_get_curg":
         return 1
+    if name == "rt_m_idx" || name == "rt_current_arena" || name == "rt_set_current_arena" || name == "rt_arena_suspend" || name == "rt_set_arena_suspend" || name == "rt_atomic_load" || name == "rt_atomic_store" || name == "rt_atomic_xchg" || name == "rt_atomic_cas" || name == "rt_atomic_fetch_add":
+        return 1
     if name == "get_arg" || name == "syscall3" || name == "syscall4":
         return 1
     return 0
