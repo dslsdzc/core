@@ -248,6 +248,9 @@ fn conc_plan_emit_write(path: string) -> int:
     if cid != chan_count:
         return _conc_emit_error("chan_make scan lost a channel")
 
+    if go_params == 1:
+        out = out + "bind 1 0 0\n"
+        out = out + "edge 0 1 SEND 0\n"
     out = out + "edge 0 1 SPAWN -1\n"
     nwritten := write_file(path, out)
     if nwritten != str_len(out):

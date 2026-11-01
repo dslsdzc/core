@@ -33,7 +33,7 @@ fn main() -> int:
     tbl := alloc(16)
     cell_store(tbl, 0, @addr(entry_main))
     cell_store(tbl, 8, @addr(worker))
-    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nedge 0 1 SPAWN -1\\nedge 0 1 SEND 0\\n"
+    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 1 0 0\\nedge 0 1 SEND 0\\nedge 0 1 SPAWN -1\\n"
     p := conc_plan_load(plan, tbl)
     if p < 0:
         return 1
@@ -43,12 +43,18 @@ fn main() -> int:
         return 3
     if conc_plan_edge_count(p) != 2:
         return 4
-    if conc_plan_edge_channel(p, 0) != -1:
+    if conc_plan_edge_channel(p, 0) != 0:
         return 5
-    if conc_plan_edge_channel(p, 1) != 0:
+    if conc_plan_edge_kind(p, 0) != CONC_EDGE_SEND:
         return 10
-    if conc_plan_edge_kind(p, 1) != CONC_EDGE_SEND:
+    if conc_plan_edge_channel(p, 1) != -1:
         return 11
+    if conc_plan_edge_kind(p, 1) != CONC_EDGE_SPAWN:
+        return 12
+    if conc_plan_bind_count(p) != 1:
+        return 13
+    if conc_plan_param_channel(p, 1, 0) != 0:
+        return 14
     msg := conc_alloc(r, 8)
     cell_store(msg, 0, 41)
     if conc_send(req, msg) != 0:
@@ -107,8 +113,10 @@ fn main() -> int:
     if cap != 1:
         return 3
     req := chan_make(elem, cap)
+    ch_tbl := alloc(8)
+    cell_store(ch_tbl, 0, req)
     chan_send(req, 41)
-    rc := conc_run_body(p, 1, req)
+    rc := conc_run_body_bound(p, 1, ch_tbl)
     if rc != 41:
         return 4
     return 0
@@ -190,6 +198,15 @@ fn main() -> int:
     cell_store(zero, 0, 0)
     if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 0\\n", zero) != -1:
         return 14
+    tbl2 := alloc(16)
+    cell_store(tbl2, 0, @addr(main))
+    cell_store(tbl2, 8, @addr(main))
+    if conc_plan_load("v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 1 0 5\\n", tbl2) != -1:
+        return 15
+    if conc_plan_load("v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 1 0 0\\nbind 1 0 0\\n", tbl2) != -1:
+        return 16
+    if conc_plan_load("v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 9 0 0\\n", tbl2) != -1:
+        return 17
     return 0
 """
 

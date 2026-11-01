@@ -32,6 +32,8 @@ entries 2
 body 0 TASK 0 0
 body 1 TASK 1 1
 channel 0 8 1 SPSC
+bind 1 0 0
+edge 0 1 SEND 0
 edge 0 1 SPAWN -1
 """
 
@@ -80,6 +82,8 @@ entries 2
 body 0 TASK 0 0
 body 1 TASK 1 1
 channel 0 8 1 SPSC
+bind 1 0 0
+edge 0 1 SEND 0
 edge 0 1 SPAWN -1
 """
 

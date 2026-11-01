@@ -36,6 +36,7 @@ CONC_MAX_ENTRIES : int = 64
 CONC_MAX_BODIES : int = 64
 CONC_MAX_CHANNELS : int = 64
 CONC_MAX_EDGES : int = 256
+CONC_MAX_BINDS : int = 32
 CONC_MAX_PARAMS : int = 1048576
 
 CONC_MSG_MAGIC : int = 1129270851       // 0x434F4E43; LE bytes are "CNOC"
@@ -545,18 +546,24 @@ fn conc_plan_new() -> int, pub:
     bodies := _conc_global_alloc(8 * 32)
     channels := _conc_global_alloc(8 * 32)
     edges := _conc_global_alloc(8 * 32)
+    binds := _conc_global_alloc(16 + CONC_MAX_BINDS * 24)
     if _conc_is_null(bodies) != 0:
         return -1
     if _conc_is_null(channels) != 0:
         return -1
     if _conc_is_null(edges) != 0:
         return -1
+    if _conc_is_null(binds) != 0:
+        return -1
     store_str_ptr(p, 48, bodies)
     store_str_ptr(p, 56, channels)
     store_str_ptr(p, 64, edges)
+    store_str_ptr(p, 72, binds)
     cell_store(p, 24, 8)
     cell_store(p, 32, 8)
     cell_store(p, 40, 8)
+    cell_store(binds, 0, 0)
+    cell_store(binds, 8, CONC_MAX_BINDS)
     id := g_conc_plan_count
     store_str_ptr(g_conc_plans, id * 8, p)
     g_conc_plan_count = id + 1
@@ -673,6 +680,66 @@ fn conc_plan_edge_count(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
     return cell_load(_conc_plan_at(plan), 16)
+
+fn conc_plan_bind_count(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    binds := load_str_ptr(_conc_plan_at(plan), 72)
+    if _conc_is_null(binds) != 0:
+        return 0
+    return cell_load(binds, 0)
+
+fn conc_plan_bind_param(plan: int, body: int, param: int, channel: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if body < 0 || body >= cell_load(p, 0):
+        return -1
+    b := _conc_body_at(plan, body)
+    if param < 0 || param >= cell_load(b, 16):
+        return -1
+    if channel < 0 || channel >= cell_load(p, 8):
+        return -1
+    binds := load_str_ptr(p, 72)
+    if _conc_is_null(binds) != 0:
+        return -1
+    n := cell_load(binds, 0)
+    cap := cell_load(binds, 8)
+    if n < 0 || n >= cap:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        off := 16 + i * 24
+        if cell_load(binds, off) == body:
+            if cell_load(binds, off + 8) == param:
+                return -1
+        i = i + 1
+    off2 := 16 + n * 24
+    cell_store(binds, off2, body)
+    cell_store(binds, off2 + 8, param)
+    cell_store(binds, off2 + 16, channel)
+    cell_store(binds, 0, n + 1)
+    return n
+
+fn conc_plan_param_channel(plan: int, body: int, param: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    binds := load_str_ptr(_conc_plan_at(plan), 72)
+    if _conc_is_null(binds) != 0:
+        return -1
+    n := cell_load(binds, 0)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        off := 16 + i * 24
+        if cell_load(binds, off) == body:
+            if cell_load(binds, off + 8) == param:
+                return cell_load(binds, off + 16)
+        i = i + 1
+    return -1
 
 fn conc_plan_channel_elemsize(plan: int, channel: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -821,6 +888,42 @@ fn conc_run_body(plan: int, body: int, arg: string) -> int, pub:
             return _conc_call0(entry)
         if params == 1:
             return _conc_call_str(entry, arg)
+        return -1
+    if kind == CONC_BODY_DATA_PARALLEL:
+        j : ., mut = 0
+        loop:
+            if j >= params:
+                break
+            rc := _conc_call_int(entry, j)
+            if rc != 0:
+                return rc
+            j = j + 1
+        return 0
+    return -1
+
+fn conc_run_body_bound(plan: int, body: int, channels: string) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    n := cell_load(_conc_plan_at(plan), 0)
+    if body < 0 || body >= n:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    b := _conc_body_at(plan, body)
+    kind := cell_load(b, 0)
+    entry := cell_load(b, 8)
+    params := cell_load(b, 16)
+    if kind == CONC_BODY_TASK:
+        if params == 0:
+            return _conc_call0(entry)
+        if params == 1:
+            ch := conc_plan_param_channel(plan, body, 0)
+            if ch < 0:
+                return -1
+            handle := load_str_ptr(channels, ch * 8)
+            if _conc_is_null(handle) != 0:
+                return -1
+            return _conc_call_str(entry, handle)
         return -1
     if kind == CONC_BODY_DATA_PARALLEL:
         j : ., mut = 0
@@ -996,34 +1099,41 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
                 if conc_plan_add_channel(p, elem, cap, CONC_PC_SPSC) != id:
                     return -1
             else:
-                if tok == "edge":
-                    from_body := _conc_plan_read_int(text)
-                    to_body := _conc_plan_read_int(text)
-                    ks := _conc_plan_next(text)
-                    kind : ., mut = -1
-                    if ks == "SPAWN":
-                        kind = CONC_EDGE_SPAWN
-                    else:
-                        if ks == "SEND":
-                            kind = CONC_EDGE_SEND
-                        else:
-                            if ks == "JOIN":
-                                kind = CONC_EDGE_JOIN
-                            else:
-                                if ks == "RECV":
-                                    kind = CONC_EDGE_RECV
-                    if kind < 0:
-                        return -1
-                    ct := _conc_plan_next(text)
-                    if _conc_int_token(ct) == 0:
-                        return -1
-                    ch := str_int(ct)
-                    if conc_plan_edge_count(p) >= CONC_MAX_EDGES:
-                        return -1
-                    if conc_plan_add_edge_ch(p, from_body, to_body, kind, ch) < 0:
+                if tok == "bind":
+                    body := _conc_plan_read_int(text)
+                    param := _conc_plan_read_int(text)
+                    channel := _conc_plan_read_int(text)
+                    if conc_plan_bind_param(p, body, param, channel) < 0:
                         return -1
                 else:
-                    return -1
+                    if tok == "edge":
+                        from_body := _conc_plan_read_int(text)
+                        to_body := _conc_plan_read_int(text)
+                        ks := _conc_plan_next(text)
+                        kind : ., mut = -1
+                        if ks == "SPAWN":
+                            kind = CONC_EDGE_SPAWN
+                        else:
+                            if ks == "SEND":
+                                kind = CONC_EDGE_SEND
+                            else:
+                                if ks == "JOIN":
+                                    kind = CONC_EDGE_JOIN
+                                else:
+                                    if ks == "RECV":
+                                        kind = CONC_EDGE_RECV
+                        if kind < 0:
+                            return -1
+                        ct := _conc_plan_next(text)
+                        if _conc_int_token(ct) == 0:
+                            return -1
+                        ch := str_int(ct)
+                        if conc_plan_edge_count(p) >= CONC_MAX_EDGES:
+                            return -1
+                        if conc_plan_add_edge_ch(p, from_body, to_body, kind, ch) < 0:
+                            return -1
+                    else:
+                        return -1
     if _conc_plan_validate_edges(p) != 0:
         return -1
     return p
