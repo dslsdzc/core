@@ -11,6 +11,8 @@
 
 fn runtime_frontend_builtin_register():
     prelude_builtin_add("alloc", TI_STR, 0)
+    prelude_builtin_add("load_str_ptr", TI_STR, 0)
+    prelude_builtin_add("store_str_ptr", TI_INT, 0)
     prelude_builtin_add("sched_call_0", TI_INT, 0)
     prelude_builtin_add("sched_call_1", TI_INT, 0)
     prelude_builtin_add("sched_call_2", TI_INT, 0)

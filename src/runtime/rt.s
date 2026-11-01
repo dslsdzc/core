@@ -77,7 +77,7 @@ _start:
     call main
 
     mov edi, eax
-    mov eax, 60
+    mov eax, 231         # exit_group: all M workers
     syscall
 
 # alloc(size: int) -> string (pointer)
@@ -363,46 +363,53 @@ m_start_workers:
     push r12
     push r13
     push r15
-    mov rbx, rdi         # rbx = n (number of workers)
-    xor r12d, r12d       # r12 = 0 (start from index 0; skip 0 = main thread)
+    mov rbx, rdi         # rbx = n (total workers)
+    xor r12d, r12d       # r12 = 0; increment before first use
 .Lworker_loop:
-    inc r12              # increment to next worker index (start at 1)
+    inc r12              # worker index 1..n-1
     cmp r12, rbx
-    jge .Ldone           # if r12 >= n, done (workers are 1..n-1; n-1 total)
+    jge .Ldone
 
-    # Allocate 64KB stack for worker
+    # 64KB stack for the worker; 16-byte align the top.
     push r12
     mov rdi, 65536
     call alloc
     pop r12
     test rax, rax
-    jz .Lnext_worker     # skip if alloc fails
-
-    # rax = stack_base, stack_top = base + 65536
+    jz .Lnext_worker
     mov r15, rax
     add r15, 65536
+    and r15, -16
 
-    # Set up child stack:
-    #   child_stack_top - 8  = worker index (popped by worker_entry)
-    #   child_stack_top - 16 = return address (worker_entry)
-    lea r13, [rip + worker_entry]
-    mov [r15 - 16], r13
+    # 32-byte TLS block per worker: current_g, m_idx, current_arena, suspend.
+    mov rdi, 32
+    call alloc
+    test rax, rax
+    jz .Lnext_worker
+    mov r13, rax
+    mov qword ptr [r13], -1
+    mov [r13 + 8], r12
+    mov qword ptr [r13 + 16], -1
+    mov qword ptr [r13 + 24], 0
+
+    # Child stack: [top-16] = worker_entry, [top-8] = worker index.
+    lea r11, [rip + worker_entry]
+    mov [r15 - 16], r11
     mov [r15 - 8], r12
 
-    # clone(flags=0x10F00, child_stack=r15-16, parent_tid=0, child_tls=0, child_tid=0)
-    mov edi, 0x10F00
+    # clone(flags=CLONE_*|CLONE_SETTLS, child_stack, parent_tid, child_tls, child_tid)
+    mov edi, 0x90F00
     lea rsi, [r15 - 16]
     xor edx, edx
     xor r10d, r10d
-    xor r8d, r8d
-    mov eax, 56          # sys_clone
+    mov r8, r13
+    mov eax, 56
     syscall
 
     test rax, rax
     jz .Lchild
 
 .Lnext_worker:
-    inc r12
     jmp .Lworker_loop
 
 .Lchild:

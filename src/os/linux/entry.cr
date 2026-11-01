@@ -225,7 +225,7 @@ fn emit_start(buf: string, pos: int) -> int:
     // mov eax, 60  (sys_exit)
     e2_w8(buf, cp, 184)
     cp = cp + 1  // 0xB8 MOV r, imm32 (rax)
-    cp = cp + e2_w32(buf, cp, 60)
+    cp = cp + e2_w32(buf, cp, 231)  // exit_group: terminate all M workers
 
     // syscall
     e2_w8(buf, cp, 15)

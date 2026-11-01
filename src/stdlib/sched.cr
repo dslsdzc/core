@@ -21,6 +21,21 @@ g_sched_inited : int, mut = 0
 g_dead_head_m : string, mut
 g_next_id_m : string, mut
 
+// 0A spawn distribution: a G must be created on its home M, so a spawn for
+// another M is a request node {fn,arg,result_ch,next} pushed to that M.
+MAX_SPAWN_REQ : int = 8192
+g_spawn_req_buf : string, mut
+g_spawn_req_next : string, mut
+g_spawn_rr : string, mut
+
+// Per-M bump block for persistent runtime objects (result channels).
+PERSIST_PER_M : int = 4194304   // 4 MiB per M
+PERSIST_ALIGN : int = 16
+g_persist_base : string, mut
+g_persist_ptr : string, mut
+g_persist_cap : string, mut
+
+
 // Tagged head: (tag << 48) | 48-bit user address.
 PTR_MASK : int = 281474976710656   // 2^48
 TAG_MAX : int = 32767
@@ -39,6 +54,23 @@ fn sched_init_n(n: int), pub:
     m := alloc(n * 48)
     g_dead_head_m = alloc(n * 8)
     g_next_id_m = alloc(n * 8)
+    g_spawn_req_buf = alloc(MAX_SPAWN_REQ * 32)
+    g_spawn_req_next = alloc(8)
+    g_spawn_rr = alloc(8)
+    g_persist_base = alloc(n * 8)
+    g_persist_ptr = alloc(n * 8)
+    g_persist_cap = alloc(n * 8)
+    pi : ., mut = 0
+    loop:
+        if pi >= n:
+            break
+        blk := alloc(PERSIST_PER_M)
+        cell_store(g_persist_base, pi * 8, blk)
+        cell_store(g_persist_ptr, pi * 8, blk)
+        cell_store(g_persist_cap, pi * 8, PERSIST_PER_M)
+        pi = pi + 1
+    rt_atomic_store(g_spawn_req_next, 0, 0)
+    rt_atomic_store(g_spawn_rr, 0, 0)
 
     mi : ., mut = 0
     loop:
@@ -123,18 +155,26 @@ fn sched_dequeue(m_idx: int) -> int:
             cell_store(ptr, 48, -1)
             return ptr
 
-fn sched_reap_dead(m_idx: int, cur_g: int):
+fn sched_reap_dead(m_idx: int, cur_g: int), pub:
+    prev : ., mut = -1
+    g : ., mut = cell_load(g_dead_head_m, m_idx * 8)
     loop:
-        g := cell_load(g_dead_head_m, m_idx * 8)
         if g < 0:
             break
+        nxt := cell_load(g, 96)
         if g == cur_g:
-            break
-        cell_store(g_dead_head_m, m_idx * 8, cell_load(g, 96))
+            prev = g
+            g = nxt
+            continue
+        if prev < 0:
+            cell_store(g_dead_head_m, m_idx * 8, nxt)
+        else:
+            cell_store(prev, 96, nxt)
         aid := cell_load(g, 32)
         saved := rt_current_arena()
         arena_reset(aid)
         rt_set_current_arena(saved)
+        g = nxt
 
 fn sched_yield():
     cur_g := sched_get_curg()
@@ -155,15 +195,26 @@ fn sched_schedule():
 
     next_g : ., mut = -1
     loop:
+        sched_process_spawns(m_idx)
         next_g = sched_dequeue(m_idx)
         if next_g >= 0:
+            if next_g == old_g:
+                if rt_atomic_load(old_g, 8) == 3:
+                    // Dead self-entry left by a spurious wake: discard.
+                    continue
+                return
             break
         if old_g < 0:
             return
-        // 0A single-M/main-M path: spin. Task 5 adds worker parking.
-        continue
-
-    if next_g == old_g:
+        if m_idx == 0:
+            // main M has no scheduler stack; spin until work/wake.
+            continue
+        // Worker with no runnable G: park on the scheduler stack.
+        m := g_machines + m_idx * 48
+        cell_store(old_g, 80, arena_current_unchecked())
+        cell_store(m, 8, -1)
+        g_set_curg(-1)
+        fiber_switch(@ptr_add(old_g, 16), cell_load(m, 24))
         return
 
     m := g_machines + m_idx * 48
@@ -184,40 +235,123 @@ fn sched_schedule():
         fiber_switch(old_sp_addr, next_sp)
         arena_set_current_unchecked(cell_load(old_g, 80))
 
-// Worker entry. Task 5 extends this with spawn requests and parking.
+// Worker entry: scheduler stack runs here; Gs are entered by fiber_switch.
 fn sched_worker_run(m_idx: int):
     cell_store(g_machines, m_idx * 48, m_idx)
     loop:
+        sched_process_spawns(m_idx)
         sched_reap_dead(m_idx, -1)
         next_g := sched_dequeue(m_idx)
         if next_g >= 0:
             m := g_machines + m_idx * 48
-            old_g := cell_load(m, 8)
             cell_store(m, 8, next_g)
             g_set_curg(next_g)
             rt_atomic_store(next_g, 8, 1)
-
-            if old_g >= 0:
-                cell_store(old_g, 80, arena_current_unchecked())
             next_cur : ., mut = cell_load(next_g, 80)
             if next_cur < 0:
                 next_cur = cell_load(next_g, 32)
             arena_set_current_unchecked(next_cur)
+            fiber_switch(@ptr_add(m, 24), cell_load(next_g, 16))
+            g_set_curg(-1)
 
-            if old_g >= 0:
-                fiber_switch(@ptr_add(old_g, 16), cell_load(next_g, 16))
-                arena_set_current_unchecked(cell_load(old_g, 80))
-            else:
-                fiber_switch(@ptr_add(m, 24), cell_load(next_g, 16))
-                g_set_curg(-1)
+fn sched_push_spawn(m_idx: int, req: string):
+    m := g_machines + m_idx * 48
+    rp : ., mut = 0
+    unsafe:
+        rp = @ptr_of(req)
+    loop:
+        old := rt_atomic_load(m, 32)
+        tag : ., mut = old / PTR_MASK + 1
+        if tag > TAG_MAX:
+            tag = 1
+        ptr := old % PTR_MASK
+        cell_store(req, 24, ptr)
+        newv := tag * PTR_MASK + rp
+        if rt_atomic_cas(m, 32, old, newv) != 0:
+            return
 
-fn sched_go(fn_ptr: int, arg: int) -> string, pub:
-    ch := chan_make(8, 1)
+fn sched_process_spawns(m_idx: int):
+    m := g_machines + m_idx * 48
+    loop:
+        old := rt_atomic_load(m, 32)
+        ptr := old % PTR_MASK
+        if ptr == 0:
+            return
+        nxt := cell_load(ptr, 24)
+        tag : ., mut = old / PTR_MASK + 1
+        if tag > TAG_MAX:
+            tag = 1
+        newv := tag * PTR_MASK + nxt
+        if rt_atomic_cas(m, 32, old, newv) != 0:
+            cell_store(ptr, 24, 0)
+            saved := rt_current_arena()
+            g := g_new(cell_load(ptr, 0), cell_load(ptr, 8), 0)
+            rt_set_current_arena(saved)
+            cell_store(g, 40, cell_load(ptr, 16))
+            sched_enqueue(g)
+
+fn sched_go_direct(fn_ptr: int, arg: int, ch: string):
     saved_cur := arena_current_unchecked()
     g := g_new(fn_ptr, arg, 0)
     arena_set_current_unchecked(saved_cur)
     cell_store(g, 40, ch)
     sched_enqueue(g)
+
+fn rt_alloc_persistent(size: int) -> string:
+    m : ., mut = rt_m_idx()
+    if m < 0:
+        m = 0
+    base := cell_load(g_persist_base, m * 8)
+    ptr := cell_load(g_persist_ptr, m * 8)
+    cap := cell_load(g_persist_cap, m * 8)
+    aligned := (size + 15) / 8 * 8
+    if ptr + aligned > base + cap:
+        return ""
+    cell_store(g_persist_ptr, m * 8, ptr + aligned)
+    p : ., mut = ""
+    unsafe:
+        p = @str_of(ptr)
+    return p
+
+fn sched_go(fn_ptr: int, arg: int) -> string, pub:
+    rm : ., mut = rt_m_idx()
+    if rm < 0:
+        rm = 0
+    sched_reap_dead(rm, sched_get_curg())
+    ch := rt_alloc_persistent(64)
+    cbuf := rt_alloc_persistent(8)
+    cp : ., mut = 0
+    cbp : ., mut = 0
+    unsafe:
+        cp = @ptr_of(ch)
+        cbp = @ptr_of(cbuf)
+    if cp == 0 || cbp == 0:
+        return ""
+    cell_store(ch, 0, cbuf)
+    cell_store(ch, 8, 1)
+    cell_store(ch, 16, 0)
+    cell_store(ch, 24, 0)
+    cell_store(ch, 32, 8)
+    cell_store(ch, 40, 0)
+    cell_store(ch, 48, 0)
+    cell_store(ch, 56, 0)
+    n := g_machine_count
+    target : ., mut = rt_m_idx()
+    if n > 1:
+        target = rt_atomic_fetch_add(g_spawn_rr, 0, 1) % n
+    if target == rt_m_idx():
+        sched_go_direct(fn_ptr, arg, ch)
+    else:
+        idx := rt_atomic_fetch_add(g_spawn_req_next, 0, 1)
+        if idx >= MAX_SPAWN_REQ:
+            sched_go_direct(fn_ptr, arg, ch)
+        else:
+            req := g_spawn_req_buf + idx * 32
+            cell_store(req, 0, fn_ptr)
+            cell_store(req, 8, arg)
+            cell_store(req, 16, ch)
+            cell_store(req, 24, 0)
+            sched_push_spawn(target, req)
     return ch
 
 fn sched_spawn_workers(n: int), pub:
@@ -225,3 +359,5 @@ fn sched_spawn_workers(n: int), pub:
         return
     g_num_workers = n - 1
     m_start_workers(n)
+
+

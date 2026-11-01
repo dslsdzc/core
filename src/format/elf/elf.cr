@@ -1229,9 +1229,9 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
 fn emit_m_start_workers(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
-    // worker_entry (15 bytes):
+    // worker_entry (15 bytes): pop index; call sched_worker_run; exit.
     w8(buf, pos+cp, 95)
-    cp = cp + 1  // pop rdi
+    cp = cp + 1
     call_pos_we := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
     cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_we)
@@ -1239,59 +1239,60 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call sched_worker_run
+    cp = cp + 5
     w8(buf, pos+cp, 184)
     w8(buf, pos+cp+1, 60)
     w8(buf, pos+cp+2, 0)
     w8(buf, pos+cp+3, 0)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov eax, 60
+    cp = cp + 5
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 255)
-    cp = cp + 2  // xor edi, edi
+    cp = cp + 2
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // syscall
+    cp = cp + 2
 
-    // m_start_workers (111 bytes, starts at pos+15)
+    // m_start_workers starts at pos+15. Offsets below are relative to m_start.
     w8(buf, pos+cp, 83)
-    cp = cp + 1  // push rbx
+    cp = cp + 1                    // push rbx
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 84)
-    cp = cp + 2  // push r12
+    cp = cp + 2                    // push r12
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 85)
-    cp = cp + 2  // push r13
+    cp = cp + 2                    // push r13
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 87)
-    cp = cp + 2  // push r15
+    cp = cp + 2                    // push r15
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 251)
-    cp = cp + 3  // mov rbx, rdi
+    cp = cp + 3                    // mov rbx, rdi
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 49)
     w8(buf, pos+cp+2, 228)
-    cp = cp + 3  // xor r12d, r12d
-    // .Lworker_loop (offset 13)
+    cp = cp + 3                    // xor r12d, r12d
+    // .Lloop at m_start+13
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 255)
     w8(buf, pos+cp+2, 196)
-    cp = cp + 3  // inc r12
+    cp = cp + 3                    // inc r12
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 57)
     w8(buf, pos+cp+2, 220)
-    cp = cp + 3  // cmp r12, rbx
-    w8(buf, pos+cp, 125)
-    w8(buf, pos+cp+1, 83)
-    cp = cp + 2  // jge .Ldone (+83)
+    cp = cp + 3                    // cmp r12, rbx
+    w8(buf, pos+cp, 15)
+    w8(buf, pos+cp+1, 141)
+    e2_w32(buf, pos+cp+2, 129)      // jge .Ldone (m_start+154)
+    cp = cp + 6
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 84)
-    cp = cp + 2  // push r12
+    cp = cp + 2                    // push r12
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 199)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // mov rdi, 65536
+    cp = cp + 3                    // mov rdi, 65536
     w8(buf, pos+cp, 0)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 1)
@@ -1304,115 +1305,169 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call alloc
+    cp = cp + 5                    // call alloc(65536)
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 92)
-    cp = cp + 2  // pop r12
+    cp = cp + 2                    // pop r12
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // test rax, rax
+    cp = cp + 3                    // test rax, rax
     w8(buf, pos+cp, 116)
-    w8(buf, pos+cp+1, 54)
-    cp = cp + 2  // jz .Lnext_worker (+54)
+    w8(buf, pos+cp+1, 100)
+    cp = cp + 2                    // jz .Lnext (m_start+146)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // mov r15, rax
+    cp = cp + 3                    // mov r15, rax
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 129)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // add r15, 65536
+    cp = cp + 3                    // add r15, 65536
     w8(buf, pos+cp, 0)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 1)
     w8(buf, pos+cp+3, 0)
     cp = cp + 4
-    // lea r13, [rip + worker_entry]: worker_entry at stub base (pos+0), this lea
-    // is 7 bytes ending at (pos+58): disp = (pos+0) - (pos+58) = -58
+    w8(buf, pos+cp, 73)
+    w8(buf, pos+cp+1, 131)
+    w8(buf, pos+cp+2, 231)
+    w8(buf, pos+cp+3, 240)
+    cp = cp + 4                    // and r15, -16
+
+    // TLS block: alloc(32); block+0=-1, +8=m_idx, +16=-1, +24=0
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 199)
+    cp = cp + 3                    // mov rdi, 32
+    w8(buf, pos+cp, 32)
+    w8(buf, pos+cp+1, 0)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 0)
+    cp = cp + 4
+    call_pos_tls := pos + cp
+    grow_call_patch(g_x86_call_patch_count + 1)
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_tls)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("alloc"))
+    g_x86_call_patch_count = g_x86_call_patch_count + 1
+    e2_w8(buf, pos+cp, 232)
+    e2_w32(buf, pos+cp+1, 0)
+    cp = cp + 5                    // call alloc(32)
+    w8(buf, pos+cp, 73)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 197)
+    cp = cp + 3                    // mov r13, rax
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 255)
+    w8(buf, pos+cp+4, 255)
+    w8(buf, pos+cp+5, 255)
+    w8(buf, pos+cp+6, 255)
+    cp = cp + 7                    // mov qword [rax], -1
+    w8(buf, pos+cp, 76)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 96)
+    w8(buf, pos+cp+3, 8)
+    cp = cp + 4                    // mov [rax+8], r12
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 64)
+    w8(buf, pos+cp+3, 16)
+    w8(buf, pos+cp+4, 255)
+    w8(buf, pos+cp+5, 255)
+    w8(buf, pos+cp+6, 255)
+    w8(buf, pos+cp+7, 255)
+    cp = cp + 8                    // mov qword [rax+16], -1
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 64)
+    w8(buf, pos+cp+3, 24)
+    w8(buf, pos+cp+4, 0)
+    w8(buf, pos+cp+5, 0)
+    w8(buf, pos+cp+6, 0)
+    w8(buf, pos+cp+7, 0)
+    cp = cp + 8                    // mov qword [rax+24], 0
+
+    // lea r11, [rip + worker_entry] (target is m_start-15; next is m_start+109)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 45)
+    w8(buf, pos+cp+2, 29)
     cp = cp + 3
-    e2_w32(buf, pos+cp, -58)
+    e2_w32(buf, pos+cp, -124)
     cp = cp + 4
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 111)
+    w8(buf, pos+cp+2, 95)
     w8(buf, pos+cp+3, 240)
-    cp = cp + 4  // mov [r15-16], r13
-    w8(buf, pos+cp, 76)
+    cp = cp + 4                    // mov [r15-16], r11
+    w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 71)
+    w8(buf, pos+cp+2, 103)
     w8(buf, pos+cp+3, 248)
-    cp = cp + 4  // mov [r15-8], r12
+    cp = cp + 4                    // mov [r15-8], r12
     w8(buf, pos+cp, 191)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 15)
-    w8(buf, pos+cp+3, 1)
+    w8(buf, pos+cp+3, 9)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov edi, 0x10F00
+    cp = cp + 5                    // mov edi, 0x90F00
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 119)
     w8(buf, pos+cp+3, 240)
-    cp = cp + 4  // lea rsi, [r15-16]
+    cp = cp + 4                    // lea rsi, [r15-16]
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 210)
-    cp = cp + 2  // xor edx, edx
+    cp = cp + 2                    // xor edx, edx
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 49)
     w8(buf, pos+cp+2, 210)
-    cp = cp + 3  // xor r10d, r10d
-    w8(buf, pos+cp, 69)
-    w8(buf, pos+cp+1, 49)
-    w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // xor r8d, r8d
+    cp = cp + 3                    // xor r10d, r10d (child_tid = 0)
+    w8(buf, pos+cp, 77)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 232)
+    cp = cp + 3                    // mov r8, r13 (tls = block)
     w8(buf, pos+cp, 184)
     w8(buf, pos+cp+1, 56)
     w8(buf, pos+cp+2, 0)
     w8(buf, pos+cp+3, 0)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov eax, 56
+    cp = cp + 5                    // mov eax, 56
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // syscall
+    cp = cp + 2                    // syscall
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // test rax, rax
+    cp = cp + 3                    // test rax, rax
     w8(buf, pos+cp, 116)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // jz .Lchild (+5)
-    // .Lnext_worker (offset 95)
-    w8(buf, pos+cp, 73)
-    w8(buf, pos+cp+1, 255)
-    w8(buf, pos+cp+2, 196)
-    cp = cp + 3  // inc r12
-    w8(buf, pos+cp, 235)
-    w8(buf, pos+cp+1, 169)
-    cp = cp + 2  // jmp .Lworker_loop (-87)
-    // .Lchild (offset 100)
+    cp = cp + 2                    // jz .Lchild (m_start+151)
+    // .Lnext at m_start+146
+    w8(buf, pos+cp, 233)
+    e2_w32(buf, pos+cp+1, -138)    // jmp .Lloop (m_start+13)
+    cp = cp + 5
+    // .Lchild at m_start+151
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 237)
-    cp = cp + 2  // xor ebp, ebp
+    cp = cp + 2                    // xor ebp, ebp
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-    // .Ldone (offset 103)
+    cp = cp + 1                    // ret
+    // .Ldone at m_start+157
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 95)
-    cp = cp + 2  // pop r15
+    cp = cp + 2
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 93)
-    cp = cp + 2  // pop r13
+    cp = cp + 2
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 92)
-    cp = cp + 2  // pop r12
+    cp = cp + 2
     w8(buf, pos+cp, 91)
-    cp = cp + 1  // pop rbx
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-
+    cp = cp + 1
     return cp
 
 fn sched_reg_one(name: string, offset: int, cp: int):

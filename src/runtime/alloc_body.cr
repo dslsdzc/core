@@ -193,7 +193,7 @@ fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if slot < 0:
         // arena_new_sized could not obtain a first slot (pool limit). The
         // legacy body traps here instead of silently allocating a new one.
-        return alloc_fail(size, -1, slot, 256)
+        return alloc_fail(size, -1, slot, 1024)
     max_size := cell_load(g_arena_scalars, 8)
     slot_base : ., mut = arena_slot_base(slot)
     if cell_load(g_arena_static, ai * 8) != 0:

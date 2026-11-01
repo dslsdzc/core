@@ -17,8 +17,8 @@ g_arena_cap : int, mut = 0        // metadata array capacity
 // happens on its home M. Metadata arrays are preallocated; per-M free lists and
 // high-water counters are owner-private.
 ARENA_PER_M : int = 1024
-SLOTS_PER_M : int = 256
-SEGMENTS_PER_M : int = 4
+SLOTS_PER_M : int = 1024
+SEGMENTS_PER_M : int = 16
 
 g_arena_m_count : int, mut = 1
 g_arena_count_m : string, mut
@@ -362,7 +362,15 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
         cell_store(g_arena_free_list_m, mi * 8, -1)
         cell_store(g_slot_count_m, mi * 8, 0)
         cell_store(g_slot_free_m, mi * 8, -1)
-        cell_store(g_segment_count_m, mi * 8, mi * SEGMENTS_PER_M)
+        seg := mi * SEGMENTS_PER_M
+        cell_store(g_segment_count_m, mi * 8, seg)
+        p := syscall6(9, 0, 67108864, 3, 34, -1, 0)
+        if p >= 0:
+            ps : ., mut = ""
+            unsafe:
+                ps = @str_of(p)
+            store_str_ptr(g_segment_base, seg * 8, ps)
+            cell_store(g_segment_count_m, mi * 8, seg + 1)
         mi = mi + 1
 
     g_arena_pool_limit = pool_size
@@ -441,7 +449,8 @@ fn arena_grow_pool_m(m: int), pub:
     seg := cell_load(g_segment_count_m, m * 8)
     if seg >= (m + 1) * SEGMENTS_PER_M:
         return
-    if g_arena_pool_limit > 0 && (seg + 1) * 67108864 > g_arena_pool_limit:
+    local_seg := seg - m * SEGMENTS_PER_M
+    if g_arena_pool_limit > 0 && (local_seg + 1) * 67108864 > g_arena_pool_limit:
         println("arena: pool limit exceeded")
         return
     saved := rt_current_arena()

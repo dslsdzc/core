@@ -33,6 +33,10 @@ fn chan_make(elemsize: int, cap: int) -> string, pub:
 
 fn chan_send(ch: string, val: int), pub:
     _chan_ensure_init()
+    rm : ., mut = rt_m_idx()
+    if rm < 0:
+        rm = 0
+    sched_reap_dead(rm, sched_get_curg())
     loop:
         cap := cell_load(ch, 8)
         head : ., mut = rt_atomic_load(ch, 16)
@@ -75,6 +79,10 @@ fn chan_send(ch: string, val: int), pub:
 
 fn chan_recv(ch: string) -> int, pub:
     _chan_ensure_init()
+    rm : ., mut = rt_m_idx()
+    if rm < 0:
+        rm = 0
+    sched_reap_dead(rm, sched_get_curg())
     loop:
         cap := cell_load(ch, 8)
         head : ., mut = rt_atomic_load(ch, 16)

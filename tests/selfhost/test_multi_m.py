@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""0A: multi-M runtime tests. Extended in Task 5; starts with arena partition."""
+"""0A: lock-free multi-M runtime tests."""
 
 from __future__ import annotations
 
@@ -31,6 +31,108 @@ fn main() -> int:
     return 0
 """
 
+TWO_WORKERS = """\
+import sched
+import chan
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    c1 := go work(1)
+    c2 := go work(2)
+    r1 := chan_recv(c1)
+    r2 := chan_recv(c2)
+    if r1 != 2:
+        return 1
+    if r2 != 3:
+        return 2
+    return 0
+"""
+
+FOUR_WORKERS = """\
+import sched
+import chan
+
+g_buf : string, mut
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(4)
+    g_buf = alloc(64 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= 64:
+            break
+        ch := go work(i)
+        cell_store(g_buf, i * 8, ch)
+        i = i + 1
+    sum : ., mut = 0
+    i = 0
+    loop:
+        if i >= 64:
+            break
+        ch := cell_load(g_buf, i * 8)
+        sum = sum + chan_recv(ch)
+        i = i + 1
+    if sum != 2080:
+        return sum
+    return 0
+"""
+
+CROSS_M_PINGPONG = """\
+import sched
+import chan
+
+g_in : string, mut
+g_out : string, mut
+
+fn noop() -> int:
+    return 0
+
+fn ping(x: int) -> int:
+    v := chan_recv(g_in)
+    chan_send(g_out, v + 1)
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    g_in = chan_make(8, 1)
+    g_out = chan_make(8, 1)
+    d := go noop()
+    p := go ping(0)
+    chan_send(g_in, 0)
+    r := chan_recv(g_out)
+    if r != 1:
+        return 1
+    return 0
+"""
+
+SPAWN_STRESS = """\
+import sched
+import chan
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    sum : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= 1000:
+            break
+        ch := go work(i)
+        sum = sum + chan_recv(ch)
+        i = i + 1
+    if sum != 500500:
+        return sum
+    return 0
+"""
+
 
 def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
@@ -50,28 +152,37 @@ def build_run(name: str, source: str, timeout: int = 60) -> bool:
         c = run([str(COREC), "ccr", str(src), "-o", str(ccr)])
         if c.returncode != 0:
             print(f"FAIL {name} corec")
-            print(c.stdout[-1200:])
-            print(c.stderr[-1200:])
+            print(c.stdout[-1600:])
+            print(c.stderr[-1600:])
             return False
         a = run([str(COREARCH), "--raw-int", "--elf", str(ccr), "-o", str(elf)])
         if a.returncode != 0:
             print(f"FAIL {name} corearch")
-            print(a.stdout[-1200:])
-            print(a.stderr[-1200:])
+            print(a.stdout[-1600:])
+            print(a.stderr[-1600:])
             return False
         r = run([str(elf)], timeout=timeout)
         if r.returncode != 0:
             print(f"FAIL {name} run rc={r.returncode}")
-            print(r.stdout[-1200:])
-            print(r.stderr[-1200:])
+            print(r.stdout[-1600:])
+            print(r.stderr[-1600:])
             return False
     print(f"PASS {name}")
     return True
 
 
 def main() -> int:
+    cases = [
+        ("arena_partition_stress", ARENA_STRESS, 120),
+        ("two_workers_two_goroutines", TWO_WORKERS, 60),
+        ("four_workers_queue", FOUR_WORKERS, 60),
+        ("cross_m_pingpong", CROSS_M_PINGPONG, 60),
+        ("spawn_stress", SPAWN_STRESS, 120),
+    ]
     ok = True
-    ok = build_run("arena_partition_stress", ARENA_STRESS) and ok
+    for name, source, timeout in cases:
+        ok = build_run(name, source, timeout) and ok
+    print(f"{sum(1 for _ in cases) if ok else 0}/{len(cases)} passed")
     return 0 if ok else 1
 
 
