@@ -4019,35 +4019,13 @@ fn gen_expr(node: int) -> int:
             bname := istr_get(func_ni)
             if str_eq(bname, "arena_current_unchecked") != 0 && ac == 0:
                 dest := new_ir_var("arena_current", TI_INT)
-                sv := global_var_of(str_intern("g_arena_scalars"))
-                if sv >= 0:
-                    z := new_ir_var("_arena_zero", TI_INT)
-                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
-                    a0 := new_ir_var("_arena_arg", TI_STR)
-                    emit(IR_STORE, -1, a0, sv, 0, 0)
-                    a1 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a1, z, 0, 0)
-                    emit(IR_CALL, dest, a0, 2, str_intern("cell_load"), TI_INT)
-                else:
-                    gv := global_var_of(str_intern("g_current_arena"))
-                    if gv >= 0:
-                        emit(IR_LOAD, dest, gv, 0, 0, TI_INT)
-                    else:
-                        emit(IR_CONST, dest, 0, 0, 0, TI_INT)
+                emit(IR_CALL, dest, -1, 0, str_intern("rt_current_arena"), TI_INT)
                 return dest
             if str_eq(bname, "arena_set_current_unchecked") != 0 && ac == 1:
                 av := cell_load(arg_vars, 0)
-                sv := global_var_of(str_intern("g_arena_scalars"))
-                if sv >= 0:
-                    z := new_ir_var("_arena_zero", TI_INT)
-                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
-                    a0 := new_ir_var("_arena_arg", TI_STR)
-                    emit(IR_STORE, -1, a0, sv, 0, 0)
-                    a1 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a1, z, 0, 0)
-                    a2 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a2, av, 0, 0)
-                    emit(IR_CALL, -1, a0, 3, str_intern("cell_store"), TI_INT)
+                a0 := new_ir_var("_arena_arg", TI_INT)
+                emit(IR_STORE, -1, a0, av, 0, 0)
+                emit(IR_CALL, -1, a0, 1, str_intern("rt_set_current_arena"), TI_UNIT)
                 gv := global_var_of(str_intern("g_current_arena"))
                 if gv >= 0:
                     emit(IR_STORE, -1, gv, av, 0, 0)

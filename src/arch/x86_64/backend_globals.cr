@@ -4,6 +4,7 @@
 // Interned names for the syscall builtins resolved by the backend.
 g_ni_syscall3 : int, mut
 g_ni_syscall4 : int, mut
+g_ni_syscall6 : int, mut
 
 // IR variable index to shared stack slot variable (-1 = own slot).
 g_stack_map : string, mut

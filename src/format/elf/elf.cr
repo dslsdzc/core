@@ -1619,6 +1619,7 @@ fn elf_gen(buf: string) -> int:
     // the OS axis is still pending.
     g_ni_syscall3 = -1
     g_ni_syscall4 = -1
+    g_ni_syscall6 = -1
     g_ni_load8 = -1
     g_ni_store8 = -1
     g_ni_load64 = -1
@@ -1638,6 +1639,8 @@ fn elf_gen(buf: string) -> int:
             g_ni_syscall3 = ni_i
         if str_eq(ns, "syscall4") != 0:
             g_ni_syscall4 = ni_i
+        if str_eq(ns, "syscall6") != 0:
+            g_ni_syscall6 = ni_i
         if str_eq(ns, "load8") != 0:
             g_ni_load8 = ni_i
         if str_eq(ns, "store8") != 0:

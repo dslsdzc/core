@@ -19,4 +19,6 @@ fn linux_frontend_builtin_return_ti(name_ni: int) -> int:
         return TI_INT
     if s == "syscall4":
         return TI_INT
+    if s == "syscall6":
+        return TI_INT
     return -1

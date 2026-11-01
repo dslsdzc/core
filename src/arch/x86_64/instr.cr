@@ -1523,6 +1523,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + e2_load_var(buf, pos+cp, 7, d)
                 cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
                 cp = cp + e2_st_var(buf, pos+cp, 0, d)
+        else if s3 == g_ni_syscall6:
+            // 0A: raw-word ABI path (used by arena_grow_pool_m in runtime
+            // programs). mmap args are machine words, not tagged big-ints.
+            cp = sys_syscall6_stub(buf, pos, cp, d)
         else if s3 == g_ni_load8:
             // movzx rax, byte [rdi+rsi] — REX.W + 0x0FB6 + SIB
             if g_x86_big_enabled != 0:
