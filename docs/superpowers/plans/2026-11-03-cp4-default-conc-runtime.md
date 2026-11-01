@@ -37,7 +37,7 @@
 
 - [ ] **Step 1: 写失败测试**：`go worker(req)` 传 channel、阻塞 send、两个 `go`。
 - [ ] **Step 2: 实现**：activation table、ready ring、wait queue、`fiber_init`/`fiber_switch`、arena save/restore、`conc_sched_send_int`/`recv_int`/`close`。
-- [ ] **Step 3: 跑测试**：`test_conc_sched.py` 3/3。
+- [ ] **Step 3: 跑测试**：`test_conc_sched.py` 7/7（含大 channel、无 sched_init、1000 go、native build）。
 - [ ] **Step 4: 提交**。
 
 ### Task 2: default `go`/`chan` switch
@@ -60,7 +60,7 @@
 
 - [ ] **Step 1: 写失败测试**：两 channel，`go` 用第二个；plan 含 `bind 1 0 1`、`SEND 1`、`RECV 1`。
 - [ ] **Step 2: 实现**：`chan_make` 后首个 handle store 建 channel id；`go` 实参映射到 channel id；worker body `chan_recv/chan_send(param)` 发 RECV/SEND edge。
-- [ ] **Step 3: 跑测试**：emitter 21/21；plan 5/5（含 multichannel）。
+- [ ] **Step 3: 跑测试**：emitter 25/25；plan 5/5（含 multichannel）。
 - [ ] **Step 4: 提交**。
 
 ### Task 4: CI + report
