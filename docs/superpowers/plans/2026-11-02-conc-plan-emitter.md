@@ -21,7 +21,7 @@
 
 ## Review Focus
 
-- plan emitter 对不支持模式（多个 `go`、动态 cap、aliasing channel）是否零 artifact 且诊断清晰。
+- plan emitter 对不支持模式（多个 `go`、动态 cap、main 形参、嵌套 go/chan_make、非 string go 参数）是否零 artifact 且诊断清晰。
 - plan loader 对截断/未知 kind/越界 id 是否拒绝，而不是读越界或生成半成品。
 - entry table 与 body 顺序是否绑定正确；同名函数/多 body 是否错位。
 - 同一份 plan 在 CPU/SIMT 上是否产生相同值/终止类别。
@@ -93,8 +93,8 @@ jj commit -m "conc: load target-neutral plan text and run one body"
 - 只支持：
   - 一个函数内一个 `sched_go` 调用；
   - `chan_make` 的 `elemsize`/`cap` 是整数字面量；
-  - channel handle 是直接变量（`chan_make` dest、函数参数、全局变量），不允许 aliasing。
-- 不支持时：打印 `error: conc-plan unsupported: ...`，返回 1，不写文件。
+  - channel handle 是直接变量（`chan_make` dest、函数参数、全局变量）；aliasing 不分析，属 CP-3 限制。
+- 不支持时：打印 `error: conc-plan unsupported: ...`，返回 1，目标路径被删除（零 artifact）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -130,7 +130,7 @@ edge 0 1 SPAWN -1
 - 先登记 `chan_make` 的 dest var -> channel id（常量参数通过 var 的 `IR_CONST`/`IR_STORE` 回溯）。
 - 再扫 `sched_go`：从 arg0 的 `IR_STORE` 追到 `IR_FNADDR`，取函数名；记录 body(name, params=1)。body 0 固定为 entry/main（entry index 0，params 0）。
 - 入口函数里每发现一个 `chan_send`/`chan_recv` 且 handle 可解析，输出 `SEND`/`RECV` edge；解析不到就 fail-closed。
-- 只支持单 `go`；多 `go`、动态 cap、aliasing 都返回 1。
+- 只支持单 `go`；多 `go`、动态 cap、main 形参、嵌套调用、非 string 参数都返回 1。aliasing 不分析（CP-3）。
 
 - [ ] **Step 3: 跑测试**
 
@@ -171,7 +171,7 @@ jj commit -m "compiler: emit target-neutral conc plan artifact"
 
 - [ ] **Step 4: 报告**
 
-记录：emitter 支持的子集、plan 文本格式、loader 语义、CPU/SIMT 对拍、fail-closed 证据、未做项（真实 GPU、transfer primitive、多 slot、预算、默认 lowering 切换）。
+记录：emitter 支持的子集、plan 文本格式、loader 语义、loader 手写 PAR 的 CPU/SIMT 对拍、fail-closed 证据、未做项（真实 GPU、transfer primitive、多 slot、预算、默认 lowering 切换）。
 
 - [ ] **Step 5: 提交**
 
