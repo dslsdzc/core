@@ -1,0 +1,86 @@
+# CP-4 实现记录：默认 conc runtime + 协作调度
+
+**日期：** 2026-11-03
+**状态：** CP-4 前四项完成：多 channel plan binding、worker send/recv edge、阻塞 send/recv + fiber 协作调度、默认 `go`/`chan` 切换。
+**计划：** `docs/superpowers/plans/2026-11-03-cp4-default-conc-runtime.md`
+**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+
+## 1. 交付
+
+| 文件 | 内容 |
+|---|---|
+| `src/stdlib/conc_sched.cr` | 单线程协作 activation scheduler：ready queue、per-channel wait queue、fiber_init/fiber_switch、arena save/restore、阻塞 int send/recv、close |
+| `src/compiler/ir_gen.cr` | 单 `go` 从 `sched_go` 切到 `conc_go` |
+| `src/stdlib/sched.cr` | `sched_init` 初始化 conc scheduler；`sched_go` 委托 `conc_go` |
+| `src/stdlib/chan.cr` | `chan_make/send/recv/close` 委托 conc/conc_sched |
+| `src/compiler/conc_plan_emit.cr` | 多 `chan_make` handle 映射、`go` 实参→channel id、worker body RECV/SEND edge |
+| `src/runtime/rt.s` | 加入 native `sched_call_0..4` trampolines（编译器自身链接用） |
+| `bootstrap/corec/frontend/*` | bootstrap prelude 认识 `sched_call_0..4` |
+
+## 2. 调度模型
+
+- 每个 activation 有独立 fiber stack、arena、entry、arg、result channel。
+- `conc_spawn` 入 ready queue；`conc_schedule` 在 scheduler/fiber 之间用 `fiber_switch` 切换。
+- 每个 activation 保存/恢复 `arena_current_unchecked()`；`test_go_arena` 验证主 arena 不被 activation 改写。
+- channel 满/空时，当前 activation 进入 per-channel wait queue；对端 send/recv 唤醒一个 waiter。
+- `close` 标记 closed 并唤醒所有 waiter；recv 先排空再返回 0。
+- 主线程不是 activation：在空 result channel 上 `chan_recv` 时调用 `conc_schedule` 推进 ready activation；无 ready 且无数据时返回 0（fail-closed）。
+- 无锁、无原子、单线程；不宣称线程安全。
+
+## 3. 多 channel / edges
+
+`corec conc-plan` 现在：
+
+- 每个 `chan_make` 后第一条 handle store 建立 `channel id -> 用户变量`。
+- `go` 实参追溯到某个 handle 后，plan 发 `bind 1 0 <id>`、`edge 0 1 SEND <id>`。
+- worker body 中 `chan_recv(param)` / `chan_send(param, ...)` 发 `RECV` / `SEND` edge（同一 bound channel）。
+- 多 channel plan 例：
+  ```text
+  channel 0 8 2 SPSC
+  channel 1 8 1 SPSC
+  bind 1 0 1
+  edge 0 1 SEND 1
+  edge 1 0 RECV 1
+  edge 0 1 SPAWN -1
+  ```
+- 仍只支持单 `go`；多 `go` 的 plan emitter 留 CP-5。默认 runtime 已支持多 `go`（`go_parallel` 与 `test_conc_sched_two_go`）。
+
+## 4. 验证
+
+```text
+test_conc_plan_emitter.py   21/21
+test_conc_plan.py            5/5
+test_conc_runtime.py        13/13
+test_conc_sched.py           3/3
+test_chan_handle_model.py   11/11
+test_go_arena.py            PASS
+test_rt_tls.py              PASS
+test_compile.py             PASS
+```
+
+`test_chan_handle_model` 覆盖 `chan_test`、`conc_test`、`go_e2e`、`go_final`、`go_parallel`；全部 run rc=0。`test_conc_sched` 覆盖：
+
+- `go worker(req)` 传 channel handle；
+- cap=1 上连续两次 `chan_send` 的阻塞/唤醒；
+- 两个 `go` 的结果 channel。
+
+## 5. 边界（CP-5+）
+
+- range `go var start..end` 仍是 `IR_SPAWN` 同步近似，未接 conc scheduler。
+- 多 `go` 的 plan emitter（默认 runtime 已支持）。
+- multi-M、抢占、跨线程原子/等待协议。
+- 真实 GPU/FPGA/集群、transfer MOVE/LOAN/SPLIT/FILL、多 slot、预算/证书。
+- 零容量 rendezvous/MPMC；close 已有基本实现。
+- 正式 MessageRef `(region_id, offset, layout)` 与 reset+复用 ABA。
+- activation/arena 回收：CP-4 不复用已死 activation 的栈/arena。
+
+## 6. 不变量核对
+
+| 不变量 | CP-4 证据 |
+|---|---|
+| 不新增源码语法 | 默认 surface 仍是 `go`/`chan_*` |
+| 默认路径切换 | `ir_gen` 单 `go` -> `conc_go`；`chan.cr`/`sched.cr` 委托 |
+| 无锁 | `conc_sched.cr` 无 mutex/atomic/spin；单线程 ready/wait queue |
+| 编译期事实不复算 | plan emitter 发 bind/edges；runtime 只按 descriptor 执行 |
+| fail-closed | emitter 多 go/非法 handle/嵌套/字面量参数拒绝；loader 越界/短表/edge channel 拒绝 |
+| 默认语料回归 | `test_chan_handle_model` 11/11、go_arena、rt_tls、compile |
