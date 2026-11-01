@@ -179,6 +179,8 @@ case "$CI_JOB_NAME" in
     # suite currently has a pre-existing p41 SIGSEGV (recorded in the CP-1
     # report), and `set -e` would otherwise prevent this gate from running.
     python3 tests/selfhost/test_conc_runtime.py
+    python3 tests/selfhost/test_conc_plan_emitter.py
+    python3 tests/selfhost/test_conc_plan.py
     python3 tests/selfhost/test_merge_copy.py  # V2.2 merge copy：单标量数组跨 IF 复制/重绑；长度 0/1/64/65、双分支、动态下标、嵌套逃逸、父槽预算
     python3 tests/selfhost/test_share.py  # V2.3 read-only share：顶层 IF 标量数组由消费者循环只读共享，reset 在最后消费者退出后；写/调用/窗口分配/g_current_arena 保持 v1
     python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/chan_recv (raw-int scheduler build)
