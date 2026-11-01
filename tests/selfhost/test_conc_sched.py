@@ -58,6 +58,54 @@ fn main() -> int:
     return 0
 """
 
+LARGE_CHANNEL = """\
+import chan
+
+fn main() -> int:
+    ch := chan_make(8, 200000)
+    chan_send(ch, 7)
+    v := chan_recv(ch)
+    if v != 7:
+        return 1
+    return 0
+"""
+
+NO_INIT = """\
+import chan
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    ch := go work(41)
+    v := chan_recv(ch)
+    if v != 42:
+        return 1
+    return 0
+"""
+
+MANY_GO = """\
+import chan
+import sched
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init()
+    i : ., mut = 0
+    sum : ., mut = 0
+    loop:
+        if i >= 1000:
+            break
+        ch := go work(i)
+        sum = sum + chan_recv(ch)
+        i = i + 1
+    if sum != 500500:
+        return 1
+    return 0
+"""
+
 TWO_GO = """\
 import chan
 import sched
@@ -82,6 +130,32 @@ fn main() -> int:
 def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
+
+
+def build_run_native(name: str, source: str, timeout: int = 120) -> bool:
+    if not COREC.exists() or not COREARCH.exists():
+        print("FAIL: missing build/corec or build/corearch")
+        return False
+    with tempfile.TemporaryDirectory(prefix=f"conc_sched_{name}_") as td:
+        root = Path(td)
+        src = root / f"{name}.cr"
+        elf = root / f"{name}.elf"
+        src.write_text(source, encoding="utf-8")
+        c = run([str(COREC), "build", str(src), "-o", str(elf), "--static"],
+                timeout=timeout)
+        if c.returncode != 0:
+            print(f"FAIL {name} corec build")
+            print(c.stdout[-1600:])
+            print(c.stderr[-1600:])
+            return False
+        r = run([str(elf)], timeout=timeout)
+        if r.returncode != 0:
+            print(f"FAIL {name} run rc={r.returncode}")
+            print(r.stdout[-1600:])
+            print(r.stderr[-1600:])
+            return False
+    print(f"PASS {name}")
+    return True
 
 
 def build_run(name: str, source: str, timeout: int = 60) -> bool:
@@ -121,13 +195,19 @@ def main() -> int:
         ("conc_sched_channel_arg", CHANNEL_ARG, 30),
         ("conc_sched_blocking_send", BLOCKING_SEND, 30),
         ("conc_sched_two_go", TWO_GO, 30),
+        ("conc_sched_large_channel", LARGE_CHANNEL, 30),
+        ("conc_sched_no_init", NO_INIT, 30),
+        ("conc_sched_many_go", MANY_GO, 120),
     ]
     passed = 0
     for name, source, timeout in cases:
         if build_run(name, source, timeout):
             passed += 1
-    print(f"{passed}/{len(cases)} passed")
-    return 0 if passed == len(cases) else 1
+    if build_run_native("conc_sched_native_build", TWO_GO, 120):
+        passed += 1
+    total = len(cases) + 1
+    print(f"{passed}/{total} passed")
+    return 0 if passed == total else 1
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ src = b.concat(
         'src/stdlib/hotpatch.cr',    # rt.s 的 _hotpatch_sighup 引用 hp_load_config
         'src/stdlib/panic.cr',
         'src/stdlib/arena.cr',       # rt.s 引用 g_free
+        'src/stdlib/conc.cr',        # CP-4 conc runtime
+        'src/stdlib/conc_sched.cr',  # CP-4 scheduler
         'src/stdlib/goroutine.cr',   # rt.s 引用 sched_worker_run/goroutine_entry_wrapper
         'src/stdlib/chan.cr',        # rt.s 引用 chan_send
         'src/stdlib/sched.cr',       # rt.s 引用 sched_schedule

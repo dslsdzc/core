@@ -103,6 +103,7 @@ fn _conc_acts_grow():
     g_conc_act_cap = nc
 
 fn conc_sched_init():
+    arena_ensure_init()
     if g_conc_inited != 0:
         return
     g_conc_acts = _conc_sched_alloc(16 * 8)
@@ -143,6 +144,8 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     return id
 
 fn _conc_word(s: string) -> int:
+    if str_len(s) <= 0:
+        return 0
     v : ., mut = 0
     unsafe:
         v = @ptr_of(s)
@@ -174,6 +177,11 @@ fn conc_schedule() -> int, pub:
             cell_store(a, 8, CONC_ACT_RUNNING)
             arena_set_current_unchecked(cell_load(a, 64))
             fiber_switch(_conc_ptr_addr(g_conc_sched_sp), cell_load(a, 16))
+            st := cell_load(a, 8)
+            aid := cell_load(a, 64)
+            if st == CONC_ACT_DEAD:
+                arena_reset(aid)
+                store_str_ptr(g_conc_acts, id * 8, "")
             arena_set_current_unchecked(saved)
             g_conc_cur = -1
     else:
@@ -346,9 +354,12 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     r : ., mut = _conc_global_region_get()
     if r < 0:
         return ""
+    need : ., mut = 128 + cap * elemsize
+    if need < 1048576:
+        need = 1048576
     ch : ., mut = conc_channel_new(r, elemsize, cap)
     if _conc_word(ch) == 0:
-        r = conc_region_new(1048576)
+        r = conc_region_new(need)
         if r < 0:
             return ""
         g_conc_global_region = r
@@ -430,12 +441,18 @@ fn conc_sched_close(ch: string), pub:
 
 fn conc_go(entry: int, arg: int) -> string, pub:
     conc_sched_init()
-    r := _conc_global_region_get()
+    r : ., mut = _conc_global_region_get()
     if r < 0:
         return ""
-    ch := conc_channel_new(r, 8, 1)
+    ch : ., mut = conc_channel_new(r, 8, 1)
     if _conc_word(ch) == 0:
-        return ""
+        r = conc_region_new(1048576)
+        if r < 0:
+            return ""
+        g_conc_global_region = r
+        ch = conc_channel_new(r, 8, 1)
+        if _conc_word(ch) == 0:
+            return ""
     if conc_spawn(entry, arg, ch) < 0:
         return ""
     return ch

@@ -158,7 +158,7 @@ fn _conc_emit_uses_param(arg: int, param_var: int, call_ii: int, func_start: int
     k : ., mut = 0
     loop:
         if k >= 8:
-            return 0
+            return 2
         i : ., mut = func_start
         defs : ., mut = 0
         def_at : ., mut = -1
@@ -202,14 +202,43 @@ fn _conc_emit_handle_after(call_ii: int, end: int) -> int:
             return -1
         if k >= 8:
             return -1
+        if iri_op(j) == IR_CALL:
+            return -1
         if iri_op(j) == IR_STORE:
             if iri_s1(j) >= 0:
-                return iri_s1(j)
+                return j
         j = j + 1
         k = k + 1
     return -1
 
-fn _conc_emit_arg_channel(var: int, call_ii: int, func_start: int, cvars: string, nchan: int) -> int:
+fn _conc_emit_unique_def(var: int, call_ii: int, func_start: int) -> int:
+    i : ., mut = func_start
+    defs : ., mut = 0
+    def_at : ., mut = -1
+    loop:
+        if i >= call_ii:
+            break
+        op := iri_op(i)
+        if op == IR_REF || op == IR_PTR_OF:
+            if iri_s1(i) == var:
+                return -1
+        if iri_dest(i) == var:
+            if op != IR_ALLOC:
+                defs = defs + 1
+                def_at = i
+        else:
+            if op == IR_STORE:
+                if iri_s1(i) == var:
+                    defs = defs + 1
+                    def_at = i
+        i = i + 1
+    if defs != 1:
+        return -1
+    if _conc_emit_in_nested(def_at) != 0:
+        return -1
+    return def_at
+
+fn _conc_emit_arg_channel(var: int, call_ii: int, func_start: int, cvars: string, cstores: string, nchan: int) -> int:
     v : ., mut = var
     limit : ., mut = call_ii
     k : ., mut = 0
@@ -249,6 +278,9 @@ fn _conc_emit_arg_channel(var: int, call_ii: int, func_start: int, cvars: string
             if ci >= nchan:
                 break
             if cell_load(cvars, ci * 8) == src:
+                hd := _conc_emit_unique_def(src, call_ii, func_start)
+                if hd != cell_load(cstores, ci * 8):
+                    return -1
                 return ci
             ci = ci + 1
         v = src
@@ -278,6 +310,7 @@ fn conc_plan_emit_write(path: string) -> int:
     go_call_ii : ., mut = -1
     chan_count : ., mut = 0
     cvars := alloc(64 * 8)
+    cstores := alloc(64 * 8)
     i : ., mut = 0
     loop:
         if i >= count:
@@ -304,10 +337,11 @@ fn conc_plan_emit_write(path: string) -> int:
                         return _conc_emit_error("chan_make inside loop/if is not supported")
                     if chan_count >= 64:
                         return _conc_emit_error("too many chan_make sites")
-                    hvar := _conc_emit_handle_after(ii, start + count)
-                    if hvar < 0:
+                    hstore := _conc_emit_handle_after(ii, start + count)
+                    if hstore < 0:
                         return _conc_emit_error("cannot resolve chan_make handle")
-                    cell_store(cvars, chan_count * 8, hvar)
+                    cell_store(cvars, chan_count * 8, iri_s1(hstore))
+                    cell_store(cstores, chan_count * 8, hstore)
                     chan_count = chan_count + 1
         i = i + 1
 
@@ -315,6 +349,27 @@ fn conc_plan_emit_write(path: string) -> int:
         return _conc_emit_error("exactly one sched_go in main is supported")
     if chan_count < 1:
         return _conc_emit_error("at least one chan_make in main is required")
+
+    fj : ., mut = 0
+    loop:
+        if fj >= g_ir_func_count:
+            break
+        if fj != fi:
+            fname := istr_get(cell_load(g_ir_func_name_idx, fj * 8))
+            if str_eq(fname, "sched_go") == 0 && str_eq(fname, "conc_go") == 0:
+                fs := cell_load(g_ir_func_instr_start, fj * 8)
+                fc := cell_load(g_ir_func_instr_count, fj * 8)
+                fi2 : ., mut = 0
+                loop:
+                    if fi2 >= fc:
+                        break
+                    ii2 := fs + fi2
+                    if iri_op(ii2) == IR_CALL:
+                        nm2 := istr_get(iri_s3(ii2))
+                        if str_eq(nm2, "conc_go") != 0 || str_eq(nm2, "sched_go") != 0:
+                            return _conc_emit_error("go outside main is not supported")
+                    fi2 = fi2 + 1
+        fj = fj + 1
 
     target_fi := _conc_emit_find_func(go_fn_ni)
     if target_fi < 0:
@@ -330,7 +385,7 @@ fn conc_plan_emit_write(path: string) -> int:
         if go_arg_var >= 0:
             if _conc_emit_const_before(go_arg_var, go_call_ii, start) != CONC_EMIT_UNKNOWN:
                 return _conc_emit_error("literal or missing go argument is not supported")
-            bind_ch = _conc_emit_arg_channel(go_arg_var, go_call_ii, start, cvars, chan_count)
+            bind_ch = _conc_emit_arg_channel(go_arg_var, go_call_ii, start, cvars, cstores, chan_count)
             if bind_ch < 0:
                 return _conc_emit_error("go argument is not a chan_make handle")
 
@@ -380,12 +435,18 @@ fn conc_plan_emit_write(path: string) -> int:
                 tn := istr_get(iri_s3(tii))
                 if str_eq(tn, "chan_recv") != 0:
                     if iri_s2(tii) == 1:
-                        if _conc_emit_uses_param(iri_s1(tii), param_var, tii, tstart) != 0:
+                        wu := _conc_emit_uses_param(iri_s1(tii), param_var, tii, tstart)
+                        if wu == 2:
+                            return _conc_emit_error("worker channel chain is too long")
+                        if wu == 1:
                             out = out + "edge 1 0 RECV " + int_str(bind_ch) + "\n"
                 else:
                     if str_eq(tn, "chan_send") != 0:
                         if iri_s2(tii) == 2:
-                            if _conc_emit_uses_param(iri_s1(tii), param_var, tii, tstart) != 0:
+                            wu2 := _conc_emit_uses_param(iri_s1(tii), param_var, tii, tstart)
+                            if wu2 == 2:
+                                return _conc_emit_error("worker channel chain is too long")
+                            if wu2 == 1:
                                 out = out + "edge 1 0 SEND " + int_str(bind_ch) + "\n"
             ti = ti + 1
     out = out + "edge 0 1 SPAWN -1\n"

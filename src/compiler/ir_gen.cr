@@ -6996,6 +6996,12 @@ fn ccr_set_raw_mode_from_source():
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:
         g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import sched") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import chan") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import conc") != 0:
+        g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("import cli") != 0:
         // The CLI word-table layer intentionally stores raw string pointers via
         // cell_store/cell_load and views them back through @str_of. Legacy raw

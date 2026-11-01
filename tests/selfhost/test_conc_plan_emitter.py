@@ -215,6 +215,83 @@ fn main() -> int:
     return spawn_one(req)
 """
 
+DISCARD = """\
+import chan
+import sched
+
+fn make_ch() -> string:
+    return chan_make(8, 2)
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    chan_make(8, 9)
+    req := make_ch()
+    h := go worker(req)
+    return 0
+"""
+
+REASSIGN = """\
+import chan
+import sched
+
+fn make_ch() -> string:
+    return chan_make(8, 2)
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    a : ., mut = chan_make(8, 1)
+    a = make_ch()
+    h := go worker(a)
+    return 0
+"""
+
+MAIN_HELPER_GO = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn spawn_one(req: string) -> int:
+    h := go worker(req)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    req := chan_make(8, 1)
+    h := go worker(req)
+    return 0
+"""
+
+LONG_CHAIN = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    a0 := req
+    a1 := a0
+    a2 := a1
+    a3 := a2
+    a4 := a3
+    a5 := a4
+    a6 := a5
+    a7 := a6
+    a8 := a7
+    return chan_recv(a8)
+
+fn main() -> int:
+    sched_init()
+    req := chan_make(8, 1)
+    h := go worker(req)
+    return 0
+"""
+
 GO_LITERAL = """\
 import chan
 import sched
@@ -451,6 +528,10 @@ def main() -> int:
         ("alias_cap", ALIAS_CAP, "chan_make cap is not a unique literal", False),
         ("no_chan", NO_CHAN, "at least one chan_make", False),
         ("go_helper", GO_HELPER, "exactly one sched_go", False),
+        ("discard", DISCARD, "cannot resolve chan_make handle", False),
+        ("reassign", REASSIGN, "go argument is not a chan_make handle", False),
+        ("main_helper_go", MAIN_HELPER_GO, "go outside main", False),
+        ("long_chain", LONG_CHAIN, "worker channel chain is too long", False),
         ("preexisting", MULTI_GO, "exactly one sched_go", True),
     ]
     for name, source, needle, precreate in negatives:

@@ -435,6 +435,10 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
 fn arena_init(pool_size: int, arena_size: int), pub:
     arena_init_m(pool_size, arena_size, 1)
 
+fn arena_ensure_init(), pub:
+    if g_arena_scalars_ready == 0:
+        arena_init(0, 1048576)
+
 fn _arena_copy_cells(src: string, nbytes: int, dst: string):
     i : ., mut = 0
     loop:
