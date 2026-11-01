@@ -254,6 +254,27 @@ fn main() -> int:
     return 0
 """
 
+LOOP_CAP = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return chan_recv(req)
+
+fn main() -> int:
+    sched_init()
+    cap : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= 1:
+            break
+        cap = 1
+        i = i + 1
+    req := chan_make(8, cap)
+    h := go worker(req)
+    return 0
+"""
+
 ALIAS_CAP = """\
 import chan
 import sched
@@ -406,6 +427,7 @@ def main() -> int:
         ("global_cap", GLOBAL_CAP, "chan_make cap is not a unique literal", False),
         ("loop_go", LOOP_GO, "go inside loop/if", False),
         ("branch_cap", BRANCH_CAP, "chan_make cap is not a unique literal", False),
+        ("loop_cap", LOOP_CAP, "chan_make cap is not a unique literal", False),
         ("alias_cap", ALIAS_CAP, "chan_make cap is not a unique literal", False),
         ("multi_chan", MULTI_CHAN, "exactly one chan_make", False),
         ("no_chan", NO_CHAN, "exactly one chan_make", False),
