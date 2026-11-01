@@ -64,6 +64,23 @@ test_compile.py             PASS
 - cap=1 上连续两次 `chan_send` 的阻塞/唤醒；
 - 两个 `go` 的结果 channel。
 
+完整 `selfhost-tests` 中 CP-1/2/3/4 gate 先执行并通过：
+
+```text
+PASS conc_region ... PASS conc_negative        13/13
+PASS emitter_fixture ... PASS emitter_fail_closed_preexisting  21/21
+PASS conc_plan_load ... PASS conc_plan_e2e      5/5
+PASS conc_sched_channel_arg
+PASS conc_sched_blocking_send
+PASS conc_sched_two_go                          3/3
+
+FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
+44/45 passed
+CI_EXIT=1
+```
+
+p41 仍是 CP-1 基线 `1e47f93f` 上已复现的旧 0A 问题，不是 CP-4 引入。
+
 ## 5. 边界（CP-5+）
 
 - range `go var start..end` 仍是 `IR_SPAWN` 同步近似，未接 conc scheduler。
