@@ -176,18 +176,24 @@ fn main() -> int:
     x := conc_recv(ch)
     if cell_load(x, 0) != 101:
         return 4
-    if conc_send(ch, c) != 0:
+    if cell_load(x, 8) != 102:
         return 5
+    if conc_send(ch, c) != 0:
+        return 6
     y := conc_recv(ch)
     z := conc_recv(ch)
     if cell_load(y, 0) != 201:
-        return 6
-    if cell_load(z, 0) != 301:
         return 7
-    if conc_recv(ch) != "":
+    if cell_load(y, 8) != 202:
         return 8
-    if conc_last_error() != CONC_ERR_EMPTY:
+    if cell_load(z, 0) != 301:
         return 9
+    if cell_load(z, 8) != 302:
+        return 10
+    if conc_recv(ch) != "":
+        return 11
+    if conc_last_error() != CONC_ERR_EMPTY:
+        return 12
     return 0
 """
 
@@ -217,6 +223,15 @@ fn main() -> int:
         return 7
     if conc_plan_edge_count(p) != 3:
         return 8
+    j : ., mut = 0
+    loop:
+        if j >= 12:
+            break
+        if conc_plan_add_edge(p, j, j + 1, CONC_EDGE_SPAWN) != j + 3:
+            return 14
+        j = j + 1
+    if conc_plan_edge_count(p) != 15:
+        return 15
     if conc_plan_add_edge(p, 0, 20, CONC_EDGE_SPAWN) != -1:
         return 9
     if conc_plan_add_body(p, CONC_BODY_TASK, -1, 0) != -1:
@@ -333,6 +348,30 @@ fn main() -> int:
         if cell_load(g_arr, i * 8) != i * i:
             return 4
         i = i + 1
+    i = 0
+    loop:
+        if i >= 16:
+            break
+        cell_store(g_arr, i * 8, -1)
+        i = i + 1
+    if conc_run_simt(p, 4, 8) != 0:
+        return 5
+    i = 0
+    loop:
+        if i >= 16:
+            break
+        v := cell_load(g_arr, i * 8)
+        if i >= 4:
+            if i < 8:
+                if v != i * i:
+                    return 6
+            else:
+                if v != -1:
+                    return 7
+        else:
+            if v != -1:
+                return 7
+        i = i + 1
     return 0
 """
 
@@ -367,6 +406,7 @@ fn main() -> int:
     ch := conc_channel_new(r, 8, 1)
     a := conc_alloc(r, 8)
     b := conc_alloc(r, 8)
+    bad := alloc(8)
     cell_store(a, 0, 1)
     cell_store(b, 0, 2)
     if conc_send(ch, a) != 0:
@@ -385,6 +425,18 @@ fn main() -> int:
         return 5
     if conc_run_simt(p, 0, 1) != -1:
         return 6
+    if conc_channel_len(bad) != -1:
+        return 8
+    if conc_channel_elemsize(bad) != -1:
+        return 9
+    if conc_send(bad, a) != CONC_ERR_INVALID:
+        return 10
+    if conc_last_error() != CONC_ERR_INVALID:
+        return 11
+    if conc_recv(bad) != "":
+        return 12
+    if conc_last_error() != CONC_ERR_INVALID:
+        return 13
     return 0
 """
 
