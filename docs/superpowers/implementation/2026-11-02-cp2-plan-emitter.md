@@ -73,6 +73,8 @@ PASS emitter_non_cr_default_output
 PASS emitter_fail_closed_multi_go
 PASS emitter_fail_closed_dynamic_cap
 PASS emitter_fail_closed_int_go
+PASS emitter_fail_closed_go_literal
+PASS emitter_fail_closed_go_no_arg
 PASS emitter_fail_closed_two_param_go
 PASS emitter_fail_closed_main_param
 PASS emitter_fail_closed_global_cap
@@ -80,14 +82,14 @@ PASS emitter_fail_closed_loop_go
 PASS emitter_fail_closed_no_chan
 PASS emitter_fail_closed_go_helper
 PASS emitter_fail_closed_preexisting
-14/14 passed
+16/16 passed
 ```
 
 - `emitter_fixture`：`go worker(req)` + `chan_make(8,1)`，产物逐行匹配。
 - `emitter_zero_arg`：`go worker()` 产出 `body 1 TASK 1 0`。
 - `emitter_mut_cap_before_call`：`cap=1` 在调用后重赋 2，plan 仍用调用点的 1。
 - `emitter_non_cr_default_output`：非 `.cr` 输入默认写 `<src>.plan`，不覆盖输入。
-- fail-closed：多 `go`、函数调用形式的动态 cap、`go worker(0)`（int 参数）、两参数 target、main 形参、helper 后写全局、loop 内 `go`、无 `chan_make`、`go` 在 helper、预存在输出，全部 rc=1 且目标路径不存在。
+- fail-closed：多 `go`、函数调用形式的动态 cap、`go worker(0)`（int 参数）、字面量 `go` 实参、单参数 target 的 `go worker()`、两参数 target、main 形参、helper 后写全局、loop 内 `go`、无 `chan_make`、`go` 在 helper、预存在输出，全部 rc=1 且目标路径不存在。
 
 ### 4.2 Runtime loader + E2E
 
