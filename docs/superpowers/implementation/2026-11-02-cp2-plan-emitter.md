@@ -38,7 +38,7 @@ edge 0 1 SPAWN -1
 支持：
 
 - `main` 内恰好一个 `sched_go`，且 `main` 自身没有参数；
-- `main` 内至少一个 `chan_make`；
+- `main` 内恰好一个 `chan_make`；多 channel 的 handle 绑定尚未建模，CP-3。
 - `chan_make` 的 `elem_size`/`cap` 在调用点有唯一 reaching definition，且该定义是整数字面量（调用后的重赋值不影响；分支/多定义/函数调用/全局读一律拒绝）；
 - `go` 目标函数有 0/1 个参数；1 个参数时必须是 `string`（channel handle）；
 - `sched_go`/`chan_make` 不在 loop/if/flow/unsafe 子图内；
@@ -47,13 +47,15 @@ edge 0 1 SPAWN -1
 不支持时打印 `error: conc-plan unsupported: ...`，rc=1，目标路径被删除（零 artifact）：
 
 - 多个 `sched_go`；
+- 多个 `chan_make`；
 - `main` 有参数；
-- 动态/多定义/非字面量 `chan_make` 参数；
+- 动态/多定义/非字面量 `chan_make` 参数；分支/循环内的单次定义；local 取地址后被 helper 改写；
 - `go` 目标参数 >1 或参数不是 string；
 - `go`/`chan_make` 在 loop/if 内；
-- `sched_go` arity 不是 2。
+- `sched_go` arity 不是 2；
+- frontend/type-check/lowering 失败时目标路径也会被删除（零 artifact）。
 
-当前不分析 worker body 内部的 send/recv 边；plan 只发出 `SPAWN` edge。channel handle 的 aliasing 也不分析（CP-3）。
+当前不分析 worker body 内部的 send/recv 边；plan 只发出 `SPAWN` edge。channel handle 的 aliasing 与“go 实参指向哪个 channel”的显式绑定也不分析；CP-2 通过限制为单 channel 来避免歧义（CP-3 建模多 channel 绑定）。
 
 ## 4. 验证
 
@@ -81,15 +83,21 @@ PASS emitter_fail_closed_global_cap
 PASS emitter_fail_closed_loop_go
 PASS emitter_fail_closed_no_chan
 PASS emitter_fail_closed_go_helper
+PASS emitter_frontend_failure_zero_artifact
+PASS emitter_fail_closed_branch_cap
+PASS emitter_fail_closed_alias_cap
+PASS emitter_fail_closed_multi_chan
+PASS emitter_fail_closed_no_chan
+PASS emitter_fail_closed_go_helper
 PASS emitter_fail_closed_preexisting
-16/16 passed
+20/20 passed
 ```
 
 - `emitter_fixture`：`go worker(req)` + `chan_make(8,1)`，产物逐行匹配。
 - `emitter_zero_arg`：`go worker()` 产出 `body 1 TASK 1 0`。
 - `emitter_mut_cap_before_call`：`cap=1` 在调用后重赋 2，plan 仍用调用点的 1。
 - `emitter_non_cr_default_output`：非 `.cr` 输入默认写 `<src>.plan`，不覆盖输入。
-- fail-closed：多 `go`、函数调用形式的动态 cap、`go worker(0)`（int 参数）、字面量 `go` 实参、单参数 target 的 `go worker()`、两参数 target、main 形参、helper 后写全局、loop 内 `go`、无 `chan_make`、`go` 在 helper、预存在输出，全部 rc=1 且目标路径不存在。
+- fail-closed：多 `go`、函数调用形式的动态 cap、`go worker(0)`（int 参数）、字面量 `go` 实参、单参数 target 的 `go worker()`、两参数 target、main 形参、helper 后写全局、loop 内 `go`、分支内 `chan_make` cap、`&cap` 被 helper 改写、多/无 `chan_make`、`go` 在 helper、预存在输出，以及 frontend 失败，全部 rc=1 且目标路径不存在。
 
 ### 4.2 Runtime loader + E2E
 
@@ -107,7 +115,7 @@ PASS conc_plan_e2e
 4/4 passed
 ```
 
-- `conc_plan_load`：手写 plan 文本 + entry table，加载后 `conc_run_body` 执行 worker。
+- `conc_plan_load`：手写 plan 文本 + entry table，加载后 `conc_run_body` 执行 worker；短 entry table、巨大 `entries`、entry=0、edge channel 越界/SEND -1 等负例均返回 `-1`。
 - `conc_plan_simt`：PAR plan 在 CPU 和 host-SIMT 上逐项对拍。
 - `conc_plan_negative`：body entry 越界、未知 token、非 SPSC、版本 2 均返回 `-1`。
 - `conc_plan_e2e`：`corec conc-plan` 生成 plan → 读回文本 → 生成 Core fixture（entry table + `conc_plan_load`）→ 用 plan 的 channel descriptor 创建 `chan_make(8,1)` → `conc_run_body` 调用**原始 `chan_recv` worker** → 返回 41。body 0 与 SPAWN edge 仍未执行，属于 CP-3；该测试证明的是“compiler plan 的 body/channel 描述被真实消费”，不是完整调度图执行。

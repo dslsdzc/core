@@ -93,7 +93,7 @@ jj commit -m "conc: load target-neutral plan text and run one body"
 - 只支持：
   - 一个函数内一个 `sched_go` 调用；
   - `chan_make` 的 `elemsize`/`cap` 是整数字面量；
-  - channel handle 是直接变量（`chan_make` dest、函数参数、全局变量）；aliasing 不分析，属 CP-3 限制。
+  - channel handle 是直接变量（`chan_make` dest、函数参数、全局变量）；aliasing 与 go 实参→channel id 的显式绑定不分析，属 CP-3 限制。
 - 不支持时：打印 `error: conc-plan unsupported: ...`，返回 1，目标路径被删除（零 artifact）。
 
 - [ ] **Step 1: 写失败测试**
@@ -130,7 +130,7 @@ edge 0 1 SPAWN -1
 - 先登记 `chan_make` 的 dest var -> channel id（常量参数通过 var 的 `IR_CONST`/`IR_STORE` 回溯）。
 - 再扫 `sched_go`：从 arg0 的 `IR_STORE` 追到 `IR_FNADDR`，取函数名；记录 body(name, params=1)。body 0 固定为 entry/main（entry index 0，params 0）。
 - 入口函数里每发现一个 `chan_send`/`chan_recv` 且 handle 可解析，输出 `SEND`/`RECV` edge；解析不到就 fail-closed。
-- 只支持单 `go`；多 `go`、动态 cap、main 形参、嵌套调用、非 string 参数都返回 1。aliasing 不分析（CP-3）。
+- 只支持单 `go` + 单 `chan_make`；多 `go`/多 channel、动态 cap、main 形参、嵌套调用、非 string 参数、分支/循环内定义、`&cap` 改写都返回 1。aliasing 与显式 channel 绑定不分析（CP-3）。
 
 - [ ] **Step 3: 跑测试**
 
