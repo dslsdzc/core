@@ -252,9 +252,10 @@ jj commit -m "conc: plan fixture descriptors (CP-1)"
 - Modify: `tests/selfhost/test_conc_runtime.py`
 
 **Interfaces:**
-- `conc_run_cpu(plan: int, arg: int) -> int`
-- CPU mapping：单 slot，按 plan 的 body 顺序执行；TASK body 调 `entry(arg)`；DATA_PARALLEL body 先按串行 fallback 遍历索引。
+- `conc_run_cpu(plan: int, arg: string) -> int`
+- CPU mapping：单 slot，按 plan 的 body 顺序执行；TASK body 调 `entry(arg)`；DATA_PARALLEL body 先按串行 fallback 遍历 `0..params`。
 - 用 `sched_call_1` 调 body entry；entry 的地址由 `@addr` 给出。
+- `sched_call_1` 是 CP-1 的必要后端原语；实现前必须修正 `src/format/elf/elf.cr` 的两处缺陷：trampoline 从 `rdi+rsi*8` 取表项（不是 `rax`），且 Phase 3 必须更新 Phase 2 预登记的偏移而不是追加重复项。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -339,17 +340,26 @@ fn main() -> int:
     r := conc_region_new(65536)
     g_arr = conc_alloc(r, 8 * 16)
     p := conc_plan_new()
-    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(par), 1)
-    if conc_run_cpu(p, 0) != 0:
+    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(par), 16)
+    if conc_run_cpu(p, "") != 0:
         return 1
-    c0 := cell_load(g_arr, 3 * 8)
-    if c0 != 9:
-        return 2
+    i : ., mut = 0
+    loop:
+        if i >= 16:
+            break
+        if cell_load(g_arr, i * 8) != i * i:
+            return 2
+        cell_store(g_arr, i * 8, -1)
+        i = i + 1
     if conc_run_simt(p, 0, 16) != 0:
         return 3
-    s0 := cell_load(g_arr, 3 * 8)
-    if s0 != 9:
-        return 4
+    i = 0
+    loop:
+        if i >= 16:
+            break
+        if cell_load(g_arr, i * 8) != i * i:
+            return 4
+        i = i + 1
     return 0
 ```
 
@@ -365,7 +375,7 @@ fn main() -> int:
 nice -n 19 python3 tests/selfhost/test_conc_runtime.py
 ```
 
-Expected: `PASS conc simt`, `PASS conc cpu_simt_same`.
+Expected: `PASS conc simt`（该 case 内先 CPU 后 SIMT，逐项检查 `0..15`；同一份 plan 的 CPU/SIMT 输出必须相等）。
 
 - [ ] **Step 4: 提交**
 
@@ -382,7 +392,7 @@ jj commit -m "conc: host SIMT plan executor, same plan as CPU (CP-1)"
 
 - [ ] **Step 1: 合并测试入口**
 
-`test_conc_runtime.py` 跑完整 fixture：region、channel、plan、CPU、SIMT、CPU/SIMT 对拍。
+`test_conc_runtime.py` 跑完整 fixture：region、channel、plan、CPU、SIMT（CPU/SIMT 同 plan 逐项对拍）、lifetime、negative，共 7 例。
 `src/ci/run.sh` 的 `selfhost-tests` 段加入该测试。
 
 - [ ] **Step 2: 生命周期负例**
@@ -416,6 +426,6 @@ jj commit -m "docs: record cross-paradigm CP-1 runtime substrate"
 
 - **Spec coverage:** CP-1 覆盖 spec 的 Region/Message/Channel/ExecutionBody 基础对象模型与 CPU/SIMT mapping 验证；编译器 plan emitter、真实 GPU、transfer 全 primitive 明确留 CP-2。
 - **Step scan:** 每个 task 有失败测试、最小实现、验证、提交。
-- **Type consistency:** `conc_region_new(int)`, `conc_alloc(int,int)`, `conc_channel_new(int,int,int)`, `conc_plan_add_body(int,int,int,int)`, `conc_run_cpu(int,string,string)`, `conc_run_simt(int,string,string)` 固定。
+- **Type consistency:** `conc_region_new(int)`, `conc_alloc(int,int)`, `conc_channel_new(int,int,int)`, `conc_plan_add_body(int,int,int,int)`, `conc_run_cpu(int,string)`, `conc_run_simt(int,int,int)` 固定。
 - **Review Focus:** 生命周期、typed message、同 plan 对拍、target-neutral plan、fail-closed 均有对应测试。
 - **Proportion:** 计划只给接口、fixture 和验收，不转录完整实现。
