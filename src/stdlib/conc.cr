@@ -18,8 +18,22 @@ CONC_EDGE_SPAWN : int, pub = 1
 CONC_EDGE_SEND : int, pub = 2
 CONC_EDGE_JOIN : int, pub = 3
 
-CONC_MSG_MAGIC : int = 1129270851       // "CONC"
-CONC_CHANNEL_MAGIC : int = 1129270856   // "CONH"
+// CP-1 only implements single-producer/single-consumer channels.
+CONC_PC_SPSC : int, pub = 1
+
+// Status codes for conc_send/conc_recv and conc_last_error.
+CONC_OK : int, pub = 0
+CONC_ERR_INVALID : int, pub = -1
+CONC_ERR_FULL : int, pub = 1
+CONC_ERR_EMPTY : int, pub = 2
+CONC_ERR_NOMEM : int, pub = 3
+
+// The same 1 TiB ceiling the arena allocator uses; keeps size arithmetic well
+// inside the raw 64-bit range.
+CONC_MAX_ALLOC : int = 1099511627776
+
+CONC_MSG_MAGIC : int = 1129270851       // 0x434F4E43; LE bytes are "CNOC"
+CONC_CHANNEL_MAGIC : int = 1129270856   // 0x434F4E48; LE bytes are "HNOC"
 CONC_MSG_HEADER : int = 32
 
 // Region table. Each region owns a global-heap block and a bump cursor.
@@ -35,9 +49,14 @@ g_conc_plans : string, mut
 g_conc_plan_count : int, mut = 0
 g_conc_plan_array_cap : int, mut = 0
 
-// A single 8-byte table used by sched_call_1. CP-1 executes one body at a
+// A single 8-byte table used by sched_call_*. CP-1 executes one body at a
 // time; concurrent mappings will eventually own their own call tables.
 g_conc_call_table : string, mut
+
+// 0 / CONC_ERR_* for the most recent send/recv. This lets recv distinguish an
+// empty queue from an output-allocation failure without changing its string
+// return type.
+g_conc_last_error : int, mut = 0
 
 // ── Raw pointer helpers ───────────────────────────────────────────────────
 
@@ -54,6 +73,16 @@ fn _conc_ptr(v: int) -> string:
     unsafe:
         p = @str_of(v)
     return p
+
+// In a static ELF, @ptr_of("") is not zero; the empty string is a real rodata
+// object. Allocation failure therefore has to be detected by its zero length,
+// not only by a null pointer.
+fn _conc_is_null(p: string) -> int:
+    if _conc_addr(p) == 0:
+        return 1
+    if str_len(p) <= 0:
+        return 1
+    return 0
 
 // Allocate outside the current compiler function arena. Runtime objects must
 // live in owner regions, never in a function arena.
@@ -93,13 +122,13 @@ fn _conc_region_ensure(needed: int) -> int:
     cb := _conc_global_alloc(nc * 8)
     cu := _conc_global_alloc(nc * 8)
     ep := _conc_global_alloc(nc * 8)
-    if _conc_addr(nb) == 0:
+    if _conc_is_null(nb) != 0:
         return -1
-    if _conc_addr(cb) == 0:
+    if _conc_is_null(cb) != 0:
         return -1
-    if _conc_addr(cu) == 0:
+    if _conc_is_null(cu) != 0:
         return -1
-    if _conc_addr(ep) == 0:
+    if _conc_is_null(ep) != 0:
         return -1
     if g_conc_region_array_cap > 0:
         _conc_copy(nb, g_conc_region_block, g_conc_region_array_cap * 8)
@@ -124,13 +153,22 @@ fn _conc_region_valid(region: int) -> int:
     return 1
 
 fn conc_region_new(size: int) -> int, pub:
-    if size <= 1:
+    // A region smaller than one message header is not useful and makes
+    // capacity tests confusing.
+    if size < 64:
+        return -1
+    if size > CONC_MAX_ALLOC - 16:
         return -1
     if _conc_region_ensure(g_conc_region_count + 1) != 0:
         return -1
-    block := _conc_global_alloc(size)
-    if _conc_addr(block) == 0:
+    raw := _conc_global_alloc(size + 16)
+    if _conc_is_null(raw) != 0:
         return -1
+    // alloc() only guarantees 8-byte data alignment. Payloads are promised
+    // 16-byte alignment, so align the region base once, here.
+    a := _conc_addr(raw)
+    aligned : ., mut = (a + 15) / 16 * 16
+    block := _conc_ptr(aligned)
     id := g_conc_region_count
     store_str_ptr(g_conc_region_block, id * 8, block)
     cell_store(g_conc_region_cap, id * 8, size)
@@ -148,11 +186,20 @@ fn conc_alloc(region: int, size: int) -> string, pub:
         return _conc_ptr(0)
     if size <= 0:
         return _conc_ptr(0)
-    aligned : ., mut = (size + 15) / 16 * 16
+    if size > CONC_MAX_ALLOC:
+        return _conc_ptr(0)
+    // Reserve one extra byte for the Core string NUL terminator.
+    aligned : ., mut = (size + 1 + 15) / 16 * 16
     total := CONC_MSG_HEADER + aligned
-    cursor := cell_load(g_conc_region_cursor, region * 8)
+    if total > CONC_MAX_ALLOC:
+        return _conc_ptr(0)
     cap := cell_load(g_conc_region_cap, region * 8)
-    if cursor + total > cap:
+    cursor := cell_load(g_conc_region_cursor, region * 8)
+    if cursor < 0:
+        return _conc_ptr(0)
+    if total > cap:
+        return _conc_ptr(0)
+    if cursor > cap - total:
         return _conc_ptr(0)
     base := load_str_ptr(g_conc_region_block, region * 8)
     if _conc_addr(base) == 0:
@@ -162,6 +209,7 @@ fn conc_alloc(region: int, size: int) -> string, pub:
     cell_store(hdr, 8, region)
     cell_store(hdr, 16, cell_load(g_conc_region_epoch, region * 8))
     cell_store(hdr, 24, size + 1)
+    store8(hdr, CONC_MSG_HEADER + size, 0)
     cell_store(g_conc_region_cursor, region * 8, cursor + total)
     return _conc_ptr(_conc_addr(hdr) + CONC_MSG_HEADER)
 
@@ -178,69 +226,88 @@ fn conc_region_owner(region: int) -> int, pub:
         return -1
     return 0
 
-fn conc_is_ok(p: string) -> int, pub:
-    if str_len(p) <= 0:
-        return 0
+// Find the region containing address a, or -1. This is checked before reading
+// a payload header, so conc_is_ok("ordinary string") does not read before the
+// string's data.
+fn _conc_region_of_addr(a: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_conc_region_count:
+            break
+        base := load_str_ptr(g_conc_region_block, i * 8)
+        lo := _conc_addr(base)
+        if lo != 0:
+            cap := cell_load(g_conc_region_cap, i * 8)
+            if a >= lo + CONC_MSG_HEADER:
+                if a < lo + cap:
+                    return i
+        i = i + 1
+    return -1
+
+// Full MessageRef header check: containment, magic, region identity, epoch,
+// size, and payload bounds. It deliberately does not recurse through the
+// public API.
+fn _conc_header_ok(p: string) -> int:
     a := _conc_addr(p)
-    if a < CONC_MSG_HEADER:
+    if a == 0:
+        return 0
+    rid := _conc_region_of_addr(a)
+    if rid < 0:
+        return 0
+    if str_len(p) <= 0:
         return 0
     hdr := _conc_ptr(a - CONC_MSG_HEADER)
     if cell_load(hdr, 0) != CONC_MSG_MAGIC:
         return 0
+    if cell_load(hdr, 8) != rid:
+        return 0
+    if cell_load(hdr, 16) != cell_load(g_conc_region_epoch, rid * 8):
+        return 0
+    sz := cell_load(hdr, 24) - 1
+    if sz <= 0:
+        return 0
+    cap := cell_load(g_conc_region_cap, rid * 8)
+    if sz > cap:
+        return 0
+    base := load_str_ptr(g_conc_region_block, rid * 8)
+    lo := _conc_addr(base)
+    if a > lo + cap - sz:
+        return 0
     return 1
+
+fn conc_is_ok(p: string) -> int, pub:
+    return _conc_header_ok(p)
+
+fn conc_is_aligned(p: string, align: int) -> int, pub:
+    if align <= 0:
+        return 0
+    if _conc_is_null(p) != 0:
+        return 0
+    if _conc_addr(p) % align == 0:
+        return 1
+    return 0
+
+fn conc_last_error() -> int, pub:
+    return g_conc_last_error
 
 fn conc_same(a: string, b: string) -> int, pub:
     if _conc_addr(a) == _conc_addr(b):
         return 1
     return 0
 
-fn _conc_msg_hdr(p: string) -> string:
+fn _conc_msg_size(p: string) -> int:
+    // Only called after _conc_header_ok/_conc_msg_valid has accepted p.
     a := _conc_addr(p)
     if a < CONC_MSG_HEADER:
-        return _conc_ptr(0)
-    return _conc_ptr(a - CONC_MSG_HEADER)
-
-fn _conc_msg_size(p: string) -> int:
-    hdr := _conc_msg_hdr(p)
-    if _conc_addr(hdr) == 0:
         return -1
+    hdr := _conc_ptr(a - CONC_MSG_HEADER)
     return cell_load(hdr, 24) - 1
 
-fn _conc_msg_region(p: string) -> int:
-    hdr := _conc_msg_hdr(p)
-    if _conc_addr(hdr) == 0:
-        return -1
-    return cell_load(hdr, 8)
-
-fn _conc_msg_epoch(p: string) -> int:
-    hdr := _conc_msg_hdr(p)
-    if _conc_addr(hdr) == 0:
-        return -1
-    return cell_load(hdr, 16)
-
-// A message is valid only while its owner region is live and its epoch
-// matches. region_reset advances the epoch, so stale payload pointers stop
-// being accepted by send/recv without needing a free list.
+// A message is valid only while its owner region is live, its epoch matches,
+// and its stated size fits inside that region. region_reset advances the
+// epoch, so stale payload pointers stop being accepted by send/recv.
 fn _conc_msg_valid(p: string) -> int:
-    if conc_is_ok(p) == 0:
-        return 0
-    rid := _conc_msg_region(p)
-    if _conc_region_valid(rid) == 0:
-        return 0
-    if _conc_msg_epoch(p) != cell_load(g_conc_region_epoch, rid * 8):
-        return 0
-    base := load_str_ptr(g_conc_region_block, rid * 8)
-    lo := _conc_addr(base)
-    hi := lo + cell_load(g_conc_region_cap, rid * 8)
-    a := _conc_addr(p)
-    sz := _conc_msg_size(p)
-    if sz <= 0:
-        return 0
-    if a < lo + CONC_MSG_HEADER:
-        return 0
-    if a + sz > hi:
-        return 0
-    return 1
+    return _conc_header_ok(p)
 
 // ── Typed channel ─────────────────────────────────────────────────────────
 //
@@ -259,16 +326,32 @@ fn _conc_channel_valid(ch: string) -> int:
         return 0
     if cell_load(ch, 56) != cell_load(g_conc_region_epoch, rid * 8):
         return 0
-    if cell_load(ch, 40) <= 0:
+    esize := cell_load(ch, 40)
+    if esize <= 0:
         return 0
-    if cell_load(ch, 16) <= 0:
+    cap := cell_load(ch, 16)
+    if cap <= 0:
         return 0
     n := cell_load(ch, 24)
     if n < 0:
         return 0
-    if n > cell_load(ch, 16):
+    if n > cap:
         return 0
-    if _conc_addr(load_str_ptr(ch, 8)) == 0:
+    head := cell_load(ch, 32)
+    if head < 0:
+        return 0
+    if head >= cap:
+        return 0
+    buf := load_str_ptr(ch, 8)
+    b := _conc_addr(buf)
+    if b == 0:
+        return 0
+    if b != _conc_addr(ch) + 64:
+        return 0
+    total := _conc_msg_size(ch)
+    if total < 64:
+        return 0
+    if cap > (total - 64) / esize:
         return 0
     return 1
 
@@ -279,9 +362,15 @@ fn conc_channel_new(region: int, elem_size: int, cap: int) -> string, pub:
         return _conc_ptr(0)
     if cap <= 0:
         return _conc_ptr(0)
+    if cap > CONC_MAX_ALLOC:
+        return _conc_ptr(0)
+    if elem_size > CONC_MAX_ALLOC / cap:
+        return _conc_ptr(0)
     total := 64 + cap * elem_size
+    if total > CONC_MAX_ALLOC:
+        return _conc_ptr(0)
     ch := conc_alloc(region, total)
-    if _conc_addr(ch) == 0:
+    if _conc_is_null(ch) != 0:
         return _conc_ptr(0)
     buf := _conc_ptr(_conc_addr(ch) + 64)
     cell_store(ch, 0, CONC_CHANNEL_MAGIC)
@@ -296,26 +385,28 @@ fn conc_channel_new(region: int, elem_size: int, cap: int) -> string, pub:
 
 fn conc_channel_len(ch: string) -> int, pub:
     if _conc_channel_valid(ch) == 0:
-        return 0
+        return -1
     return cell_load(ch, 24)
 
 fn conc_channel_elemsize(ch: string) -> int, pub:
     if _conc_channel_valid(ch) == 0:
-        return 0
+        return -1
     return cell_load(ch, 40)
 
 fn conc_send(ch: string, msg: string) -> int, pub:
+    g_conc_last_error = CONC_ERR_INVALID
     if _conc_channel_valid(ch) == 0:
-        return -1
+        return CONC_ERR_INVALID
     if _conc_msg_valid(msg) == 0:
-        return -1
+        return CONC_ERR_INVALID
     esize := cell_load(ch, 40)
     if _conc_msg_size(msg) != esize:
-        return -1
+        return CONC_ERR_INVALID
     cap := cell_load(ch, 16)
     n := cell_load(ch, 24)
     if n >= cap:
-        return 1
+        g_conc_last_error = CONC_ERR_FULL
+        return CONC_ERR_FULL
     head := cell_load(ch, 32)
     buf := load_str_ptr(ch, 8)
     slot : ., mut = head + n
@@ -324,18 +415,22 @@ fn conc_send(ch: string, msg: string) -> int, pub:
     dst := _conc_ptr(_conc_addr(buf) + slot * esize)
     _conc_copy(dst, msg, esize)
     cell_store(ch, 24, n + 1)
-    return 0
+    g_conc_last_error = CONC_OK
+    return CONC_OK
 
 fn conc_recv(ch: string) -> string, pub:
+    g_conc_last_error = CONC_ERR_INVALID
     if _conc_channel_valid(ch) == 0:
         return _conc_ptr(0)
     n := cell_load(ch, 24)
     if n <= 0:
+        g_conc_last_error = CONC_ERR_EMPTY
         return _conc_ptr(0)
     esize := cell_load(ch, 40)
     rid := cell_load(ch, 48)
     out := conc_alloc(rid, esize)
-    if _conc_addr(out) == 0:
+    if _conc_is_null(out) != 0:
+        g_conc_last_error = CONC_ERR_NOMEM
         return _conc_ptr(0)
     head : ., mut = cell_load(ch, 32)
     buf := load_str_ptr(ch, 8)
@@ -346,6 +441,7 @@ fn conc_recv(ch: string) -> string, pub:
         head = 0
     cell_store(ch, 32, head)
     cell_store(ch, 24, n - 1)
+    g_conc_last_error = CONC_OK
     return out
 
 // ── Fixture plan ──────────────────────────────────────────────────────────
@@ -366,7 +462,7 @@ fn _conc_plan_ensure(needed: int) -> int:
     if nc < needed:
         nc = needed + 8
     nb := _conc_global_alloc(nc * 8)
-    if _conc_addr(nb) == 0:
+    if _conc_is_null(nb) != 0:
         return -1
     if g_conc_plan_array_cap > 0:
         _conc_copy(nb, g_conc_plans, g_conc_plan_array_cap * 8)
@@ -380,7 +476,7 @@ fn _conc_plan_valid(plan: int) -> int:
     if plan >= g_conc_plan_count:
         return 0
     p := load_str_ptr(g_conc_plans, plan * 8)
-    if _conc_addr(p) == 0:
+    if _conc_is_null(p) != 0:
         return 0
     return 1
 
@@ -394,10 +490,10 @@ fn _conc_plan_grow_bodies(p: string, cap: int) -> int:
     if nc < 8:
         nc = 8
     nb := _conc_global_alloc(nc * 32)
-    if _conc_addr(nb) == 0:
+    if _conc_is_null(nb) != 0:
         return -1
     old := load_str_ptr(p, 48)
-    if _conc_addr(old) != 0:
+    if _conc_is_null(old) == 0:
         _conc_copy(nb, old, cell_load(p, 0) * 32)
     store_str_ptr(p, 48, nb)
     cell_store(p, 24, nc)
@@ -408,10 +504,10 @@ fn _conc_plan_grow_channels(p: string, cap: int) -> int:
     if nc < 8:
         nc = 8
     nb := _conc_global_alloc(nc * 32)
-    if _conc_addr(nb) == 0:
+    if _conc_is_null(nb) != 0:
         return -1
     old := load_str_ptr(p, 56)
-    if _conc_addr(old) != 0:
+    if _conc_is_null(old) == 0:
         _conc_copy(nb, old, cell_load(p, 8) * 32)
     store_str_ptr(p, 56, nb)
     cell_store(p, 32, nc)
@@ -422,10 +518,10 @@ fn _conc_plan_grow_edges(p: string, cap: int) -> int:
     if nc < 8:
         nc = 8
     nb := _conc_global_alloc(nc * 32)
-    if _conc_addr(nb) == 0:
+    if _conc_is_null(nb) != 0:
         return -1
     old := load_str_ptr(p, 64)
-    if _conc_addr(old) != 0:
+    if _conc_is_null(old) == 0:
         _conc_copy(nb, old, cell_load(p, 16) * 32)
     store_str_ptr(p, 64, nb)
     cell_store(p, 40, nc)
@@ -435,16 +531,16 @@ fn conc_plan_new() -> int, pub:
     if _conc_plan_ensure(g_conc_plan_count + 1) != 0:
         return -1
     p := _conc_global_alloc(80)
-    if _conc_addr(p) == 0:
+    if _conc_is_null(p) != 0:
         return -1
     bodies := _conc_global_alloc(8 * 32)
     channels := _conc_global_alloc(8 * 32)
     edges := _conc_global_alloc(8 * 32)
-    if _conc_addr(bodies) == 0:
+    if _conc_is_null(bodies) != 0:
         return -1
-    if _conc_addr(channels) == 0:
+    if _conc_is_null(channels) != 0:
         return -1
-    if _conc_addr(edges) == 0:
+    if _conc_is_null(edges) != 0:
         return -1
     store_str_ptr(p, 48, bodies)
     store_str_ptr(p, 56, channels)
@@ -462,7 +558,13 @@ fn conc_plan_add_body(plan: int, kind: int, entry: int, params: int) -> int, pub
         return -1
     if kind != CONC_BODY_TASK && kind != CONC_BODY_DATA_PARALLEL:
         return -1
+    if entry < 0:
+        return -1
     if params < 0:
+        return -1
+    // CP-1 host TASK entries take zero or one argument. More parameters need
+    // a param layout/lowering step that belongs to CP-2.
+    if kind == CONC_BODY_TASK && params > 1:
         return -1
     p := _conc_plan_at(plan)
     n := cell_load(p, 0)
@@ -484,9 +586,9 @@ fn conc_plan_add_channel(plan: int, elem_size: int, cap: int, pc: int) -> int, p
         return -1
     if elem_size <= 0:
         return -1
-    if cap < 0:
+    if cap <= 0:
         return -1
-    if pc <= 0:
+    if pc != CONC_PC_SPSC:
         return -1
     p := _conc_plan_at(plan)
     n := cell_load(p, 8)
@@ -554,14 +656,22 @@ fn _conc_body_at(plan: int, idx: int) -> string:
 // Neither executor invents target capabilities.
 
 fn _conc_call_ready() -> int:
-    if _conc_addr(g_conc_call_table) == 0:
+    if _conc_is_null(g_conc_call_table) != 0:
         g_conc_call_table = _conc_global_alloc(8)
-        if _conc_addr(g_conc_call_table) == 0:
+        if _conc_is_null(g_conc_call_table) != 0:
             return 0
     return 1
 
+fn _conc_call0(entry: int) -> int:
+    if entry <= 0:
+        return -1
+    if _conc_call_ready() == 0:
+        return -1
+    cell_store(g_conc_call_table, 0, entry)
+    return sched_call_0(_conc_addr(g_conc_call_table), 0)
+
 fn _conc_call_str(entry: int, arg: string) -> int:
-    if entry == 0:
+    if entry <= 0:
         return -1
     if _conc_call_ready() == 0:
         return -1
@@ -569,7 +679,7 @@ fn _conc_call_str(entry: int, arg: string) -> int:
     return sched_call_1(_conc_addr(g_conc_call_table), 0, _conc_addr(arg))
 
 fn _conc_call_int(entry: int, arg: int) -> int:
-    if entry == 0:
+    if entry <= 0:
         return -1
     if _conc_call_ready() == 0:
         return -1
@@ -589,9 +699,17 @@ fn conc_run_cpu(plan: int, arg: string) -> int, pub:
         entry := cell_load(b, 8)
         params := cell_load(b, 16)
         if kind == CONC_BODY_TASK:
-            rc := _conc_call_str(entry, arg)
-            if rc != 0:
-                return rc
+            if params == 0:
+                rc := _conc_call0(entry)
+                if rc != 0:
+                    return rc
+            else:
+                if params == 1:
+                    rc := _conc_call_str(entry, arg)
+                    if rc != 0:
+                        return rc
+                else:
+                    return -1
         else:
             if kind == CONC_BODY_DATA_PARALLEL:
                 j : ., mut = 0

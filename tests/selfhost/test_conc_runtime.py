@@ -33,6 +33,87 @@ fn main() -> int:
     return 0
 """
 
+REGION_ARENA = """\
+import arena
+import conc
+
+fn make_region() -> int:
+    return conc_region_new(4096)
+
+fn main() -> int:
+    arena_init(67108864, 65536)
+    before := arena_current_unchecked()
+    r := make_region()
+    after := arena_current_unchecked()
+    if before != after:
+        return 1
+    a := arena_new_sized(65536)
+    p := conc_alloc(r, 64)
+    if conc_is_ok(p) == 0:
+        return 2
+    cell_store(p, 0, 123)
+    arena_reset(a)
+    if conc_is_ok(p) == 0:
+        return 3
+    if cell_load(p, 0) != 123:
+        return 4
+    return 0
+"""
+
+REGION_EXHAUST = """\
+import conc
+
+fn main() -> int:
+    r := conc_region_new(64)
+    if r < 0:
+        return 1
+    p := conc_alloc(r, 64)
+    if conc_is_ok(p) != 0:
+        return 2
+    ch := conc_channel_new(r, 8, 1000)
+    if conc_is_ok(ch) != 0:
+        return 3
+    r2 := conc_region_new(160)
+    ch2 := conc_channel_new(r2, 8, 1)
+    a := conc_alloc(r2, 8)
+    cell_store(a, 0, 7)
+    if conc_send(ch2, a) != 0:
+        return 4
+    if conc_channel_len(ch2) != 1:
+        return 5
+    x := conc_recv(ch2)
+    if conc_is_ok(x) != 0:
+        return 6
+    if conc_last_error() != CONC_ERR_NOMEM:
+        return 7
+    if conc_channel_len(ch2) != 1:
+        return 8
+    if conc_is_ok(conc_alloc(r2, 9223372036854775807)) != 0:
+        return 9
+    if conc_is_ok(conc_channel_new(r2, 8, 1000000000000)) != 0:
+        return 10
+    return 0
+"""
+
+ALIGNMENT = """\
+import conc
+
+fn main() -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 8:
+            break
+        d := conc_region_new(72)
+        if d < 0:
+            return 1
+        r := conc_region_new(4096)
+        p := conc_alloc(r, 16)
+        if conc_is_aligned(p, 16) == 0:
+            return 1
+        i = i + 1
+    return 0
+"""
+
 CHANNEL = """\
 import conc
 
@@ -64,6 +145,85 @@ fn main() -> int:
     z := conc_recv(ch)
     if conc_is_ok(z) != 0:
         return 8
+    return 0
+"""
+
+CHANNEL_EDGE = """\
+import conc
+
+fn main() -> int:
+    r := conc_region_new(16384)
+    ch := conc_channel_new(r, 12, 2)
+    if conc_channel_elemsize(ch) != 12:
+        return 1
+    a := conc_alloc(r, 12)
+    b := conc_alloc(r, 12)
+    c := conc_alloc(r, 12)
+    cell_store(a, 0, 101)
+    cell_store(a, 8, 102)
+    cell_store(b, 0, 201)
+    cell_store(b, 8, 202)
+    cell_store(c, 0, 301)
+    cell_store(c, 8, 302)
+    if conc_send(ch, a) != 0:
+        return 2
+    if conc_send(ch, b) != 0:
+        return 3
+    cell_store(a, 0, 999)
+    x := conc_recv(ch)
+    if cell_load(x, 0) != 101:
+        return 4
+    if conc_send(ch, c) != 0:
+        return 5
+    y := conc_recv(ch)
+    z := conc_recv(ch)
+    if cell_load(y, 0) != 201:
+        return 6
+    if cell_load(z, 0) != 301:
+        return 7
+    if conc_recv(ch) != "":
+        return 8
+    if conc_last_error() != CONC_ERR_EMPTY:
+        return 9
+    return 0
+"""
+
+PLAN_GROWTH = """\
+import conc
+
+fn main() -> int:
+    p := conc_plan_new()
+    i : ., mut = 0
+    loop:
+        if i >= 20:
+            break
+        if conc_plan_add_body(p, CONC_BODY_TASK, 0, 0) != i:
+            return 1
+        if conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC) != i:
+            return 2
+        i = i + 1
+    if conc_plan_body_count(p) != 20:
+        return 3
+    if conc_plan_channel_count(p) != 20:
+        return 4
+    if conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN) != 0:
+        return 5
+    if conc_plan_add_edge(p, 1, 2, CONC_EDGE_SEND) != 1:
+        return 6
+    if conc_plan_add_edge(p, 2, 3, CONC_EDGE_JOIN) != 2:
+        return 7
+    if conc_plan_edge_count(p) != 3:
+        return 8
+    if conc_plan_add_edge(p, 0, 20, CONC_EDGE_SPAWN) != -1:
+        return 9
+    if conc_plan_add_body(p, CONC_BODY_TASK, -1, 0) != -1:
+        return 10
+    if conc_plan_add_body(p, CONC_BODY_TASK, 1, 2) != -1:
+        return 11
+    if conc_plan_add_channel(p, 8, 0, CONC_PC_SPSC) != -1:
+        return 12
+    if conc_plan_add_channel(p, 8, 1, 2) != -1:
+        return 13
     return 0
 """
 
@@ -118,6 +278,25 @@ fn main() -> int:
     return 0
 """
 
+CPU0 = """\
+import conc
+
+g_hit : int, mut = 0
+
+fn zero() -> int:
+    g_hit = 1
+    return 0
+
+fn main() -> int:
+    p := conc_plan_new()
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(zero), 0)
+    if conc_run_cpu(p, "") != 0:
+        return 1
+    if g_hit != 1:
+        return 2
+    return 0
+"""
+
 SIMT = """\
 import conc
 
@@ -162,11 +341,15 @@ fn main() -> int:
     ch := conc_channel_new(r, 8, 1)
     v := conc_alloc(r, 8)
     cell_store(v, 0, 7)
-    conc_region_reset(r)
-    if conc_send(ch, v) == 0:
+    if conc_is_ok("hello") != 0:
         return 1
-    if conc_recv(ch) != "":
+    conc_region_reset(r)
+    if conc_is_ok(v) != 0:
         return 2
+    if conc_send(ch, v) == 0:
+        return 3
+    if conc_recv(ch) != "":
+        return 4
     return 0
 """
 
@@ -241,9 +424,15 @@ def build_run(name: str, source: str, timeout: int = 60) -> bool:
 def main() -> int:
     cases = [
         ("conc_region", REGION, 30),
+        ("conc_region_arena", REGION_ARENA, 60),
+        ("conc_region_exhaust", REGION_EXHAUST, 30),
+        ("conc_alignment", ALIGNMENT, 30),
         ("conc_channel", CHANNEL, 30),
+        ("conc_channel_edge", CHANNEL_EDGE, 30),
         ("conc_plan", PLAN, 30),
+        ("conc_plan_growth", PLAN_GROWTH, 30),
         ("conc_cpu", CPU, 30),
+        ("conc_cpu0", CPU0, 30),
         ("conc_simt", SIMT, 30),
         ("conc_lifetime", LIFETIME, 30),
         ("conc_negative", NEGATIVE, 30),
