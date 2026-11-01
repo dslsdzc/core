@@ -1,7 +1,15 @@
-// Channel: typed FIFO, goroutine-safe with wait queues
+// Channel: SPSC lock-free ring.
+//
+// head is consumer-owned and only advanced by recv; tail is producer-owned and
+// only advanced by send. The two wait slots hold at most one G each (SPSC
+// contract). `xchg` claims a waiter, so close and the opposite side cannot wake
+// the same G twice.
+//
+// Layout (64 bytes):
+//   0 buf, 8 cap, 16 head, 24 tail, 32 esize,
+//  40 send_wait, 48 recv_wait, 56 closed.
 import sched
 
-// Auto-initialization: any channel op triggers sched_init if needed.
 g_chan_inited : int, mut = 0
 
 fn _chan_ensure_init():
@@ -9,162 +17,109 @@ fn _chan_ensure_init():
         sched_init()
         g_chan_inited = 1
 
-// Channel layout (64 bytes):
-//   0: buf        — pointer to ring buffer
-//   8: cap        — capacity
-//  16: len        — current length
-//  24: head       — head index
-//  32: esize      — element size
-//  40: send_wait  — linked list of goroutines blocked on send (-1 = empty)
-//  48: recv_wait  — linked list of goroutines blocked on recv (-1 = empty)
-//  56: closed     — 0 = open, 1 = closed
-//
-// Goroutine (G) struct fields used by wait queues:
-//   8: status     — 0=Grunnable, 1=Grunning, 2=Gwaiting, 3=Gdead
-//  40: result_ch  — result channel (set by sched_go; NOT used as chan_wait —
-//      the wait lists live on the channel itself, so writing offset 40 here
-//      would clobber result_ch and redirect the wrapper's chan_send)
-//  48: next       — next waiter in linked list (-1 = end)
-//  72: temp_val   — temporary value storage for handoff (offset 56 is
-//      saved_fn — never write it from channel code)
-
 fn chan_make(elemsize: int, cap: int) -> string, pub:
     _chan_ensure_init()
     ch := alloc(64)
     buf := alloc(cap * elemsize)
-    cell_store(ch, 0, buf)        // buf
-    cell_store(ch, 8, cap)         // cap
-    cell_store(ch, 16, 0)          // len
-    cell_store(ch, 24, 0)          // head
-    cell_store(ch, 32, elemsize)   // elemsize
-    cell_store(ch, 40, -1)         // send_wait = empty
-    cell_store(ch, 48, -1)         // recv_wait = empty
-    cell_store(ch, 56, 0)          // closed = false
+    cell_store(ch, 0, buf)
+    cell_store(ch, 8, cap)
+    cell_store(ch, 16, 0)       // head
+    cell_store(ch, 24, 0)       // tail
+    cell_store(ch, 32, elemsize)
+    cell_store(ch, 40, 0)       // send_wait = none
+    cell_store(ch, 48, 0)       // recv_wait = none
+    cell_store(ch, 56, 0)       // closed
     return ch
 
 fn chan_send(ch: string, val: int), pub:
     _chan_ensure_init()
-    buf := cell_load(ch, 0)
-    cap := cell_load(ch, 8)
-    len := cell_load(ch, 16)
-    head := cell_load(ch, 24)
-    esize := cell_load(ch, 32)
+    loop:
+        cap := cell_load(ch, 8)
+        head : ., mut = rt_atomic_load(ch, 16)
+        tail : ., mut = rt_atomic_load(ch, 24)
+        if tail - head < cap:
+            buf := cell_load(ch, 0)
+            esize := cell_load(ch, 32)
+            cell_store(buf, (tail % cap) * esize, val)
+            rt_atomic_store(ch, 24, tail + 1)
+            rw := rt_atomic_xchg(ch, 48, 0)
+            if rw != 0:
+                rt_atomic_store(rw, 8, 0)   // runnable
+                sched_enqueue(rw)
+            return
 
-    // Check for waiting receivers first (direct handoff)
-    recv_wait := cell_load(ch, 48)
-    if recv_wait >= 0:
-        // Direct handoff: copy value to the waiting receiver's temp_val
-        nxt := cell_load(recv_wait, 48)          // save next before overwriting
-        cell_store(recv_wait, 72, val)             // store value in receiver's temp_val
-        cell_store(recv_wait, 8, 0)               // set to _Grunnable
-        sched_enqueue(recv_wait)
-        cell_store(ch, 48, nxt)                   // remove from recv_wait list
-        return
+        if rt_atomic_load(ch, 56) != 0:
+            return
 
-    if len < cap:
-        // Buffer has space
-        tail := (head + len) % cap
-        cell_store(buf, tail * esize, val)
-        cell_store(ch, 16, len + 1)
-        return
+        g := sched_get_curg()
+        if g < 0:
+            return
+        rt_atomic_store(g, 8, 2)            // waiting
+        rt_atomic_xchg(ch, 40, g)
 
-    // Buffer full: block on send_wait list
-    g := sched_get_curg()
-    if g >= 0:
-        cell_store(g, 72, val)         // store value for later delivery (temp_val)
-        cell_store(g, 8, 2)            // _Gwaiting
-        cell_store(g, 48, -1)          // next = -1
+        // Recheck after publishing the waiter. The xchg is the barrier.
+        head = rt_atomic_load(ch, 16)
+        tail = rt_atomic_load(ch, 24)
+        if tail - head < cap:
+            if rt_atomic_xchg(ch, 40, 0) == g:
+                rt_atomic_store(g, 8, 1)
+                continue
+        if rt_atomic_load(ch, 56) != 0:
+            if rt_atomic_xchg(ch, 40, 0) == g:
+                rt_atomic_store(g, 8, 1)
+                return
 
-        // Add to channel's send_wait list
-        sw : ., mut = cell_load(ch, 40)
-        if sw < 0:
-            cell_store(ch, 40, g)
-        else:
-            loop:
-                nxt := cell_load(sw, 48)
-                if nxt < 0:
-                    cell_store(sw, 48, g)
-                    break
-                sw = nxt
-
-    // Yield — scheduler will wake us when receiver comes
-    sched_yield()
+        // Blocking path: never sched_yield here. A waker may already have
+        // pushed this G; sched_yield would enqueue it a second time.
+        sched_schedule()
 
 fn chan_recv(ch: string) -> int, pub:
     _chan_ensure_init()
-    buf := cell_load(ch, 0)
-    cap := cell_load(ch, 8)
-    len := cell_load(ch, 16)
-    head := cell_load(ch, 24)
-    esize := cell_load(ch, 32)
-    closed := cell_load(ch, 56)
+    loop:
+        cap := cell_load(ch, 8)
+        head : ., mut = rt_atomic_load(ch, 16)
+        tail : ., mut = rt_atomic_load(ch, 24)
+        if head < tail:
+            buf := cell_load(ch, 0)
+            esize := cell_load(ch, 32)
+            val := cell_load(buf, (head % cap) * esize)
+            rt_atomic_store(ch, 16, head + 1)
+            sw := rt_atomic_xchg(ch, 40, 0)
+            if sw != 0:
+                rt_atomic_store(sw, 8, 0)
+                sched_enqueue(sw)
+            return val
 
-    // Check for waiting senders first (direct handoff)
-    send_wait := cell_load(ch, 40)
-    if send_wait >= 0:
-        // Direct handoff: take value from the waiting sender's temp_val
-        val := cell_load(send_wait, 72)           // read sender's stored value
-        nxt := cell_load(send_wait, 48)
-        cell_store(send_wait, 8, 0)               // set to _Grunnable
-        sched_enqueue(send_wait)
-        cell_store(ch, 40, nxt)                   // remove from send_wait list
-        return val
+        if rt_atomic_load(ch, 56) != 0:
+            return 0
 
-    if len > 0:
-        // Buffer has data
-        val := cell_load(buf, head * esize)
-        cell_store(ch, 24, (head + 1) % cap)
-        cell_store(ch, 16, len - 1)
-        return val
+        g := sched_get_curg()
+        if g < 0:
+            return 0
+        rt_atomic_store(g, 8, 2)
+        rt_atomic_xchg(ch, 48, g)
 
-    if closed != 0:
-        return 0
+        head = rt_atomic_load(ch, 16)
+        tail = rt_atomic_load(ch, 24)
+        if head < tail:
+            if rt_atomic_xchg(ch, 48, 0) == g:
+                rt_atomic_store(g, 8, 1)
+                continue
+        if rt_atomic_load(ch, 56) != 0:
+            if rt_atomic_xchg(ch, 48, 0) == g:
+                rt_atomic_store(g, 8, 1)
+                return 0
 
-    // Buffer empty: block on recv_wait list
-    g := sched_get_curg()
-    if g >= 0:
-        cell_store(g, 8, 2)            // _Gwaiting
-        cell_store(g, 48, -1)          // next = -1
-
-        rw : ., mut = cell_load(ch, 48)
-        if rw < 0:
-            cell_store(ch, 48, g)
-        else:
-            loop:
-                nxt := cell_load(rw, 48)
-                if nxt < 0:
-                    cell_store(rw, 48, g)
-                    break
-                rw = nxt
-
-    sched_yield()
-
-    // After wakeup, value should be in this G's temp_val (delivered by sender)
-    val := cell_load(g, 72)
-    return val
+        sched_schedule()
 
 fn chan_close(ch: string), pub:
     _chan_ensure_init()
-    cell_store(ch, 56, 1)  // closed = true
-
-    // Wake up all waiting senders
-    sw : ., mut = cell_load(ch, 40)
-    loop:
-        if sw < 0:
-            break
-        nxt := cell_load(sw, 48)
-        cell_store(sw, 8, 0)         // _Grunnable
-        sched_enqueue(sw)
-        sw = nxt
-    cell_store(ch, 40, -1)  // clear send_wait
-
-    // Wake up all waiting receivers
-    rw : ., mut = cell_load(ch, 48)
-    loop:
-        if rw < 0:
-            break
-        nxt := cell_load(rw, 48)
-        cell_store(rw, 8, 0)         // _Grunnable
+    rt_atomic_store(ch, 56, 1)
+    rw := rt_atomic_xchg(ch, 48, 0)
+    if rw != 0:
+        rt_atomic_store(rw, 8, 0)
         sched_enqueue(rw)
-        rw = nxt
-    cell_store(ch, 48, -1)  // clear recv_wait
+    sw := rt_atomic_xchg(ch, 40, 0)
+    if sw != 0:
+        rt_atomic_store(sw, 8, 0)
+        sched_enqueue(sw)
