@@ -129,15 +129,17 @@ CP-2 不修改 `go`/`chan` lowering；`test_conc_runtime.py` 13/13、`test_chan_
 完整套件仍会在既存 p41 处变红（CP-1 基线 `1e47f93f` 已复现，与本阶段无关）。CI 中 CP-1/CP-2 测试排在 `test_merge_copy.py` 之前，实测 gate 先执行：
 
 ```text
-PASS conc_negative
-PASS emitter_fixture
-PASS emitter_zero_arg
-PASS emitter_fail_closed_multi_go
-PASS emitter_fail_closed_dynamic_cap
+PASS conc_region ... PASS conc_negative
+13/13 passed
+
+PASS emitter_fixture ... PASS emitter_fail_closed_preexisting
+20/20 passed
+
 PASS conc_plan_load
 PASS conc_plan_simt
 PASS conc_plan_negative
 PASS conc_plan_e2e
+4/4 passed
 
 FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
 44/45 passed
@@ -147,6 +149,7 @@ CI_EXIT=1
 ## 5. 未做项（CP-3+）
 
 - worker body 内的 send/recv edge 抽取；当前只发 SPAWN edge。
+- 多 channel 的 go 实参→channel id 显式绑定与 channel handle aliasing；CP-2 通过单 channel + 单 go 限制规避。
 - 默认 `go`/`chan` lowering 切换到 plan 执行；CP-2 是显式 `conc-plan` + 显式 loader。
 - 真实 GPU/SIMT 后端、FPGA/集群映射。
 - MOVE / LOAN / SPLIT / FILL 的 transfer 执行器。
