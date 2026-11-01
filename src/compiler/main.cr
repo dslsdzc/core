@@ -784,7 +784,14 @@ fn corec_main() -> int:
     if cli_eq(cmd, "conc-plan"):
         out : ., mut = cli_get("output")
         if str_len(out) == 0:
-            out = default_out_path(src_path, ".plan")
+            if g_is_project_mode != 0:
+                out = g_project_name + ".plan"
+            else:
+                sl := str_len(src_path)
+                if sl > 3 && str_eq(str_sub(src_path, sl - 3, 3), ".cr") != 0:
+                    out = str_sub(src_path, 0, sl - 3) + ".plan"
+                else:
+                    out = src_path + ".plan"
         return conc_plan_emit_write(out)
 
     // === ccr: output linear CFG ===

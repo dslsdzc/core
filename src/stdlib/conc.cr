@@ -32,6 +32,11 @@ CONC_ERR_NOMEM : int, pub = 3
 // The same 1 TiB ceiling the arena allocator uses; keeps size arithmetic well
 // inside the raw 64-bit range.
 CONC_MAX_ALLOC : int = 1099511627776
+CONC_MAX_ENTRIES : int = 64
+CONC_MAX_BODIES : int = 64
+CONC_MAX_CHANNELS : int = 64
+CONC_MAX_EDGES : int = 256
+CONC_MAX_PARAMS : int = 1048576
 
 CONC_MSG_MAGIC : int = 1129270851       // 0x434F4E43; LE bytes are "CNOC"
 CONC_CHANNEL_MAGIC : int = 1129270856   // 0x434F4E48; LE bytes are "HNOC"
@@ -592,6 +597,10 @@ fn conc_plan_add_channel(plan: int, elem_size: int, cap: int, pc: int) -> int, p
         return -1
     if cap <= 0:
         return -1
+    if elem_size > CONC_MAX_ALLOC:
+        return -1
+    if cap > CONC_MAX_ALLOC:
+        return -1
     if pc != CONC_PC_SPSC:
         return -1
     p := _conc_plan_at(plan)
@@ -664,6 +673,56 @@ fn conc_plan_edge_count(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
     return cell_load(_conc_plan_at(plan), 16)
+
+fn conc_plan_channel_elemsize(plan: int, channel: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if channel < 0 || channel >= cell_load(p, 8):
+        return -1
+    base := load_str_ptr(p, 56)
+    return cell_load(base, channel * 32)
+
+fn conc_plan_channel_cap(plan: int, channel: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if channel < 0 || channel >= cell_load(p, 8):
+        return -1
+    base := load_str_ptr(p, 56)
+    return cell_load(base, channel * 32 + 8)
+
+fn conc_plan_edge_kind(plan: int, edge: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if edge < 0 || edge >= cell_load(p, 16):
+        return -1
+    base := load_str_ptr(p, 64)
+    return cell_load(base, edge * 32 + 16)
+
+fn _conc_plan_validate_edges(plan: int) -> int:
+    p := _conc_plan_at(plan)
+    n := cell_load(p, 16)
+    chn := cell_load(p, 8)
+    base := load_str_ptr(p, 64)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        kind := cell_load(base, i * 32 + 16)
+        ch := cell_load(base, i * 32 + 24)
+        if kind == CONC_EDGE_SEND || kind == CONC_EDGE_RECV:
+            if ch < 0 || ch >= chn:
+                return -1
+        else:
+            if kind == CONC_EDGE_SPAWN || kind == CONC_EDGE_JOIN:
+                if ch != -1:
+                    return -1
+            else:
+                return -1
+        i = i + 1
+    return 0
 
 fn _conc_body_at(plan: int, idx: int) -> string:
     p := _conc_plan_at(plan)
@@ -879,7 +938,11 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
     if _conc_plan_next(text) != "entries":
         return -1
     ec := _conc_plan_read_int(text)
-    if ec < 0:
+    if ec <= 0:
+        return -1
+    if ec > CONC_MAX_ENTRIES:
+        return -1
+    if str_len(entries) + 1 < ec * 8:
         return -1
     p := conc_plan_new()
     if p < 0:
@@ -903,6 +966,10 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
             params := _conc_plan_read_int(text)
             if id < 0 || ei < 0 || params < 0:
                 return -1
+            if id >= CONC_MAX_BODIES:
+                return -1
+            if params > CONC_MAX_PARAMS:
+                return -1
             if ei >= ec:
                 return -1
             if id != conc_plan_body_count(p):
@@ -919,6 +986,8 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
                 cap := _conc_plan_read_int(text)
                 pc := _conc_plan_next(text)
                 if id < 0 || elem <= 0 || cap <= 0:
+                    return -1
+                if id >= CONC_MAX_CHANNELS:
                     return -1
                 if pc != "SPSC":
                     return -1
@@ -949,8 +1018,12 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
                     if _conc_int_token(ct) == 0:
                         return -1
                     ch := str_int(ct)
+                    if conc_plan_edge_count(p) >= CONC_MAX_EDGES:
+                        return -1
                     if conc_plan_add_edge_ch(p, from_body, to_body, kind, ch) < 0:
                         return -1
                 else:
                     return -1
+    if _conc_plan_validate_edges(p) != 0:
+        return -1
     return p

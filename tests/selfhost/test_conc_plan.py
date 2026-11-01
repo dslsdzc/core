@@ -33,7 +33,7 @@ fn main() -> int:
     tbl := alloc(16)
     cell_store(tbl, 0, @addr(entry_main))
     cell_store(tbl, 8, @addr(worker))
-    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nedge 0 1 SPAWN -1\\n"
+    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nedge 0 1 SPAWN -1\\nedge 0 1 SEND 0\\n"
     p := conc_plan_load(plan, tbl)
     if p < 0:
         return 1
@@ -41,10 +41,14 @@ fn main() -> int:
         return 2
     if conc_plan_channel_count(p) != 1:
         return 3
-    if conc_plan_edge_count(p) != 1:
+    if conc_plan_edge_count(p) != 2:
         return 4
     if conc_plan_edge_channel(p, 0) != -1:
         return 5
+    if conc_plan_edge_channel(p, 1) != 0:
+        return 10
+    if conc_plan_edge_kind(p, 1) != CONC_EDGE_SEND:
+        return 11
     msg := conc_alloc(r, 8)
     cell_store(msg, 0, 41)
     if conc_send(req, msg) != 0:
@@ -76,24 +80,19 @@ fn main() -> int:
 """
 
 E2E_TEMPLATE = """\
+import chan
 import conc
-
-g_out : string, mut
+import sched
 
 fn entry_main() -> int:
     return 0
 
 fn worker(req: string) -> int:
-    v := conc_recv(req)
-    if conc_is_ok(v) == 0:
-        return 1
-    conc_send(g_out, v)
-    return 0
+    v := chan_recv(req)
+    return v
 
 fn main() -> int:
-    r := conc_region_new(65536)
-    req := conc_channel_new(r, 8, 1)
-    g_out = conc_channel_new(r, 8, 1)
+    sched_init()
     tbl := alloc(16)
     cell_store(tbl, 0, @addr(entry_main))
     cell_store(tbl, 8, @addr(worker))
@@ -101,17 +100,17 @@ fn main() -> int:
     p := conc_plan_load(plan, tbl)
     if p < 0:
         return 1
-    msg := conc_alloc(r, 8)
-    cell_store(msg, 0, 41)
-    if conc_send(req, msg) != 0:
+    elem := conc_plan_channel_elemsize(p, 0)
+    cap := conc_plan_channel_cap(p, 0)
+    if elem != 8:
         return 2
-    if conc_run_body(p, 1, req) != 0:
+    if cap != 1:
         return 3
-    out := conc_recv(g_out)
-    if conc_is_ok(out) == 0:
+    req := chan_make(elem, cap)
+    chan_send(req, 41)
+    rc := conc_run_body(p, 1, req)
+    if rc != 41:
         return 4
-    if cell_load(out, 0) != 41:
-        return 5
     return 0
 """
 
@@ -169,6 +168,28 @@ fn main() -> int:
         return 3
     if conc_plan_load("v 2\\nentries 0\\n", tbl) != -1:
         return 4
+    if conc_plan_load("v 1\\nentries 2\\nbody 0 TASK 1 0\\n", tbl) != -1:
+        return 5
+    if conc_plan_load("v 1\\nentries 999999999999\\n", tbl) != -1:
+        return 6
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 0\\nedge 0 0 SEND 0\\n", tbl) != -1:
+        return 7
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 0\\nedge 0 0 SEND -1\\n", tbl) != -1:
+        return 8
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 0\\nedge 0 0 SPAWN 5\\n", tbl) != -1:
+        return 9
+    if conc_plan_load("v 1\\nentries 0\\n", tbl) != -1:
+        return 10
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK", tbl) != -1:
+        return 11
+    if conc_plan_load("v 1\\nentries 1\\nbody 1 TASK 0 0\\n", tbl) != -1:
+        return 12
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 PAR 0 999999999\\n", tbl) != -1:
+        return 13
+    zero := alloc(8)
+    cell_store(zero, 0, 0)
+    if conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 0\\n", zero) != -1:
+        return 14
     return 0
 """
 
