@@ -117,7 +117,7 @@ fn sched_current_m_idx() -> int:
     return rt_m_idx()
 
 fn sched_get_curg() -> int, pub:
-    return g_get_curg()
+    return conc_sched_curg()
 
 fn sched_enqueue(g: string):
     hm : ., mut = cell_load(g, 88)
