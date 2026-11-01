@@ -464,3 +464,46 @@ goroutine_entry_wrapper:
     call sched_schedule
     # If schedule returns (no more work), just return (fiber dead)
     ret
+
+# sched_call_N(table, index, args...): load the function pointer and tail-call it.
+# These are the native/rt.s counterparts of the backend-emitted trampolines;
+# they are used by the self-hosted compiler's own conc runtime.
+.globl sched_call_0
+.type sched_call_0, @function
+sched_call_0:
+    mov rax, [rdi + rsi*8]
+    jmp rax
+
+.globl sched_call_1
+.type sched_call_1, @function
+sched_call_1:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    jmp rax
+
+.globl sched_call_2
+.type sched_call_2, @function
+sched_call_2:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    jmp rax
+
+.globl sched_call_3
+.type sched_call_3, @function
+sched_call_3:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, r8
+    jmp rax
+
+.globl sched_call_4
+.type sched_call_4, @function
+sched_call_4:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, r8
+    mov rcx, r9
+    jmp rax

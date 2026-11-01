@@ -76,6 +76,8 @@ COREC_FILES = [
     'src/stdlib/toml.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',
+    'src/stdlib/conc.cr',
+    'src/stdlib/conc_sched.cr',
     'src/stdlib/goroutine.cr',
     'src/stdlib/chan.cr',
     'src/stdlib/sched.cr',

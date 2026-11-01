@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""CP-4: default go/chan on the conc cooperative scheduler."""
+
+from __future__ import annotations
+
+import subprocess
+import tempfile
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[2]
+COREC = BASE / "build" / "corec"
+COREARCH = BASE / "build" / "corearch"
+
+CHANNEL_ARG = """\
+import chan
+import sched
+
+g_out : string, mut
+
+fn worker(req: string) -> int:
+    v := chan_recv(req)
+    chan_send(g_out, v + 1)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    req := chan_make(8, 1)
+    g_out = chan_make(8, 1)
+    h := go worker(req)
+    chan_send(req, 41)
+    v := chan_recv(g_out)
+    if v != 42:
+        return 1
+    return 0
+"""
+
+BLOCKING_SEND = """\
+import chan
+import sched
+
+g_out : string, mut
+
+fn worker() -> int:
+    chan_send(g_out, 1)
+    chan_send(g_out, 2)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    g_out = chan_make(8, 1)
+    h := go worker()
+    a := chan_recv(g_out)
+    b := chan_recv(g_out)
+    if a != 1:
+        return 1
+    if b != 2:
+        return 2
+    return 0
+"""
+
+TWO_GO = """\
+import chan
+import sched
+
+fn work(n: int) -> int:
+    return n * n
+
+fn main() -> int:
+    sched_init()
+    a := go work(6)
+    b := go work(7)
+    x := chan_recv(a)
+    y := chan_recv(b)
+    if x != 36:
+        return 1
+    if y != 49:
+        return 2
+    return 0
+"""
+
+
+def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
+                          timeout=timeout)
+
+
+def build_run(name: str, source: str, timeout: int = 60) -> bool:
+    if not COREC.exists() or not COREARCH.exists():
+        print("FAIL: missing build/corec or build/corearch")
+        return False
+    with tempfile.TemporaryDirectory(prefix=f"conc_sched_{name}_") as td:
+        root = Path(td)
+        src = root / f"{name}.cr"
+        ccr = root / f"{name}.ccr"
+        elf = root / f"{name}.elf"
+        src.write_text(source, encoding="utf-8")
+        c = run([str(COREC), "ccr", str(src), "-o", str(ccr)])
+        if c.returncode != 0:
+            print(f"FAIL {name} corec")
+            print(c.stdout[-1600:])
+            print(c.stderr[-1600:])
+            return False
+        a = run([str(COREARCH), "--raw-int", "--elf", str(ccr), "-o", str(elf)])
+        if a.returncode != 0:
+            print(f"FAIL {name} corearch")
+            print(a.stdout[-1600:])
+            print(a.stderr[-1600:])
+            return False
+        r = run([str(elf)], timeout=timeout)
+        if r.returncode != 0:
+            print(f"FAIL {name} run rc={r.returncode}")
+            print(r.stdout[-1600:])
+            print(r.stderr[-1600:])
+            return False
+    print(f"PASS {name}")
+    return True
+
+
+def main() -> int:
+    cases = [
+        ("conc_sched_channel_arg", CHANNEL_ARG, 30),
+        ("conc_sched_blocking_send", BLOCKING_SEND, 30),
+        ("conc_sched_two_go", TWO_GO, 30),
+    ]
+    passed = 0
+    for name, source, timeout in cases:
+        if build_run(name, source, timeout):
+            passed += 1
+    print(f"{passed}/{len(cases)} passed")
+    return 0 if passed == len(cases) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

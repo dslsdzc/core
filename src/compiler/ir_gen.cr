@@ -3643,8 +3643,8 @@ fn gen_expr(node: int) -> int:
         body := ast_b(node)
         range_node := ast_data(node)  // 0 = single, EXPR_RANGE node = range go
         if range_node <= 0:
-            // Single go: emit call to sched_go(@addr(f), arg)
-            // sched_go creates a goroutine via g_new + sched_enqueue and returns a channel
+            // Single go: emit call to conc_go(@addr(f), arg)
+            // conc_go creates a conc activation on the CP-4 scheduler and returns a channel
             if ast_kind(body) == EXPR_CALL:
                 func_node := ast_a(body)
                 first_arg := ast_b(body)
@@ -3674,7 +3674,7 @@ fn gen_expr(node: int) -> int:
                 else:
                     emit(IR_CONST, packed1, 0, 0, 0, TI_INT)
                 dest := new_ir_var("_go_ch", TI_INT)
-                sched_go_ni := str_intern("sched_go")
+                sched_go_ni := str_intern("conc_go")
                 emit(IR_CALL, dest, packed0, 2, sched_go_ni, TI_INT)
                 return dest
             return gen_expr(body)

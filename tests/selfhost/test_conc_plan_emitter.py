@@ -34,6 +34,7 @@ body 1 TASK 1 1
 channel 0 8 1 SPSC
 bind 1 0 0
 edge 0 1 SEND 0
+edge 1 0 RECV 0
 edge 0 1 SPAWN -1
 """
 
@@ -84,6 +85,7 @@ body 1 TASK 1 1
 channel 0 8 1 SPSC
 bind 1 0 0
 edge 0 1 SEND 0
+edge 1 0 RECV 0
 edge 0 1 SPAWN -1
 """
 
@@ -313,6 +315,19 @@ fn main() -> int:
     return 0
 """
 
+MULTI_CHAN_EXPECTED = """\
+v 1
+entries 2
+body 0 TASK 0 0
+body 1 TASK 1 1
+channel 0 8 2 SPSC
+channel 1 8 1 SPSC
+bind 1 0 1
+edge 0 1 SEND 1
+edge 1 0 RECV 1
+edge 0 1 SPAWN -1
+"""
+
 LOOP_GO = """\
 import chan
 import sched
@@ -372,6 +387,7 @@ def main() -> int:
         ("fixture", FIXTURE, EXPECTED),
         ("zero_arg", ZERO_FIXTURE, ZERO_EXPECTED),
         ("mut_cap_before_call", MUT_CAP, MUT_CAP_EXPECTED),
+        ("multi_chan", MULTI_CHAN, MULTI_CHAN_EXPECTED),
     ]
     for name, source, expected in positives:
         code, text, diag, plan, td = emit(name, source)
@@ -433,8 +449,7 @@ def main() -> int:
         ("branch_cap", BRANCH_CAP, "chan_make cap is not a unique literal", False),
         ("loop_cap", LOOP_CAP, "chan_make cap is not a unique literal", False),
         ("alias_cap", ALIAS_CAP, "chan_make cap is not a unique literal", False),
-        ("multi_chan", MULTI_CHAN, "exactly one chan_make", False),
-        ("no_chan", NO_CHAN, "exactly one chan_make", False),
+        ("no_chan", NO_CHAN, "at least one chan_make", False),
         ("go_helper", GO_HELPER, "exactly one sched_go", False),
         ("preexisting", MULTI_GO, "exactly one sched_go", True),
     ]

@@ -33,7 +33,7 @@ fn main() -> int:
     tbl := alloc(16)
     cell_store(tbl, 0, @addr(entry_main))
     cell_store(tbl, 8, @addr(worker))
-    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 1 0 0\\nedge 0 1 SEND 0\\nedge 0 1 SPAWN -1\\n"
+    plan := "v 1\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 1\\nchannel 0 8 1 SPSC\\nbind 1 0 0\\nedge 0 1 SEND 0\\nedge 1 0 RECV 0\\nedge 0 1 SPAWN -1\\n"
     p := conc_plan_load(plan, tbl)
     if p < 0:
         return 1
@@ -41,20 +41,22 @@ fn main() -> int:
         return 2
     if conc_plan_channel_count(p) != 1:
         return 3
-    if conc_plan_edge_count(p) != 2:
+    if conc_plan_edge_count(p) != 3:
         return 4
     if conc_plan_edge_channel(p, 0) != 0:
         return 5
     if conc_plan_edge_kind(p, 0) != CONC_EDGE_SEND:
         return 10
-    if conc_plan_edge_channel(p, 1) != -1:
+    if conc_plan_edge_kind(p, 1) != CONC_EDGE_RECV:
         return 11
-    if conc_plan_edge_kind(p, 1) != CONC_EDGE_SPAWN:
+    if conc_plan_edge_channel(p, 2) != -1:
         return 12
-    if conc_plan_bind_count(p) != 1:
+    if conc_plan_edge_kind(p, 2) != CONC_EDGE_SPAWN:
         return 13
-    if conc_plan_param_channel(p, 1, 0) != 0:
+    if conc_plan_bind_count(p) != 1:
         return 14
+    if conc_plan_param_channel(p, 1, 0) != 0:
+        return 15
     msg := conc_alloc(r, 8)
     cell_store(msg, 0, 41)
     if conc_send(req, msg) != 0:
@@ -158,6 +160,41 @@ fn main() -> int:
         if cell_load(g_arr, i * 8) != i * i:
             return 5
         i = i + 1
+    return 0
+"""
+
+LOAD_MULTI = """\
+import conc
+
+g_seen : int, mut = 0
+
+fn worker(req: string) -> int:
+    v := conc_recv(req)
+    if conc_is_ok(v) == 0:
+        return 1
+    g_seen = cell_load(v, 0)
+    return 0
+
+fn main() -> int:
+    r := conc_region_new(65536)
+    c0 := conc_channel_new(r, 8, 1)
+    c1 := conc_channel_new(r, 8, 1)
+    tbl := alloc(8)
+    cell_store(tbl, 0, @addr(worker))
+    cht := alloc(16)
+    cell_store(cht, 0, c0)
+    cell_store(cht, 8, c1)
+    p := conc_plan_load("v 1\\nentries 1\\nbody 0 TASK 0 1\\nchannel 0 8 1 SPSC\\nchannel 1 8 1 SPSC\\nbind 0 0 1\\n", tbl)
+    if p < 0:
+        return 1
+    msg := conc_alloc(r, 8)
+    cell_store(msg, 0, 77)
+    if conc_send(c1, msg) != 0:
+        return 2
+    if conc_run_body_bound(p, 0, cht) != 0:
+        return 3
+    if g_seen != 77:
+        return 4
     return 0
 """
 
@@ -269,6 +306,7 @@ def main() -> int:
     cases = [
         ("conc_plan_load", LOAD_RUN, 30),
         ("conc_plan_simt", LOAD_SIMT, 30),
+        ("conc_plan_multichannel", LOAD_MULTI, 30),
         ("conc_plan_negative", LOAD_NEGATIVE, 30),
     ]
     passed = 0

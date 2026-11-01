@@ -6,6 +6,7 @@
 //
 // 0A is still single-M by default (sched_init); sched_init_n(n) is the
 // explicit multi-M entry point. Work stealing and futex idling are 0C.
+import conc_sched
 import goroutine
 import chan
 import arena
@@ -314,45 +315,9 @@ fn rt_alloc_persistent(size: int) -> string:
     return p
 
 fn sched_go(fn_ptr: int, arg: int) -> string, pub:
-    rm : ., mut = rt_m_idx()
-    if rm < 0:
-        rm = 0
-    sched_reap_dead(rm, sched_get_curg())
-    ch := rt_alloc_persistent(64)
-    cbuf := rt_alloc_persistent(8)
-    cp : ., mut = 0
-    cbp : ., mut = 0
-    unsafe:
-        cp = @ptr_of(ch)
-        cbp = @ptr_of(cbuf)
-    if cp == 0 || cbp == 0:
-        return ""
-    cell_store(ch, 0, cbuf)
-    cell_store(ch, 8, 1)
-    cell_store(ch, 16, 0)
-    cell_store(ch, 24, 0)
-    cell_store(ch, 32, 8)
-    cell_store(ch, 40, 0)
-    cell_store(ch, 48, 0)
-    cell_store(ch, 56, 0)
-    n := g_machine_count
-    target : ., mut = rt_m_idx()
-    if n > 1:
-        target = rt_atomic_fetch_add(g_spawn_rr, 0, 1) % n
-    if target == rt_m_idx():
-        sched_go_direct(fn_ptr, arg, ch)
-    else:
-        idx := rt_atomic_fetch_add(g_spawn_req_next, 0, 1)
-        if idx >= MAX_SPAWN_REQ:
-            sched_go_direct(fn_ptr, arg, ch)
-        else:
-            req := g_spawn_req_buf + idx * 32
-            cell_store(req, 0, fn_ptr)
-            cell_store(req, 8, arg)
-            cell_store(req, 16, ch)
-            cell_store(req, 24, 0)
-            sched_push_spawn(target, req)
-    return ch
+    // CP-4 default path: go/chan run on the conc activation scheduler.
+    conc_sched_init()
+    return conc_go(fn_ptr, arg)
 
 fn sched_spawn_workers(n: int), pub:
     if n <= 1:
