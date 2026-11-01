@@ -244,6 +244,7 @@ fn corec_main() -> int:
     cli_cmd("check", "Type-check only, no output")
     cli_cmd("cir",   "Output dataflow graph (.cir)")
     cli_cmd("ccr",   "Output linear CFG (.ccr)")
+    cli_cmd("conc-plan", "Emit target-neutral concurrency plan (.plan)")
     cli_cmd("run",   "Execute code directly (interpreter mode)")
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
@@ -778,6 +779,13 @@ fn corec_main() -> int:
     print(" funcs, ")
     print(int_str(g_ir_instr_count))
     println(" instrs")
+
+    // === conc-plan: target-neutral plan artifact (CP-2) ===
+    if cli_eq(cmd, "conc-plan"):
+        out : ., mut = cli_get("output")
+        if str_len(out) == 0:
+            out = default_out_path(src_path, ".plan")
+        return conc_plan_emit_write(out)
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr"):
