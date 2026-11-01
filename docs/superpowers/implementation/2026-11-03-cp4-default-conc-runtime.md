@@ -83,6 +83,7 @@ PASS conc_region ... PASS conc_negative        13/13
 PASS emitter_fixture ... PASS emitter_fail_closed_preexisting  25/25
 PASS conc_plan_load ... PASS conc_plan_e2e      5/5
 PASS conc_sched_channel_arg ... PASS conc_sched_native_build  7/7
+PASS spawn_stress（test_multi_m）                              5/5
 
 FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
 44/45 passed
