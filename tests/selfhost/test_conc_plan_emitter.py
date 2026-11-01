@@ -209,6 +209,34 @@ fn main() -> int:
     return spawn_one(req)
 """
 
+GO_LITERAL = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return 0
+
+fn main() -> int:
+    sched_init()
+    req := chan_make(8, 1)
+    h := go worker("x")
+    return 0
+"""
+
+GO_NO_ARG = """\
+import chan
+import sched
+
+fn worker(req: string) -> int:
+    return 0
+
+fn main() -> int:
+    sched_init()
+    req := chan_make(8, 1)
+    h := go worker()
+    return 0
+"""
+
 LOOP_GO = """\
 import chan
 import sched
@@ -302,6 +330,8 @@ def main() -> int:
         ("multi_go", MULTI_GO, "exactly one sched_go", False),
         ("dynamic_cap", DYNAMIC_CAP, "chan_make cap is not a unique literal", False),
         ("int_go", INT_GO, "go target parameter must be a string/channel", False),
+        ("go_literal", GO_LITERAL, "literal or missing go argument", False),
+        ("go_no_arg", GO_NO_ARG, "literal or missing go argument", False),
         ("two_param_go", TWO_PARAM_GO, "go target must take zero or one parameter", False),
         ("main_param", MAIN_PARAM, "main with parameters", False),
         ("global_cap", GLOBAL_CAP, "chan_make cap is not a unique literal", False),

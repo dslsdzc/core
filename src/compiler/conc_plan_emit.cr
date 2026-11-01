@@ -157,6 +157,8 @@ fn conc_plan_emit_write(path: string) -> int:
 
     go_count : ., mut = 0
     go_fn_ni : ., mut = -1
+    go_arg_var : ., mut = -1
+    go_call_ii : ., mut = -1
     chan_count : ., mut = 0
     i : ., mut = 0
     loop:
@@ -171,6 +173,8 @@ fn conc_plan_emit_write(path: string) -> int:
                 if _conc_emit_in_nested(ii) != 0:
                     return _conc_emit_error("go inside loop/if is not supported")
                 go_count = go_count + 1
+                go_call_ii = ii
+                go_arg_var = iri_s1(ii) + 1
                 go_fn_ni = _conc_emit_fnaddr_before(iri_s1(ii), ii, start)
                 if go_fn_ni < 0:
                     return _conc_emit_error("cannot resolve go target")
@@ -198,6 +202,9 @@ fn conc_plan_emit_write(path: string) -> int:
         param_var := cell_load(g_ir_func_var_start, target_fi * 8)
         if irv_type(param_var) != TI_STR:
             return _conc_emit_error("go target parameter must be a string/channel")
+        if go_arg_var >= 0:
+            if _conc_emit_const_before(go_arg_var, go_call_ii, start) != CONC_EMIT_UNKNOWN:
+                return _conc_emit_error("literal or missing go argument is not supported")
 
     out : ., mut = "v 1\n"
     out = out + "entries 2\n"
