@@ -92,6 +92,9 @@ fn main() -> int:
         return 9
     if conc_is_ok(conc_channel_new(r2, 8, 1000000000000)) != 0:
         return 10
+    rb := conc_region_new(1024)
+    if conc_is_ok(conc_channel_new(rb, 8, 1000)) != 0:
+        return 11
     return 0
 """
 
@@ -370,6 +373,8 @@ fn main() -> int:
         return 1
     if conc_send(ch, b) != 1:
         return 2
+    if conc_last_error() != CONC_ERR_FULL:
+        return 7
     x := conc_recv(ch)
     if cell_load(x, 0) != 1:
         return 3

@@ -651,9 +651,10 @@ fn _conc_body_at(plan: int, idx: int) -> string:
 
 // ── Executors ─────────────────────────────────────────────────────────────
 //
-// Both executors consume the same plan. CPU is a single logical slot with a
-// serial fallback for DATA_PARALLEL; SIMT is a host-side index-domain mapping.
-// Neither executor invents target capabilities.
+// Both executors consume the same plan's body list. Channel/edge descriptors
+// are validated by the fixture but are not executed in CP-1. CPU is a single
+// logical slot with a serial fallback for DATA_PARALLEL; SIMT is a host-side
+// index-domain mapping. Neither executor invents target capabilities.
 
 fn _conc_call_ready() -> int:
     if _conc_is_null(g_conc_call_table) != 0:
