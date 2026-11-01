@@ -783,7 +783,7 @@ fn emit_sched_call(buf: string, p: int, n: int) -> int:
     w8(buf, p, 72)
     w8(buf, p+1, 139)
     w8(buf, p+2, 4)
-    w8(buf, p+3, 240)
+    w8(buf, p+3, 247)
     off : ., mut = 4
     if n >= 1:
         w8(buf, p+off, 72)
@@ -1471,6 +1471,17 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     return cp
 
 fn sched_reg_one(name: string, offset: int, cp: int):
+    // Phase 2 pre-registers the scheduler trampolines with estimated offsets.
+    // Call patching resolves the first matching entry, so Phase 3 must update
+    // that entry instead of appending a second one.
+    i : ., mut = 0
+    loop:
+        if i >= g_x86_func_off_count:
+            break
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, i * 16)), name) != 0:
+            cell_store(g_x86_func_offsets, i * 16 + 8, cp - 176)
+            return
+        i = i + 1
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
     cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name))
     cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
