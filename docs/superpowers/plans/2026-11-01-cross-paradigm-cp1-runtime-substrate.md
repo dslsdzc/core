@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
+**Implementation note（2026-11-01）：** 落地时按 review 收紧了失败路径与测试，最终套件为 13 例（新增 arena 生命周期、容量耗尽、16B 对齐、12B 元素/ring wrap、plan growth/edge、0 参数 CPU）；接口细节以 `docs/superpowers/implementation/2026-11-01-cross-paradigm-cp1.md` 为准。
+
 ## Global Constraints
 
 - 不新增源码语法；不引入 `Chan<T>`、lock/mutex/atomic/ownership 关键字。
@@ -126,7 +128,7 @@ jj commit -m "conc: owner-region bump allocator (CP-1)"
 **Interfaces:**
 - `conc_channel_new(region: int, elem_size: int, cap: int) -> string`
 - `conc_send(ch: string, msg: string)` — msg 是 MessageRef payload 指针，按 `elem_size` 复制。
-- `conc_recv(ch: string) -> string` — 返回 region 内副本；空则返回 `""`。
+- `conc_recv(ch: string) -> string` — 返回 region 内副本；空则返回 `""`，`conc_last_error()` 返回 `CONC_ERR_EMPTY`；输出分配失败返回 `CONC_ERR_NOMEM` 且不消费队首。
 - `conc_channel_elemsize(ch: string) -> int`
 - `conc_channel_len(ch: string) -> int`
 
@@ -168,8 +170,8 @@ fn main() -> int:
 - 字段：`buf(0), cap(8), len(16), head(24), esize(32), closed(40), owner_region(48)`。
 - `conc_send` 满时返回，不阻塞（CP-1 单线程 fixture 先由 plan 顺序保证）。
 - 复制按 `esize` 字节逐字节（`cell_store`/`cell_load` 8 字节 + 尾字节），不假设 8 字节。
-- `conc_recv` 空返回 `""`。
-- 不做 close/MPMC；负例返回明确错误。
+- `conc_recv` 空返回 `""`；`conc_last_error()` 区分 `CONC_ERR_EMPTY` 与 `CONC_ERR_NOMEM`，分配失败不消费队首。
+- 不做 close/MPMC；负例返回明确错误。CP-1 只接受 `elem_size > 0`、`cap > 0`。
 
 - [ ] **Step 3: 运行测试**
 
@@ -200,7 +202,8 @@ jj commit -m "conc: typed MessageRef channel (CP-1)"
 - `conc_plan_add_edge(plan: int, from_body: int, to_body: int, kind: int) -> int`
 - `conc_plan_body_count(plan: int) -> int`
 - `conc_plan_channel_count(plan: int) -> int`
-- 常量：`CONC_BODY_TASK=1`, `CONC_BODY_DATA_PARALLEL=2`, `CONC_EDGE_SPAWN=1`, `CONC_EDGE_SEND=2`, `CONC_EDGE_JOIN=3`.
+- 常量：`CONC_BODY_TASK=1`, `CONC_BODY_DATA_PARALLEL=2`, `CONC_EDGE_SPAWN=1`, `CONC_EDGE_SEND=2`, `CONC_EDGE_JOIN=3`, `CONC_PC_SPSC=1`.
+- 校验：TASK `params` 只接受 0/1；channel `cap > 0` 且 `pc == CONC_PC_SPSC`；`entry >= 0`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -253,7 +256,7 @@ jj commit -m "conc: plan fixture descriptors (CP-1)"
 
 **Interfaces:**
 - `conc_run_cpu(plan: int, arg: string) -> int`
-- CPU mapping：单 slot，按 plan 的 body 顺序执行；TASK body 调 `entry(arg)`；DATA_PARALLEL body 先按串行 fallback 遍历 `0..params`。
+- CPU mapping：单 slot，按 plan 的 body 顺序执行；TASK `params=0` 调 `sched_call_0`，`params=1` 调 `entry(arg)`；DATA_PARALLEL body 先按串行 fallback 遍历 `0..params`。
 - 用 `sched_call_1` 调 body entry；entry 的地址由 `@addr` 给出。
 - `sched_call_1` 是 CP-1 的必要后端原语；实现前必须修正 `src/format/elf/elf.cr` 的两处缺陷：trampoline 从 `rdi+rsi*8` 取表项（不是 `rax`），且 Phase 3 必须更新 Phase 2 预登记的偏移而不是追加重复项。
 
@@ -293,7 +296,7 @@ fn main() -> int:
 
 - [ ] **Step 2: 实现 CPU executor**
 
-- `conc_run_cpu` 遍历 plan body：TASK 用 `sched_call_1` 调用 entry(arg)；DATA_PARALLEL 用 `entry(index)` 串行遍历。
+- `conc_run_cpu` 遍历 plan body：TASK `params=0` 用 `sched_call_0`，`params=1` 用 `sched_call_1`；DATA_PARALLEL 用 `entry(index)` 串行遍历。`entry <= 0` / TASK `params > 1` 返回 `-1`。
 - `sched_call_1` 的 table 用全局 heap 上的一格指针；idx=0；arg 原样传入。
 - 返回第一个非 0 的 body 结果；无 body 返回 0。
 - 不启动 OS 线程；CP-1 只验证 plan/对象模型，不验证并行时序。
@@ -392,7 +395,7 @@ jj commit -m "conc: host SIMT plan executor, same plan as CPU (CP-1)"
 
 - [ ] **Step 1: 合并测试入口**
 
-`test_conc_runtime.py` 跑完整 fixture：region、channel、plan、CPU、SIMT（CPU/SIMT 同 plan 逐项对拍）、lifetime、negative，共 7 例。
+`test_conc_runtime.py` 跑完整 fixture：region、arena 生命周期、容量耗尽、16B 对齐、channel、12B 元素/ring wrap、plan、plan growth/edge、CPU 1 参数、CPU 0 参数、SIMT（CPU/SIMT 同 body list 逐项对拍）、lifetime、negative，共 13 例。
 `src/ci/run.sh` 的 `selfhost-tests` 段加入该测试。
 
 - [ ] **Step 2: 生命周期负例**
