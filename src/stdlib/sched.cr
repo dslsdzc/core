@@ -49,8 +49,12 @@ fn sched_init_n(n: int), pub:
         return
     if n < 1:
         n = 1
+    // Reserve one extra M partition for shared runtime metadata (scheduler
+    // arrays, channel regions). Worker homes stay in 0..n-1.
+    arena_init_m(g_arena_pool_limit, 1048576, n + 1)
+    conc_sched_set_m(n)
+    conc_sched_init()
 
-    arena_init_m(g_arena_pool_limit, 1048576, n)
 
     m := alloc(n * 48)
     g_dead_head_m = alloc(n * 8)
@@ -238,22 +242,8 @@ fn sched_schedule():
 
 // Worker entry: scheduler stack runs here; Gs are entered by fiber_switch.
 fn sched_worker_run(m_idx: int):
-    cell_store(g_machines, m_idx * 48, m_idx)
-    loop:
-        sched_process_spawns(m_idx)
-        sched_reap_dead(m_idx, -1)
-        next_g := sched_dequeue(m_idx)
-        if next_g >= 0:
-            m := g_machines + m_idx * 48
-            cell_store(m, 8, next_g)
-            g_set_curg(next_g)
-            rt_atomic_store(next_g, 8, 1)
-            next_cur : ., mut = cell_load(next_g, 80)
-            if next_cur < 0:
-                next_cur = cell_load(next_g, 32)
-            arena_set_current_unchecked(next_cur)
-            fiber_switch(@ptr_add(m, 24), cell_load(next_g, 16))
-            g_set_curg(-1)
+    // CP-5 multi-M: worker threads run the conc scheduler with per-M TLS.
+    conc_worker_run(m_idx)
 
 fn sched_push_spawn(m_idx: int, req: string):
     m := g_machines + m_idx * 48

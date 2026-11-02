@@ -1,14 +1,15 @@
-// conc_sched — single-thread cooperative activation scheduler for CP-4.
+// conc_sched — plan-first CPU mapping for `go`/`chan` (CP-4, multi-M in CP-5).
 //
-// This is the default host CPU mapping for `go`/`chan` in CP-4. It uses the
-// backend fiber stubs (fiber_init/fiber_switch) and CP-1 conc channels, but
-// remains single-slot: one ready queue, one current activation, no atomics or
-// locks. Runtime objects live in activation arenas or the global heap.
+// Each M owns a ready queue and a current-activation slot. Activation fibers
+// are pinned to their home M, so the compiler arena/TLS for an activation is
+// only ever touched by one thread. A single spinlock protects the shared ready
+// queues, channel wait lists, and scheduler arrays; it is never held across a
+// fiber switch. Runtime metadata lives in the reserved shared arena partition.
 import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 80
+CONC_ACT_SIZE : int = 104
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -22,13 +23,13 @@ g_conc_inited : int, mut = 0
 g_conc_acts : string, mut
 g_conc_act_count : int, mut = 0
 g_conc_act_cap : int, mut = 0
-g_conc_cur : int, mut = -1
-g_conc_ready : string, mut
-g_conc_ready_head : int, mut = 0
-g_conc_ready_tail : int, mut = 0
-g_conc_ready_count : int, mut = 0
-g_conc_ready_cap : int, mut = 0
-g_conc_sched_sp : string, mut
+g_conc_cur_m : string, mut
+g_conc_ready_head_m : string, mut
+g_conc_ready_tail_m : string, mut
+g_conc_spawn_rr : int, mut = 0
+g_conc_sched_sp_m : string, mut
+g_conc_lock : string, mut
+g_conc_m_count : int, mut = 1
 g_conc_global_region : int, mut = -1
 g_conc_ch_states : string, mut
 g_conc_ch_count : int, mut = 0
@@ -38,55 +39,44 @@ g_conc_free_count : int, mut = 0
 g_conc_free_cap : int, mut = 0
 
 fn _conc_sched_alloc(size: int) -> string:
-    saved := rt_current_arena()
-    rt_set_current_arena(-1)
-    p := alloc(size)
-    rt_set_current_arena(saved)
-    return p
+    // Scheduler arrays are shared across Ms; allocate them from the reserved
+    // shared partition. Callers hold the conc lock while mutating them.
+    return arena_shared_alloc(size)
 
 fn _conc_act_at(id: int) -> string:
     if id < 0 || id >= g_conc_act_count:
         return ""
     return load_str_ptr(g_conc_acts, id * 8)
 
-fn _conc_ready_grow():
-    if g_conc_ready_count < g_conc_ready_cap:
-        return
-    nc : ., mut = g_conc_ready_cap * 2
-    if nc < 64:
-        nc = 64
-    nb := _conc_sched_alloc(nc * 8)
-    i : ., mut = 0
-    pos : ., mut = g_conc_ready_head
-    loop:
-        if i >= g_conc_ready_count:
-            break
-        cell_store(nb, i * 8, cell_load(g_conc_ready, pos * 8))
-        pos = pos + 1
-        if pos >= g_conc_ready_cap:
-            pos = 0
-        i = i + 1
-    g_conc_ready = nb
-    g_conc_ready_head = 0
-    g_conc_ready_tail = g_conc_ready_count
-    g_conc_ready_cap = nc
-
 fn _conc_ready_push(id: int):
-    _conc_ready_grow()
-    cell_store(g_conc_ready, g_conc_ready_tail * 8, id)
-    g_conc_ready_tail = g_conc_ready_tail + 1
-    if g_conc_ready_tail >= g_conc_ready_cap:
-        g_conc_ready_tail = 0
-    g_conc_ready_count = g_conc_ready_count + 1
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return
+    m : ., mut = cell_load(a, 80)
+    if m < 0 || m >= 64:
+        m = 0
+    cell_store(a, 88, -1)
+    tail := cell_load(g_conc_ready_tail_m, m * 8)
+    if tail < 0:
+        cell_store(g_conc_ready_head_m, m * 8, id)
+    else:
+        ta := _conc_act_at(tail)
+        if _conc_word(ta) != 0:
+            cell_store(ta, 88, id)
+    cell_store(g_conc_ready_tail_m, m * 8, id)
 
 fn _conc_ready_pop() -> int:
-    if g_conc_ready_count <= 0:
+    m := _conc_m()
+    id := cell_load(g_conc_ready_head_m, m * 8)
+    if id < 0:
         return -1
-    id := cell_load(g_conc_ready, g_conc_ready_head * 8)
-    g_conc_ready_head = g_conc_ready_head + 1
-    if g_conc_ready_head >= g_conc_ready_cap:
-        g_conc_ready_head = 0
-    g_conc_ready_count = g_conc_ready_count - 1
+    nxt : ., mut = -1
+    a := _conc_act_at(id)
+    if _conc_word(a) != 0:
+        nxt = cell_load(a, 88)
+    cell_store(g_conc_ready_head_m, m * 8, nxt)
+    if nxt < 0:
+        cell_store(g_conc_ready_tail_m, m * 8, -1)
     return id
 
 fn _conc_acts_grow():
@@ -105,15 +95,64 @@ fn _conc_acts_grow():
     g_conc_acts = nb
     g_conc_act_cap = nc
 
+fn _conc_m() -> int:
+    m : ., mut = rt_m_idx()
+    if m < 0:
+        m = 0
+    if m >= 64:
+        m = 0
+    return m
+
+fn _conc_cur_id() -> int:
+    return cell_load(g_conc_cur_m, _conc_m() * 8)
+
+fn _conc_set_cur(id: int):
+    cell_store(g_conc_cur_m, _conc_m() * 8, id)
+
+fn _conc_sched_sp_cell() -> string:
+    return _conc_ptr(_conc_addr(g_conc_sched_sp_m) + _conc_m() * 8)
+
+fn _conc_lock():
+    loop:
+        if rt_atomic_load(g_conc_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_lock, 0, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_unlock():
+    rt_atomic_store(g_conc_lock, 0, 0)
+
+fn conc_sched_set_m(n: int), pub:
+    if n < 1:
+        n = 1
+    g_conc_m_count = n
+
 fn conc_sched_init():
     arena_ensure_init()
+    arena_shared_init()
     if g_conc_inited != 0:
         return
     g_conc_acts = _conc_sched_alloc(16 * 8)
     g_conc_act_cap = 16
-    g_conc_ready = _conc_sched_alloc(64 * 8)
-    g_conc_ready_cap = 64
-    g_conc_sched_sp = _conc_sched_alloc(8)
+    g_conc_ready_head_m = _conc_sched_alloc(64 * 8)
+    g_conc_ready_tail_m = _conc_sched_alloc(64 * 8)
+    i0 : ., mut = 0
+    loop:
+        if i0 >= 64:
+            break
+        cell_store(g_conc_ready_head_m, i0 * 8, -1)
+        cell_store(g_conc_ready_tail_m, i0 * 8, -1)
+        i0 = i0 + 1
+    g_conc_sched_sp_m = _conc_sched_alloc(64 * 8)
+    g_conc_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_lock, 0, 0)
+    g_conc_cur_m = _conc_sched_alloc(64 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= 64:
+            break
+        cell_store(g_conc_cur_m, i * 8, -1)
+        i = i + 1
     g_conc_ch_states = _conc_sched_alloc(16 * CONC_CH_STATE_SIZE)
     g_conc_ch_cap = 16
     g_conc_free = _conc_sched_alloc(64 * 8)
@@ -150,29 +189,41 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     if id < 0:
         id = g_conc_act_count
         g_conc_act_count = id + 1
-    saved := arena_current_unchecked()
-    aid := arena_new()
-    if aid < 0:
-        arena_set_current_unchecked(saved)
-        return -1
-    stack := alloc(CONC_SCHED_STACK)
-    a := alloc(CONC_ACT_SIZE)
-    arena_set_current_unchecked(saved)
-    if _conc_word(stack) == 0 || _conc_word(a) == 0:
-        return -1
-    sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
+    home : ., mut = g_conc_spawn_rr % g_conc_m_count
+    g_conc_spawn_rr = g_conc_spawn_rr + 1
+    // Control blocks live in the shared partition and are reused through the
+    // free list. Stacks and activation arenas are created lazily by the home
+    // M on first run (conc_schedule), so a spawner never touches another M's
+    // slot pools and every M allocates only in its own partition.
+    a : ., mut = _conc_act_at(id)
+    if _conc_raw(a) == 0:
+        a = arena_shared_alloc(CONC_ACT_SIZE)
+        if _conc_word(a) == 0:
+            g_conc_act_count = id
+            return -1
     cell_store(a, 0, id)
     cell_store(a, 8, CONC_ACT_RUNNABLE)
-    cell_store(a, 16, sp)
-    cell_store(a, 24, stack)
+    cell_store(a, 16, 0)
+    cell_store(a, 24, 0)
     cell_store(a, 32, entry)
     cell_store(a, 40, arg)
     store_str_ptr(a, 48, result_ch)
     cell_store(a, 56, -1)
-    cell_store(a, 64, aid)
+    cell_store(a, 64, -1)
     cell_store(a, 72, 0)
+    cell_store(a, 80, home)
+    cell_store(a, 88, -1)
+    cell_store(a, 96, -1)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
+
+fn _conc_raw(s: string) -> int:
+    // Raw data pointer. Unlike _conc_word this does not read the length word,
+    // so it is safe on a zero word from the acts table.
+    v : ., mut = 0
+    unsafe:
+        v = @ptr_of(s)
+    return v
 
 fn _conc_word(s: string) -> int:
     if str_len(s) <= 0:
@@ -183,46 +234,74 @@ fn _conc_word(s: string) -> int:
     return v
 
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
+    conc_sched_init()
+    _conc_lock()
     id := _conc_act_new(entry, arg, result_ch)
-    if id < 0:
-        return -1
-    _conc_ready_push(id)
+    if id >= 0:
+        _conc_ready_push(id)
+    _conc_unlock()
     return id
 
 fn conc_sched_curg() -> int, pub:
-    return g_conc_cur
+    return _conc_cur_id()
 
 fn conc_schedule() -> int, pub:
     ran : ., mut = 0
-    if g_conc_cur < 0:
+    if _conc_cur_id() < 0:
         saved := arena_current_unchecked()
         loop:
+            _conc_lock()
             id := _conc_ready_pop()
             if id < 0:
+                _conc_unlock()
                 return ran
             a := _conc_act_at(id)
             if _conc_word(a) == 0:
+                _conc_unlock()
                 continue
+            if cell_load(a, 64) < 0:
+                // First run on the home M: create the activation arena and
+                // fiber stack here, so the owning partition is only touched
+                // by its own thread.
+                aidp := arena_new()
+                if aidp < 0:
+                    cell_store(a, 8, CONC_ACT_DEAD)
+                    _conc_unlock()
+                    continue
+                stack := alloc(CONC_SCHED_STACK)
+                arena_set_current_unchecked(saved)
+                if _conc_word(stack) == 0:
+                    arena_reset(aidp)
+                    cell_store(a, 8, CONC_ACT_DEAD)
+                    _conc_unlock()
+                    continue
+                sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
+                cell_store(a, 16, sp)
+                cell_store(a, 24, stack)
+                cell_store(a, 64, aidp)
+                cell_store(a, 96, aidp)
             ran = 1
-            g_conc_cur = id
+            _conc_set_cur(id)
             cell_store(a, 8, CONC_ACT_RUNNING)
+            _conc_unlock()
             arena_set_current_unchecked(cell_load(a, 64))
-            fiber_switch(_conc_ptr_addr(g_conc_sched_sp), cell_load(a, 16))
-            st := cell_load(a, 8)
-            aid := cell_load(a, 64)
-            if st == CONC_ACT_DEAD:
-                arena_reset(aid)
-                store_str_ptr(g_conc_acts, id * 8, "")
-                _conc_free_push(id)
+            fiber_switch(_conc_ptr_addr(_conc_sched_sp_cell()), cell_load(a, 16))
             arena_set_current_unchecked(saved)
-            g_conc_cur = -1
+            _conc_lock()
+            st := cell_load(a, 8)
+            root := cell_load(a, 96)
+            if st == CONC_ACT_DEAD:
+                arena_reset(root)
+                _conc_free_push(id)
+            _conc_set_cur(-1)
+            _conc_unlock()
     else:
-        a := _conc_act_at(g_conc_cur)
+        a := _conc_act_at(_conc_cur_id())
         if _conc_word(a) == 0:
-            g_conc_cur = -1
+            _conc_set_cur(-1)
             return 0
         cell_store(a, 64, arena_current_unchecked())
-        fiber_switch(@ptr_add(a, 16), cell_load(g_conc_sched_sp, 0))
+        fiber_switch(@ptr_add(a, 16), cell_load(_conc_sched_sp_cell(), 0))
     return ran
 
 fn _conc_ptr_addr(s: string) -> int:
@@ -232,23 +311,34 @@ fn _conc_ptr_addr(s: string) -> int:
     return v
 
 fn conc_yield(), pub:
-    if g_conc_cur < 0:
+    if _conc_cur_id() < 0:
         return
-    a := _conc_act_at(g_conc_cur)
+    a := _conc_act_at(_conc_cur_id())
     if _conc_word(a) == 0:
         return
     cell_store(a, 8, CONC_ACT_RUNNABLE)
-    _conc_ready_push(g_conc_cur)
+    _conc_lock()
+    _conc_ready_push(_conc_cur_id())
+    _conc_unlock()
     conc_schedule()
 
+fn conc_worker_run(m_idx: int), pub:
+    // The clone trampoline already installs the per-worker TLS block; set the
+    // index again so this loop is correct even on a runtime that starts a
+    // worker through a different path.
+    rt_set_m_idx(m_idx)
+    loop:
+        if conc_schedule() == 0:
+            syscall3(24, 0, 0, 0)
+
 fn _conc_activation_entry():
-    id := g_conc_cur
+    id := _conc_cur_id()
     a := _conc_act_at(id)
     if _conc_word(a) == 0:
         return
     entry := cell_load(a, 32)
     arg := cell_load(a, 40)
-    tbl := _conc_sched_alloc(8)
+    tbl := alloc(8)
     cell_store(tbl, 0, entry)
     rc := sched_call_1(tbl, 0, arg)
     ch := load_str_ptr(a, 48)
@@ -383,35 +473,41 @@ fn _conc_global_region_get() -> int:
 
 fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     conc_sched_init()
-    r : ., mut = _conc_global_region_get()
-    if r < 0:
-        return ""
-    if cap < 0 || elemsize <= 0:
-        return ""
-    if cap > 1099511627776 / elemsize:
-        return ""
-    need : ., mut = 128 + cap * elemsize
-    if need < 1048576:
-        need = 1048576
-    ch : ., mut = conc_channel_new(r, elemsize, cap)
-    if _conc_word(ch) == 0:
-        r = conc_region_new(need)
-        if r < 0:
-            return ""
-        g_conc_global_region = r
-        ch = conc_channel_new(r, elemsize, cap)
-    return ch
+    _conc_lock()
+    out : ., mut = ""
+    if elemsize > 0:
+        if cap >= 0:
+            if cap <= 1099511627776 / elemsize:
+                r : ., mut = _conc_global_region_get()
+                if r >= 0:
+                    need : ., mut = 128 + cap * elemsize
+                    if need < 1048576:
+                        need = 1048576
+                    ch : ., mut = conc_channel_new(r, elemsize, cap)
+                    if _conc_word(ch) == 0:
+                        r = conc_region_new(need)
+                        if r >= 0:
+                            g_conc_global_region = r
+                            ch = conc_channel_new(r, elemsize, cap)
+                    if _conc_word(ch) != 0:
+                        out = ch
+    _conc_unlock()
+    return out
 
 fn conc_sched_send_int(ch: string, val: int) -> int, pub:
     conc_sched_init()
-    if conc_channel_len(ch) < 0:
-        return -1
-    esize := _conc_ch_esize(ch)
-    if esize < 8:
-        return -1
-    slot := _conc_ch_slot(ch)
     loop:
+        _conc_lock()
+        if conc_channel_len(ch) < 0:
+            _conc_unlock()
+            return -1
+        esize := _conc_ch_esize(ch)
+        if esize < 8:
+            _conc_unlock()
+            return -1
+        slot := _conc_ch_slot(ch)
         if _conc_ch_closed(slot) != 0:
+            _conc_unlock()
             return 0
         cap := _conc_ch_cap(ch)
         n := _conc_ch_len(ch)
@@ -423,15 +519,22 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
                     cell_store(ra, 72, val)
                     cell_store(ra, 8, CONC_ACT_RUNNABLE)
                     _conc_ready_push(rid)
+                    _conc_unlock()
                     return 0
-            if g_conc_cur < 0:
-                if conc_schedule() == 0:
-                    return 0
+                _conc_unlock()
                 continue
-            ca := _conc_act_at(g_conc_cur)
+            if _conc_cur_id() < 0:
+                _conc_unlock()
+                if conc_schedule() == 0:
+                    if g_conc_m_count <= 1:
+                        return 0
+                    syscall3(24, 0, 0, 0)
+                continue
+            ca := _conc_act_at(_conc_cur_id())
             cell_store(ca, 72, val)
-            _conc_wait_push(slot, CONC_WAIT_SEND, g_conc_cur)
+            _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
             cell_store(ca, 8, CONC_ACT_WAITING)
+            _conc_unlock()
             conc_schedule()
             return 0
         if n < cap:
@@ -443,28 +546,39 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             cell_store(buf, pos * esize, val)
             cell_store(ch, 24, n + 1)
             _conc_wake_one(slot, CONC_WAIT_RECV)
+            _conc_unlock()
             return 0
-        if g_conc_cur < 0:
+        if _conc_cur_id() < 0:
+            _conc_unlock()
             if conc_schedule() == 0:
-                return 0
+                if g_conc_m_count <= 1:
+                    return 0
+                syscall3(24, 0, 0, 0)
             continue
-        _conc_wait_push(slot, CONC_WAIT_SEND, g_conc_cur)
-        a := _conc_act_at(g_conc_cur)
+        _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
+        a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
+        _conc_unlock()
         conc_schedule()
 
 fn conc_sched_recv_int(ch: string) -> int, pub:
     conc_sched_init()
-    if conc_channel_len(ch) < 0:
-        return 0
-    esize := _conc_ch_esize(ch)
-    if esize < 8:
-        return 0
-    slot := _conc_ch_slot(ch)
     loop:
+        _conc_lock()
+        if conc_channel_len(ch) < 0:
+            _conc_unlock()
+            return 0
+        esize := _conc_ch_esize(ch)
+        if esize < 8:
+            _conc_unlock()
+            return 0
+        slot := _conc_ch_slot(ch)
         n := _conc_ch_len(ch)
         cap := _conc_ch_cap(ch)
         if cap == 0:
+            if _conc_ch_closed(slot) != 0:
+                _conc_unlock()
+                return 0
             sid := _conc_wait_pop(slot, CONC_WAIT_SEND)
             if sid >= 0:
                 sa := _conc_act_at(sid)
@@ -473,16 +587,21 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
                     v = cell_load(sa, 72)
                     cell_store(sa, 8, CONC_ACT_RUNNABLE)
                     _conc_ready_push(sid)
+                _conc_unlock()
                 return v
-            if g_conc_cur < 0:
+            if _conc_cur_id() < 0:
+                _conc_unlock()
                 if conc_schedule() == 0:
-                    return 0
+                    if g_conc_m_count <= 1:
+                        return 0
+                    syscall3(24, 0, 0, 0)
                 continue
-            ra := _conc_act_at(g_conc_cur)
-            _conc_wait_push(slot, CONC_WAIT_RECV, g_conc_cur)
+            ra := _conc_act_at(_conc_cur_id())
+            _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
             cell_store(ra, 8, CONC_ACT_WAITING)
+            _conc_unlock()
             conc_schedule()
-            ra2 := _conc_act_at(g_conc_cur)
+            ra2 := _conc_act_at(_conc_cur_id())
             if _conc_word(ra2) == 0:
                 return 0
             return cell_load(ra2, 72)
@@ -496,41 +615,53 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
             cell_store(ch, 32, head)
             cell_store(ch, 24, n - 1)
             _conc_wake_one(slot, CONC_WAIT_SEND)
+            _conc_unlock()
             return v
         if _conc_ch_closed(slot) != 0:
+            _conc_unlock()
             return 0
-        if g_conc_cur < 0:
+        if _conc_cur_id() < 0:
+            _conc_unlock()
             if conc_schedule() == 0:
-                return 0
+                if g_conc_m_count <= 1:
+                    return 0
+                syscall3(24, 0, 0, 0)
             continue
-        _conc_wait_push(slot, CONC_WAIT_RECV, g_conc_cur)
-        a := _conc_act_at(g_conc_cur)
+        _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
+        a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
+        _conc_unlock()
         conc_schedule()
 
 fn conc_sched_close(ch: string), pub:
     conc_sched_init()
+    _conc_lock()
     if conc_channel_len(ch) < 0:
+        _conc_unlock()
         return
     slot := _conc_ch_slot(ch)
     _conc_ch_set_closed(slot)
     _conc_wake_all(slot, CONC_WAIT_SEND)
     _conc_wake_all(slot, CONC_WAIT_RECV)
+    _conc_unlock()
 
 fn conc_go(entry: int, arg: int) -> string, pub:
     conc_sched_init()
+    _conc_lock()
+    out : ., mut = ""
     r : ., mut = _conc_global_region_get()
-    if r < 0:
-        return ""
-    ch : ., mut = conc_channel_new(r, 8, 1)
-    if _conc_word(ch) == 0:
-        r = conc_region_new(1048576)
-        if r < 0:
-            return ""
-        g_conc_global_region = r
-        ch = conc_channel_new(r, 8, 1)
+    if r >= 0:
+        ch : ., mut = conc_channel_new(r, 8, 1)
         if _conc_word(ch) == 0:
-            return ""
-    if conc_spawn(entry, arg, ch) < 0:
+            r = conc_region_new(1048576)
+            if r >= 0:
+                g_conc_global_region = r
+                ch = conc_channel_new(r, 8, 1)
+        if _conc_word(ch) != 0:
+            out = ch
+    _conc_unlock()
+    if _conc_word(out) == 0:
         return ""
-    return ch
+    if conc_spawn(entry, arg, out) < 0:
+        return ""
+    return out

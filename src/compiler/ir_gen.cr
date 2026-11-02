@@ -4376,10 +4376,10 @@ fn gen_expr(node: int) -> int:
             // Capture the parent arena before the child is created. Array and
             // struct copies may contain string leaves that need a parent-side
             // str_sub allocation.
-            gv := global_var_of(str_intern("g_current_arena"))
-            if gv >= 0:
-                merge_parent_var = new_ir_var("_merge_parent", TI_INT)
-                emit(IR_LOAD, merge_parent_var, gv, 0, 0, TI_INT)
+            // Read the per-thread current arena: multi-M schedulers switch
+            // arenas per activation, so the legacy global is shared and stale.
+            merge_parent_var = new_ir_var("_merge_parent", TI_INT)
+            emit(IR_CALL, merge_parent_var, -1, 0, str_intern("rt_current_arena"), TI_INT)
             if merge_kind == 3:
                 ms1 := region_plan_merge_str1_of(sg_idx)
                 ms2 := region_plan_merge_str2_of(sg_idx)

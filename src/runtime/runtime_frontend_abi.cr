@@ -25,6 +25,7 @@ fn runtime_frontend_builtin_register():
     prelude_builtin_add("g_set_curg", TI_UNIT, 0)
     prelude_builtin_add("g_get_curg", TI_INT, 0)
     prelude_builtin_add("rt_m_idx", TI_INT, 0)
+    prelude_builtin_add("rt_set_m_idx", TI_UNIT, 0)
     prelude_builtin_add("rt_current_arena", TI_INT, 0)
     prelude_builtin_add("rt_set_current_arena", TI_UNIT, 0)
     prelude_builtin_add("rt_arena_suspend", TI_INT, 0)

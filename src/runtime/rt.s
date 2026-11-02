@@ -286,6 +286,12 @@ rt_m_idx:
     mov rax, qword ptr fs:[8]
     ret
 
+.globl rt_set_m_idx
+.type rt_set_m_idx, @function
+rt_set_m_idx:
+    mov qword ptr fs:[8], rdi
+    ret
+
 .globl rt_current_arena
 .type rt_current_arena, @function
 rt_current_arena:

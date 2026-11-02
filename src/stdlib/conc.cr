@@ -99,11 +99,20 @@ fn _conc_is_null(p: string) -> int:
 // Allocate outside the current compiler function arena. Runtime objects must
 // live in owner regions, never in a function arena.
 fn _conc_global_alloc(size: int) -> string:
-    saved := rt_current_arena()
-    rt_set_current_arena(-1)
-    p := alloc(size)
-    rt_set_current_arena(saved)
-    return p
+    // Owner regions are process-wide and must be usable from any worker M. A
+    // private anonymous mapping is independent of every arena partition and of
+    // the (single-owner) bump heap. Regions live until process exit, matching
+    // the previous "never reset" global-heap behavior.
+    if size <= 0:
+        return _conc_ptr(0)
+    // Ask for size + 8 so the payload can carry the Core string length word
+    // immediately before its data pointer, like the heap allocator does.
+    raw := syscall6(9, 0, size + 8, 3, 34, -1, 0)
+    if raw <= 0:
+        return _conc_ptr(0)
+    base := _conc_ptr(raw)
+    cell_store(base, 0, size)
+    return _conc_ptr(raw + 8)
 
 // Byte copy. The 8-byte path keeps layout copies cheap; the tail path keeps
 // arbitrary element sizes correct instead of assuming every message is 8B.

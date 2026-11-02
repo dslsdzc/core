@@ -1039,6 +1039,9 @@ fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
     cp = rt_pad16(buf, pos, cp)
     cp = cp + rt_emit_atomic_fetch_add(buf, pos+cp)
     cp = rt_pad16(buf, pos, cp)
+    // rt_set_m_idx (fs:8), appended so existing registered offsets stay stable.
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 8)
+    cp = rt_pad16(buf, pos, cp)
     return cp
 
 fn emit_goroutine_stubs(buf: string, pos: int) -> int:
@@ -1928,8 +1931,8 @@ fn elf_gen(buf: string) -> int:
         cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
         total_code = total_code + 11
-        // per-thread TLS + atomic stubs: 10 * 16 bytes
-        total_code = total_code + 160
+        // per-thread TLS + atomic stubs: 11 * 16 bytes (incl. rt_set_m_idx)
+        total_code = total_code + 176
 
     hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE
     rodata_base := total_code
@@ -2234,6 +2237,7 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("rt_atomic_xchg", 0, tls_start + 112)
         sched_reg_one("rt_atomic_cas", 0, tls_start + 128)
         sched_reg_one("rt_atomic_fetch_add", 0, tls_start + 144)
+        sched_reg_one("rt_set_m_idx", 0, tls_start + 160)
 
     // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
     // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init

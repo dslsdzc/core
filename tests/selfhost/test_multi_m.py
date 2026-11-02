@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""0A: lock-free multi-M runtime tests."""
+"""CP-5: true OS-thread multi-M runtime tests."""
 
 from __future__ import annotations
 
@@ -82,6 +82,39 @@ fn main() -> int:
         return sum
     return 0
 """
+
+EIGHT_WORKERS = """\
+import sched
+import chan
+
+g_buf : string, mut
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(8)
+    g_buf = alloc(512 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= 512:
+            break
+        ch := go work(i)
+        cell_store(g_buf, i * 8, ch)
+        i = i + 1
+    sum : ., mut = 0
+    i = 0
+    loop:
+        if i >= 512:
+            break
+        ch := cell_load(g_buf, i * 8)
+        sum = sum + chan_recv(ch)
+        i = i + 1
+    if sum != 131328:
+        return sum
+    return 0
+"""
+
 
 CROSS_M_PINGPONG = """\
 import sched
@@ -176,6 +209,7 @@ def main() -> int:
         ("arena_partition_stress", ARENA_STRESS, 120),
         ("two_workers_two_goroutines", TWO_WORKERS, 60),
         ("four_workers_queue", FOUR_WORKERS, 60),
+        ("eight_workers_queue", EIGHT_WORKERS, 90),
         ("cross_m_pingpong", CROSS_M_PINGPONG, 60),
         ("spawn_stress", SPAWN_STRESS, 120),
     ]

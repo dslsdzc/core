@@ -16,11 +16,21 @@ g_arena_cap : int, mut = 0        // metadata array capacity
 // 0A per-M partition. Gs never migrate, so every arena operation for a G
 // happens on its home M. Metadata arrays are preallocated; per-M free lists and
 // high-water counters are owner-private.
+//
+// SLOTS_PER_M/SEGMENTS_PER_M must match the slot math compiled into the
+// allocator blob (src/runtime/alloc_body.cr: slot = m * 256 + count, 64 slots
+// per 1MiB segment). A mismatch aliases two Ms onto the same slot: with
+// SLOTS_PER_M = 1024 here, M1's slot 256 landed in M0's segment 4.
 ARENA_PER_M : int = 1024
-SLOTS_PER_M : int = 1024
-SEGMENTS_PER_M : int = 16
+SLOTS_PER_M : int = 256
+SEGMENTS_PER_M : int = 4
 
 g_arena_m_count : int, mut = 1
+// Dedicated arena for runtime/shared metadata (scheduler arrays, channel
+// regions). It lives in the last M partition, which sched_init_n reserves by
+// initializing n+1 partitions. Only shared_alloc touches it, and callers
+// serialize on the conc lock, so no worker ever races another M's slot pools.
+g_arena_shared_arena : int, mut = -1
 g_arena_count_m : string, mut
 g_arena_free_list_m : string, mut
 g_slot_count_m : string, mut
@@ -312,6 +322,7 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     prev := rt_current_arena()
     rt_set_current_arena(-1)
     g_arena_scalars_ready = 0
+    g_arena_shared_arena = -1
     g_arena_scalars = alloc(64)
     g_arena_m_count = m_count
     total := m_count * ARENA_PER_M
@@ -438,6 +449,45 @@ fn arena_init(pool_size: int, arena_size: int), pub:
 fn arena_ensure_init(), pub:
     if g_arena_scalars_ready == 0:
         arena_init(0, 1048576)
+
+// Shared metadata arena. arena_init_m(n+1) reserves the last partition for it;
+// with a single partition it falls back to partition 0 (single-threaded use).
+fn arena_shared_m() -> int:
+    m : ., mut = g_arena_m_count - 1
+    if m < 0:
+        m = 0
+    return m
+
+fn arena_shared_init(), pub:
+    if g_arena_shared_arena >= 0:
+        return
+    saved_m := rt_m_idx()
+    saved := rt_current_arena()
+    rt_set_m_idx(arena_shared_m())
+    rt_set_current_arena(-1)
+    aid := arena_new()
+    rt_set_current_arena(saved)
+    rt_set_m_idx(saved_m)
+    if aid >= 0:
+        g_arena_shared_arena = aid
+
+// Caller must serialize concurrent calls (the conc lock does). The temporary
+// m_idx switch makes the allocator use the reserved partition's slot pools
+// instead of the calling worker's.
+fn arena_shared_alloc(size: int) -> string, pub:
+    saved_m := rt_m_idx()
+    saved := rt_current_arena()
+    if g_arena_shared_arena < 0:
+        rt_set_current_arena(-1)
+        p0 := alloc(size)
+        rt_set_current_arena(saved)
+        return p0
+    rt_set_m_idx(arena_shared_m())
+    rt_set_current_arena(g_arena_shared_arena)
+    p := alloc(size)
+    rt_set_current_arena(saved)
+    rt_set_m_idx(saved_m)
+    return p
 
 fn _arena_copy_cells(src: string, nbytes: int, dst: string):
     i : ., mut = 0
