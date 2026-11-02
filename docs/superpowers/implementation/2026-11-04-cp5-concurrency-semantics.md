@@ -13,7 +13,7 @@
 - 全部 spawn 后逐 index `chan_recv`，结果写入返回数组；
 - `arr := go i 0..3 square(i)` 由 `test_conc_sched_range_go` 验证（0²+1²+2²=5）。
 
-`IR_SPAWN` opcode 保留，但 range go 默认路径已不走它。
+`IR_SPAWN` opcode 保留，但 range go 默认路径已不走它；`test_ccr_types.py` 的旧 `p_spawn` 动态标记语料已随 CP-5 删除（53/53 通过）。
 
 ## 2. Multi-M 状态
 
@@ -63,6 +63,7 @@ test_chan_handle_model.py   11/11
 test_go_arena.py            PASS
 test_multi_m.py              5/5
 test_compile.py             PASS
+test_ccr_types.py           53/53
 build_kernel.py             PASS
 ```
 
