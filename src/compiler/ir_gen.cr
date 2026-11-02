@@ -3699,6 +3699,21 @@ fn gen_expr(node: int) -> int:
             func_ni : ., mut = -1
             if ast_kind(func_node) == EXPR_IDENT:
                 func_ni = ast_int_val(func_node)
+            // Plan-emitter marker: one call for the whole range. The default
+            // runtime still executes the per-index conc_go loop below.
+            range_fnaddr := new_ir_var("_range_fnaddr", TI_INT)
+            emit(IR_FNADDR, range_fnaddr, func_ni, 0, 0, 0)
+            range_start := new_ir_var("_range_start", TI_INT)
+            emit(IR_CONST, range_start, ast_a(range_node), 0, 0, TI_INT)
+            range_len := new_ir_var("_range_len", TI_INT)
+            emit(IR_CONST, range_len, range_count, 0, 0, TI_INT)
+            mp0 := new_ir_var("_mark0", TI_INT)
+            emit(IR_STORE, -1, mp0, range_fnaddr, 0, 0)
+            mp1 := new_ir_var("_mark1", TI_INT)
+            emit(IR_STORE, -1, mp1, range_start, 0, 0)
+            mp2 := new_ir_var("_mark2", TI_INT)
+            emit(IR_STORE, -1, mp2, range_len, 0, 0)
+            emit(IR_CALL, -1, mp0, 3, str_intern("conc_plan_mark_range"), TI_UNIT)
             conc_go_ni := str_intern("conc_go")
             fi : ., mut = 0
             loop:
@@ -6044,6 +6059,8 @@ fn gen_expr(node: int) -> int:
 fn is_arena_infra_name(name_idx: int) -> int:
     n := istr_get(name_idx)
     if str_eq(n, "conc_preempt_tick") != 0:
+        return 1
+    if str_eq(n, "conc_plan_mark_range") != 0:
         return 1
     if str_eq(n, "conc_preempt_signal") != 0:
         return 1

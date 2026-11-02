@@ -9,7 +9,7 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 104
+CONC_ACT_SIZE : int = 112
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -30,6 +30,7 @@ g_conc_spawn_rr : int, mut = 0
 g_conc_sched_sp_m : string, mut
 g_conc_lock : string, mut
 g_conc_m_count : int, mut = 1
+g_conc_slots : int, mut = 1
 g_conc_global_region : int, mut = -1
 g_conc_ch_states : string, mut
 g_conc_ch_count : int, mut = 0
@@ -199,6 +200,11 @@ fn conc_sched_set_m(n: int), pub:
         n = 1
     g_conc_m_count = n
 
+fn conc_sched_set_slots(n: int), pub:
+    if n < 1:
+        n = 1
+    g_conc_slots = n
+
 fn conc_sched_init():
     arena_ensure_init()
     arena_shared_init()
@@ -274,7 +280,11 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     if id < 0:
         id = g_conc_act_count
         g_conc_act_count = id + 1
-    home : ., mut = g_conc_spawn_rr % g_conc_m_count
+    slots : ., mut = g_conc_slots
+    if slots < 1:
+        slots = 1
+    slot := g_conc_spawn_rr % (g_conc_m_count * slots)
+    home : ., mut = slot % g_conc_m_count
     g_conc_spawn_rr = g_conc_spawn_rr + 1
     // Control blocks live in the shared partition and are reused through the
     // free list. Stacks and activation arenas are created lazily by the home
@@ -299,6 +309,7 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     cell_store(a, 80, home)
     cell_store(a, 88, -1)
     cell_store(a, 96, -1)
+    cell_store(a, 104, slot)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
 
@@ -329,6 +340,15 @@ fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
 
 fn conc_sched_curg() -> int, pub:
     return _conc_cur_id()
+
+fn conc_current_slot() -> int, pub:
+    id := _conc_cur_id()
+    if id < 0:
+        return -1
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return -1
+    return cell_load(a, 104)
 
 fn conc_schedule() -> int, pub:
     ran : ., mut = 0
@@ -406,6 +426,10 @@ fn conc_yield(), pub:
     _conc_ready_push(_conc_cur_id())
     _conc_unlock()
     conc_schedule()
+
+fn conc_plan_mark_range(entry: int, start: int, count: int), pub:
+    // Compiler-to-plan marker; the default runtime uses the IR loop.
+    return
 
 fn conc_preempt_tick(), pub:
     // Inserted at user loop backedges. No-op when the conc scheduler is not

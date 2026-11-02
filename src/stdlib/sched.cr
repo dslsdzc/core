@@ -44,6 +44,10 @@ TAG_MAX : int = 32767
 fn sched_init(), pub:
     sched_init_n(1)
 
+fn sched_init_slots(m: int, slots: int), pub:
+    conc_sched_set_slots(slots)
+    sched_init_n(m)
+
 fn sched_init_n(n: int), pub:
     if g_sched_inited != 0:
         return

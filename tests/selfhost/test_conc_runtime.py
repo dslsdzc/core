@@ -240,7 +240,7 @@ fn main() -> int:
         return 11
     if conc_plan_add_channel(p, 8, 0, CONC_PC_SPSC) != -1:
         return 12
-    if conc_plan_add_channel(p, 8, 1, 2) != -1:
+    if conc_plan_add_channel(p, 8, 1, 3) != -1:
         return 13
     return 0
 """

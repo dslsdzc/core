@@ -306,6 +306,10 @@ fn conc_plan_emit_write(path: string) -> int:
     count := cell_load(g_ir_func_instr_count, fi * 8)
 
     go_count : ., mut = 0
+    range_mode : ., mut = 0
+    range_fn_ni : ., mut = -1
+    range_start : ., mut = -1
+    range_count : ., mut = -1
     go_fn_ni : ., mut = -1
     go_arg_var : ., mut = -1
     go_call_ii : ., mut = -1
@@ -319,32 +323,81 @@ fn conc_plan_emit_write(path: string) -> int:
         ii := start + i
         if iri_op(ii) == IR_CALL:
             name := istr_get(iri_s3(ii))
-            if str_eq(name, "sched_go") != 0 || str_eq(name, "conc_go") != 0:
-                if iri_s2(ii) != 2:
-                    return _conc_emit_error("sched_go arity is not 2")
-                if _conc_emit_in_nested(ii) != 0:
-                    return _conc_emit_error("go inside loop/if is not supported")
-                go_count = go_count + 1
-                go_call_ii = ii
-                go_arg_var = iri_s1(ii) + 1
-                go_fn_ni = _conc_emit_fnaddr_before(iri_s1(ii), ii, start)
-                if go_fn_ni < 0:
-                    return _conc_emit_error("cannot resolve go target")
+            if str_eq(name, "conc_plan_mark_range") != 0:
+                if iri_s2(ii) != 3:
+                    return _conc_emit_error("range marker arity is not 3")
+                if range_mode != 0:
+                    return _conc_emit_error("multiple range-go sites are not supported")
+                range_mode = 1
+                range_fn_ni = _conc_emit_fnaddr_before(iri_s1(ii), ii, start)
+                range_start = _conc_emit_const_before(iri_s1(ii) + 1, ii, start)
+                range_count = _conc_emit_const_before(iri_s1(ii) + 2, ii, start)
             else:
-                if str_eq(name, "chan_make") != 0:
+                if str_eq(name, "sched_go") != 0 || str_eq(name, "conc_go") != 0:
+                    if range_mode != 0:
+                        // Part of the lowered range-go loop; the range record
+                        // already describes it.
+                        i = i + 1
+                        continue
                     if iri_s2(ii) != 2:
-                        return _conc_emit_error("chan_make arity is not 2")
+                        return _conc_emit_error("sched_go arity is not 2")
                     if _conc_emit_in_nested(ii) != 0:
-                        return _conc_emit_error("chan_make inside loop/if is not supported")
-                    if chan_count >= 64:
-                        return _conc_emit_error("too many chan_make sites")
-                    hstore := _conc_emit_handle_after(ii, start + count)
-                    if hstore < 0:
-                        return _conc_emit_error("cannot resolve chan_make handle")
-                    cell_store(cvars, chan_count * 8, iri_s1(hstore))
-                    cell_store(cstores, chan_count * 8, hstore)
-                    chan_count = chan_count + 1
+                        return _conc_emit_error("go inside loop/if is not supported")
+                    go_count = go_count + 1
+                    go_call_ii = ii
+                    go_arg_var = iri_s1(ii) + 1
+                    go_fn_ni = _conc_emit_fnaddr_before(iri_s1(ii), ii, start)
+                    if go_fn_ni < 0:
+                        return _conc_emit_error("cannot resolve go target")
+                else:
+                    if str_eq(name, "chan_make") != 0:
+                        if range_mode != 0:
+                            i = i + 1
+                            continue
+                        if iri_s2(ii) != 2:
+                            return _conc_emit_error("chan_make arity is not 2")
+                        if _conc_emit_in_nested(ii) != 0:
+                            return _conc_emit_error("chan_make inside loop/if is not supported")
+                        if chan_count >= 64:
+                            return _conc_emit_error("too many chan_make sites")
+                        hstore := _conc_emit_handle_after(ii, start + count)
+                        if hstore < 0:
+                            return _conc_emit_error("cannot resolve chan_make handle")
+                        cell_store(cvars, chan_count * 8, iri_s1(hstore))
+                        cell_store(cstores, chan_count * 8, hstore)
+                        chan_count = chan_count + 1
         i = i + 1
+
+    if range_mode != 0:
+        if go_count != 0:
+            return _conc_emit_error("range-go plan cannot mix with single go")
+        if range_fn_ni < 0:
+            return _conc_emit_error("cannot resolve range target")
+        if range_start == CONC_EMIT_UNKNOWN || range_count == CONC_EMIT_UNKNOWN:
+            return _conc_emit_error("range bounds are not constants")
+        if range_start < 0 || range_count <= 0:
+            return _conc_emit_error("range bounds are invalid")
+        target_fi := _conc_emit_find_func(range_fn_ni)
+        if target_fi < 0:
+            return _conc_emit_error("cannot find range target function")
+        if cell_load(g_ir_func_param_count, target_fi * 8) != 1:
+            return _conc_emit_error("range target must take one int parameter")
+        out2 : ., mut = "v 2\n"
+        out2 = out2 + "entries 2\n"
+        out2 = out2 + "body 0 TASK 0 0\n"
+        out2 = out2 + "target cpu 1 1\n"
+        out2 = out2 + "slot 0 THREAD -1 1\n"
+        out2 = out2 + "body 1 PAR 1 " + int_str(range_count) + "\n"
+        out2 = out2 + "range 1 " + int_str(range_start) + " " + int_str(range_count) + "\n"
+        out2 = out2 + "edge 0 1 SPAWN -1\n"
+        nwritten2 := write_file(path, out2)
+        if nwritten2 != str_len(out2):
+            _conc_emit_remove(path)
+            print("error: could not write ")
+            println(path)
+            return 1
+        print(" -> ")
+        return 0
 
     if go_count != 1:
         return _conc_emit_error("exactly one go in main is supported")

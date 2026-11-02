@@ -6455,6 +6455,8 @@ fn compute_all_purity():
             break
         if str_eq(istr_get(fi_name(fi)), "conc_preempt_tick") != 0:
             cell_store(pure, fi * 8, 1)
+        if str_eq(istr_get(fi_name(fi)), "conc_plan_mark_range") != 0:
+            cell_store(pure, fi * 8, 1)
         if str_eq(istr_get(fi_name(fi)), "_conc_futex_wait") != 0:
             cell_store(pure, fi * 8, 1)
         if str_eq(istr_get(fi_name(fi)), "_conc_futex_wake") != 0:
