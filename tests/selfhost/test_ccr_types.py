@@ -2277,14 +2277,12 @@ def test_p6t3_aux_face_and_composite_preserved():
     # 语料分工：
     #   ptr_ref_first.cr = 复合行（IR_BINARY 指针行）+ hotpatch route 辅码；
     #   p_dex.cr = IR_STORE_PTR + IR_BOUNDS_CHECK 旗标；
-    #   p_spawn.cr = IR_SPAWN 动态标记。
+    #   IR_SPAWN 的 range-go 发射点已在 CP-5 切换到 conc_go，故不再有动态 SPAWN 语料。
     sources = [(os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr'), 'prf', 'comp'),
                (os.path.join(BASE, 'tests', 'probes', 'p_dex.cr'), 'dex', 'aux'),
-               (os.path.join(BASE, 'tests', 'probes', 'p_spawn.cr'), 'spawn', 'aux'),
                (tk_fixture('p6t3aux_tk', TK_FIXTURE), 'tk', 'aux')]
     total_aux = 0
     saw_bound = 0
-    saw_spawn = 0
     for src, tag, kind in sources:
         ccr_path = os.path.join(BASE, 'build', f'test_p6t3_aux_{tag}.ccr')
         try:
@@ -2307,8 +2305,6 @@ def test_p6t3_aux_face_and_composite_preserved():
                         f"{tag}: aux-face op {op} carries type_id {type_id} (must be -1)"
                 if op == IR_BOUNDS_CHECK and flags_ & 1:
                     saw_bound += 1
-                if op == IR_SPAWN and flags_ & 2:
-                    saw_spawn += 1
                 assert flags_ <= 0x7
 
         finally:
@@ -2317,7 +2313,6 @@ def test_p6t3_aux_face_and_composite_preserved():
                 _cleanup(src)
     assert total_aux > 0, "vacuous: no aux-face node in any source"
     assert saw_bound > 0, "vacuous: no dynamic BOUNDS_CHECK flag in corpus"
-    assert saw_spawn > 0, "vacuous: no dynamic SPAWN flag in corpus"
 
 
 def _patch_type_id(data: bytes, node: int, value: int) -> bytes:
