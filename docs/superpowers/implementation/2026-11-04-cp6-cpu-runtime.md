@@ -120,6 +120,7 @@ CP-6 分三批提交：
 - plan v2 `budget <id> <kind> <bound> <status>`、`cert <id> <kind> <status>`。
 - `CONC_STATUS_{PROVED,UNKNOWN,VIOLATED,MEASURED}`。
 - `conc_plan_budget_ok` / `conc_plan_cert_ok`：只有全部 `PROVED|MEASURED` 才返回 1；`UNKNOWN` 明确失败。
+- `conc_plan_budget_measure(plan, i, value)` 记录实测值并置 `MEASURED`；`conc_plan_budget_value` 读回。
 - range plan 发射 `PROGRESSIVE UNKNOWN`（可见延迟未证明）、`COUNT PROVED`（索引域已知）、`WAIT UNKNOWN`（最长等待未证明）、`cert UNKNOWN`（无死锁证书）。
 - `.ccr` 不承载预算/证书。
 
