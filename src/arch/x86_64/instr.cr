@@ -1806,7 +1806,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // Load arguments: s2 = first arg, s3 = arg count. SysV AMD64 assigns int
         // arguments to rdi, rsi, rdx, rcx, r8, r9 and float arguments to
         // xmm0-xmm7. The dispatch is callseq.cr cs_args_dispatch, shared with
-        // IR_CALL and IR_SPAWN. The extern path only dispatches registers; it
+        // IR_CALL. The extern path only dispatches registers; it
         // does not push stack arguments or clean the stack. This is existing
         // behavior and is kept byte-for-byte; see callseq.cr for the difference.
         cp = cs_args_dispatch(buf, pos, cp, s2, s3)
@@ -1864,38 +1864,6 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w32(buf, pos+cp+1, 0)
         cp = cp + 5
         cp = cp + e2_st(buf, pos+cp, 0, do2)
-        return cp
-
-    if op == IR_SPAWN:
-        do2 := g2_slot(d)
-        // Operand convention: s1 = first arg, s2 = arg count, s3 = function name
-        // ni. ir_gen emits emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1), and
-        // the interpreter uses s3 to look up the function name. Load arguments
-        // with the same SysV AMD64 dispatch as IR_CALL: int arguments go to
-        // rdi, rsi, rdx, rcx, r8, r9, then the stack; float arguments go to
-        // xmm0-xmm7.
-        name_ni := s3
-        fa := s1
-        ac := s2
-        cp = cs_args_dispatch(buf, pos, cp, fa, ac)
-        // Push stack arguments right to left. Only the 7th int or 9th float
-        // argument goes on the stack. The helpers are in callseq.cr.
-        stack_total := cs_stack_count(fa, ac)
-        cp = cs_stack_args(buf, pos, cp, fa, ac)
-        // Emit call to function + store result (single-threaded approximation)
-        grow_call_patch(g_x86_call_patch_count + 1)
-        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni)
-        g_x86_call_patch_count = g_x86_call_patch_count + 1
-        e2_w8(buf, pos+cp, 232)
-        e2_w32(buf, pos+cp+1, 0)
-        cp = cp + 5
-        // Clean the stack after the call, same as IR_CALL.
-        cp = cs_stack_cleanup(buf, pos, cp, stack_total)
-        if d >= 0 && irv_type(d) == TI_DEX:
-            cp = cp + e2_sd_store(buf, pos+cp, do2)
-        else:
-            cp = cp + e2_st(buf, pos+cp, 0, do2)
         return cp
 
     if op == IR_FNADDR:

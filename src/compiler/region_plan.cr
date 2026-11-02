@@ -1105,7 +1105,7 @@ fn rp_if_has_exit_or_effect(sg_start: int, sg_count: int) -> int:
             return 0
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        if op == IR_RETURN || op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_PTR_OF || op == IR_STR_OF:
+        if op == IR_RETURN || op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_PTR_OF || op == IR_STR_OF:
             return 1
         if op == IR_JUMP:
             t := rc_ctl_label_node(s1)
@@ -1585,7 +1585,7 @@ fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: 
         qn = qn + 1
     return -1
 
-// IR_CALL/IR_SPAWN carry contiguous argument vars starting at s1.
+// IR_CALL carries contiguous argument vars starting at s1.
 fn rp_call_arg_uses_alloc(s1: int, s2: int, ai_sel: int) -> int:
     if s1 < 0 || s2 <= 0:
         return 0
@@ -1918,7 +1918,7 @@ fn rp_string_calls_ok(sg_start: int, sg_count: int) -> int:
             cfi := rc_func_by_name(s3)
             if cfi < 0 || func_owner(cfi) != owner:
                 return 0
-        else if op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_RETURN:
+        else if op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_RETURN:
             return 0
         else if op == IR_JUMP:
             if rp_label_inside(rc_ctl_label_node(s1), sg_start, sg_count) == 0:
@@ -2195,7 +2195,7 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                 if literal_only == 0:
                     // IR_BINARY/IR_UNARY/IR_MATCH keep an operator or label
                     // range in the high fields; check only the value slots.
-                    if op == IR_CALL || op == IR_SPAWN:
+                    if op == IR_CALL:
                         if allow_calls == 0 && rp_call_arg_uses_sel(s1, s2, ai1, ai2) != 0:
                             return 0
                     else if op == IR_MATCH:
@@ -2319,11 +2319,11 @@ fn rp_share_bad_prepare():
                             rp_share_bad_set(fi, 4)
                         else if rk == TYP_BASE && get_type_data(rt) == TY_STRING:
                             rp_share_bad_set(fi, 4)
-                if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+                if op == IR_YIELD || op == IR_AWAIT:
                     rp_share_bad_set(fi, 4)
                 if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
                     rp_share_bad_set(fi, 4)
-                if op == IR_CALL || op == IR_SPAWN:
+                if op == IR_CALL:
                     if is_arena_infra_name(s3) != 0:
                         rp_share_bad_set(fi, 4)
                     else if rc_func_by_name(s3) < 0:
@@ -2362,7 +2362,7 @@ fn rp_share_bad_prepare():
                         break
                     op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
                     s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-                    if op == IR_CALL || op == IR_SPAWN:
+                    if op == IR_CALL:
                         cfi := rc_func_by_name(s3)
                         if cfi >= 0 && cfi < g_ir_func_count:
                             cb := cell_load(g_share_bad, cfi * 8)
@@ -2510,7 +2510,7 @@ fn rp_share_window_ok(s_end: int, rn: int, mode: int, ai_sel: int, nstart: int, 
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-        if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        if op == IR_YIELD || op == IR_AWAIT:
             return 0
         if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
             return 0
@@ -2689,7 +2689,7 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
             if op == IR_CONST || op == IR_CONST_BIG || op == IR_LABEL || op == IR_JUMP || op == IR_ALLOC || op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_BOUNDS_CHECK:
                 literal_only = 1
             if literal_only == 0:
-                if op == IR_CALL || op == IR_SPAWN:
+                if op == IR_CALL:
                     if rp_call_arg_uses_alloc(s1, s2, ai_sel) != 0:
                         umax = ni
                 else if op == IR_MATCH:
@@ -3237,7 +3237,7 @@ fn lazy_memory_write(op: int) -> int:
 fn lazy_op_may_mutate_memory(op: int) -> int:
     if lazy_memory_write(op) != 0:
         return 1
-    if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH || op == IR_YIELD || op == IR_AWAIT:
+    if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH || op == IR_YIELD || op == IR_AWAIT:
         return 1
     return 0
 
@@ -3351,7 +3351,7 @@ fn lazy_callee_safe(fi: int) -> int:
         d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
-        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
             return 0
         if op == IR_STORE_PTR || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ADDR_INDEX || op == IR_SLICE || op == IR_REF || op == IR_FNADDR:
             return 0
@@ -3394,7 +3394,7 @@ fn lazy_callee_no_alloc(fi: int) -> int:
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         if op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_ALLOC_AT || op == IR_ARENA_CLEAR:
             return 0
-        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT:
             return 0
         ni = ni + 1
     return 0

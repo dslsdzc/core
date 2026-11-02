@@ -71,9 +71,8 @@ CCR_FLAG_KNOWN_MASK : int = 7
 // carries a machine extent or physical location. corearch reconstructs those
 // from the semantic type and the active target layout.
 //   bit 0  IR_BOUNDS_CHECK: bound is a runtime value (legacy tk == 1)
-//   bit 1  IR_SPAWN: dynamic spawn (legacy tk == -1)
+//   bit 1  reserved (retired IR_SPAWN dynamic flag)
 //   bit 2  IR_DEREF/IR_STORE_PTR: runtime allocation bound is present
 CCR_NOD_FLAG_DYNAMIC_LIMIT : int = 1
-CCR_NOD_FLAG_DYNAMIC_SPAWN : int = 2
 CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS : int = 4
 CCR_NOD_FLAG_KNOWN_MASK : int = 7

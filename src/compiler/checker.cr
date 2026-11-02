@@ -6206,7 +6206,7 @@ fn spec_check_all():
 //   IR_STORE_INDEX_VAR / IR_STORE_PTR（裸指针写同为效应）；无 unsafe 区
 //   （IR 无 unsafe 专用 opcode，按 SG_UNSAFE 区的归属函数判定）。
 //  2. 体无 IO/FFI/并发效应 opcode：IR_CALL_EXTERN / IR_HOTPATCH_ROUTE /
-//   IR_DYN_DISPATCH / IR_SPAWN / IR_YIELD / IR_AWAIT / IR_INLINE 见 3。
+//   IR_DYN_DISPATCH / IR_YIELD / IR_AWAIT / IR_INLINE 见 3。
 //  3. 传递闭包内被调者全纯：IR_CALL 的 s3 = 名 ni 经 find_func 解析（不可解析 =
 //   runtime builtin，因此不纯）；IR_INLINE 亦按 s1 经 find_func 解析，但 s1 的
 //   含义依发射点分两形：调用旗标形（ir_gen.cr:1523）s1 = 函数名 ni；
@@ -6255,8 +6255,6 @@ fn purity_op_effect(op: int) -> int:
     if op == IR_HOTPATCH_ROUTE:
         return 1
     if op == IR_DYN_DISPATCH:
-        return 1
-    if op == IR_SPAWN:
         return 1
     if op == IR_YIELD:
         return 1

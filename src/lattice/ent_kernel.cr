@@ -422,8 +422,6 @@ fn ir_op_kind_name(op: int) -> string:
         return "SLICE"
     if op == IR_ADDR_INDEX:
         return "ADDR_INDEX"
-    if op == IR_SPAWN:
-        return "SPAWN"
     if op == IR_AWAIT:
         return "AWAIT"
     if op == IR_ARENA_NEW:
@@ -1108,10 +1106,6 @@ fn nod_tk(n: int) -> int:
     if op == IR_BOUNDS_CHECK:
         if fl % 2 == 1:
             return 1
-        return 0
-    if op == IR_SPAWN:
-        if (fl / 2) % 2 == 1:
-            return -1
         return 0
     return nod_type_id(n)
 fn nod_edge_first(n: int) -> int:

@@ -21,7 +21,7 @@ COREC = BASE / "build" / "corec"
 # ④不可解析 + ⑤自递归 + ⑤b互递归x2 + ⑥泛型实例x2 + ⑥b有效应泛型x2）+ state 链
 # 4（效应调用被链穿过 / 纯调用不被触及 / 循环终止依赖 / 无循环无 label 边负控）
 # + Task 2 分类表补全 7（验收例双调 x3 + extern x2 + yield x2）。
-# CP-5：range go 切到 conc_go 后不再发射 IR_SPAWN，原 spawn x2 用例删除。
+# CP-5/CP-6：range go 走 conc_go，IR_SPAWN 已退役。
 # 低于此数 = 用例被静默删减（判定依据空转），故设下限而非仅断言相等。
 MIN_CASES = 24
 

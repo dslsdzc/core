@@ -4,7 +4,7 @@
 // Entry points:
 //   1. cs_args_dispatch: register argument dispatch. int args use rdi, rsi, rdx,
 //      rcx, r8, r9; binary64 args use xmm0-xmm7. Each class is numbered
-//      independently. Used by IR_CALL, IR_CALL_EXTERN, and IR_SPAWN.
+//      independently. Used by IR_CALL and IR_CALL_EXTERN.
 //   2. cs_arg_on_stack, cs_stack_count, cs_stack_args: stack argument test, count,
 //      and push. Int args from the 7th and binary64 from the 9th go on the stack,
 //      pushed right to left. The test and count share cs_arg_on_stack.
@@ -16,7 +16,7 @@
 //   5. cs_call_direct: direct call by name through g_x86_func_offsets, or external
 //      relocation when not found; stores the return value when d >= 0.
 //
-// IR_CALL and IR_SPAWN use the stack helpers. IR_CALL_EXTERN only dispatches
+// IR_CALL uses the stack helpers. IR_CALL_EXTERN only dispatches
 // registers and does not push stack arguments or clean the stack. This is
 // existing behavior; more than six integer extern arguments remain unsupported.
 // IR_HOTPATCH_ROUTE keeps its own external placeholder and does not use
@@ -30,12 +30,12 @@
 // Depends on instr.cr for encoding primitives and g2_slot, and the shared x86
 // patch and global arrays.
 
-// Register argument dispatch, shared by IR_CALL, IR_CALL_EXTERN, and IR_SPAWN.
+// Register argument dispatch, shared by IR_CALL and IR_CALL_EXTERN.
 // SysV AMD64 assigns int args to rdi, rsi, rdx, rcx, r8, r9 and binary64 args to
 // xmm0-xmm7. Each class has its own index. The first pass emits register loads in
 // left-to-right order. Arguments above the limit (7th int or 9th binary64) are
 // not emitted here; cs_stack_args decides whether to push them. IR_CALL and
-// IR_SPAWN push them, IR_CALL_EXTERN does not.
+// IR_CALL pushes them, IR_CALL_EXTERN does not.
 // Returns the new cp.
 fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
     ir_cnt : ., mut = 0
@@ -72,7 +72,7 @@ fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
         ai = ai + 1
     return cp
 
-// Stack arguments: test, count, and push. IR_CALL and IR_SPAWN share them.
+// Stack arguments: test, count, and push. IR_CALL uses them.
 // cs_arg_on_stack returns 1 when the i-th argument goes on the stack: int from
 // the 7th and binary64 from the 9th. The test counts earlier arguments of the
 // same class. 1 means stack, 0 means register.
@@ -131,7 +131,7 @@ fn cs_stack_args(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
         stack_ai = stack_ai - 1
     return cp
 
-// Stack cleanup, shared by IR_CALL and IR_SPAWN.
+// Stack cleanup, shared by IR_CALL.
 // Restore rsp after the call with add rsp, stack_count*8. Use the 4-byte form
 // (48 83 C4 imm8) when the byte count is at most 127, otherwise the 7-byte form
 // (48 81 C4 imm32). Returns the new cp.

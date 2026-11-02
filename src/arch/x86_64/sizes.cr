@@ -112,9 +112,6 @@ fn instr_size(op: int) -> int:
         return 11
     if op == IR_LAZY_FORCE:
         return 11
-    if op == IR_SPAWN:
-        return 9
-    // call(5) + store(4)
     if op == IR_YIELD:
         return 0
     // no-op (for now)
