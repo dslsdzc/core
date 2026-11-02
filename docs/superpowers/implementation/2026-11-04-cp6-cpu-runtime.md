@@ -11,7 +11,7 @@ CP-6 分三批提交：
 
 - 批次 A `7ceb88cf`：抢占 tick、SIGALRM pending flag、futex park/wake。
 - 批次 B `0627c507`：plan v2、MPMC、range plan、MessageRef 通道、layout 表、transfer、slots。
-- 批次 C（本记录）：预算/证书、确定性、PIPE/yield、旧 runtime 退役。
+- 批次 C `4620bf1b`：预算/证书、确定性、PIPE/yield、旧 runtime 退役。
 
 ## 2. 逐项实现
 
