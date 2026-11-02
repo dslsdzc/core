@@ -153,6 +153,9 @@ CP-6 分三批提交：
 ### 2.13 PIPELINE / flow / yield
 
 - `yield` 在 conc 程序中生成真实 `conc_yield` 调用；值搬运仍保留，供 flow/stream 读取。
+- flow 函数由 `scan_for_yield` 标记；`yield` 在 conc flow 中 lowering 为 `conc_flow_yield(v)`：把 v 发到 activation 的 yield 通道（record +112），再 `conc_yield` 挂起。
+- `conc_flow_run(entry, arg, out)`：创建 yield/result 通道，spawn flow activation，循环收集 yield 值直到通道 close，再收 result。fiber 保存任意控制流与局部变量，因此 if/loop/嵌套 yield 都成立，不需要 CPS 或生成 N 个 stage 函数。
+- `go flow_fn()` 仍走普通 activation：yield 只是协作切换点，不收集；需要 stage 输出时用 `conc_flow_run`。
 - `CONC_BODY_PIPELINE=3`；plan 接受 `body <id> PIPE <entry> <params>`。
 - `conc_run_cpu`/`conc_run_body`/`conc_run_body_bound` 将 PIPE 按 TASK 调用一次，函数内部 `yield` 是真实 stage 切换。
 - `corec conc-plan` 检测 go 目标函数 IR 中的 `IR_YIELD`，输出 `v 2` + `body 1 PIPE 1 <params>`。
@@ -171,7 +174,7 @@ CP-6 分三批提交：
 - 保留兼容入口：`sched_init`、`sched_init_n`、`sched_init_slots`、`sched_go`（委托 conc_go）、`sched_get_curg`、`sched_worker_run`（委托 conc_worker_run）、`m_start_workers`。
 - `build_kernel.py` 保留 `sched.cr`（rt.s 的 worker_entry 引用 `sched_worker_run`），移除 `goroutine.cr`。
 - 删除无人引用的 `rt_alloc_persistent` 与 4 MiB/M 持久对象 bump block。
-- `IR_SPAWN` 仍保留 wire/解释器兼容，但编译器不再发射；这是格式兼容，不是执行路径。
+- `IR_SPAWN` 已删除；opcode 槽位 27 保留为 retired，旧 artifact 出现 op 27 会 fail-closed。
 
 测试：`go_e2e_test`、`go_final_test`、`go_parallel_test`、`conc_test`、`chan_test` 全部 ALL PASS；`test_chan_handle_model.py` 11/11。
 
@@ -185,6 +188,7 @@ test_conc_plan.py            5/5
 test_conc_plan_emitter.py   25/25
 test_conc_plan_v2.py         7/7（含 validate/explain/cycle、MPMC plan run、pipeline run）
 test_conc_autopar.py         4/4（pure arithmetic auto-PAR + serial fallback IR 对照）
+test_conc_flow.py            3/3（straight/loop/nested flow coroutine）
 test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
@@ -205,7 +209,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
 - DATA_PARALLEL 的自动识别覆盖 range go 与“纯算术 `out[i] = f(i)`”普通 for；其他循环 serial fallback。
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
-- PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；编译器还不会自动把 `flow` 函数拆成多个 stage body，需要手写 stage 函数或 CPS splitter。
+- PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；flow 采用 fiber 协程实现（yield 为 stage 边界），不生成多个函数。
 - futex 的优先级继承未做；取消/关闭已有 `conc_shutdown` 与 channel close；等待使用 2 ms 安全超时。
 - layout 表是进程内全局表；plan 可声明并 apply，但未做跨进程持久化/文件格式。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。

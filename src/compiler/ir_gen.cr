@@ -10,6 +10,7 @@ g_program_has_arena : int, mut = 0 // 1 when the program imports the arena libra
 g_program_has_conc : int, mut = 0  // 1 when the program imports sched/chan/conc
 g_emit_preempt_ticks : int, mut = 0 // 1 while generating user concurrent code
 g_emit_since_tick : int, mut = 0    // IR instructions since the last safe-point tick
+g_cur_flow : int, mut = 0           // 1 while generating a function that contains yield
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
 g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
@@ -5632,6 +5633,15 @@ fn gen_expr(node: int) -> int:
         if val_node >= 0:
             val_var = gen_expr(val_node)
             val_var = force_if_thunk(val_var)
+        if g_cur_flow != 0 && g_program_has_conc != 0:
+            // Coroutine flow: publish the yielded value to the driver and
+            // suspend. The fiber preserves arbitrary control flow/locals, so
+            // no AST/CPS splitting is needed.
+            if val_var < 0:
+                val_var = new_ir_var("yield_unit", TI_INT)
+                emit(IR_CONST, val_var, 0, 0, 0, TI_INT)
+            emit(IR_CALL, -1, val_var, 1, str_intern("conc_flow_yield"), TI_UNIT)
+            return -1
         emit(IR_YIELD, -1, val_var, 0, 0, 0)
         // On the conc mapping a yield is a real activation switch point. The
         // value move above stays for the flow/stream reading of yield.
@@ -6290,6 +6300,7 @@ fn ir_gen_func(fi: int):
     // bits->scaled 转换失效，仅在 dex 类型节点下标恰为 1 时碰巧生效）
     ret_ti := fi_return_type(fi)
     body := ast_data(fn_node)
+    g_cur_flow = scan_for_yield(body)
 
     // Record function metadata
     func_idx := g_ir_func_count
@@ -6445,6 +6456,7 @@ fn ir_gen_func(fi: int):
                 g_cur_ret_opt = 1
     if body >= 0:
         gen_expr(body)
+    g_cur_flow = 0
     g_cur_ret_ti = -1
     g_cur_ret_opt = 0
     g_cur_ret_dex_opt = 0

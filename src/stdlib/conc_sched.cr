@@ -9,7 +9,7 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 112
+CONC_ACT_SIZE : int = 120
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -354,7 +354,7 @@ fn _conc_free_pop() -> int:
     g_conc_free_count = g_conc_free_count - 1
     return cell_load(g_conc_free, g_conc_free_count * 8)
 
-fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
+fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string) -> int:
     conc_sched_init()
     _conc_acts_grow()
     id : ., mut = _conc_free_pop()
@@ -384,6 +384,7 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     cell_store(a, 32, entry)
     cell_store(a, 40, arg)
     store_str_ptr(a, 48, result_ch)
+    store_str_ptr(a, 112, yield_ch)
     cell_store(a, 56, -1)
     cell_store(a, 64, -1)
     cell_store(a, 72, 0)
@@ -413,7 +414,17 @@ fn _conc_word(s: string) -> int:
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch)
+    id := _conc_act_new(entry, arg, result_ch, "")
+    if id >= 0:
+        _conc_ready_push(id)
+    _conc_unlock()
+    return id
+
+fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
+                   yield_ch: string) -> int, pub:
+    conc_sched_init()
+    _conc_lock()
+    id := _conc_act_new(entry, arg, result_ch, yield_ch)
     if id >= 0:
         _conc_ready_push(id)
     _conc_unlock()
@@ -633,6 +644,50 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
         i = i + 1
     return total
 
+fn conc_flow_yield(v: int), pub:
+    id := _conc_cur_id()
+    if id < 0:
+        return
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return
+    ych := load_str_ptr(a, 112)
+    if _conc_word(ych) != 0:
+        conc_sched_send_int(ych, v)
+    conc_yield()
+
+fn conc_sched_is_closed(ch: string) -> int, pub:
+    conc_sched_init()
+    if conc_channel_len(ch) < 0:
+        return 1
+    slot := _conc_ch_slot(ch)
+    return _conc_ch_closed(slot)
+
+fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
+    // Drive a coroutine flow to completion, collecting each yielded int in
+    // `out`. The flow fiber preserves arbitrary control flow and locals across
+    // yields; no compiler stage splitting is required.
+    conc_sched_init()
+    r := _conc_global_region_get()
+    if r < 0:
+        return -1
+    ych := conc_channel_new(r, 8, 1)
+    rch := conc_channel_new(r, 8, 1)
+    if _conc_word(ych) == 0 || _conc_word(rch) == 0:
+        return -1
+    id := conc_spawn_flow(entry, arg, rch, ych)
+    if id < 0:
+        return -1
+    n : ., mut = 0
+    loop:
+        v := conc_sched_recv_int(ych)
+        if conc_sched_is_closed(ych) != 0:
+            break
+        cell_store(out, n * 8, v)
+        n = n + 1
+    rv := conc_sched_recv_int(rch)
+    return n
+
 fn conc_plan_mark_range(entry: int, start: int, count: int), pub:
     // Compiler-to-plan marker; the default runtime uses the IR loop.
     return
@@ -681,6 +736,9 @@ fn _conc_activation_entry():
     tbl := alloc(8)
     cell_store(tbl, 0, entry)
     rc := sched_call_1(tbl, 0, arg)
+    ych := load_str_ptr(a, 112)
+    if _conc_word(ych) != 0:
+        conc_sched_close(ych)
     ch := load_str_ptr(a, 48)
     if _conc_word(ch) != 0:
         conc_sched_send_int(ch, rc)
