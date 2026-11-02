@@ -448,35 +448,6 @@ worker_entry:
     xor edi, edi
     syscall
 
-# goroutine_entry_wrapper: entry point for goroutines spawned via go.
-# Called via fiber_init as the fiber entry.
-# Reads the current G via g_get_curg(),
-# loads saved_fn and saved_arg from G, calls saved_fn(saved_arg),
-# sends rax to result_ch, then reclaims the goroutine:
-# g_free (arena_reset + mark _Gdead) and sched_schedule to the next G.
-.globl goroutine_entry_wrapper
-.type goroutine_entry_wrapper, @function
-goroutine_entry_wrapper:
-    call g_get_curg       # rax = current G pointer
-    mov rdi, [rax + 64]   # rdi = saved_arg (first parameter — SysV rdi)
-    mov rax, [rax + 56]   # rax = saved_fn (G pointer no longer needed)
-    call rax              # call saved_fn(saved_arg)
-    # rax = return value
-    push rax
-    call g_get_curg
-    mov rdi, [rax + 40]   # rdi = result_ch
-    pop rsi               # rsi = return value
-    call chan_send        # chan_send(result_ch, return_value)
-.Lexit:
-    # Get current G and reclaim it: arena_reset + mark _Gdead
-    call g_get_curg
-    mov rdi, rax
-    call g_free
-    # Exit goroutine: switch to next without re-enqueueing
-    call sched_schedule
-    # If schedule returns (no more work), just return (fiber dead)
-    ret
-
 # sched_call_N(table, index, args...): load the function pointer and tail-call it.
 # These are the native/rt.s counterparts of the backend-emitted trampolines;
 # they are used by the self-hosted compiler's own conc runtime.

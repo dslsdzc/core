@@ -1143,91 +1143,6 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // ret
     // 27 bytes
 
-    // goroutine_entry_wrapper: fiber entry, no prologue (runs on the G's stack):
-    //   call g_get_curg; rdi = [rax+64] (saved_arg: first param, SysV rdi);
-    //   rax = [rax+56] (saved_fn); call rax; push rax; call g_get_curg;
-    //   rdi = [rax+40] (result_ch); pop rsi; call chan_send;
-    //   then exit: call g_get_curg; mov rdi, rax; call g_free (arena_reset +
-    //   mark _Gdead); call sched_schedule (switch to next, no re-enqueue);
-    //   ret (fiber dead if no work)
-    call_pos0 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos0)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 120)
-    w8(buf, pos+cp+3, 64)
-    cp = cp + 4  // mov rdi, [rax+64]
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 64)
-    w8(buf, pos+cp+3, 56)
-    cp = cp + 4  // mov rax, [rax+56]  (modrm 01 000 000 = 0x40 + disp8)
-    w8(buf, pos+cp, 255)
-    w8(buf, pos+cp+1, 208)
-    cp = cp + 2  // call rax
-    w8(buf, pos+cp, 80)
-    cp = cp + 1  // push rax
-    call_pos1 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos1)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 120)
-    w8(buf, pos+cp+3, 40)
-    cp = cp + 4  // mov rdi, [rax+40]
-    w8(buf, pos+cp, 94)
-    cp = cp + 1  // pop rsi
-    call_pos2 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos2)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("chan_send"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call chan_send
-    // exit: call g_get_curg; mov rdi, rax; call g_free; call sched_schedule; ret
-    call_pos3 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos3)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 248)
-    cp = cp + 3  // mov rdi, rax
-    call_pos4 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos4)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_free"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_free
-    call_pos5 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos5)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_schedule"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call sched_schedule
-    w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-
     return cp
 
 // ── m_start_workers runtime stub (pure-static self-contained runtime) ──
@@ -1714,7 +1629,6 @@ fn elf_gen(buf: string) -> int:
     g_ni_cell_store = -1
     g_ni_dyncpy = -1
     g_ni_cell_load = -1
-    g_ni_goroutine_wrapper_addr = -1
     ni_i : ., mut = 0
     loop:
         if ni_i >= g_str_count:
@@ -1744,8 +1658,6 @@ fn elf_gen(buf: string) -> int:
             g_ni_cell_store = ni_i
         if str_eq(ns, "_dyncpy") != 0:
             g_ni_dyncpy = ni_i
-        if str_eq(ns, "goroutine_wrapper_addr") != 0:
-            g_ni_goroutine_wrapper_addr = ni_i
         ni_i = ni_i + 1
 
     print("  ni: syscall3=")
@@ -2261,15 +2173,12 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("rt_sigreturn_stub", 0, cp)
         cp = cp + emit_rt_sigreturn_stub(buf, cp)
 
-    // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
-    // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init
-    // builds the fake frame, fiber_switch performs the context switch.
-    // Registered in func_offsets so IR_CALL (fiber_init/fiber_switch from
-    // Core) and IR_FNADDR (@addr(goroutine_entry_wrapper)) resolve here.
+    // ── Fiber runtime stubs (fiber_init / fiber_switch) ──
+    // The conc activation scheduler uses these directly; the legacy goroutine
+    // wrapper was retired in CP-6.
     if g_x86_emit_rt_stubs != 0:
         sched_reg_one("fiber_init", 0, cp)
         sched_reg_one("fiber_switch", 0, cp + 20)
-        sched_reg_one("goroutine_entry_wrapper", 0, cp + 47)
         cp = cp + emit_goroutine_stubs(buf, cp)
         // m_start_workers: worker thread launcher (clone). worker_entry
         // (15 bytes) precedes the public entry so its RIP-relative LEA stays

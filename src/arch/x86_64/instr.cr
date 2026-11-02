@@ -1785,26 +1785,6 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp+1, 240)
             cp = cp + 2  // jmp -16 (back to cmp rcx,rsi)
             // done:
-        else if s3 == g_ni_goroutine_wrapper_addr:
-            // goroutine_wrapper_addr() — the address of goroutine_entry_wrapper
-            // (backend-emitted stub / rt.s). Same encoding as IR_FNADDR:
-            // movabs r10, imm64 + store; imm64 patched in elf.cr Phase 3.
-            do2 := g2_slot(d)
-            grow_fnaddr_patch(g_x86_fnaddr_patch_count + 1)
-            cell_store(g_x86_fnaddr_patch_pos, g_x86_fnaddr_patch_count * 8, pos + cp)
-            cell_store(g_x86_fnaddr_patch_name, g_x86_fnaddr_patch_count * 8, str_intern("goroutine_entry_wrapper"))
-            g_x86_fnaddr_patch_count = g_x86_fnaddr_patch_count + 1
-            // movabs r10, imm64: REX.W+B = 0x49, opcode 0xBA (0xB8 + reg 2)
-            e2_w8(buf, pos+cp, 73)
-            e2_w8(buf, pos+cp+1, 186)
-            e2_w64(buf, pos+cp+2, 0)  // placeholder — patched in elf.cr Phase 3
-            cp = cp + 10
-            if g_x86_big_enabled != 0 && d >= 0:
-                cp = cp + e2_mov(buf, pos+cp, 7, 10)
-                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_uword"))
-                cp = cp + e2_st_var(buf, pos+cp, 0, d)
-            else:
-                cp = cp + e2_st(buf, pos+cp, 10, do2)
         else if s3 >= 0:
             // 通用调用路径 = callseq.cr cs_call_direct（查名 -> e2_call /
             // 外部位 + 返回值存；  抽取）

@@ -3700,7 +3700,38 @@ fn gen_expr(node: int) -> int:
             if ast_kind(func_node) == EXPR_IDENT:
                 func_ni = ast_int_val(func_node)
             // Plan-emitter marker: one call for the whole range. The default
-            // runtime still executes the per-index conc_go loop below.
+            // runtime still executes the per-index conc_go loop below. Only
+            // conc programs link conc_sched, so ordinary range-go code stays
+            // exactly as before.
+            if g_program_has_conc == 0:
+                conc_go_ni := str_intern("conc_go")
+                fi0 : ., mut = 0
+                loop:
+                    if fi0 >= range_count:
+                        break
+                    val0 := new_ir_var("go_val", TI_UNIT)
+                    emit(IR_CONST, val0, ast_a(range_node) + fi0, 0, 0, TI_INT)
+                    fn0 := new_ir_var("_go_fnaddr", TI_INT)
+                    emit(IR_FNADDR, fn0, func_ni, 0, 0, 0)
+                    p0 := new_ir_var("_go_fna", TI_INT)
+                    emit(IR_STORE, -1, p0, fn0, 0, 0)
+                    p1 := new_ir_var("_go_arg", TI_INT)
+                    emit(IR_STORE, -1, p1, val0, 0, 0)
+                    ch0 := new_ir_var("go_ch", TI_INT)
+                    emit(IR_CALL, ch0, p0, 2, conc_go_ni, TI_INT)
+                    emit(IR_STORE_INDEX, -1, ch_arr, ch0, fi0, 0)
+                    fi0 = fi0 + 1
+                fi1 : ., mut = 0
+                loop:
+                    if fi1 >= range_count:
+                        break
+                    chv0 := new_ir_var("go_chv", TI_INT)
+                    emit(IR_LOAD_INDEX, chv0, ch_arr, 0, fi1, 0)
+                    res0 := new_ir_var("go_res", TI_INT)
+                    emit(IR_CALL, res0, chv0, 1, str_intern("chan_recv"), TI_INT)
+                    emit(IR_STORE_INDEX, -1, arr_var, res0, fi1, TI_INT)
+                    fi1 = fi1 + 1
+                return arr_var
             range_fnaddr := new_ir_var("_range_fnaddr", TI_INT)
             emit(IR_FNADDR, range_fnaddr, func_ni, 0, 0, 0)
             range_start := new_ir_var("_range_start", TI_INT)
@@ -5590,6 +5621,10 @@ fn gen_expr(node: int) -> int:
             val_var = gen_expr(val_node)
             val_var = force_if_thunk(val_var)
         emit(IR_YIELD, -1, val_var, 0, 0, 0)
+        // On the conc mapping a yield is a real activation switch point. The
+        // value move above stays for the flow/stream reading of yield.
+        if g_program_has_conc != 0:
+            emit(IR_CALL, -1, -1, 0, str_intern("conc_yield"), TI_UNIT)
         return -1  // yield suspends — no return value for caller
 
     if ast_kind(node) == EXPR_AWAIT:

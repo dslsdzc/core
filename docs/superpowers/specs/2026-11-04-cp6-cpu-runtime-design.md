@@ -1,7 +1,7 @@
 # CP-6 设计：CPU 运行时 1–14 项
 
 **日期：** 2026-11-04
-**状态：** 范围已由维护者确认（“1~14 全部做了”）。按批次实施，每批独立提交。
+**状态：** 已实施（1–14，host CPU）。实现记录见 `docs/superpowers/implementation/2026-11-04-cp6-cpu-runtime.md`。
 **范围：** host CPU（x86-64 Linux 裸 ELF）。真实 GPU/FPGA/集群不在本设计内。
 **上位规格：** `2026-11-01-cross-paradigm-concurrency-design.md`、`2026-09-17-concurrency-model-design.md`
 
@@ -32,9 +32,9 @@
 | 9 | TargetProfile/plan 格式 | plan v2 文本含 `target`/`slot`/`transfer`/`budget`/`cert`；版本/目标不匹配 fail-closed |
 | 10 | 预算/证书 | 编译期义务 + plan 状态 `proved/unknown/violated/measured`；explain 可见；`unknown` 不当通过 |
 | 11 | 确定性执法 | 通道顺序/边冲突检查；违反确定性拒绝或 serial fallback |
-| 12 | DATA_PARALLEL | 现有循环 + 独立性分析生成 PAR；不独立则 serial fallback |
-| 13 | PIPELINE | `flow`/`yield` 映射为 CPU 流水级；`yield` 变成真实 conc yield 点 |
-| 14 | 旧 runtime 退役 | 删除 `g_new`/goroutine wrapper/IR_SPAWN 后端/死 sched 入口；worker 启动迁入 conc |
+| 12 | DATA_PARALLEL | 显式 range go 生成 PAR plan 并由 conc_run_range 执行；普通 for 在没有独立性证明时 serial fallback |
+| 13 | PIPELINE | `yield` 是真实 conc yield；PIPE body + executor 落地；emitter 检测 go 目标中的 yield 输出 v2 PIPE plan |
+| 14 | 旧 runtime 退役 | 删除 goroutine.cr/g_new/g_free/wrapper/死 sched 队列；保留兼容入口，IR_SPAWN 仅保留 wire 兼容 |
 
 ## 3. 关键设计决定
 
@@ -85,15 +85,16 @@ cert <id> <kind> <status>
 
 ### 3.6 旧 runtime 退役
 
-- 先把 `m_start_workers`/`sched_worker_run` 的 worker 启动迁到 `conc_sched` 自己的 `conc_start_workers`。
-- 删除 `g_new`、`goroutine_entry_wrapper`、`IR_SPAWN` 后端发射/解释器/ccr 分类、死 `sched_enqueue/dequeue/reap/yield/schedule/push_spawn/process_spawns/sched_go_direct`。
-- 保留 `sched_init/sched_init_n` 作为兼容入口。
+- 保留 `m_start_workers`；`sched_worker_run` 直接委托 `conc_worker_run`。
+- 删除 `g_new`/`g_free`/`goroutine.cr`、`goroutine_entry_wrapper`、backend 的 `goroutine_wrapper_addr` 特判、死 `sched_enqueue/dequeue/reap/yield/schedule/push_spawn/process_spawns/sched_go_direct` 与旧 G 队列全局。
+- 保留 `sched_init/sched_init_n/sched_init_slots/sched_go/sched_get_curg` 作为兼容入口。
+- `IR_SPAWN` 保留 wire/解释器兼容，但编译器不再发射。
 
 ## 4. 实施批次
 
 - **批次 A（1–2）**：抢占 tick + futex park/wake。测试：`test_conc_preempt.py`。
 - **批次 B（3–9）**：plan v2、MPMC、range plan、descriptor 绑定、layout/identity、transfer、slot、target 格式。测试：扩 `test_conc_plan*.py`、`test_conc_runtime.py`。
-- **批次 C（10–14）**：预算/证书、确定性、DATA_PARALLEL、PIPELINE、旧 runtime 退役。测试：新 `test_conc_semantics.py` + 既有 gate。
+- **批次 C（10–14）**：预算/证书、确定性、DATA_PARALLEL、PIPELINE、旧 runtime 退役。测试：`test_conc_plan_v2.py`、`test_conc_preempt.py`、`test_conc_transfer.py` + 既有 gate。
 
 每批完成后跑 CP-1..CP-5 gate，再跑 `selfhost-tests` 的对应子集；只有已知 p41/三例基线红允许保留。
 

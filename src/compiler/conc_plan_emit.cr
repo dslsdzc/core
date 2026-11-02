@@ -389,6 +389,9 @@ fn conc_plan_emit_write(path: string) -> int:
         out2 = out2 + "slot 0 THREAD -1 1\n"
         out2 = out2 + "body 1 PAR 1 " + int_str(range_count) + "\n"
         out2 = out2 + "range 1 " + int_str(range_start) + " " + int_str(range_count) + "\n"
+        out2 = out2 + "budget 0 PROGRESSIVE 0 UNKNOWN\n"
+        out2 = out2 + "budget 1 COUNT " + int_str(range_count) + " PROVED\n"
+        out2 = out2 + "cert 0 1 UNKNOWN\n"
         out2 = out2 + "edge 0 1 SPAWN -1\n"
         nwritten2 := write_file(path, out2)
         if nwritten2 != str_len(out2):
@@ -443,10 +446,26 @@ fn conc_plan_emit_write(path: string) -> int:
             if bind_ch < 0:
                 return _conc_emit_error("go argument is not a chan_make handle")
 
+    pipe_mode : ., mut = 0
+    pstart := cell_load(g_ir_func_instr_start, target_fi * 8)
+    pcount := cell_load(g_ir_func_instr_count, target_fi * 8)
+    pi : ., mut = 0
+    loop:
+        if pi >= pcount:
+            break
+        if iri_op(pstart + pi) == IR_YIELD:
+            pipe_mode = 1
+            break
+        pi = pi + 1
     out : ., mut = "v 1\n"
+    if pipe_mode != 0:
+        out = "v 2\n"
     out = out + "entries 2\n"
     out = out + "body 0 TASK 0 0\n"
-    out = out + "body 1 TASK 1 " + int_str(go_params) + "\n"
+    if pipe_mode != 0:
+        out = out + "body 1 PIPE 1 " + int_str(go_params) + "\n"
+    else:
+        out = out + "body 1 TASK 1 " + int_str(go_params) + "\n"
 
     cid : ., mut = 0
     i = 0

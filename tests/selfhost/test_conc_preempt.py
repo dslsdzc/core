@@ -138,6 +138,43 @@ fn main() -> int:
 """
 
 
+YIELD_SWITCH = """\
+import sched
+import chan
+
+g_seq : string, mut
+
+fn a() -> int:
+    cell_store(g_seq, 0, 1)
+    yield 0
+    if cell_load(g_seq, 16) != 2:
+        return 1
+    cell_store(g_seq, 8, 3)
+    return 0
+
+fn b() -> int:
+    cell_store(g_seq, 16, 2)
+    return 0
+
+fn main() -> int:
+    sched_init_n(1)
+    g_seq = alloc(24)
+    x := go a()
+    y := go b()
+    r1 := chan_recv(x)
+    r2 := chan_recv(y)
+    if r1 != 0:
+        return r1
+    if r2 != 0:
+        return r2
+    if cell_load(g_seq, 0) != 1:
+        return 2
+    if cell_load(g_seq, 8) != 3:
+        return 3
+    return 0
+"""
+
+
 FUTEX_STRESS = """\
 import sched
 import chan
@@ -238,6 +275,7 @@ def main() -> int:
         ("preempt_same_m", PREEMPT, 60, 0),
         ("preempt_signal_only", PREEMPT_SIGNAL, 90, 0),
         ("preempt_disabled_control", PREEMPT_OFF, 60, 1),
+        ("yield_switches", YIELD_SWITCH, 60, 0),
         ("futex_idle_stress", FUTEX_STRESS, 120, 0),
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
     ]

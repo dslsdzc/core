@@ -50,6 +50,12 @@ fn main() -> int:
         return 13
     if conc_plan_cert_status(plan, 0) != CONC_STATUS_UNKNOWN:
         return 14
+    if conc_plan_budget_ok(plan) != 1:
+        return 23
+    if conc_plan_cert_ok(plan) != 0:
+        return 24
+    if conc_plan_deterministic(plan) != 0:
+        return 25
     if conc_plan_channel_cap(plan, 0) != 0:
         return 15
     out := alloc(16 * 8)
@@ -76,6 +82,26 @@ fn main() -> int:
         return 22
     return 0
 """
+
+PIPE_LOAD = """\
+import conc
+
+fn stage() -> int:
+    return 7
+
+fn main() -> int:
+    tbl := alloc(8)
+    cell_store(tbl, 0, @addr(stage))
+    plan := conc_plan_load("v 2\\nentries 1\\nbody 0 PIPE 0 0\\n", tbl)
+    if plan < 0:
+        return 1
+    if conc_plan_body_count(plan) != 1:
+        return 2
+    if conc_run_body(plan, 0, "") != 7:
+        return 3
+    return 0
+"""
+
 
 SLOTS = """\
 import sched
@@ -173,7 +199,9 @@ def range_plan_case() -> bool:
             return False
         text = plan.read_text(encoding="utf-8")
         for line in ["v 2", "target cpu", "slot 0 THREAD", "body 1 PAR 1 4",
-                     "range 1 0 4", "edge 0 1 SPAWN -1"]:
+                     "range 1 0 4", "budget 0 PROGRESSIVE 0 UNKNOWN",
+                     "budget 1 COUNT 4 PROVED", "cert 0 1 UNKNOWN",
+                     "edge 0 1 SPAWN -1"]:
             if line not in text:
                 print(f"FAIL range_plan_emit missing {line!r}")
                 print(text)
@@ -195,6 +223,14 @@ fn main() -> int:
         return 2
     if conc_plan_range_len(plan, 0) != 4:
         return 3
+    if conc_plan_budget_count(plan) != 2:
+        return 6
+    if conc_plan_budget_ok(plan) != 0:
+        return 7
+    if conc_plan_cert_ok(plan) != 0:
+        return 8
+    if conc_plan_deterministic(plan) != 1:
+        return 9
     out := alloc(4 * 8)
     if conc_run_range(plan, 1, 0, 4, out) != 0:
         return 4
@@ -212,16 +248,84 @@ fn main() -> int:
         return build_run("range_plan_exec", loader, 60, 0)
 
 
+PIPE_SRC = """\
+import sched
+import chan
+
+flow fn pipe(ch: string) -> int:
+    v := chan_recv(ch)
+    yield v
+    return v + 1
+
+fn main() -> int:
+    sched_init()
+    g_in := chan_make(8, 1)
+    h := go pipe(g_in)
+    chan_send(g_in, 5)
+    r := chan_recv(h)
+    if r != 6:
+        return r
+    return 0
+"""
+
+
+def pipe_plan_case() -> bool:
+    with tempfile.TemporaryDirectory(prefix="pipe_plan_") as td:
+        root = Path(td)
+        src = root / "pipe_plan.cr"
+        plan = root / "pipe_plan.plan"
+        src.write_text(PIPE_SRC, encoding="utf-8")
+        r = run([str(COREC), "conc-plan", str(src), "-o", str(plan)])
+        if r.returncode != 0 or not plan.exists():
+            print(f"FAIL pipe_plan_emit rc={r.returncode}")
+            print(r.stdout[-1600:])
+            return False
+        text = plan.read_text(encoding="utf-8")
+        for line in ["v 2", "body 1 PIPE 1 1", "bind 1 0 0",
+                     "edge 0 1 SPAWN -1"]:
+            if line not in text:
+                print(f"FAIL pipe_plan_emit missing {line!r}")
+                print(text)
+                return False
+        escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        loader = f'''import conc
+import sched
+import chan
+fn stage(ch: string) -> int:
+    v := chan_recv(ch)
+    yield v
+    return v + 1
+fn main() -> int:
+    sched_init()
+    tbl := alloc(16)
+    cell_store(tbl, 0, @addr(stage))
+    cell_store(tbl, 8, @addr(stage))
+    plan := conc_plan_load("{escaped}", tbl)
+    if plan < 0:
+        return 1
+    ch := chan_make(8, 1)
+    channels := alloc(8)
+    cell_store(channels, 0, ch)
+    chan_send(ch, 5)
+    if conc_run_body_bound(plan, 1, channels) != 6:
+        return 2
+    return 0
+'''
+        return build_run("pipe_plan_exec", loader, 60, 0)
+
+
 def main() -> int:
     cases = [
         ("plan_v2_load", V2_LOAD, 60, 0),
+        ("pipe_body_load", PIPE_LOAD, 60, 0),
         ("slot_runtime", SLOTS, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:
         ok = build_run(name, source, timeout, expect) and ok
     ok = range_plan_case() and ok
-    total = len(cases) + 1
+    ok = pipe_plan_case() and ok
+    total = len(cases) + 2
     print(f"{total if ok else 0}/{total} passed")
     return 0 if ok else 1
 

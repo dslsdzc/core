@@ -78,7 +78,6 @@ COREC_FILES = [
     'src/stdlib/arena.cr',
     'src/stdlib/conc.cr',
     'src/stdlib/conc_sched.cr',
-    'src/stdlib/goroutine.cr',
     'src/stdlib/chan.cr',
     'src/stdlib/sched.cr',
     'src/compiler/project.cr',

@@ -13,6 +13,7 @@
 
 CONC_BODY_TASK : int, pub = 1
 CONC_BODY_DATA_PARALLEL : int, pub = 2
+CONC_BODY_PIPELINE : int, pub = 3
 
 CONC_EDGE_SPAWN : int, pub = 1
 CONC_EDGE_SEND : int, pub = 2
@@ -936,7 +937,7 @@ fn conc_plan_new() -> int, pub:
 fn conc_plan_add_body(plan: int, kind: int, entry: int, params: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
-    if kind != CONC_BODY_TASK && kind != CONC_BODY_DATA_PARALLEL:
+    if kind != CONC_BODY_TASK && kind != CONC_BODY_DATA_PARALLEL && kind != CONC_BODY_PIPELINE:
         return -1
     if entry < 0:
         return -1
@@ -945,6 +946,8 @@ fn conc_plan_add_body(plan: int, kind: int, entry: int, params: int) -> int, pub
     // CP-1 host TASK entries take zero or one argument. More parameters need
     // a param layout/lowering step that belongs to CP-2.
     if kind == CONC_BODY_TASK && params > 1:
+        return -1
+    if kind == CONC_BODY_PIPELINE && params > 1:
         return -1
     p := _conc_plan_at(plan)
     n := cell_load(p, 0)
@@ -1506,7 +1509,7 @@ fn conc_run_cpu(plan: int, arg: string) -> int, pub:
         kind := cell_load(b, 0)
         entry := cell_load(b, 8)
         params := cell_load(b, 16)
-        if kind == CONC_BODY_TASK:
+        if kind == CONC_BODY_TASK || kind == CONC_BODY_PIPELINE:
             if params == 0:
                 rc := _conc_call0(entry)
                 if rc != 0:
@@ -1543,7 +1546,7 @@ fn conc_run_body(plan: int, body: int, arg: string) -> int, pub:
     kind := cell_load(b, 0)
     entry := cell_load(b, 8)
     params := cell_load(b, 16)
-    if kind == CONC_BODY_TASK:
+    if kind == CONC_BODY_TASK || kind == CONC_BODY_PIPELINE:
         if params == 0:
             return _conc_call0(entry)
         if params == 1:
@@ -1573,7 +1576,7 @@ fn conc_run_body_bound(plan: int, body: int, channels: string) -> int, pub:
     kind := cell_load(b, 0)
     entry := cell_load(b, 8)
     params := cell_load(b, 16)
-    if kind == CONC_BODY_TASK:
+    if kind == CONC_BODY_TASK || kind == CONC_BODY_PIPELINE:
         if params == 0:
             return _conc_call0(entry)
         if params == 1:
@@ -1627,6 +1630,75 @@ fn conc_run_simt(plan: int, start: int, end: int) -> int, pub:
             j = j + 1
         i = i + 1
     return 0
+
+fn conc_plan_budget_ok(plan: int) -> int, pub:
+    // A budget is a pass only when every entry is proved or measured.
+    // UNKNOWN/VIOLATED are visible failures, never silently accepted.
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    n := conc_plan_budget_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        st := conc_plan_budget_status(plan, i)
+        if st != CONC_STATUS_PROVED && st != CONC_STATUS_MEASURED:
+            return 0
+        i = i + 1
+    return 1
+
+fn conc_plan_cert_ok(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    n := conc_plan_cert_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        st := conc_plan_cert_status(plan, i)
+        if st != CONC_STATUS_PROVED && st != CONC_STATUS_MEASURED:
+            return 0
+        i = i + 1
+    return 1
+
+fn conc_plan_deterministic(plan: int) -> int, pub:
+    // SPSC with one producer and one consumer is deterministic. MPMC has no
+    // global order, and a second SEND/RECV edge on one channel would make the
+    // observable order mapping-dependent, so both are rejected.
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    p := _conc_plan_at(plan)
+    nch := cell_load(p, 8)
+    chbase := load_str_ptr(p, 56)
+    c : ., mut = 0
+    loop:
+        if c >= nch:
+            break
+        pc := cell_load(chbase, c * 32 + 16)
+        if pc == CONC_PC_MPMC:
+            return 0
+        sends : ., mut = 0
+        recvs : ., mut = 0
+        ne := cell_load(p, 16)
+        ebase := load_str_ptr(p, 64)
+        e : ., mut = 0
+        loop:
+            if e >= ne:
+                break
+            kind := cell_load(ebase, e * 32 + 16)
+            ch := cell_load(ebase, e * 32 + 24)
+            if ch == c:
+                if kind == CONC_EDGE_SEND:
+                    sends = sends + 1
+                if kind == CONC_EDGE_RECV:
+                    recvs = recvs + 1
+            e = e + 1
+        if sends > 1:
+            return 0
+        if recvs > 1:
+            return 0
+        c = c + 1
+    return 1
 
 fn conc_run_range(plan: int, body: int, start: int, end: int,
                   out: string) -> int, pub:
@@ -1869,6 +1941,9 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
             else:
                 if ks == "PAR":
                     kind = CONC_BODY_DATA_PARALLEL
+                else:
+                    if ks == "PIPE":
+                        kind = CONC_BODY_PIPELINE
             if kind < 0:
                 return -1
             ei := _conc_plan_read_int(text)

@@ -198,7 +198,7 @@ CASES = [
     # —— 并发族（27 SPAWN：range go；28 YIELD / 29 AWAIT eager 近似）——
     (
         "range_go_spawn_callee",
-        "fn square(x: int) -> int:\n    return x * x\n",
+        "import sched\nfn square(x: int) -> int:\n    return x * x\n",
         "arr := go i 0..3 square(i)\nreturn arr[0] + arr[1] + arr[2]\n",
         "parity", 5, 5,
     ),
@@ -281,7 +281,7 @@ EXPECT_OPS = {
     "recursion_fib_callee": {"call"},
     "mutual_recursion_callee": {"call"},
     "depth_guard_runaway_loud": {"call"},
-    "range_go_spawn_callee": {"spawn"},
+    "range_go_spawn_callee": {"call", "fnaddr"},
     "loop_in_callee": {"jump", "match"},
     "yield_in_callee": {"yield"},
     "await_in_callee": {"await"},
