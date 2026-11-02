@@ -112,6 +112,8 @@ CP-6 分三批提交：
 - 版本/未知 token/越界/重复 id 全部 fail-closed。
 - `conc_plan_validate` 校验 body/channel/edge/range/slot/transfer/budget/cert；`conc_plan_acyclic` 对 SPAWN 图做 Kahn 环检测。
 - `conc_plan_explain` 输出版本、计数、legal/budget/cert/deterministic 状态文本。
+- plan v2 `layout <id> <size> <hash>` 记录；`conc_plan_apply_layouts` 在 executor 启动前把 plan 声明的 layout 注册到进程内 layout 表。
+- layout 表有 `conc_layout_table_version` / `conc_layout_set_version`（只允许向前）。
 - `.ccr` 9 段 wire 未改。
 
 测试：`plan_v2_load`、`pipe_body_load`、`range_plan_exec`、`pipe_plan_exec`。
@@ -201,7 +203,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
 - PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；编译器还不会自动把 `flow` 函数拆成多个 stage body，需要手写 stage 函数或后续 splitter。
 - futex 的优先级继承未做；取消/关闭已有 `conc_shutdown` 与 channel close；等待使用 2 ms 安全超时。
-- layout 表是进程内全局表，未做跨 plan/跨进程持久化。
+- layout 表是进程内全局表；plan 可声明并 apply，但未做跨进程持久化/文件格式。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。
 - p41（`test_p41_dynamic_string_arena_switch_path`）仍是 CP-1 基线旧问题。
 - `test_alloc_blob_relocs.py`、`test_alloc_arena_parity.py`、clang 系列在纯净父提交 `34bab32d` 同样失败，已在 CP-5 记录中给出基线对照。

@@ -495,6 +495,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
     // itself performs those operations on the bound channel.
     if conc_plan_validate(plan) == 0:
         return -1
+    if conc_plan_apply_layouts(plan) < 0:
+        return -1
     if root < 0 || root >= conc_plan_body_count(plan):
         return -1
     if _conc_is_null(channels) != 0:
@@ -549,6 +551,8 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
     // context (in/out channel handles). Stages run as activations; bounded
     // channels provide backpressure. Returns the sum of stage return values.
     if conc_plan_validate(plan) == 0:
+        return -1
+    if conc_plan_apply_layouts(plan) < 0:
         return -1
     if _conc_is_null(channels) != 0:
         return -1

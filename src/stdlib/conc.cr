@@ -104,6 +104,7 @@ g_conc_layout_hash : string, mut
 g_conc_layout_fields : string, mut
 g_conc_layout_field_count : string, mut
 g_conc_layout_count : int, mut = 0
+g_conc_layout_version : int, mut = 1
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
 g_conc_plan_parse_pos : int, mut = 0
@@ -470,6 +471,15 @@ fn conc_layout_hash(layout: int) -> int, pub:
 
 fn conc_layout_count() -> int, pub:
     return g_conc_layout_count
+
+fn conc_layout_table_version() -> int, pub:
+    return g_conc_layout_version
+
+fn conc_layout_set_version(v: int) -> int, pub:
+    if v < g_conc_layout_version:
+        return -1
+    g_conc_layout_version = v
+    return v
 
 fn conc_layout_add_field(layout: int, offset: int, size: int) -> int, pub:
     if conc_layout_ok(layout) == 0:
@@ -975,7 +985,7 @@ fn conc_plan_new() -> int, pub:
     if _conc_plan_ensure(g_conc_plan_count + 1) != 0:
         return -1
     // v2 record: the v1 fields stay at 0..72, new sidecar fields follow.
-    p := _conc_global_alloc(208)
+    p := _conc_global_alloc(224)
     if _conc_is_null(p) != 0:
         return -1
     bodies := _conc_global_alloc(8 * 32)
@@ -988,6 +998,7 @@ fn conc_plan_new() -> int, pub:
     budgets := _conc_global_alloc(64 * 40)
     certs := _conc_global_alloc(64 * 32)
     stages := _conc_global_alloc(64 * 32)
+    plan_layouts := _conc_global_alloc(64 * 32)
     if _conc_is_null(bodies) != 0:
         return -1
     if _conc_is_null(channels) != 0:
@@ -1008,6 +1019,8 @@ fn conc_plan_new() -> int, pub:
         return -1
     if _conc_is_null(stages) != 0:
         return -1
+    if _conc_is_null(plan_layouts) != 0:
+        return -1
     store_str_ptr(p, 48, bodies)
     store_str_ptr(p, 56, channels)
     store_str_ptr(p, 64, edges)
@@ -1019,7 +1032,9 @@ fn conc_plan_new() -> int, pub:
     store_str_ptr(p, 160, budgets)
     store_str_ptr(p, 168, certs)
     store_str_ptr(p, 200, stages)
+    store_str_ptr(p, 216, plan_layouts)
     cell_store(p, 192, 0)     // stage_count
+    cell_store(p, 208, 0)     // plan layout_count
     cell_store(p, 80, 1)      // version
     cell_store(p, 96, 0)      // slot_count
     cell_store(p, 104, 0)     // range_count
@@ -1334,6 +1349,17 @@ fn conc_plan_validate(plan: int) -> int, pub:
         if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
             return 0
         cc = cc + 1
+    nl := cell_load(p, 208)
+    lbase := load_str_ptr(p, 216)
+    l : ., mut = 0
+    loop:
+        if l >= nl:
+            break
+        if cell_load(lbase, l * 32) != l:
+            return 0
+        if cell_load(lbase, l * 32 + 8) <= 0:
+            return 0
+        l = l + 1
     nst := cell_load(p, 192)
     stbase := load_str_ptr(p, 200)
     st : ., mut = 0
@@ -1393,6 +1419,7 @@ fn conc_plan_explain(plan: int) -> string, pub:
     out = out + " edges " + _conc_num_str(cell_load(p, 16))
     out = out + " slots " + _conc_num_str(cell_load(p, 96))
     out = out + " stages " + _conc_num_str(cell_load(p, 192))
+    out = out + " layouts " + _conc_num_str(cell_load(p, 208))
     out = out + " ranges " + _conc_num_str(cell_load(p, 104))
     out = out + " transfers " + _conc_num_str(cell_load(p, 112))
     out = out + " budgets " + _conc_num_str(cell_load(p, 120))
@@ -1868,6 +1895,71 @@ fn conc_plan_stage_policy(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 200), i * 32 + 24)
 
+fn conc_plan_add_layout(plan: int, layout: int, size: int, hash: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if layout < 0 || layout >= CONC_MAX_LAYOUTS || size <= 0:
+        return -1
+    p := _conc_plan_at(plan)
+    n := cell_load(p, 208)
+    if n >= 64:
+        return -1
+    if n != layout:
+        return -1
+    base := load_str_ptr(p, 216)
+    off := n * 32
+    cell_store(base, off, layout)
+    cell_store(base, off + 8, size)
+    cell_store(base, off + 16, hash)
+    cell_store(base, off + 24, 0)
+    cell_store(p, 208, n + 1)
+    return n
+
+fn conc_plan_layout_count(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    return cell_load(_conc_plan_at(plan), 208)
+
+fn conc_plan_layout_id(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 208):
+        return -1
+    return cell_load(load_str_ptr(p, 216), i * 32)
+
+fn conc_plan_layout_size(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 208):
+        return -1
+    return cell_load(load_str_ptr(p, 216), i * 32 + 8)
+
+fn conc_plan_layout_hash(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 208):
+        return -1
+    return cell_load(load_str_ptr(p, 216), i * 32 + 16)
+
+fn conc_plan_apply_layouts(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    n := conc_plan_layout_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        lid := conc_plan_layout_id(plan, i)
+        sz := conc_plan_layout_size(plan, i)
+        h := conc_plan_layout_hash(plan, i)
+        if conc_layout_declare(lid, sz, h) != lid:
+            return -1
+        i = i + 1
+    return n
+
 fn conc_plan_body_kind(plan: int, body: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2309,6 +2401,13 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         start := _conc_plan_read_int(text)
         count := _conc_plan_read_int(text)
         if conc_plan_add_range(p, body, start, count) < 0:
+            return -1
+        return 0
+    if tok == "layout":
+        id := _conc_plan_read_int(text)
+        size := _conc_plan_read_int(text)
+        hash := _conc_plan_read_int(text)
+        if conc_plan_add_layout(p, id, size, hash) < 0:
             return -1
         return 0
     if tok == "stage":
