@@ -116,6 +116,64 @@ fn main() -> int:
 """
 
 
+MPMC_RUN = """\
+import conc
+import sched
+import chan
+
+fn producer(ch: string) -> int:
+    chan_send(ch, 1)
+    return 0
+
+fn consumer(ch: string) -> int:
+    return chan_recv(ch)
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if p < 0:
+        return 1
+    if conc_plan_set_version(p, 2) != 0:
+        return 2
+    if conc_plan_add_channel(p, 8, 4, CONC_PC_MPMC) != 0:
+        return 3
+    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 0) != 0:
+        return 4
+    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 1) != 1:
+        return 5
+    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 1) != 2:
+        return 6
+    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(consumer), 1) != 3:
+        return 7
+    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(consumer), 1) != 4:
+        return 8
+    if conc_plan_bind_param(p, 1, 0, 0) < 0:
+        return 9
+    if conc_plan_bind_param(p, 2, 0, 0) < 0:
+        return 10
+    if conc_plan_bind_param(p, 3, 0, 0) < 0:
+        return 11
+    if conc_plan_bind_param(p, 4, 0, 0) < 0:
+        return 12
+    if conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN) != 0:
+        return 13
+    if conc_plan_add_edge(p, 0, 2, CONC_EDGE_SPAWN) != 1:
+        return 14
+    if conc_plan_add_edge(p, 0, 3, CONC_EDGE_SPAWN) != 2:
+        return 15
+    if conc_plan_add_edge(p, 0, 4, CONC_EDGE_SPAWN) != 3:
+        return 16
+    if conc_plan_validate(p) != 1:
+        return 17
+    ch := chan_make(8, 4)
+    cht := alloc(8)
+    cell_store(cht, 0, ch)
+    if conc_plan_run(p, 0, cht) != 2:
+        return 18
+    return 0
+"""
+
+
 SLOTS = """\
 import sched
 import chan
@@ -331,6 +389,7 @@ def main() -> int:
     cases = [
         ("plan_v2_load", V2_LOAD, 60, 0),
         ("pipe_body_load", PIPE_LOAD, 60, 0),
+        ("mpmc_plan_run", MPMC_RUN, 60, 0),
         ("slot_runtime", SLOTS, 60, 0),
     ]
     ok = True

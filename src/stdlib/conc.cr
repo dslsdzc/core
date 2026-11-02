@@ -1254,6 +1254,8 @@ fn conc_plan_validate(plan: int) -> int, pub:
             return 0
         if pc == CONC_PC_SPSC && cap <= 0:
             return 0
+        if ver == 1 && pc == CONC_PC_MPMC:
+            return 0
         c = c + 1
     if _conc_plan_validate_edges(plan) != 0:
         return 0
@@ -1457,6 +1459,14 @@ fn conc_plan_version(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
     return cell_load(_conc_plan_at(plan), 80)
+
+fn conc_plan_set_version(plan: int, ver: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if ver != 1 && ver != 2:
+        return -1
+    cell_store(_conc_plan_at(plan), 80, ver)
+    return 0
 
 fn conc_plan_set_target(plan: int, name: string, slots: int, memory: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -1737,6 +1747,30 @@ fn conc_plan_cert_status(plan: int, i: int) -> int, pub:
     if i < 0 || i >= cell_load(p, 128):
         return -1
     return cell_load(load_str_ptr(p, 168), i * 32 + 8)
+
+fn conc_plan_body_kind(plan: int, body: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if body < 0 || body >= cell_load(p, 0):
+        return -1
+    return cell_load(load_str_ptr(p, 48), body * 32)
+
+fn conc_plan_body_entry(plan: int, body: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if body < 0 || body >= cell_load(p, 0):
+        return -1
+    return cell_load(load_str_ptr(p, 48), body * 32 + 8)
+
+fn conc_plan_body_params(plan: int, body: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if body < 0 || body >= cell_load(p, 0):
+        return -1
+    return cell_load(load_str_ptr(p, 48), body * 32 + 16)
 
 fn conc_plan_channel_elemsize(plan: int, channel: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:

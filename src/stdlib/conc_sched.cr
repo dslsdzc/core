@@ -466,6 +466,58 @@ fn conc_yield(), pub:
     _conc_unlock()
     conc_schedule()
 
+fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
+    // CPU edge executor: spawn every body reachable by a SPAWN edge from
+    // `root`, pass its bound channel handle, then join the result channels and
+    // sum body return values. SEND/RECV edges are documentation; the body
+    // itself performs those operations on the bound channel.
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if root < 0 || root >= conc_plan_body_count(plan):
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    hs := alloc(64 * 8)
+    n : ., mut = 0
+    ne := conc_plan_edge_count(plan)
+    e : ., mut = 0
+    loop:
+        if e >= ne:
+            break
+        if conc_plan_edge_kind(plan, e) == CONC_EDGE_SPAWN:
+            if conc_plan_edge_from(plan, e) == root:
+                to := conc_plan_edge_to(plan, e)
+                if n >= 64:
+                    return -1
+                kind := conc_plan_body_kind(plan, to)
+                if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
+                    return -1
+                arg : ., mut = 0
+                ch := conc_plan_param_channel(plan, to, 0)
+                if ch >= 0:
+                    handle := load_str_ptr(channels, ch * 8)
+                    if _conc_is_null(handle) != 0:
+                        return -1
+                    unsafe:
+                        arg = @ptr_of(handle)
+                entry := conc_plan_body_entry(plan, to)
+                if entry <= 0:
+                    return -1
+                h := conc_go(entry, arg)
+                if _conc_word(h) == 0:
+                    return -1
+                cell_store(hs, n * 8, h)
+                n = n + 1
+        e = e + 1
+    total : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+        i = i + 1
+    return total
+
 fn conc_plan_mark_range(entry: int, start: int, count: int), pub:
     // Compiler-to-plan marker; the default runtime uses the IR loop.
     return

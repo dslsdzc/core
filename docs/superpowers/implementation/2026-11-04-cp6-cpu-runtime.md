@@ -40,7 +40,8 @@ CP-6 分三批提交：
 
 - `CONC_PC_MPMC`；plan v2 接受 `channel <id> <elem> <cap> MPMC`，cap=0 允许。
 - Runtime 侧 MPMC 由 conc_sched 的 per-channel send/recv wait queue 执行；`test_conc_sched_mpmc` 覆盖。
-- `test_conc_plan_v2.py::plan_v2_load` 覆盖 MPMC cap=0 的加载与查询。
+- `conc_plan_run(plan, root, channels)` 是 CPU edge 执行器：从 root 的 SPAWN 边创建 activation，绑定 channel 参数，join 结果通道并汇总返回值。
+- `test_conc_plan_v2.py::plan_v2_load` 覆盖 MPMC cap=0 的加载/查询；`mpmc_plan_run` 覆盖 2 producer + 2 consumer 的 plan 执行。
 
 ### 2.4 descriptor 与 channel 绑定
 
@@ -88,6 +89,7 @@ CP-6 分三批提交：
 - `conc_ref_split_part`：按 count 等分，最后一块取余数；最后一块完成后源失效。
 - `conc_ref_fill`：预留目标 ref，生产方通过 `conc_ref_payload` 构造。
 - `conc_layout_add_field` + `conc_ref_copy_set`/`conc_ref_move_set`：只复制 CopySet 声明的字段，非复制字段在 CPU 映射上清零；无字段布局回退整 payload。
+- `conc_plan_run` 的 MPMC e2e 在 `test_conc_plan_v2.py` 覆盖。
 - 所有源失效都通过 descriptor magic/epoch，CPU 上不依赖物理地址失效。
 
 测试：`ref_transfer` 覆盖五种 primitive。
@@ -171,7 +173,7 @@ CP-6 gate（`build_selfhost_native.py` 之后）：
 test_conc_runtime.py        14/14
 test_conc_plan.py            5/5
 test_conc_plan_emitter.py   25/25
-test_conc_plan_v2.py         5/5（含 validate/explain/cycle）
+test_conc_plan_v2.py         6/6（含 validate/explain/cycle、MPMC plan run）
 test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
@@ -191,7 +193,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - 抢占是“回边 tick + SIGALRM pending flag”：长 straight-line 代码/长系统调用内不能切换；这是 CPU mapping 的显式边界。
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
 - DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
-- MPMC plan 仍是描述 + runtime 执行，plan edge 不驱动机器调度。
+- MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
 - PIPELINE 的 stage 并行/背压/缓冲未做；`yield` 是协作切换，PIPE body 单次调用。
 - futex 的取消/关闭/优先级继承未做；只有 WAIT/WAKE + 2 ms 安全超时。
 - layout 表是进程内全局表，未做跨 plan/跨进程持久化。

@@ -415,18 +415,22 @@ fn conc_plan_emit_write(path: string) -> int:
         if fj != fi:
             fname := istr_get(cell_load(g_ir_func_name_idx, fj * 8))
             if str_eq(fname, "sched_go") == 0 && str_eq(fname, "conc_go") == 0:
-                fs := cell_load(g_ir_func_instr_start, fj * 8)
-                fc := cell_load(g_ir_func_instr_count, fj * 8)
-                fi2 : ., mut = 0
-                loop:
-                    if fi2 >= fc:
-                        break
-                    ii2 := fs + fi2
-                    if iri_op(ii2) == IR_CALL:
-                        nm2 := istr_get(iri_s3(ii2))
-                        if str_eq(nm2, "conc_go") != 0 || str_eq(nm2, "sched_go") != 0:
-                            return _conc_emit_error("go outside main is not supported")
-                    fi2 = fi2 + 1
+                // Runtime helpers (e.g. conc_plan_run) legitimately call
+                // conc_go; only user functions are part of the plan surface.
+                owner := func_owner(fj)
+                if owner < 0 || lib_kind(owner) == LIB_KIND_USER:
+                    fs := cell_load(g_ir_func_instr_start, fj * 8)
+                    fc := cell_load(g_ir_func_instr_count, fj * 8)
+                    fi2 : ., mut = 0
+                    loop:
+                        if fi2 >= fc:
+                            break
+                        ii2 := fs + fi2
+                        if iri_op(ii2) == IR_CALL:
+                            nm2 := istr_get(iri_s3(ii2))
+                            if str_eq(nm2, "conc_go") != 0 || str_eq(nm2, "sched_go") != 0:
+                                return _conc_emit_error("go outside main is not supported")
+                        fi2 = fi2 + 1
         fj = fj + 1
 
     target_fi := _conc_emit_find_func(go_fn_ni)
