@@ -106,6 +106,62 @@ fn main() -> int:
     return 0
 """
 
+RANGE_GO = """\
+import chan
+import sched
+
+fn square(x: int) -> int:
+    return x * x
+
+fn main() -> int:
+    arr := go i 0..3 square(i)
+    if arr[0] + arr[1] + arr[2] != 5:
+        return 1
+    return 0
+"""
+
+RENDEZVOUS = """\
+import chan
+import sched
+
+g_ch : string, mut
+
+fn sender() -> int:
+    chan_send(g_ch, 55)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    g_ch = chan_make(8, 0)
+    h := go sender()
+    v := chan_recv(g_ch)
+    if v != 55:
+        return 1
+    return 0
+"""
+
+MPMC = """\
+import chan
+import sched
+
+g_ch : string, mut
+
+fn sender(n: int) -> int:
+    chan_send(g_ch, n)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    g_ch = chan_make(8, 0)
+    a := go sender(1)
+    b := go sender(2)
+    x := chan_recv(g_ch)
+    y := chan_recv(g_ch)
+    if x + y != 3:
+        return 1
+    return 0
+"""
+
 TWO_GO = """\
 import chan
 import sched
@@ -198,6 +254,9 @@ def main() -> int:
         ("conc_sched_large_channel", LARGE_CHANNEL, 30),
         ("conc_sched_no_init", NO_INIT, 30),
         ("conc_sched_many_go", MANY_GO, 120),
+        ("conc_sched_range_go", RANGE_GO, 30),
+        ("conc_sched_rendezvous", RENDEZVOUS, 30),
+        ("conc_sched_mpmc", MPMC, 30),
     ]
     passed = 0
     for name, source, timeout in cases:

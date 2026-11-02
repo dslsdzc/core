@@ -395,6 +395,36 @@ fn main() -> int:
     return 0
 """
 
+REF = """\
+import conc
+
+fn main() -> int:
+    r := conc_region_new(4096)
+    ref := conc_ref_alloc(r, 8, 7)
+    if conc_ref_ok(ref) == 0:
+        return 1
+    p := conc_ref_payload(ref)
+    cell_store(p, 0, 123)
+    off := conc_ref_offset(ref)
+    conc_region_reset(r)
+    if conc_ref_ok(ref) != 0:
+        return 2
+    if conc_ref_payload(ref) != "":
+        return 3
+    ref2 := conc_ref_alloc(r, 8, 7)
+    if conc_ref_ok(ref2) == 0:
+        return 4
+    if conc_ref_offset(ref2) != off:
+        return 5
+    if conc_ref_layout(ref2) != 7:
+        return 6
+    p2 := conc_ref_payload(ref2)
+    cell_store(p2, 0, 456)
+    if cell_load(p2, 0) != 456:
+        return 7
+    return 0
+"""
+
 NEGATIVE = """\
 import conc
 
@@ -492,6 +522,7 @@ def main() -> int:
         ("conc_cpu0", CPU0, 30),
         ("conc_simt", SIMT, 30),
         ("conc_lifetime", LIFETIME, 30),
+        ("conc_ref", REF, 30),
         ("conc_negative", NEGATIVE, 30),
     ]
     passed = 0

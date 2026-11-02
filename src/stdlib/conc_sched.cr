@@ -8,7 +8,7 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 72
+CONC_ACT_SIZE : int = 80
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -33,6 +33,9 @@ g_conc_global_region : int, mut = -1
 g_conc_ch_states : string, mut
 g_conc_ch_count : int, mut = 0
 g_conc_ch_cap : int, mut = 0
+g_conc_free : string, mut
+g_conc_free_count : int, mut = 0
+g_conc_free_cap : int, mut = 0
 
 fn _conc_sched_alloc(size: int) -> string:
     saved := rt_current_arena()
@@ -113,11 +116,40 @@ fn conc_sched_init():
     g_conc_sched_sp = _conc_sched_alloc(8)
     g_conc_ch_states = _conc_sched_alloc(16 * CONC_CH_STATE_SIZE)
     g_conc_ch_cap = 16
+    g_conc_free = _conc_sched_alloc(64 * 8)
+    g_conc_free_cap = 64
     g_conc_inited = 1
+
+fn _conc_free_push(id: int):
+    if g_conc_free_count >= g_conc_free_cap:
+        nc : ., mut = g_conc_free_cap * 2
+        if nc < 64:
+            nc = 64
+        nb := _conc_sched_alloc(nc * 8)
+        i : ., mut = 0
+        loop:
+            if i >= g_conc_free_count:
+                break
+            cell_store(nb, i * 8, cell_load(g_conc_free, i * 8))
+            i = i + 1
+        g_conc_free = nb
+        g_conc_free_cap = nc
+    cell_store(g_conc_free, g_conc_free_count * 8, id)
+    g_conc_free_count = g_conc_free_count + 1
+
+fn _conc_free_pop() -> int:
+    if g_conc_free_count <= 0:
+        return -1
+    g_conc_free_count = g_conc_free_count - 1
+    return cell_load(g_conc_free, g_conc_free_count * 8)
 
 fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     conc_sched_init()
     _conc_acts_grow()
+    id : ., mut = _conc_free_pop()
+    if id < 0:
+        id = g_conc_act_count
+        g_conc_act_count = id + 1
     saved := arena_current_unchecked()
     aid := arena_new()
     if aid < 0:
@@ -128,7 +160,6 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     arena_set_current_unchecked(saved)
     if _conc_word(stack) == 0 || _conc_word(a) == 0:
         return -1
-    id := g_conc_act_count
     sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
     cell_store(a, 0, id)
     cell_store(a, 8, CONC_ACT_RUNNABLE)
@@ -139,8 +170,8 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string) -> int:
     store_str_ptr(a, 48, result_ch)
     cell_store(a, 56, -1)
     cell_store(a, 64, aid)
+    cell_store(a, 72, 0)
     store_str_ptr(g_conc_acts, id * 8, a)
-    g_conc_act_count = id + 1
     return id
 
 fn _conc_word(s: string) -> int:
@@ -182,6 +213,7 @@ fn conc_schedule() -> int, pub:
             if st == CONC_ACT_DEAD:
                 arena_reset(aid)
                 store_str_ptr(g_conc_acts, id * 8, "")
+                _conc_free_push(id)
             arena_set_current_unchecked(saved)
             g_conc_cur = -1
     else:
@@ -354,7 +386,7 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     r : ., mut = _conc_global_region_get()
     if r < 0:
         return ""
-    if cap <= 0 || elemsize <= 0:
+    if cap < 0 || elemsize <= 0:
         return ""
     if cap > 1099511627776 / elemsize:
         return ""
@@ -383,6 +415,25 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             return 0
         cap := _conc_ch_cap(ch)
         n := _conc_ch_len(ch)
+        if cap == 0:
+            rid := _conc_wait_pop(slot, CONC_WAIT_RECV)
+            if rid >= 0:
+                ra := _conc_act_at(rid)
+                if _conc_word(ra) != 0:
+                    cell_store(ra, 72, val)
+                    cell_store(ra, 8, CONC_ACT_RUNNABLE)
+                    _conc_ready_push(rid)
+                    return 0
+            if g_conc_cur < 0:
+                if conc_schedule() == 0:
+                    return 0
+                continue
+            ca := _conc_act_at(g_conc_cur)
+            cell_store(ca, 72, val)
+            _conc_wait_push(slot, CONC_WAIT_SEND, g_conc_cur)
+            cell_store(ca, 8, CONC_ACT_WAITING)
+            conc_schedule()
+            return 0
         if n < cap:
             buf := _conc_ch_buf(ch)
             head := _conc_ch_head(ch)
@@ -412,6 +463,29 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
     slot := _conc_ch_slot(ch)
     loop:
         n := _conc_ch_len(ch)
+        cap := _conc_ch_cap(ch)
+        if cap == 0:
+            sid := _conc_wait_pop(slot, CONC_WAIT_SEND)
+            if sid >= 0:
+                sa := _conc_act_at(sid)
+                v : ., mut = 0
+                if _conc_word(sa) != 0:
+                    v = cell_load(sa, 72)
+                    cell_store(sa, 8, CONC_ACT_RUNNABLE)
+                    _conc_ready_push(sid)
+                return v
+            if g_conc_cur < 0:
+                if conc_schedule() == 0:
+                    return 0
+                continue
+            ra := _conc_act_at(g_conc_cur)
+            _conc_wait_push(slot, CONC_WAIT_RECV, g_conc_cur)
+            cell_store(ra, 8, CONC_ACT_WAITING)
+            conc_schedule()
+            ra2 := _conc_act_at(g_conc_cur)
+            if _conc_word(ra2) == 0:
+                return 0
+            return cell_load(ra2, 72)
         if n > 0:
             buf := _conc_ch_buf(ch)
             head : ., mut = _conc_ch_head(ch)

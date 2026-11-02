@@ -3684,27 +3684,45 @@ fn gen_expr(node: int) -> int:
         range_count := ast_b(range_node) - ast_a(range_node)
         if range_count <= 0:
             return -1
-        // Allocate results array
+        // Allocate results array and a temporary channel array.
         arr_var := new_ir_var("go_arr", TI_UNIT)
         track_alloc_array(range_count)
         emit(IR_ALLOC_ARRAY, arr_var, range_count, 0, 0, 0)
-        // Spawn each iteration
+        ch_arr := new_ir_var("go_chs", TI_UNIT)
+        track_alloc_array(range_count)
+        emit(IR_ALLOC_ARRAY, ch_arr, range_count, 0, 0, 0)
+        // Spawn each iteration through the conc runtime.
         if ast_kind(body) == EXPR_CALL:
             func_node := ast_a(body)
             func_ni : ., mut = -1
             if ast_kind(func_node) == EXPR_IDENT:
                 func_ni = ast_int_val(func_node)
-            // Extract the call arg that uses the iter variable
+            conc_go_ni := str_intern("conc_go")
             fi : ., mut = 0
             loop:
                 if fi >= range_count:
                     break
-                // For each i, spawn with i as the iter var's value
                 val_var := new_ir_var("go_val", TI_UNIT)
                 emit(IR_CONST, val_var, ast_a(range_node) + fi, 0, 0, TI_INT)
-                dest2 := new_ir_var("go_fut", TI_UNIT)
-                emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1)
-                emit(IR_STORE_INDEX, -1, arr_var, dest2, fi, 0)
+                fnaddr_var := new_ir_var("_go_fnaddr", TI_INT)
+                emit(IR_FNADDR, fnaddr_var, func_ni, 0, 0, 0)
+                packed0 := new_ir_var("_go_fna", TI_INT)
+                emit(IR_STORE, -1, packed0, fnaddr_var, 0, 0)
+                packed1 := new_ir_var("_go_arg", TI_INT)
+                emit(IR_STORE, -1, packed1, val_var, 0, 0)
+                ch := new_ir_var("go_ch", TI_INT)
+                emit(IR_CALL, ch, packed0, 2, conc_go_ni, TI_INT)
+                emit(IR_STORE_INDEX, -1, ch_arr, ch, fi, 0)
+                fi = fi + 1
+            fi = 0
+            loop:
+                if fi >= range_count:
+                    break
+                chv := new_ir_var("go_chv", TI_INT)
+                emit(IR_LOAD_INDEX, chv, ch_arr, 0, fi, 0)
+                res := new_ir_var("go_res", TI_INT)
+                emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+                emit(IR_STORE_INDEX, -1, arr_var, res, fi, TI_INT)
                 fi = fi + 1
         return arr_var
 

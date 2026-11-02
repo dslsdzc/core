@@ -42,6 +42,8 @@ CONC_MAX_PARAMS : int = 1048576
 CONC_MSG_MAGIC : int = 1129270851       // 0x434F4E43; LE bytes are "CNOC"
 CONC_CHANNEL_MAGIC : int = 1129270856   // 0x434F4E48; LE bytes are "HNOC"
 CONC_MSG_HEADER : int = 32
+CONC_REF_MAGIC : int = 1129270860
+CONC_REF_SIZE : int = 48
 
 // Region table. Each region owns a global-heap block and a bump cursor.
 g_conc_region_block : string, mut
@@ -300,6 +302,82 @@ fn conc_is_aligned(p: string, align: int) -> int, pub:
 fn conc_last_error() -> int, pub:
     return g_conc_last_error
 
+fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:
+    if _conc_region_valid(region) == 0:
+        return _conc_ptr(0)
+    p := conc_alloc(region, size)
+    if _conc_is_null(p) != 0:
+        return _conc_ptr(0)
+    base := load_str_ptr(g_conc_region_block, region * 8)
+    off := _conc_addr(p) - _conc_addr(base)
+    ref := _conc_global_alloc(CONC_REF_SIZE)
+    if _conc_is_null(ref) != 0:
+        return _conc_ptr(0)
+    cell_store(ref, 0, CONC_REF_MAGIC)
+    cell_store(ref, 8, region)
+    cell_store(ref, 16, off)
+    cell_store(ref, 24, size)
+    cell_store(ref, 32, layout)
+    cell_store(ref, 40, cell_load(g_conc_region_epoch, region * 8))
+    return ref
+
+fn conc_ref_ok(ref: string) -> int, pub:
+    if _conc_is_null(ref) != 0:
+        return 0
+    if cell_load(ref, 0) != CONC_REF_MAGIC:
+        return 0
+    rid := cell_load(ref, 8)
+    if _conc_region_valid(rid) == 0:
+        return 0
+    if cell_load(ref, 40) != cell_load(g_conc_region_epoch, rid * 8):
+        return 0
+    off := cell_load(ref, 16)
+    sz := cell_load(ref, 24)
+    if off < CONC_MSG_HEADER:
+        return 0
+    if sz <= 0:
+        return 0
+    cap := cell_load(g_conc_region_cap, rid * 8)
+    if sz > cap:
+        return 0
+    if off > cap - sz:
+        return 0
+    base := load_str_ptr(g_conc_region_block, rid * 8)
+    p := _conc_ptr(_conc_addr(base) + off)
+    if _conc_header_ok(p) == 0:
+        return 0
+    if _conc_msg_size(p) != sz:
+        return 0
+    return 1
+
+fn conc_ref_payload(ref: string) -> string, pub:
+    if conc_ref_ok(ref) == 0:
+        return _conc_ptr(0)
+    rid := cell_load(ref, 8)
+    off := cell_load(ref, 16)
+    base := load_str_ptr(g_conc_region_block, rid * 8)
+    return _conc_ptr(_conc_addr(base) + off)
+
+fn conc_ref_region(ref: string) -> int, pub:
+    if _conc_is_null(ref) != 0:
+        return -1
+    return cell_load(ref, 8)
+
+fn conc_ref_offset(ref: string) -> int, pub:
+    if _conc_is_null(ref) != 0:
+        return -1
+    return cell_load(ref, 16)
+
+fn conc_ref_size(ref: string) -> int, pub:
+    if _conc_is_null(ref) != 0:
+        return -1
+    return cell_load(ref, 24)
+
+fn conc_ref_layout(ref: string) -> int, pub:
+    if _conc_is_null(ref) != 0:
+        return -1
+    return cell_load(ref, 32)
+
 fn conc_same(a: string, b: string) -> int, pub:
     if _conc_addr(a) == _conc_addr(b):
         return 1
@@ -340,7 +418,7 @@ fn _conc_channel_valid(ch: string) -> int:
     if esize <= 0:
         return 0
     cap := cell_load(ch, 16)
-    if cap <= 0:
+    if cap < 0:
         return 0
     n := cell_load(ch, 24)
     if n < 0:
@@ -350,8 +428,12 @@ fn _conc_channel_valid(ch: string) -> int:
     head := cell_load(ch, 32)
     if head < 0:
         return 0
-    if head >= cap:
-        return 0
+    if cap > 0:
+        if head >= cap:
+            return 0
+    else:
+        if head != 0:
+            return 0
     buf := load_str_ptr(ch, 8)
     b := _conc_addr(buf)
     if b == 0:
@@ -370,13 +452,15 @@ fn conc_channel_new(region: int, elem_size: int, cap: int) -> string, pub:
         return _conc_ptr(0)
     if elem_size <= 0:
         return _conc_ptr(0)
-    if cap <= 0:
+    if cap < 0:
         return _conc_ptr(0)
     if cap > CONC_MAX_ALLOC:
         return _conc_ptr(0)
-    if elem_size > CONC_MAX_ALLOC / cap:
-        return _conc_ptr(0)
-    total := 64 + cap * elem_size
+    total : ., mut = 64
+    if cap > 0:
+        if elem_size > CONC_MAX_ALLOC / cap:
+            return _conc_ptr(0)
+        total = 64 + cap * elem_size
     if total > CONC_MAX_ALLOC:
         return _conc_ptr(0)
     ch := conc_alloc(region, total)
