@@ -110,6 +110,9 @@ import conc
 fn stage() -> int:
     return 7
 
+fn pipe_stage(ch: string) -> int:
+    return 9
+
 fn main() -> int:
     tbl := alloc(8)
     cell_store(tbl, 0, @addr(stage))
@@ -120,6 +123,17 @@ fn main() -> int:
         return 2
     if conc_run_body(plan, 0, "") != 7:
         return 3
+    tbl2 := alloc(8)
+    cell_store(tbl2, 0, @addr(pipe_stage))
+    p2 := conc_plan_load("v 2\\nentries 1\\nbody 0 PIPE 0 1\\nstage 0 0 -1 -1 BLOCKING\\n", tbl2)
+    if p2 < 0:
+        return 4
+    if conc_plan_stage_count(p2) != 1:
+        return 5
+    if conc_plan_stage_policy(p2, 0) != CONC_STAGE_BLOCKING:
+        return 6
+    if conc_run_body(p2, 0, "") != 9:
+        return 7
     return 0
 """
 
@@ -178,6 +192,72 @@ fn main() -> int:
     cell_store(cht, 0, ch)
     if conc_plan_run(p, 0, cht) != 2:
         return 18
+    return 0
+"""
+
+
+PIPELINE_RUN = """\
+import conc
+import sched
+import chan
+
+fn s1(ctx: string) -> int:
+    v := chan_recv(conc_ctx_ch(ctx, 0))
+    chan_send(conc_ctx_ch(ctx, 8), v + 1)
+    return 0
+
+fn s2(ctx: string) -> int:
+    v := chan_recv(conc_ctx_ch(ctx, 0))
+    chan_send(conc_ctx_ch(ctx, 8), v + 1)
+    return 0
+
+fn s3(ctx: string) -> int:
+    v := chan_recv(conc_ctx_ch(ctx, 0))
+    chan_send(conc_ctx_ch(ctx, 8), v + 1)
+    return 0
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if p < 0:
+        return 1
+    if conc_plan_set_version(p, 2) != 0:
+        return 2
+    i : ., mut = 0
+    loop:
+        if i >= 4:
+            break
+        if conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC) != i:
+            return 3
+        i = i + 1
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s1), 1) != 0:
+        return 4
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s2), 1) != 1:
+        return 5
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s3), 1) != 2:
+        return 6
+    if conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED) != 0:
+        return 7
+    if conc_plan_add_stage(p, 1, 1, 2, CONC_STAGE_BOUNDED) != 1:
+        return 8
+    if conc_plan_add_stage(p, 2, 2, 3, CONC_STAGE_BOUNDED) != 2:
+        return 9
+    if conc_plan_validate(p) != 1:
+        return 10
+    c0 := chan_make(8, 1)
+    c1 := chan_make(8, 1)
+    c2 := chan_make(8, 1)
+    c3 := chan_make(8, 1)
+    cht := alloc(32)
+    cell_store(cht, 0, c0)
+    cell_store(cht, 8, c1)
+    cell_store(cht, 16, c2)
+    cell_store(cht, 24, c3)
+    chan_send(c0, 1)
+    if conc_pipeline_run(p, cht) != 0:
+        return 11
+    if chan_recv(c3) != 4:
+        return 12
     return 0
 """
 
@@ -398,6 +478,7 @@ def main() -> int:
         ("plan_v2_load", V2_LOAD, 60, 0),
         ("pipe_body_load", PIPE_LOAD, 60, 0),
         ("mpmc_plan_run", MPMC_RUN, 60, 0),
+        ("pipeline_run", PIPELINE_RUN, 60, 0),
         ("slot_runtime", SLOTS, 60, 0),
     ]
     ok = True

@@ -152,8 +152,11 @@ CP-6 分三批提交：
 - `conc_run_cpu`/`conc_run_body`/`conc_run_body_bound` 将 PIPE 按 TASK 调用一次，函数内部 `yield` 是真实 stage 切换。
 - `corec conc-plan` 检测 go 目标函数 IR 中的 `IR_YIELD`，输出 `v 2` + `body 1 PIPE 1 <params>`。
 - PIPE 的 stage 数由函数内 yield 点决定，不新增源码语法。
+- plan v2 `stage <id> <body> <in_ch> <out_ch> BLOCKING|BOUNDED` 描述流水级；`conc_pipeline_run` 为每级分配 16B context（in/out channel handle），用 `conc_go` 启动 stage activation，bounded channel 提供背压。
+- stage body 通过 `conc_ctx_ch(ctx, 0/8)` 读入/输出通道句柄。
+- 逻辑/实现分工：stage 记录、policy、executor 在 conc/plan；stage 切换与缓冲的编码复用 HIT 的 `call`/`ret`/`load`/`store` 事件（`fiber_switch` + channel 内存访问），没有新增 ISA 事件；若目标要原生的 stage-switch 指令，再在 HIT 表加投影。
 
-测试：`test_conc_preempt.py::yield_switches`、`test_conc_plan_v2.py::pipe_body_load`、`pipe_plan_exec`。
+测试：`test_conc_preempt.py::yield_switches`、`test_conc_plan_v2.py::pipe_body_load`、`pipe_plan_exec`、`pipeline_run`（3 stage、bounded channel、输出 4）。
 
 ### 2.14 旧 runtime 退役
 
@@ -175,7 +178,7 @@ CP-6 gate（`build_selfhost_native.py` 之后）：
 test_conc_runtime.py        14/14
 test_conc_plan.py            5/5
 test_conc_plan_emitter.py   25/25
-test_conc_plan_v2.py         6/6（含 validate/explain/cycle、MPMC plan run）
+test_conc_plan_v2.py         7/7（含 validate/explain/cycle、MPMC plan run、pipeline run）
 test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
@@ -196,7 +199,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
 - DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
-- PIPELINE 的 stage 并行/背压/缓冲未做；`yield` 是协作切换，PIPE body 单次调用。
+- PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；编译器还不会自动把 `flow` 函数拆成多个 stage body，需要手写 stage 函数或后续 splitter。
 - futex 的优先级继承未做；取消/关闭已有 `conc_shutdown` 与 channel close；等待使用 2 ms 安全超时。
 - layout 表是进程内全局表，未做跨 plan/跨进程持久化。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。

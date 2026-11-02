@@ -540,6 +540,62 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         i = i + 1
     return total
 
+fn conc_ctx_ch(ctx: string, off: int) -> string, pub:
+    // Stage context convention: +0 input channel, +8 output channel.
+    return load_str_ptr(ctx, off)
+
+fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
+    // CPU pipeline executor: each stage is a PIPE body taking a 16-byte
+    // context (in/out channel handles). Stages run as activations; bounded
+    // channels provide backpressure. Returns the sum of stage return values.
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    n := conc_plan_stage_count(plan)
+    if n <= 0 || n > 64:
+        return -1
+    hs := alloc(64 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        body := conc_plan_stage_body(plan, i)
+        entry := conc_plan_body_entry(plan, body)
+        if entry <= 0:
+            return -1
+        ctx := alloc(16)
+        cell_store(ctx, 0, 0)
+        cell_store(ctx, 8, 0)
+        in_ch := conc_plan_stage_in(plan, i)
+        if in_ch >= 0:
+            ih := load_str_ptr(channels, in_ch * 8)
+            if _conc_is_null(ih) != 0:
+                return -1
+            store_str_ptr(ctx, 0, ih)
+        out_ch := conc_plan_stage_out(plan, i)
+        if out_ch >= 0:
+            oh := load_str_ptr(channels, out_ch * 8)
+            if _conc_is_null(oh) != 0:
+                return -1
+            store_str_ptr(ctx, 8, oh)
+        arg : ., mut = 0
+        unsafe:
+            arg = @ptr_of(ctx)
+        h := conc_go(entry, arg)
+        if _conc_word(h) == 0:
+            return -1
+        cell_store(hs, i * 8, h)
+        i = i + 1
+    total : ., mut = 0
+    i = 0
+    loop:
+        if i >= n:
+            break
+        total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+        i = i + 1
+    return total
+
 fn conc_plan_mark_range(entry: int, start: int, count: int), pub:
     // Compiler-to-plan marker; the default runtime uses the IR loop.
     return

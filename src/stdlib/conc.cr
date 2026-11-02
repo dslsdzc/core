@@ -34,6 +34,9 @@ CONC_TRANSFER_SPLIT : int, pub = 3
 CONC_TRANSFER_FILL : int, pub = 4
 CONC_TRANSFER_COPY : int, pub = 5
 
+CONC_STAGE_BLOCKING : int, pub = 0
+CONC_STAGE_BOUNDED : int, pub = 1
+
 CONC_BUDGET_PROGRESSIVE : int, pub = 1
 CONC_BUDGET_COUNT : int, pub = 2
 CONC_BUDGET_WAIT : int, pub = 3
@@ -972,7 +975,7 @@ fn conc_plan_new() -> int, pub:
     if _conc_plan_ensure(g_conc_plan_count + 1) != 0:
         return -1
     // v2 record: the v1 fields stay at 0..72, new sidecar fields follow.
-    p := _conc_global_alloc(192)
+    p := _conc_global_alloc(208)
     if _conc_is_null(p) != 0:
         return -1
     bodies := _conc_global_alloc(8 * 32)
@@ -984,6 +987,7 @@ fn conc_plan_new() -> int, pub:
     transfers := _conc_global_alloc(64 * 40)
     budgets := _conc_global_alloc(64 * 40)
     certs := _conc_global_alloc(64 * 32)
+    stages := _conc_global_alloc(64 * 32)
     if _conc_is_null(bodies) != 0:
         return -1
     if _conc_is_null(channels) != 0:
@@ -1002,6 +1006,8 @@ fn conc_plan_new() -> int, pub:
         return -1
     if _conc_is_null(certs) != 0:
         return -1
+    if _conc_is_null(stages) != 0:
+        return -1
     store_str_ptr(p, 48, bodies)
     store_str_ptr(p, 56, channels)
     store_str_ptr(p, 64, edges)
@@ -1012,6 +1018,8 @@ fn conc_plan_new() -> int, pub:
     store_str_ptr(p, 152, transfers)
     store_str_ptr(p, 160, budgets)
     store_str_ptr(p, 168, certs)
+    store_str_ptr(p, 200, stages)
+    cell_store(p, 192, 0)     // stage_count
     cell_store(p, 80, 1)      // version
     cell_store(p, 96, 0)      // slot_count
     cell_store(p, 104, 0)     // range_count
@@ -1326,6 +1334,29 @@ fn conc_plan_validate(plan: int) -> int, pub:
         if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
             return 0
         cc = cc + 1
+    nst := cell_load(p, 192)
+    stbase := load_str_ptr(p, 200)
+    st : ., mut = 0
+    loop:
+        if st >= nst:
+            break
+        body := cell_load(stbase, st * 32)
+        in_ch := cell_load(stbase, st * 32 + 8)
+        out_ch := cell_load(stbase, st * 32 + 16)
+        policy := cell_load(stbase, st * 32 + 24)
+        if body < 0 || body >= n:
+            return 0
+        if conc_plan_body_kind(plan, body) != CONC_BODY_PIPELINE:
+            return 0
+        if conc_plan_body_params(plan, body) != 1:
+            return 0
+        if in_ch < -1 || in_ch >= nch:
+            return 0
+        if out_ch < -1 || out_ch >= nch:
+            return 0
+        if policy != CONC_STAGE_BLOCKING && policy != CONC_STAGE_BOUNDED:
+            return 0
+        st = st + 1
     if conc_plan_acyclic(plan) == 0:
         return 0
     return 1
@@ -1361,6 +1392,7 @@ fn conc_plan_explain(plan: int) -> string, pub:
     out = out + " channels " + _conc_num_str(cell_load(p, 8))
     out = out + " edges " + _conc_num_str(cell_load(p, 16))
     out = out + " slots " + _conc_num_str(cell_load(p, 96))
+    out = out + " stages " + _conc_num_str(cell_load(p, 192))
     out = out + " ranges " + _conc_num_str(cell_load(p, 104))
     out = out + " transfers " + _conc_num_str(cell_load(p, 112))
     out = out + " budgets " + _conc_num_str(cell_load(p, 120))
@@ -1768,6 +1800,73 @@ fn conc_plan_cert_status(plan: int, i: int) -> int, pub:
     if i < 0 || i >= cell_load(p, 128):
         return -1
     return cell_load(load_str_ptr(p, 168), i * 32 + 8)
+
+fn conc_plan_add_stage(plan: int, body: int, in_ch: int, out_ch: int,
+                        policy: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if body < 0 || body >= cell_load(p, 0):
+        return -1
+    if conc_plan_body_kind(plan, body) != CONC_BODY_PIPELINE:
+        return -1
+    if conc_plan_body_params(plan, body) != 1:
+        return -1
+    nch := cell_load(p, 8)
+    if in_ch < -1 || in_ch >= nch:
+        return -1
+    if out_ch < -1 || out_ch >= nch:
+        return -1
+    if policy != CONC_STAGE_BLOCKING && policy != CONC_STAGE_BOUNDED:
+        return -1
+    n := cell_load(p, 192)
+    if n >= 64:
+        return -1
+    base := load_str_ptr(p, 200)
+    off := n * 32
+    cell_store(base, off, body)
+    cell_store(base, off + 8, in_ch)
+    cell_store(base, off + 16, out_ch)
+    cell_store(base, off + 24, policy)
+    cell_store(p, 192, n + 1)
+    return n
+
+fn conc_plan_stage_count(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    return cell_load(_conc_plan_at(plan), 192)
+
+fn conc_plan_stage_body(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 192):
+        return -1
+    return cell_load(load_str_ptr(p, 200), i * 32)
+
+fn conc_plan_stage_in(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 192):
+        return -1
+    return cell_load(load_str_ptr(p, 200), i * 32 + 8)
+
+fn conc_plan_stage_out(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 192):
+        return -1
+    return cell_load(load_str_ptr(p, 200), i * 32 + 16)
+
+fn conc_plan_stage_policy(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 192):
+        return -1
+    return cell_load(load_str_ptr(p, 200), i * 32 + 24)
 
 fn conc_plan_body_kind(plan: int, body: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -2210,6 +2309,25 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         start := _conc_plan_read_int(text)
         count := _conc_plan_read_int(text)
         if conc_plan_add_range(p, body, start, count) < 0:
+            return -1
+        return 0
+    if tok == "stage":
+        id := _conc_plan_read_int(text)
+        body := _conc_plan_read_int(text)
+        in_ch := _conc_plan_read_int(text)
+        out_ch := _conc_plan_read_int(text)
+        ps := _conc_plan_next(text)
+        policy : ., mut = -1
+        if ps == "BLOCKING":
+            policy = CONC_STAGE_BLOCKING
+        else:
+            if ps == "BOUNDED":
+                policy = CONC_STAGE_BOUNDED
+        if id < 0 || policy < 0:
+            return -1
+        if id != conc_plan_stage_count(p):
+            return -1
+        if conc_plan_add_stage(p, body, in_ch, out_ch, policy) != id:
             return -1
         return 0
     if tok == "transfer":
