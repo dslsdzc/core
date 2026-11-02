@@ -95,6 +95,9 @@ CP-6 分三批提交：
 - `conc_layout_add_field` + `conc_ref_copy_set`/`conc_ref_move_set`：只复制 CopySet 声明的字段，非复制字段在 CPU 映射上清零；无字段布局回退整 payload。
 - `conc_plan_run` 的 MPMC e2e 在 `test_conc_plan_v2.py` 覆盖。
 - 所有源失效都通过 descriptor magic/epoch，CPU 上不依赖物理地址失效。
+- 跨 memory space：`conc_space_create(HOST|DEVICE|REMOTE, capacity)` 建立独立 region/配额；`conc_ref_alloc_space`、`conc_space_move/copy/loan/return/split_part/fill` 在 space 间搬运；每次搬运记录 `conc_transfer_bytes/count` 和 `conc_space_bytes`。
+- DEVICE/REMOTE 在当前 host 上使用独立本地 mapping（可运行的模拟）；搬运是真实字节 copy + 源失效/归还语义。真实设备后端只需替换 space 的 allocator/copy 实现。
+- plan v2 `space <id> HOST|DEVICE|REMOTE <capacity>` + `xfer <id> <kind> <src_body> <dst_body> <size> <src_space> <dst_space>`；`conc_plan_apply_spaces` 注册，`conc_plan_xfer_bytes` 汇总物理预算。
 
 测试：`ref_transfer` 覆盖五种 primitive。
 
@@ -189,7 +192,7 @@ test_conc_plan_emitter.py   25/25
 test_conc_plan_v2.py         7/7（含 validate/explain/cycle、MPMC plan run、pipeline run）
 test_conc_autopar.py         4/4（pure arithmetic auto-PAR + serial fallback IR 对照）
 test_conc_flow.py            3/3（straight/loop/nested flow coroutine）
-test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
+test_conc_transfer.py        3/3（含 CopySet/MOVE_SET、跨 space 搬运）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
 test_conc_preempt.py        11/11（含跨 M close、shutdown、PI lock、straight-line）
@@ -206,7 +209,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 ## 4. 边界与既有红点
 
 - 抢占是“回边 tick + SIGALRM pending flag”：长 straight-line 代码/长系统调用内不能切换；这是 CPU mapping 的显式边界。
-- 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
+- 没有真实 GPU/FPGA/集群；DEVICE/REMOTE space 是 host 本地 mapping 的可运行模拟。跨 space MOVE/LOAN 已记录真实字节搬运预算（`conc_transfer_bytes`），真实设备的物理链路/带宽模型仍需要硬件后端。
 - DATA_PARALLEL 的自动识别覆盖 range go 与“纯算术 `out[i] = f(i)`”普通 for；其他循环 serial fallback。
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
 - PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；flow 采用 fiber 协程实现（yield 为 stage 边界），不生成多个函数。

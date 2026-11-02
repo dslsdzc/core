@@ -110,6 +110,58 @@ fn main() -> int:
     return 0
 """
 
+SPACE_TRANSFER = """\
+import conc
+
+fn main() -> int:
+    h := conc_space_create(CONC_SPACE_HOST, 1048576)
+    d := conc_space_create(CONC_SPACE_DEVICE, 1048576)
+    if h < 0 || d < 0:
+        return 1
+    conc_layout_declare(7, 16, 4660)
+    r := conc_ref_alloc_space(h, 16, 7)
+    if conc_ref_space(r) != h:
+        return 2
+    p := conc_ref_payload(r)
+    cell_store(p, 0, 11)
+    cell_store(p, 8, 22)
+    m := conc_space_move(r, d)
+    if conc_ref_ok(r) != 0:
+        return 3
+    if conc_ref_ok(m) == 0:
+        return 4
+    if conc_ref_space(m) != d:
+        return 5
+    if conc_transfer_bytes() != 16:
+        return 6
+    if conc_space_bytes(d) != 16:
+        return 7
+    c := conc_space_copy(m, h)
+    if conc_ref_ok(c) == 0:
+        return 8
+    if conc_transfer_bytes() != 32:
+        return 9
+    l := conc_space_loan(c, d)
+    if conc_ref_ok(c) != 0:
+        return 10
+    cell_store(conc_ref_payload(l), 0, 99)
+    if conc_space_return(c, l) != 0:
+        return 11
+    if cell_load(conc_ref_payload(c), 0) != 99:
+        return 12
+    s0 := conc_space_split_part(c, d, 0, 2)
+    s1 := conc_space_split_part(c, d, 1, 2)
+    if conc_ref_ok(s0) == 0 || conc_ref_ok(s1) == 0:
+        return 13
+    f := conc_space_fill(d, 8, 7)
+    if conc_ref_ok(f) == 0:
+        return 14
+    if conc_space_used(d) <= 0:
+        return 15
+    return 0
+"""
+
+
 REF_EPOCH = """\
 import conc
 
@@ -174,6 +226,7 @@ def main() -> int:
     cases = [
         ("ref_transfer", TRANSFER, 60, 0),
         ("ref_channel_epoch", REF_EPOCH, 60, 0),
+        ("space_transfer", SPACE_TRANSFER, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

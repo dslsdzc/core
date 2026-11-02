@@ -20,7 +20,7 @@ fn square(x: int) -> int:
 fn main() -> int:
     tbl := alloc(8)
     cell_store(tbl, 0, @addr(square))
-    text := "v 2\\nentries 1\\ntarget cpu 2 1\\nslot 0 THREAD -1 2\\nslot 1 FIBER 0 4\\nlayout 0 16 4660\\nbody 0 PAR 0 16\\nchannel 0 8 0 MPMC\\nrange 0 0 16\\ntransfer 0 MOVE 0 0 16\\nbudget 0 COUNT 100 PROVED\\ncert 0 1 UNKNOWN\\n"
+    text := "v 2\\nentries 1\\ntarget cpu 2 1\\nslot 0 THREAD -1 2\\nslot 1 FIBER 0 4\\nlayout 0 16 4660\\nspace 0 DEVICE 1048576\\nbody 0 PAR 0 16\\nchannel 0 8 0 MPMC\\nrange 0 0 16\\nxfer 0 MOVE 0 0 16 0 0\\ntransfer 0 MOVE 0 0 16\\nbudget 0 COUNT 100 PROVED\\ncert 0 1 UNKNOWN\\n"
     plan := conc_plan_load(text, tbl)
     if plan < 0:
         return 1
@@ -74,6 +74,18 @@ fn main() -> int:
         return 37
     if conc_layout_ok(0) == 0:
         return 38
+    if conc_plan_space_count(plan) != 1:
+        return 39
+    if conc_plan_space_kind(plan, 0) != CONC_SPACE_DEVICE:
+        return 40
+    if conc_plan_xfer_count(plan) != 1:
+        return 41
+    if conc_plan_xfer_bytes(plan) != 16:
+        return 42
+    if conc_plan_apply_spaces(plan) != 1:
+        return 43
+    if conc_space_kind(0) != CONC_SPACE_DEVICE:
+        return 44
     if conc_plan_validate(plan) != 1:
         return 26
     if str_len(conc_plan_explain(plan)) < 20:

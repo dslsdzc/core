@@ -74,6 +74,11 @@ CONC_REF_SIZE : int = 48
 CONC_MAX_LAYOUTS : int = 64
 CONC_MAX_LAYOUT_FIELDS : int = 16
 
+CONC_SPACE_HOST : int, pub = 0
+CONC_SPACE_DEVICE : int, pub = 1
+CONC_SPACE_REMOTE : int, pub = 2
+CONC_MAX_SPACES : int = 16
+
 // Region table. Each region owns a global-heap block and a bump cursor.
 g_conc_region_block : string, mut
 g_conc_region_cap : string, mut
@@ -105,6 +110,18 @@ g_conc_layout_fields : string, mut
 g_conc_layout_field_count : string, mut
 g_conc_layout_count : int, mut = 0
 g_conc_layout_version : int, mut = 1
+
+// Host-simulated memory spaces. A space owns a region and an accounting
+// cursor; DEVICE/REMOTE currently use the same local mapping, while the
+// transfer executor records the physical byte movement and source/dest space.
+g_conc_space_count : int, mut = 0
+g_conc_space_kind : string, mut
+g_conc_space_capacity : string, mut
+g_conc_space_region : string, mut
+g_conc_space_used : string, mut
+g_conc_space_bytes : string, mut
+g_conc_transfer_bytes : int, mut = 0
+g_conc_transfer_count : int, mut = 0
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
 g_conc_plan_parse_pos : int, mut = 0
@@ -349,6 +366,205 @@ fn conc_is_aligned(p: string, align: int) -> int, pub:
 
 fn conc_last_error() -> int, pub:
     return g_conc_last_error
+
+fn _conc_space_ensure() -> int:
+    if _conc_is_null(g_conc_space_kind) != 0:
+        g_conc_space_kind = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_capacity = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_region = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_used = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_bytes = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        if _conc_is_null(g_conc_space_kind) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_capacity) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_region) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_used) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_bytes) != 0:
+            return -1
+    return 0
+
+fn conc_space_create(kind: int, capacity: int) -> int, pub:
+    if kind != CONC_SPACE_HOST && kind != CONC_SPACE_DEVICE && kind != CONC_SPACE_REMOTE:
+        return -1
+    if capacity <= 0:
+        return -1
+    if _conc_space_ensure() != 0:
+        return -1
+    if g_conc_space_count >= CONC_MAX_SPACES:
+        return -1
+    region := conc_region_new(capacity)
+    if region < 0:
+        return -1
+    id := g_conc_space_count
+    cell_store(g_conc_space_kind, id * 8, kind)
+    cell_store(g_conc_space_capacity, id * 8, capacity)
+    cell_store(g_conc_space_region, id * 8, region)
+    cell_store(g_conc_space_used, id * 8, 0)
+    cell_store(g_conc_space_bytes, id * 8, 0)
+    g_conc_space_count = id + 1
+    return id
+
+fn conc_space_ok(space: int) -> int, pub:
+    if space < 0 || space >= g_conc_space_count:
+        return 0
+    if _conc_is_null(g_conc_space_kind) != 0:
+        return 0
+    return 1
+
+fn conc_space_kind(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_kind, space * 8)
+
+fn conc_space_capacity(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_capacity, space * 8)
+
+fn conc_space_used(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_used, space * 8)
+
+fn conc_space_bytes(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_bytes, space * 8)
+
+fn conc_space_region(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_region, space * 8)
+
+fn conc_space_of_region(region: int) -> int, pub:
+    if _conc_is_null(g_conc_space_region) != 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= g_conc_space_count:
+            break
+        if cell_load(g_conc_space_region, i * 8) == region:
+            return i
+        i = i + 1
+    return -1
+
+fn conc_transfer_bytes() -> int, pub:
+    return g_conc_transfer_bytes
+
+fn conc_transfer_count() -> int, pub:
+    return g_conc_transfer_count
+
+fn conc_ref_space(ref: string) -> int, pub:
+    if conc_ref_ok(ref) == 0:
+        return -1
+    return conc_space_of_region(cell_load(ref, 8))
+
+fn conc_ref_alloc_space(space: int, size: int, layout: int) -> string, pub:
+    if conc_space_ok(space) == 0:
+        return _conc_ptr(0)
+    region := cell_load(g_conc_space_region, space * 8)
+    ref := conc_ref_alloc(region, size, layout)
+    if _conc_is_null(ref) == 0:
+        cell_store(g_conc_space_used, space * 8,
+                   cell_load(g_conc_space_used, space * 8) + size)
+    return ref
+
+fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int):
+    g_conc_transfer_bytes = g_conc_transfer_bytes + size
+    g_conc_transfer_count = g_conc_transfer_count + 1
+    if conc_space_ok(dst_space) != 0:
+        cell_store(g_conc_space_bytes, dst_space * 8,
+                   cell_load(g_conc_space_bytes, dst_space * 8) + size)
+    if conc_space_ok(src_space) != 0:
+        cell_store(g_conc_space_bytes, src_space * 8,
+                   cell_load(g_conc_space_bytes, src_space * 8) + size)
+
+fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
+    if conc_ref_ok(ref) == 0:
+        return _conc_ptr(0)
+    if conc_space_ok(dst_space) == 0:
+        return _conc_ptr(0)
+    src_space := conc_space_of_region(cell_load(ref, 8))
+    if src_space < 0:
+        return _conc_ptr(0)
+    size := cell_load(ref, 24)
+    layout := cell_load(ref, 32)
+    dst := conc_ref_alloc_space(dst_space, size, layout)
+    if _conc_is_null(dst) != 0:
+        return _conc_ptr(0)
+    _conc_copy(conc_ref_payload(dst), conc_ref_payload(ref), size)
+    if mode == CONC_TRANSFER_MOVE || mode == CONC_TRANSFER_LOAN:
+        magic : ., mut = CONC_REF_LOAN_MAGIC
+        if mode == CONC_TRANSFER_MOVE:
+            magic = CONC_REF_MOVED_MAGIC
+        _conc_ref_invalidate(ref, magic)
+    _conc_space_note_xfer(src_space, dst_space, size)
+    return dst
+
+fn conc_space_move(ref: string, dst_space: int) -> string, pub:
+    return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_MOVE)
+
+fn conc_space_copy(ref: string, dst_space: int) -> string, pub:
+    return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_COPY)
+
+fn conc_space_loan(ref: string, dst_space: int) -> string, pub:
+    return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_LOAN)
+
+fn conc_space_return(src_ref: string, loan: string) -> int, pub:
+    // Return a loan from its device/remote space to the source space.
+    if _conc_is_null(src_ref) != 0:
+        return -1
+    if cell_load(src_ref, 0) != CONC_REF_LOAN_MAGIC:
+        return -1
+    if conc_ref_ok(loan) == 0:
+        return -1
+    size := cell_load(src_ref, 24)
+    if cell_load(loan, 24) != size:
+        return -1
+    rid := cell_load(src_ref, 8)
+    if _conc_region_valid(rid) == 0:
+        return -1
+    if cell_load(src_ref, 40) != cell_load(g_conc_region_epoch, rid * 8):
+        return -1
+    base := load_str_ptr(g_conc_region_block, rid * 8)
+    dst := _conc_ptr(_conc_addr(base) + cell_load(src_ref, 16))
+    _conc_copy(dst, conc_ref_payload(loan), size)
+    cell_store(src_ref, 0, CONC_REF_MAGIC)
+    src_space := conc_space_of_region(rid)
+    loan_space := conc_space_of_region(cell_load(loan, 8))
+    _conc_space_note_xfer(loan_space, src_space, size)
+    return 0
+
+fn conc_space_fill(space: int, size: int, layout: int) -> string, pub:
+    return conc_ref_alloc_space(space, size, layout)
+
+fn conc_space_split_part(ref: string, dst_space: int, index: int,
+                         count: int) -> string, pub:
+    if conc_ref_ok(ref) == 0:
+        return _conc_ptr(0)
+    if conc_space_ok(dst_space) == 0:
+        return _conc_ptr(0)
+    if index < 0 || count <= 0 || index >= count:
+        return _conc_ptr(0)
+    total := cell_load(ref, 24)
+    part : ., mut = total / count
+    if index == count - 1:
+        part = total - part * (count - 1)
+    layout := cell_load(ref, 32)
+    src := conc_ref_payload(ref)
+    dst := conc_ref_alloc_space(dst_space, part, layout)
+    if _conc_is_null(dst) != 0:
+        return _conc_ptr(0)
+    s := _conc_ptr(_conc_addr(src) + index * (total / count))
+    _conc_copy(conc_ref_payload(dst), s, part)
+    if index == count - 1:
+        _conc_ref_invalidate(ref, CONC_REF_MOVED_MAGIC)
+    src_space := conc_space_of_region(cell_load(ref, 8))
+    _conc_space_note_xfer(src_space, dst_space, part)
+    return dst
 
 fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:
     if _conc_region_valid(region) == 0:
@@ -985,7 +1201,7 @@ fn conc_plan_new() -> int, pub:
     if _conc_plan_ensure(g_conc_plan_count + 1) != 0:
         return -1
     // v2 record: the v1 fields stay at 0..72, new sidecar fields follow.
-    p := _conc_global_alloc(224)
+    p := _conc_global_alloc(256)
     if _conc_is_null(p) != 0:
         return -1
     bodies := _conc_global_alloc(8 * 32)
@@ -999,6 +1215,8 @@ fn conc_plan_new() -> int, pub:
     certs := _conc_global_alloc(64 * 32)
     stages := _conc_global_alloc(64 * 32)
     plan_layouts := _conc_global_alloc(64 * 32)
+    plan_spaces := _conc_global_alloc(CONC_MAX_SPACES * 32)
+    plan_xfers := _conc_global_alloc(64 * 56)
     if _conc_is_null(bodies) != 0:
         return -1
     if _conc_is_null(channels) != 0:
@@ -1021,6 +1239,10 @@ fn conc_plan_new() -> int, pub:
         return -1
     if _conc_is_null(plan_layouts) != 0:
         return -1
+    if _conc_is_null(plan_spaces) != 0:
+        return -1
+    if _conc_is_null(plan_xfers) != 0:
+        return -1
     store_str_ptr(p, 48, bodies)
     store_str_ptr(p, 56, channels)
     store_str_ptr(p, 64, edges)
@@ -1033,8 +1255,12 @@ fn conc_plan_new() -> int, pub:
     store_str_ptr(p, 168, certs)
     store_str_ptr(p, 200, stages)
     store_str_ptr(p, 216, plan_layouts)
+    store_str_ptr(p, 232, plan_spaces)
+    store_str_ptr(p, 248, plan_xfers)
     cell_store(p, 192, 0)     // stage_count
     cell_store(p, 208, 0)     // plan layout_count
+    cell_store(p, 224, 0)     // plan space_count
+    cell_store(p, 240, 0)     // plan xfer_count
     cell_store(p, 80, 1)      // version
     cell_store(p, 96, 0)      // slot_count
     cell_store(p, 104, 0)     // range_count
@@ -1349,6 +1575,38 @@ fn conc_plan_validate(plan: int) -> int, pub:
         if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
             return 0
         cc = cc + 1
+    nsp := cell_load(p, 224)
+    spbase := load_str_ptr(p, 232)
+    sp : ., mut = 0
+    loop:
+        if sp >= nsp:
+            break
+        kind := cell_load(spbase, sp * 32)
+        cap := cell_load(spbase, sp * 32 + 8)
+        if kind != CONC_SPACE_HOST && kind != CONC_SPACE_DEVICE && kind != CONC_SPACE_REMOTE:
+            return 0
+        if cap <= 0:
+            return 0
+        sp = sp + 1
+    nx := cell_load(p, 240)
+    xbase := load_str_ptr(p, 248)
+    x : ., mut = 0
+    loop:
+        if x >= nx:
+            break
+        kind := cell_load(xbase, x * 56)
+        src := cell_load(xbase, x * 56 + 8)
+        dst := cell_load(xbase, x * 56 + 16)
+        size := cell_load(xbase, x * 56 + 24)
+        ss := cell_load(xbase, x * 56 + 32)
+        ds := cell_load(xbase, x * 56 + 40)
+        if kind < CONC_TRANSFER_MOVE || kind > CONC_TRANSFER_COPY:
+            return 0
+        if src < 0 || src >= n || dst < 0 || dst >= n || size <= 0:
+            return 0
+        if ss < -1 || ss >= nsp || ds < -1 || ds >= nsp:
+            return 0
+        x = x + 1
     nl := cell_load(p, 208)
     lbase := load_str_ptr(p, 216)
     l : ., mut = 0
@@ -1420,6 +1678,8 @@ fn conc_plan_explain(plan: int) -> string, pub:
     out = out + " slots " + _conc_num_str(cell_load(p, 96))
     out = out + " stages " + _conc_num_str(cell_load(p, 192))
     out = out + " layouts " + _conc_num_str(cell_load(p, 208))
+    out = out + " spaces " + _conc_num_str(cell_load(p, 224))
+    out = out + " xfers " + _conc_num_str(cell_load(p, 240))
     out = out + " ranges " + _conc_num_str(cell_load(p, 104))
     out = out + " transfers " + _conc_num_str(cell_load(p, 112))
     out = out + " budgets " + _conc_num_str(cell_load(p, 120))
@@ -1827,6 +2087,146 @@ fn conc_plan_cert_status(plan: int, i: int) -> int, pub:
     if i < 0 || i >= cell_load(p, 128):
         return -1
     return cell_load(load_str_ptr(p, 168), i * 32 + 8)
+
+fn conc_plan_add_space(plan: int, kind: int, capacity: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if kind != CONC_SPACE_HOST && kind != CONC_SPACE_DEVICE && kind != CONC_SPACE_REMOTE:
+        return -1
+    if capacity <= 0:
+        return -1
+    p := _conc_plan_at(plan)
+    n := cell_load(p, 224)
+    if n >= CONC_MAX_SPACES:
+        return -1
+    base := load_str_ptr(p, 232)
+    off := n * 32
+    cell_store(base, off, kind)
+    cell_store(base, off + 8, capacity)
+    cell_store(base, off + 16, 0)
+    cell_store(base, off + 24, 0)
+    cell_store(p, 224, n + 1)
+    return n
+
+fn conc_plan_space_count(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    return cell_load(_conc_plan_at(plan), 224)
+
+fn conc_plan_space_kind(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 224):
+        return -1
+    return cell_load(load_str_ptr(p, 232), i * 32)
+
+fn conc_plan_space_capacity(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 224):
+        return -1
+    return cell_load(load_str_ptr(p, 232), i * 32 + 8)
+
+fn conc_plan_add_xfer(plan: int, kind: int, src: int, dst: int, size: int,
+                      src_space: int, dst_space: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if kind < CONC_TRANSFER_MOVE || kind > CONC_TRANSFER_COPY:
+        return -1
+    p := _conc_plan_at(plan)
+    if src < 0 || src >= cell_load(p, 0):
+        return -1
+    if dst < 0 || dst >= cell_load(p, 0):
+        return -1
+    if size <= 0:
+        return -1
+    ns := cell_load(p, 224)
+    if src_space < -1 || src_space >= ns:
+        return -1
+    if dst_space < -1 || dst_space >= ns:
+        return -1
+    n := cell_load(p, 240)
+    if n >= 64:
+        return -1
+    base := load_str_ptr(p, 248)
+    off := n * 56
+    cell_store(base, off, kind)
+    cell_store(base, off + 8, src)
+    cell_store(base, off + 16, dst)
+    cell_store(base, off + 24, size)
+    cell_store(base, off + 32, src_space)
+    cell_store(base, off + 40, dst_space)
+    cell_store(base, off + 48, 0)
+    cell_store(p, 240, n + 1)
+    return n
+
+fn conc_plan_xfer_count(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    return cell_load(_conc_plan_at(plan), 240)
+
+fn conc_plan_xfer_kind(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 240):
+        return -1
+    return cell_load(load_str_ptr(p, 248), i * 56)
+
+fn conc_plan_xfer_size(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 240):
+        return -1
+    return cell_load(load_str_ptr(p, 248), i * 56 + 24)
+
+fn conc_plan_xfer_src_space(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 240):
+        return -1
+    return cell_load(load_str_ptr(p, 248), i * 56 + 32)
+
+fn conc_plan_xfer_dst_space(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 240):
+        return -1
+    return cell_load(load_str_ptr(p, 248), i * 56 + 40)
+
+fn conc_plan_xfer_bytes(plan: int) -> int, pub:
+    n := conc_plan_xfer_count(plan)
+    total : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        total = total + conc_plan_xfer_size(plan, i)
+        i = i + 1
+    return total
+
+fn conc_plan_apply_spaces(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    n := conc_plan_space_count(plan)
+    if n < 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        kind := conc_plan_space_kind(plan, i)
+        cap := conc_plan_space_capacity(plan, i)
+        sid := conc_space_create(kind, cap)
+        if sid != i:
+            return -1
+        i = i + 1
+    return n
 
 fn conc_plan_add_stage(plan: int, body: int, in_ch: int, out_ch: int,
                         policy: int) -> int, pub:
@@ -2408,6 +2808,52 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         size := _conc_plan_read_int(text)
         hash := _conc_plan_read_int(text)
         if conc_plan_add_layout(p, id, size, hash) < 0:
+            return -1
+        return 0
+    if tok == "space":
+        id := _conc_plan_read_int(text)
+        ks := _conc_plan_next(text)
+        kind : ., mut = -1
+        if ks == "HOST":
+            kind = CONC_SPACE_HOST
+        else:
+            if ks == "DEVICE":
+                kind = CONC_SPACE_DEVICE
+            else:
+                if ks == "REMOTE":
+                    kind = CONC_SPACE_REMOTE
+        cap := _conc_plan_read_int(text)
+        if id < 0 || kind < 0 || cap <= 0:
+            return -1
+        if conc_plan_add_space(p, kind, cap) != id:
+            return -1
+        return 0
+    if tok == "xfer":
+        id := _conc_plan_read_int(text)
+        ks := _conc_plan_next(text)
+        kind : ., mut = -1
+        if ks == "MOVE":
+            kind = CONC_TRANSFER_MOVE
+        else:
+            if ks == "LOAN":
+                kind = CONC_TRANSFER_LOAN
+            else:
+                if ks == "SPLIT":
+                    kind = CONC_TRANSFER_SPLIT
+                else:
+                    if ks == "FILL":
+                        kind = CONC_TRANSFER_FILL
+                    else:
+                        if ks == "COPY":
+                            kind = CONC_TRANSFER_COPY
+        src := _conc_plan_read_int(text)
+        dst := _conc_plan_read_int(text)
+        size := _conc_plan_read_int(text)
+        ss := _conc_plan_read_int(text)
+        ds := _conc_plan_read_int(text)
+        if id < 0 || kind < 0:
+            return -1
+        if conc_plan_add_xfer(p, kind, src, dst, size, ss, ds) != id:
             return -1
         return 0
     if tok == "stage":
