@@ -340,13 +340,8 @@ fn purity_selftest_run() -> int:
     fails = fails + ps_check_b("chain.extern_op_exists", (n_ex >= 0), true)
     total = total + 1
     fails = fails + ps_check("chain.extern_op_pierced", ps_state_touch(n_ex), 3)
-    // IR_SPAWN, emitted for each range-go iteration, takes part in the state dependency.
-    irf_sp := ps_ir_index_of("chain_spawn_op")
-    n_sp := ps_op_node(irf_sp, IR_SPAWN)
-    total = total + 1
-    fails = fails + ps_check_b("chain.spawn_op_exists", (n_sp >= 0), true)
-    total = total + 1
-    fails = fails + ps_check("chain.spawn_op_in_chain", ps_has_state_in(n_sp), 1)
+    // CP-5: range go no longer emits IR_SPAWN; spawn no longer participates in
+    // purity classification. The opcode remains in the wire schema.
     // IR_YIELD in a flow function body takes part in the state dependency.
     irf_yl := ps_ir_index_of("chain_yield_op")
     n_yl := ps_op_node(irf_yl, IR_YIELD)

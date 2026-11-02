@@ -64,6 +64,7 @@ test_go_arena.py            PASS
 test_multi_m.py              5/5
 test_compile.py             PASS
 test_ccr_types.py           53/53
+test_purity.py              24/24（IR_SPAWN 用例随 range-go 切换删除）
 build_kernel.py             PASS
 ```
 
