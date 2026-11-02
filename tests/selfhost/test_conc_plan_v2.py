@@ -56,6 +56,14 @@ fn main() -> int:
         return 24
     if conc_plan_deterministic(plan) != 0:
         return 25
+    if conc_plan_budget_measure(plan, 0, 7) != 0:
+        return 30
+    if conc_plan_budget_status(plan, 0) != CONC_STATUS_MEASURED:
+        return 31
+    if conc_plan_budget_value(plan, 0) != 7:
+        return 32
+    if conc_plan_budget_ok(plan) != 1:
+        return 33
     if conc_plan_validate(plan) != 1:
         return 26
     if str_len(conc_plan_explain(plan)) < 20:

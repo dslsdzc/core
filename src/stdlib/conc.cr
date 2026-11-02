@@ -1707,6 +1707,27 @@ fn conc_plan_budget_status(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 160), i * 40 + 16)
 
+fn conc_plan_budget_measure(plan: int, i: int, value: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 120):
+        return -1
+    if value < 0:
+        return -1
+    base := load_str_ptr(p, 160)
+    cell_store(base, i * 40 + 24, value)
+    cell_store(base, i * 40 + 16, CONC_STATUS_MEASURED)
+    return 0
+
+fn conc_plan_budget_value(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 120):
+        return -1
+    return cell_load(load_str_ptr(p, 160), i * 40 + 24)
+
 fn conc_plan_add_cert(plan: int, kind: int, status: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
