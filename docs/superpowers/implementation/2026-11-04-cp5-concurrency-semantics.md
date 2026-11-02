@@ -108,7 +108,16 @@ two_workers_two_goroutines 重复通过
 - `cross_m_pingpong`：两个 activation 在不同 M 上经 channel 互 ping；
 - `spawn_stress`：2 M 上 1000 次 go。
 
-完整 `selfhost-tests` 的 CP-1..CP-5 gate 在 p41 之前执行。p41 仍是 CP-1 基线 `1e47f93f` 已复现的旧 0A 问题（`run rc=-11`），不是 CP-5 引入。
+完整 `selfhost-tests`（`CI_JOB_NAME=selfhost-tests src/ci/run.sh`）最终结果：
+
+```text
+CP-1..CP-5 gates                 全部 PASS（含 multi_m 6/6）
+FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
+44/45 passed
+CI_EXIT=1
+```
+
+p41 仍是 CP-1 基线 `1e47f93f` 已复现的旧 0A 问题，不是 CP-5 引入。
 
 另有三个与本项无关、在纯净父提交 `34bab32d` 的独立 worktree 中同样失败的用例，已做基线对照：
 
