@@ -33,6 +33,7 @@ CP-6 分三批提交：
 - waker 在 ready push 内（仍持锁）递增 seq，再 `futex(202, WAKE)`。
 - main 的阻塞 send/recv 也 park；2 ms timeout 只作为 channel 轮询的安全网，不靠忙等。
 - `_conc_lock` 的短暂竞争仍用 `sched_yield`，不改变锁语义。
+- `conc_shutdown` 置停止标志并唤醒所有 M 的 futex；空闲 worker 退出并累加 `conc_workers_done`。正在运行的 activation 需要到下一个 tick/阻塞点才会观察停止标志。
 
 测试：`futex_idle_stress`、`futex_cross_m_blocking_send`。
 
@@ -178,7 +179,7 @@ test_conc_plan_v2.py         6/6（含 validate/explain/cycle、MPMC plan run）
 test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
-test_conc_preempt.py         7/7（含跨 M close）
+test_conc_preempt.py         8/8（含跨 M close、shutdown）
 test_chan_handle_model.py   11/11
 test_go_arena.py            PASS
 test_ccr_types.py           53/53
@@ -196,7 +197,7 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
 - PIPELINE 的 stage 并行/背压/缓冲未做；`yield` 是协作切换，PIPE body 单次调用。
-- futex 的取消/关闭/优先级继承未做；只有 WAIT/WAKE + 2 ms 安全超时。
+- futex 的优先级继承未做；取消/关闭已有 `conc_shutdown` 与 channel close；等待使用 2 ms 安全超时。
 - layout 表是进程内全局表，未做跨 plan/跨进程持久化。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。
 - p41（`test_p41_dynamic_string_arena_switch_path`）仍是 CP-1 基线旧问题。

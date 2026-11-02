@@ -201,6 +201,30 @@ fn main() -> int:
 """
 
 
+SHUTDOWN = """\
+import sched
+import chan
+
+fn work() -> int:
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    ch := go work()
+    if chan_recv(ch) != 0:
+        return 1
+    conc_shutdown()
+    i : ., mut = 0
+    loop:
+        if i >= 100000000:
+            return 2
+        if conc_workers_done() >= 1:
+            return 0
+        i = i + 1
+    return 3
+"""
+
+
 FUTEX_STRESS = """\
 import sched
 import chan
@@ -305,6 +329,7 @@ def main() -> int:
         ("futex_idle_stress", FUTEX_STRESS, 120, 0),
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
         ("close_wakes_cross_m", CLOSE_CROSS, 60, 0),
+        ("shutdown_cancels_workers", SHUTDOWN, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

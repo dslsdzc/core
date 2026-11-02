@@ -44,6 +44,8 @@ g_conc_quantum_m : string, mut
 g_conc_seq_m : string, mut
 g_conc_timespec : string, mut
 g_conc_preempt_flag : int, mut = 0
+g_conc_shutdown : int, mut = 0
+g_conc_workers_done : int, mut = 0
 g_conc_signal_preempt : int, mut = 1
 
 fn _conc_sched_alloc(size: int) -> string:
@@ -98,6 +100,26 @@ fn _conc_futex_wait(addr: int, val: int) -> int:
 fn _conc_futex_wake(addr: int) -> int:
     // futex(uaddr, FUTEX_WAKE, 1, 0, 0, 0)
     return syscall6(202, addr, 1, 1, 0, 0, 0)
+
+fn conc_workers_done() -> int, pub:
+    return g_conc_workers_done
+
+fn conc_shutdown(), pub:
+    // Cancel idle workers: set the stop flag and wake every M's futex word.
+    _conc_lock()
+    if g_conc_shutdown != 0:
+        _conc_unlock()
+        return
+    g_conc_shutdown = 1
+    m : ., mut = 0
+    loop:
+        if m >= 64:
+            break
+        seq := rt_atomic_load(g_conc_seq_m, m * 8)
+        rt_atomic_store(g_conc_seq_m, m * 8, seq + 1)
+        _conc_futex_wake(_conc_seq_addr(m))
+        m = m + 1
+    _conc_unlock()
 
 fn conc_park(m: int):
     // Park until the home M's queue or sequence changes. The sequence is read
@@ -545,6 +567,11 @@ fn conc_worker_run(m_idx: int), pub:
     // worker through a different path.
     rt_set_m_idx(m_idx)
     loop:
+        if g_conc_shutdown != 0:
+            _conc_lock()
+            g_conc_workers_done = g_conc_workers_done + 1
+            _conc_unlock()
+            return
         if conc_schedule() == 0:
             conc_park(m_idx)
 
