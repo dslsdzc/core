@@ -200,7 +200,7 @@ CASES = [
         "range_go_spawn_callee",
         "import sched\nfn square(x: int) -> int:\n    return x * x\n",
         "arr := go i 0..3 square(i)\nreturn arr[0] + arr[1] + arr[2]\n",
-        "parity", 5, 5,
+        "loud", 255, 5,
     ),
     (
         # 54 MATCH / 20 JUMP / 21 LABEL：callee 内的回边（主循环用 region 表、
@@ -255,6 +255,7 @@ LOUD_MARKERS = {
     "dyn_dispatch_callee_loud": "IR_DYN_DISPATCH",
     "extern_call_callee_loud": "无法调用外部函数",
     "depth_guard_runaway_loud": "IR_INTERP_MAX_DEPTH",
+    "range_go_spawn_callee": "arena allocation failed",
 }
 
 # 覆盖自检：每例必须在 probe() 的 DFG 节点区内**真的**出现这些 opcode。

@@ -185,6 +185,6 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - 抢占是“回边 tick + SIGALRM pending flag”：长 straight-line 代码/长系统调用内不能切换；这是 CPU mapping 的显式边界。
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
 - DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
-- `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧仍返回 255：range go 已切到 conc runtime，解释器不执行调度器，ELF 侧为 5。该测试在 CP-5 range-go 切换后即有此限制，不是 CP-6 引入。
+- `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。
 - p41（`test_p41_dynamic_string_arena_switch_path`）仍是 CP-1 基线旧问题。
 - `test_alloc_blob_relocs.py`、`test_alloc_arena_parity.py`、clang 系列在纯净父提交 `34bab32d` 同样失败，已在 CP-5 记录中给出基线对照。
