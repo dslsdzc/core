@@ -69,6 +69,7 @@ CONC_REF_MOVED_MAGIC : int = 1129270862
 CONC_REF_LOAN_MAGIC : int = 1129270863
 CONC_REF_SIZE : int = 48
 CONC_MAX_LAYOUTS : int = 64
+CONC_MAX_LAYOUT_FIELDS : int = 16
 
 // Region table. Each region owns a global-heap block and a bump cursor.
 g_conc_region_block : string, mut
@@ -97,6 +98,8 @@ g_conc_last_error : int, mut = 0
 // before crossing a region boundary.
 g_conc_layout_size : string, mut
 g_conc_layout_hash : string, mut
+g_conc_layout_fields : string, mut
+g_conc_layout_field_count : string, mut
 g_conc_layout_count : int, mut = 0
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
@@ -427,9 +430,15 @@ fn conc_layout_declare(layout: int, size: int, hash: int) -> int, pub:
     if _conc_is_null(g_conc_layout_size) != 0:
         g_conc_layout_size = _conc_global_alloc(CONC_MAX_LAYOUTS * 8)
         g_conc_layout_hash = _conc_global_alloc(CONC_MAX_LAYOUTS * 8)
+        g_conc_layout_fields = _conc_global_alloc(CONC_MAX_LAYOUTS * CONC_MAX_LAYOUT_FIELDS * 16)
+        g_conc_layout_field_count = _conc_global_alloc(CONC_MAX_LAYOUTS * 8)
         if _conc_is_null(g_conc_layout_size) != 0:
             return -1
         if _conc_is_null(g_conc_layout_hash) != 0:
+            return -1
+        if _conc_is_null(g_conc_layout_fields) != 0:
+            return -1
+        if _conc_is_null(g_conc_layout_field_count) != 0:
             return -1
     cell_store(g_conc_layout_size, layout * 8, size)
     cell_store(g_conc_layout_hash, layout * 8, hash)
@@ -455,6 +464,93 @@ fn conc_layout_hash(layout: int) -> int, pub:
     if conc_layout_ok(layout) == 0:
         return -1
     return cell_load(g_conc_layout_hash, layout * 8)
+
+fn conc_layout_count() -> int, pub:
+    return g_conc_layout_count
+
+fn conc_layout_add_field(layout: int, offset: int, size: int) -> int, pub:
+    if conc_layout_ok(layout) == 0:
+        return -1
+    if offset < 0 || size <= 0:
+        return -1
+    if offset + size > conc_layout_size(layout):
+        return -1
+    n := cell_load(g_conc_layout_field_count, layout * 8)
+    if n >= CONC_MAX_LAYOUT_FIELDS:
+        return -1
+    base := (layout * CONC_MAX_LAYOUT_FIELDS + n) * 16
+    cell_store(g_conc_layout_fields, base, offset)
+    cell_store(g_conc_layout_fields, base + 8, size)
+    cell_store(g_conc_layout_field_count, layout * 8, n + 1)
+    return n
+
+fn conc_layout_field_count(layout: int) -> int, pub:
+    if conc_layout_ok(layout) == 0:
+        return -1
+    return cell_load(g_conc_layout_field_count, layout * 8)
+
+fn conc_layout_field_offset(layout: int, i: int) -> int, pub:
+    if conc_layout_ok(layout) == 0:
+        return -1
+    n := cell_load(g_conc_layout_field_count, layout * 8)
+    if i < 0 || i >= n:
+        return -1
+    return cell_load(g_conc_layout_fields, (layout * CONC_MAX_LAYOUT_FIELDS + i) * 16)
+
+fn conc_layout_field_size(layout: int, i: int) -> int, pub:
+    if conc_layout_ok(layout) == 0:
+        return -1
+    n := cell_load(g_conc_layout_field_count, layout * 8)
+    if i < 0 || i >= n:
+        return -1
+    return cell_load(g_conc_layout_fields, (layout * CONC_MAX_LAYOUT_FIELDS + i) * 16 + 8)
+
+fn conc_ref_copy_set(ref: string, dst_region: int) -> string, pub:
+    // Copy only the declared CopySet fields. A layout with no fields falls back
+    // to a full payload copy (the conservative behavior).
+    if conc_ref_ok(ref) == 0:
+        return _conc_ptr(0)
+    if _conc_region_valid(dst_region) == 0:
+        return _conc_ptr(0)
+    size := cell_load(ref, 24)
+    layout := cell_load(ref, 32)
+    src := conc_ref_payload(ref)
+    dst := conc_ref_alloc(dst_region, size, layout)
+    if _conc_is_null(dst) != 0:
+        return _conc_ptr(0)
+    dp := conc_ref_payload(dst)
+    nf : ., mut = 0
+    if conc_layout_ok(layout) != 0:
+        nf = cell_load(g_conc_layout_field_count, layout * 8)
+    if nf <= 0:
+        _conc_copy(dp, src, size)
+        return dst
+    // CopySet semantics leave non-copied fields undefined; this CPU mapping
+    // zeroes them so the result is deterministic.
+    zi : ., mut = 0
+    loop:
+        if zi >= size:
+            break
+        store8(dp, zi, 0)
+        zi = zi + 1
+    i : ., mut = 0
+    loop:
+        if i >= nf:
+            break
+        off := conc_layout_field_offset(layout, i)
+        fsz := conc_layout_field_size(layout, i)
+        if off >= 0 && fsz > 0:
+            _conc_copy(_conc_ptr(_conc_addr(dp) + off),
+                       _conc_ptr(_conc_addr(src) + off), fsz)
+        i = i + 1
+    return dst
+
+fn conc_ref_move_set(ref: string, dst_region: int) -> string, pub:
+    dst := conc_ref_copy_set(ref, dst_region)
+    if _conc_is_null(dst) != 0:
+        return _conc_ptr(0)
+    _conc_ref_invalidate(ref, CONC_REF_MOVED_MAGIC)
+    return dst
 
 fn conc_ref_layout_check(ref: string) -> int, pub:
     if conc_ref_ok(ref) == 0:
@@ -1034,6 +1130,244 @@ fn conc_plan_edge_channel(plan: int, edge: int) -> int, pub:
         return -1
     base := load_str_ptr(p, 64)
     return cell_load(base, edge * 32 + 24)
+
+fn conc_plan_edge_from(plan: int, edge: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if edge < 0 || edge >= cell_load(p, 16):
+        return -1
+    return cell_load(load_str_ptr(p, 64), edge * 32)
+
+fn conc_plan_edge_to(plan: int, edge: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if edge < 0 || edge >= cell_load(p, 16):
+        return -1
+    return cell_load(load_str_ptr(p, 64), edge * 32 + 8)
+
+fn conc_plan_acyclic(plan: int) -> int, pub:
+    // Kahn over SPAWN edges. A cycle means the mapping has no legal schedule.
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    p := _conc_plan_at(plan)
+    n := cell_load(p, 0)
+    if n <= 0:
+        return 1
+    indeg := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(indeg, i * 8, 0)
+        i = i + 1
+    ne := cell_load(p, 16)
+    ebase := load_str_ptr(p, 64)
+    e : ., mut = 0
+    loop:
+        if e >= ne:
+            break
+        if cell_load(ebase, e * 32 + 16) == CONC_EDGE_SPAWN:
+            to := cell_load(ebase, e * 32 + 8)
+            if to >= 0 && to < n:
+                cell_store(indeg, to * 8, cell_load(indeg, to * 8) + 1)
+        e = e + 1
+    q := alloc(n * 8)
+    head : ., mut = 0
+    tail : ., mut = 0
+    i = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(indeg, i * 8) == 0:
+            cell_store(q, tail * 8, i)
+            tail = tail + 1
+        i = i + 1
+    seen : ., mut = 0
+    loop:
+        if head >= tail:
+            break
+        v := cell_load(q, head * 8)
+        head = head + 1
+        seen = seen + 1
+        e = 0
+        loop:
+            if e >= ne:
+                break
+            if cell_load(ebase, e * 32 + 16) == CONC_EDGE_SPAWN:
+                if cell_load(ebase, e * 32) == v:
+                    to := cell_load(ebase, e * 32 + 8)
+                    if to >= 0 && to < n:
+                        d := cell_load(indeg, to * 8) - 1
+                        cell_store(indeg, to * 8, d)
+                        if d == 0:
+                            cell_store(q, tail * 8, to)
+                            tail = tail + 1
+            e = e + 1
+    if seen == n:
+        return 1
+    return 0
+
+fn conc_plan_validate(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    p := _conc_plan_at(plan)
+    ver := cell_load(p, 80)
+    if ver != 1 && ver != 2:
+        return 0
+    n := cell_load(p, 0)
+    if n <= 0:
+        return 0
+    if n > CONC_MAX_BODIES:
+        return 0
+    if cell_load(p, 8) > CONC_MAX_CHANNELS:
+        return 0
+    if cell_load(p, 16) > CONC_MAX_EDGES:
+        return 0
+    bbase := load_str_ptr(p, 48)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        kind := cell_load(bbase, i * 32)
+        params := cell_load(bbase, i * 32 + 16)
+        if kind < CONC_BODY_TASK || kind > CONC_BODY_PIPELINE:
+            return 0
+        if kind != CONC_BODY_DATA_PARALLEL && params > 1:
+            return 0
+        if params < 0:
+            return 0
+        i = i + 1
+    nch := cell_load(p, 8)
+    chbase := load_str_ptr(p, 56)
+    c : ., mut = 0
+    loop:
+        if c >= nch:
+            break
+        elem := cell_load(chbase, c * 32)
+        cap := cell_load(chbase, c * 32 + 8)
+        pc := cell_load(chbase, c * 32 + 16)
+        if elem <= 0 || cap < 0:
+            return 0
+        if pc != CONC_PC_SPSC && pc != CONC_PC_MPMC:
+            return 0
+        if pc == CONC_PC_SPSC && cap <= 0:
+            return 0
+        c = c + 1
+    if _conc_plan_validate_edges(plan) != 0:
+        return 0
+    nr := cell_load(p, 104)
+    if nr > 64:
+        return 0
+    rbase := load_str_ptr(p, 136)
+    r : ., mut = 0
+    loop:
+        if r >= nr:
+            break
+        if cell_load(rbase, r * 32) < 0 || cell_load(rbase, r * 32) >= n:
+            return 0
+        if cell_load(rbase, r * 32 + 16) <= 0:
+            return 0
+        r = r + 1
+    ns := cell_load(p, 96)
+    sbase := load_str_ptr(p, 144)
+    s : ., mut = 0
+    loop:
+        if s >= ns:
+            break
+        kind := cell_load(sbase, s * 32)
+        parent := cell_load(sbase, s * 32 + 8)
+        count := cell_load(sbase, s * 32 + 16)
+        if kind != CONC_SLOT_CPU_THREAD && kind != CONC_SLOT_CPU_FIBER:
+            return 0
+        if parent < -1 || parent >= s:
+            return 0
+        if count <= 0:
+            return 0
+        s = s + 1
+    nt := cell_load(p, 112)
+    tbase := load_str_ptr(p, 152)
+    t : ., mut = 0
+    loop:
+        if t >= nt:
+            break
+        kind := cell_load(tbase, t * 40)
+        src := cell_load(tbase, t * 40 + 8)
+        dst := cell_load(tbase, t * 40 + 16)
+        size := cell_load(tbase, t * 40 + 24)
+        if kind < CONC_TRANSFER_MOVE || kind > CONC_TRANSFER_COPY:
+            return 0
+        if src < 0 || src >= n || dst < 0 || dst >= n || size <= 0:
+            return 0
+        t = t + 1
+    nb := cell_load(p, 120)
+    bbase2 := load_str_ptr(p, 160)
+    b : ., mut = 0
+    loop:
+        if b >= nb:
+            break
+        kind := cell_load(bbase2, b * 40)
+        st := cell_load(bbase2, b * 40 + 16)
+        if kind < CONC_BUDGET_PROGRESSIVE || kind > CONC_BUDGET_WAIT:
+            return 0
+        if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
+            return 0
+        b = b + 1
+    nc := cell_load(p, 128)
+    cbase := load_str_ptr(p, 168)
+    cc : ., mut = 0
+    loop:
+        if cc >= nc:
+            break
+        st := cell_load(cbase, cc * 32 + 8)
+        if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
+            return 0
+        cc = cc + 1
+    if conc_plan_acyclic(plan) == 0:
+        return 0
+    return 1
+
+fn _conc_num_str(n: int) -> string:
+    if n == 0:
+        return "0"
+    buf := alloc(24)
+    v : ., mut = n
+    neg : ., mut = 0
+    if v < 0:
+        neg = 1
+        v = 0 - v
+    pos : ., mut = 23
+    store8(buf, pos, 0)
+    loop:
+        if v <= 0:
+            break
+        pos = pos - 1
+        store8(buf, pos, 48 + v % 10)
+        v = v / 10
+    if neg != 0:
+        pos = pos - 1
+        store8(buf, pos, 45)
+    return str_sub(buf, pos, 23 - pos)
+
+fn conc_plan_explain(plan: int) -> string, pub:
+    if _conc_plan_valid(plan) == 0:
+        return "invalid plan"
+    p := _conc_plan_at(plan)
+    out : ., mut = "v" + _conc_num_str(cell_load(p, 80))
+    out = out + " bodies " + _conc_num_str(cell_load(p, 0))
+    out = out + " channels " + _conc_num_str(cell_load(p, 8))
+    out = out + " edges " + _conc_num_str(cell_load(p, 16))
+    out = out + " slots " + _conc_num_str(cell_load(p, 96))
+    out = out + " ranges " + _conc_num_str(cell_load(p, 104))
+    out = out + " transfers " + _conc_num_str(cell_load(p, 112))
+    out = out + " budgets " + _conc_num_str(cell_load(p, 120))
+    out = out + " certs " + _conc_num_str(cell_load(p, 128))
+    out = out + " legal " + _conc_num_str(conc_plan_validate(plan))
+    out = out + " budget_ok " + _conc_num_str(conc_plan_budget_ok(plan))
+    out = out + " cert_ok " + _conc_num_str(conc_plan_cert_ok(plan))
+    out = out + " deterministic " + _conc_num_str(conc_plan_deterministic(plan))
+    return out
 
 fn conc_plan_body_count(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:

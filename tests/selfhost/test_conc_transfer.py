@@ -20,6 +20,12 @@ fn main() -> int:
         return 1
     if conc_layout_size(7) != 16:
         return 2
+    if conc_layout_add_field(7, 0, 8) != 0:
+        return 23
+    if conc_layout_field_count(7) != 1:
+        return 25
+    if conc_layout_count() < 1:
+        return 26
     r0 := conc_region_new(65536)
     r1 := conc_region_new(65536)
     r2 := conc_region_new(65536)
@@ -31,6 +37,24 @@ fn main() -> int:
     p := conc_ref_payload(ref)
     cell_store(p, 0, 11)
     cell_store(p, 8, 22)
+    cs := conc_ref_alloc(r0, 16, 7)
+    csp := conc_ref_payload(cs)
+    cell_store(csp, 0, 11)
+    cell_store(csp, 8, 22)
+    csd := conc_ref_copy_set(cs, r1)
+    if conc_ref_ok(csd) == 0:
+        return 27
+    if cell_load(conc_ref_payload(csd), 0) != 11:
+        return 28
+    if cell_load(conc_ref_payload(csd), 8) != 0:
+        return 29
+    if conc_ref_ok(cs) == 0:
+        return 30
+    ms := conc_ref_move_set(cs, r1)
+    if conc_ref_ok(ms) == 0:
+        return 31
+    if conc_ref_ok(cs) != 0:
+        return 32
     c := conc_ref_copy(ref, r1)
     if conc_ref_ok(c) == 0:
         return 5

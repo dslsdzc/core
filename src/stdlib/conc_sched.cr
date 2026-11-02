@@ -24,8 +24,9 @@ g_conc_acts : string, mut
 g_conc_act_count : int, mut = 0
 g_conc_act_cap : int, mut = 0
 g_conc_cur_m : string, mut
-g_conc_ready_head_m : string, mut
-g_conc_ready_tail_m : string, mut
+g_conc_ready_head_s : string, mut
+g_conc_ready_tail_s : string, mut
+g_conc_slot_rr_m : string, mut
 g_conc_spawn_rr : int, mut = 0
 g_conc_sched_sp_m : string, mut
 g_conc_lock : string, mut
@@ -103,9 +104,19 @@ fn conc_park(m: int):
     // under the same lock the waker uses, so a push between unlock and the
     // futex call is observed as EAGAIN rather than a lost wakeup.
     _conc_lock()
-    if cell_load(g_conc_ready_head_m, m * 8) >= 0:
-        _conc_unlock()
-        return
+    slots : ., mut = g_conc_slots
+    if slots < 1:
+        slots = 1
+    if slots > 64:
+        slots = 64
+    k : ., mut = 0
+    loop:
+        if k >= slots:
+            break
+        if cell_load(g_conc_ready_head_s, (m + k * g_conc_m_count) * 8) >= 0:
+            _conc_unlock()
+            return
+        k = k + 1
     s := rt_atomic_load(g_conc_seq_m, m * 8)
     _conc_unlock()
     _conc_futex_wait(_conc_seq_addr(m), s)
@@ -122,15 +133,18 @@ fn _conc_ready_push(id: int):
     m : ., mut = cell_load(a, 80)
     if m < 0 || m >= 64:
         m = 0
+    slot : ., mut = cell_load(a, 104)
+    if slot < 0 || slot >= 4096:
+        slot = m
     cell_store(a, 88, -1)
-    tail := cell_load(g_conc_ready_tail_m, m * 8)
+    tail := cell_load(g_conc_ready_tail_s, slot * 8)
     if tail < 0:
-        cell_store(g_conc_ready_head_m, m * 8, id)
+        cell_store(g_conc_ready_head_s, slot * 8, id)
     else:
         ta := _conc_act_at(tail)
         if _conc_word(ta) != 0:
             cell_store(ta, 88, id)
-    cell_store(g_conc_ready_tail_m, m * 8, id)
+    cell_store(g_conc_ready_tail_s, slot * 8, id)
     // futex protocol: bump the home M's sequence while still under the conc
     // lock, then wake. A waiter that read the old sequence gets EAGAIN instead
     // of sleeping through the wake.
@@ -140,17 +154,35 @@ fn _conc_ready_push(id: int):
 
 fn _conc_ready_pop() -> int:
     m := _conc_m()
-    id := cell_load(g_conc_ready_head_m, m * 8)
-    if id < 0:
-        return -1
-    nxt : ., mut = -1
-    a := _conc_act_at(id)
-    if _conc_word(a) != 0:
-        nxt = cell_load(a, 88)
-    cell_store(g_conc_ready_head_m, m * 8, nxt)
-    if nxt < 0:
-        cell_store(g_conc_ready_tail_m, m * 8, -1)
-    return id
+    slots : ., mut = g_conc_slots
+    if slots < 1:
+        slots = 1
+    if slots > 64:
+        slots = 64
+    start : ., mut = cell_load(g_conc_slot_rr_m, m * 8)
+    if start < 0 || start >= slots:
+        start = 0
+    k : ., mut = 0
+    loop:
+        if k >= slots:
+            return -1
+        si : ., mut = start + k
+        if si >= slots:
+            si = si - slots
+        slot := m + si * g_conc_m_count
+        id := cell_load(g_conc_ready_head_s, slot * 8)
+        if id >= 0:
+            nxt : ., mut = -1
+            a := _conc_act_at(id)
+            if _conc_word(a) != 0:
+                nxt = cell_load(a, 88)
+            cell_store(g_conc_ready_head_s, slot * 8, nxt)
+            if nxt < 0:
+                cell_store(g_conc_ready_tail_s, slot * 8, -1)
+            cell_store(g_conc_slot_rr_m, m * 8, si + 1)
+            return id
+        k = k + 1
+    return -1
 
 fn _conc_acts_grow():
     if g_conc_act_count < g_conc_act_cap:
@@ -212,15 +244,22 @@ fn conc_sched_init():
         return
     g_conc_acts = _conc_sched_alloc(16 * 8)
     g_conc_act_cap = 16
-    g_conc_ready_head_m = _conc_sched_alloc(64 * 8)
-    g_conc_ready_tail_m = _conc_sched_alloc(64 * 8)
+    g_conc_ready_head_s = _conc_sched_alloc(4096 * 8)
+    g_conc_ready_tail_s = _conc_sched_alloc(4096 * 8)
+    g_conc_slot_rr_m = _conc_sched_alloc(64 * 8)
     i0 : ., mut = 0
     loop:
-        if i0 >= 64:
+        if i0 >= 4096:
             break
-        cell_store(g_conc_ready_head_m, i0 * 8, -1)
-        cell_store(g_conc_ready_tail_m, i0 * 8, -1)
+        cell_store(g_conc_ready_head_s, i0 * 8, -1)
+        cell_store(g_conc_ready_tail_s, i0 * 8, -1)
         i0 = i0 + 1
+    i1 : ., mut = 0
+    loop:
+        if i1 >= 64:
+            break
+        cell_store(g_conc_slot_rr_m, i1 * 8, 0)
+        i1 = i1 + 1
     g_conc_sched_sp_m = _conc_sched_alloc(64 * 8)
     g_conc_lock = _conc_sched_alloc(8)
     cell_store(g_conc_lock, 0, 0)

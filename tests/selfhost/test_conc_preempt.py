@@ -175,6 +175,32 @@ fn main() -> int:
 """
 
 
+CLOSE_CROSS = """\
+import sched
+import chan
+
+fn dummy() -> int:
+    return 0
+
+fn waiter(ch: string) -> int:
+    v := chan_recv(ch)
+    return v + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    ch := chan_make(8, 0)
+    d := go dummy()
+    w := go waiter(ch)
+    chan_close(ch)
+    r := chan_recv(w)
+    if r != 1:
+        return r
+    if chan_recv(d) != 0:
+        return 2
+    return 0
+"""
+
+
 FUTEX_STRESS = """\
 import sched
 import chan
@@ -278,6 +304,7 @@ def main() -> int:
         ("yield_switches", YIELD_SWITCH, 60, 0),
         ("futex_idle_stress", FUTEX_STRESS, 120, 0),
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
+        ("close_wakes_cross_m", CLOSE_CROSS, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

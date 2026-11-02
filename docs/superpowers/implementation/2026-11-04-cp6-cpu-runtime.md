@@ -12,6 +12,7 @@ CP-6 分三批提交：
 - 批次 A `7ceb88cf`：抢占 tick、SIGALRM pending flag、futex park/wake。
 - 批次 B `0627c507`：plan v2、MPMC、range plan、MessageRef 通道、layout 表、transfer、slots。
 - 批次 C `4620bf1b`：预算/证书、确定性、PIPE/yield、旧 runtime 退役。
+- 批次 D（本次）：MappingPlan 校验/无环/explain、CopySet、per-slot 队列、持久对象块移除、跨 M close 测试。
 
 ## 2. 逐项实现
 
@@ -86,6 +87,7 @@ CP-6 分三批提交：
 - `conc_ref_loan`：复制并置 `CONC_REF_LOAN_MAGIC`；`conc_ref_return` 把 loan payload 写回源并恢复 magic。
 - `conc_ref_split_part`：按 count 等分，最后一块取余数；最后一块完成后源失效。
 - `conc_ref_fill`：预留目标 ref，生产方通过 `conc_ref_payload` 构造。
+- `conc_layout_add_field` + `conc_ref_copy_set`/`conc_ref_move_set`：只复制 CopySet 声明的字段，非复制字段在 CPU 映射上清零；无字段布局回退整 payload。
 - 所有源失效都通过 descriptor magic/epoch，CPU 上不依赖物理地址失效。
 
 测试：`ref_transfer` 覆盖五种 primitive。
@@ -94,6 +96,7 @@ CP-6 分三批提交：
 
 - `sched_init_slots(m, slots)` / `conc_sched_set_slots`。
 - spawn round-robin 覆盖 `m_count * slots` 个逻辑 slot；`home = slot % m_count`；slot id 存在 activation +104。
+- 每个 slot 一条 ready queue；M 内按 slot 轮询 pop，M 之间由 home 绑定。默认 `slots=1` 与旧行为一致。
 - `conc_current_slot()` 可观测当前 slot。
 - plan v2 `slot <id> THREAD|FIBER <parent> <count>` 记录拓扑；`conc_plan_slot_*` 查询。
 
@@ -104,6 +107,8 @@ CP-6 分三批提交：
 - plan record 192B；v1 字段 0..72 不变，新增 target/slot/range/transfer/budget/cert 侧表。
 - v1 loader 继续可读；v2 额外接受 `target`、`slot`、`range`、`transfer`、`budget`、`cert`、`PIPE`、`MPMC`。
 - 版本/未知 token/越界/重复 id 全部 fail-closed。
+- `conc_plan_validate` 校验 body/channel/edge/range/slot/transfer/budget/cert；`conc_plan_acyclic` 对 SPAWN 图做 Kahn 环检测。
+- `conc_plan_explain` 输出版本、计数、legal/budget/cert/deterministic 状态文本。
 - `.ccr` 9 段 wire 未改。
 
 测试：`plan_v2_load`、`pipe_body_load`、`range_plan_exec`、`pipe_plan_exec`。
@@ -113,7 +118,7 @@ CP-6 分三批提交：
 - plan v2 `budget <id> <kind> <bound> <status>`、`cert <id> <kind> <status>`。
 - `CONC_STATUS_{PROVED,UNKNOWN,VIOLATED,MEASURED}`。
 - `conc_plan_budget_ok` / `conc_plan_cert_ok`：只有全部 `PROVED|MEASURED` 才返回 1；`UNKNOWN` 明确失败。
-- range plan 发射 `PROGRESSIVE UNKNOWN`（可见延迟未证明）、`COUNT PROVED`（索引域已知）、`cert UNKNOWN`（无死锁证书）。
+- range plan 发射 `PROGRESSIVE UNKNOWN`（可见延迟未证明）、`COUNT PROVED`（索引域已知）、`WAIT UNKNOWN`（最长等待未证明）、`cert UNKNOWN`（无死锁证书）。
 - `.ccr` 不承载预算/证书。
 
 测试：`plan_v2_load`（budget_ok=1、cert_ok=0）、`range_plan_exec`（budget_ok=0，因 PROGRESSIVE unknown）。
@@ -153,6 +158,7 @@ CP-6 分三批提交：
 - 删除 ELF/rt.s 的 `goroutine_entry_wrapper` 与 backend 的 `goroutine_wrapper_addr` 特判。
 - 保留兼容入口：`sched_init`、`sched_init_n`、`sched_init_slots`、`sched_go`（委托 conc_go）、`sched_get_curg`、`sched_worker_run`（委托 conc_worker_run）、`m_start_workers`。
 - `build_kernel.py` 保留 `sched.cr`（rt.s 的 worker_entry 引用 `sched_worker_run`），移除 `goroutine.cr`。
+- 删除无人引用的 `rt_alloc_persistent` 与 4 MiB/M 持久对象 bump block。
 - `IR_SPAWN` 仍保留 wire/解释器兼容，但编译器不再发射。
 
 测试：`go_e2e_test`、`go_final_test`、`go_parallel_test`、`conc_test`、`chan_test` 全部 ALL PASS；`test_chan_handle_model.py` 11/11。
@@ -165,11 +171,11 @@ CP-6 gate（`build_selfhost_native.py` 之后）：
 test_conc_runtime.py        14/14
 test_conc_plan.py            5/5
 test_conc_plan_emitter.py   25/25
-test_conc_plan_v2.py         5/5
-test_conc_transfer.py        2/2
+test_conc_plan_v2.py         5/5（含 validate/explain/cycle）
+test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
-test_conc_preempt.py         6/6
+test_conc_preempt.py         7/7（含跨 M close）
 test_chan_handle_model.py   11/11
 test_go_arena.py            PASS
 test_ccr_types.py           53/53
@@ -185,6 +191,10 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 - 抢占是“回边 tick + SIGALRM pending flag”：长 straight-line 代码/长系统调用内不能切换；这是 CPU mapping 的显式边界。
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
 - DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
+- MPMC plan 仍是描述 + runtime 执行，plan edge 不驱动机器调度。
+- PIPELINE 的 stage 并行/背压/缓冲未做；`yield` 是协作切换，PIPE body 单次调用。
+- futex 的取消/关闭/优先级继承未做；只有 WAIT/WAKE + 2 ms 安全超时。
+- layout 表是进程内全局表，未做跨 plan/跨进程持久化。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。
 - p41（`test_p41_dynamic_string_arena_switch_path`）仍是 CP-1 基线旧问题。
 - `test_alloc_blob_relocs.py`、`test_alloc_arena_parity.py`、clang 系列在纯净父提交 `34bab32d` 同样失败，已在 CP-5 记录中给出基线对照。

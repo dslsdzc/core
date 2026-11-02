@@ -2,20 +2,13 @@
 //
 // CP-6 retired the legacy 0A G queues and goroutine wrapper. `sched_init` /
 // `sched_init_n` now configure the conc scheduler, and workers delegate to
-// conc_worker_run. Only the persistent-object bump block remains here.
+// conc_worker_run. The legacy G data structures are gone.
 import conc_sched
 import chan
 import arena
 
 g_num_workers : int, mut = 0
 g_sched_inited : int, mut = 0
-
-// Per-M bump block for persistent runtime objects (result channels).
-PERSIST_PER_M : int = 4194304   // 4 MiB per M
-PERSIST_ALIGN : int = 16
-g_persist_base : string, mut
-g_persist_ptr : string, mut
-g_persist_cap : string, mut
 
 
 fn sched_init(), pub:
@@ -37,18 +30,6 @@ fn sched_init_n(n: int), pub:
     conc_sched_init()
 
 
-    g_persist_base = alloc(n * 8)
-    g_persist_ptr = alloc(n * 8)
-    g_persist_cap = alloc(n * 8)
-    pi : ., mut = 0
-    loop:
-        if pi >= n:
-            break
-        blk := alloc(PERSIST_PER_M)
-        cell_store(g_persist_base, pi * 8, blk)
-        cell_store(g_persist_ptr, pi * 8, blk)
-        cell_store(g_persist_cap, pi * 8, PERSIST_PER_M)
-        pi = pi + 1
     // Main thread is G0, permanently pinned to M0. Its stack_ptr is filled
     // by fiber_switch on the first yield.
     main_g := alloc(104)
@@ -82,22 +63,6 @@ fn sched_get_curg() -> int, pub:
 fn sched_worker_run(m_idx: int):
     // CP-5 multi-M: worker threads run the conc scheduler with per-M TLS.
     conc_worker_run(m_idx)
-
-fn rt_alloc_persistent(size: int) -> string:
-    m : ., mut = rt_m_idx()
-    if m < 0:
-        m = 0
-    base := cell_load(g_persist_base, m * 8)
-    ptr := cell_load(g_persist_ptr, m * 8)
-    cap := cell_load(g_persist_cap, m * 8)
-    aligned := (size + 15) / 8 * 8
-    if ptr + aligned > base + cap:
-        return ""
-    cell_store(g_persist_ptr, m * 8, ptr + aligned)
-    p : ., mut = ""
-    unsafe:
-        p = @str_of(ptr)
-    return p
 
 fn sched_go(fn_ptr: int, arg: int) -> string, pub:
     // CP-4 default path: go/chan run on the conc activation scheduler.

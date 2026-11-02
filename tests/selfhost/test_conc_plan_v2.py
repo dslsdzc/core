@@ -56,6 +56,19 @@ fn main() -> int:
         return 24
     if conc_plan_deterministic(plan) != 0:
         return 25
+    if conc_plan_validate(plan) != 1:
+        return 26
+    if str_len(conc_plan_explain(plan)) < 20:
+        return 27
+    cyc := conc_plan_new()
+    conc_plan_add_body(cyc, CONC_BODY_TASK, 1, 0)
+    conc_plan_add_body(cyc, CONC_BODY_TASK, 1, 0)
+    conc_plan_add_edge(cyc, 0, 1, CONC_EDGE_SPAWN)
+    conc_plan_add_edge(cyc, 1, 0, CONC_EDGE_SPAWN)
+    if conc_plan_acyclic(cyc) != 0:
+        return 28
+    if conc_plan_validate(cyc) != 0:
+        return 29
     if conc_plan_channel_cap(plan, 0) != 0:
         return 15
     out := alloc(16 * 8)
@@ -223,7 +236,7 @@ fn main() -> int:
         return 2
     if conc_plan_range_len(plan, 0) != 4:
         return 3
-    if conc_plan_budget_count(plan) != 2:
+    if conc_plan_budget_count(plan) != 3:
         return 6
     if conc_plan_budget_ok(plan) != 0:
         return 7
