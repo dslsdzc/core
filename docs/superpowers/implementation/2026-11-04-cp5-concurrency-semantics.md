@@ -68,7 +68,22 @@ test_purity.py              24/24（IR_SPAWN 用例随 range-go 切换删除）
 build_kernel.py             PASS
 ```
 
-完整 `selfhost-tests` 中 CP-1/2/3/4/5 gate 在 p41 前执行；p41 仍是 CP-1 基线的旧 0A 问题。
+完整 `selfhost-tests` 中 CP-1/2/3/4/5 gate 在 p41 前执行并通过：
+
+```text
+PASS test_selftest_purity_all_pass
+PASS conc_region ... PASS conc_negative      14/14
+PASS emitter_fixture ... PASS emitter_fail_closed_preexisting  25/25
+PASS conc_plan_load ... PASS conc_plan_e2e    5/5
+PASS conc_sched_channel_arg ... PASS conc_sched_native_build  10/10
+PASS spawn_stress                              5/5
+
+FAIL test_p41_dynamic_string_arena_switch_path: run rc=-11
+44/45 passed
+CI_EXIT=1
+```
+
+p41 仍是 CP-1 基线的旧 0A 问题，不是 CP-5 引入。
 
 ## 6. 未做（CP-6+）
 
