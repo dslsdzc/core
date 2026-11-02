@@ -210,6 +210,8 @@ fn work() -> int:
 
 fn main() -> int:
     sched_init_n(2)
+    if conc_worker_failures() != 0:
+        return 5
     ch := go work()
     if chan_recv(ch) != 0:
         return 1
@@ -223,6 +225,82 @@ fn main() -> int:
         i = i + 1
     return 3
 """
+
+
+PI_LOCK = """\
+import sched
+import chan
+
+g_word : string, mut
+g_count : int, mut = 0
+
+fn worker() -> int:
+    if conc_pi_lock(g_word) != 0:
+        return 1
+    g_count = g_count + 1
+    if conc_pi_unlock(g_word) != 0:
+        return 2
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    g_word = alloc(8)
+    cell_store(g_word, 0, 0)
+    a := go worker()
+    b := go worker()
+    if chan_recv(a) != 0:
+        return 3
+    if chan_recv(b) != 0:
+        return 4
+    if g_count != 2:
+        return 5
+    return 0
+"""
+
+
+_straight_stmts = "\n".join(f"    x = x + {i % 3 + 1}" for i in range(1000))
+STRAIGHT = f"""\
+import sched
+import chan
+
+g_flag : int, mut = 0
+
+fn short() -> int:
+    g_flag = 1
+    return 7
+
+fn dummy() -> int:
+    return 0
+
+fn long() -> int:
+    x : ., mut = 0
+{_straight_stmts}
+    if g_flag == 0:
+        return 1
+    return 0
+
+fn main() -> int:
+    conc_set_quantum(2)
+    sched_init_n(2)
+    a := go long()
+    d := go dummy()
+    b := go short()
+    x := chan_recv(a)
+    y := chan_recv(b)
+    z := chan_recv(d)
+    if x != 0:
+        return x
+    if y != 7:
+        return 3
+    if z != 0:
+        return 4
+    return 0
+"""
+
+STRAIGHT_OFF = STRAIGHT.replace(
+    "    conc_set_quantum(2)",
+    "    conc_set_signal_preempt(0)\n    conc_set_quantum(100000000)",
+)
 
 
 FUTEX_STRESS = """\
@@ -330,6 +408,9 @@ def main() -> int:
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
         ("close_wakes_cross_m", CLOSE_CROSS, 60, 0),
         ("shutdown_cancels_workers", SHUTDOWN, 60, 0),
+        ("futex_pi_lock", PI_LOCK, 60, 0),
+        ("straight_line_preempt", STRAIGHT, 120, 0),
+        ("straight_line_control", STRAIGHT_OFF, 120, 1),
     ]
     ok = True
     for name, source, timeout, expect in cases:

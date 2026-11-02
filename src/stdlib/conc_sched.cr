@@ -46,6 +46,8 @@ g_conc_timespec : string, mut
 g_conc_preempt_flag : int, mut = 0
 g_conc_shutdown : int, mut = 0
 g_conc_workers_done : int, mut = 0
+g_conc_workers_started : int, mut = 0
+g_conc_worker_failures : int, mut = 0
 g_conc_signal_preempt : int, mut = 1
 
 fn _conc_sched_alloc(size: int) -> string:
@@ -103,6 +105,24 @@ fn _conc_futex_wake(addr: int) -> int:
 
 fn conc_workers_done() -> int, pub:
     return g_conc_workers_done
+
+fn conc_workers_started() -> int, pub:
+    return g_conc_workers_started
+
+fn conc_worker_failures() -> int, pub:
+    return g_conc_worker_failures
+
+fn conc_check_workers(expected: int):
+    spins : ., mut = 0
+    loop:
+        if g_conc_workers_started >= expected:
+            break
+        if spins >= 100000:
+            break
+        syscall3(24, 0, 0, 0)
+        spins = spins + 1
+    if expected > g_conc_workers_started:
+        g_conc_worker_failures = expected - g_conc_workers_started
 
 fn conc_shutdown(), pub:
     // Cancel idle workers: set the stop flag and wake every M's futex word.
@@ -542,6 +562,19 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         i = i + 1
     return total
 
+fn conc_pi_lock(word: string) -> int, pub:
+    // Linux PI futex: FUTEX_LOCK_PI = 6. The kernel handles owner tracking and
+    // priority inheritance; the word must be 4-byte aligned and zeroed first.
+    return syscall6(202, _conc_addr(word), 6, 0, 0, 0, 0)
+
+fn conc_pi_trylock(word: string) -> int, pub:
+    // FUTEX_TRYLOCK_PI = 8
+    return syscall6(202, _conc_addr(word), 8, 0, 0, 0, 0)
+
+fn conc_pi_unlock(word: string) -> int, pub:
+    // FUTEX_UNLOCK_PI = 7
+    return syscall6(202, _conc_addr(word), 7, 0, 0, 0, 0)
+
 fn conc_ctx_ch(ctx: string, off: int) -> string, pub:
     // Stage context convention: +0 input channel, +8 output channel.
     return load_str_ptr(ctx, off)
@@ -626,6 +659,9 @@ fn conc_worker_run(m_idx: int), pub:
     // index again so this loop is correct even on a runtime that starts a
     // worker through a different path.
     rt_set_m_idx(m_idx)
+    _conc_lock()
+    g_conc_workers_started = g_conc_workers_started + 1
+    _conc_unlock()
     loop:
         if g_conc_shutdown != 0:
             _conc_lock()

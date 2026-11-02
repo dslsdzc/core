@@ -53,6 +53,7 @@ fn sched_init_n(n: int), pub:
 
     if n > 1:
         sched_spawn_workers(n)
+        conc_check_workers(n - 1)
 
 fn sched_current_m_idx() -> int:
     return rt_m_idx()

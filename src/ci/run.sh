@@ -185,6 +185,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_multi_m.py
     python3 tests/selfhost/test_conc_preempt.py
     python3 tests/selfhost/test_conc_plan_v2.py
+    python3 tests/selfhost/test_conc_autopar.py
     python3 tests/selfhost/test_conc_transfer.py
     python3 tests/selfhost/test_merge_copy.py  # V2.2 merge copy：单标量数组跨 IF 复制/重绑；长度 0/1/64/65、双分支、动态下标、嵌套逃逸、父槽预算
     python3 tests/selfhost/test_share.py  # V2.3 read-only share：顶层 IF 标量数组由消费者循环只读共享，reset 在最后消费者退出后；写/调用/窗口分配/g_current_arena 保持 v1

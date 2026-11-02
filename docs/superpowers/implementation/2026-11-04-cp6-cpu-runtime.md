@@ -19,6 +19,7 @@ CP-6 分三批提交：
 ### 2.1 抢占与强制让出
 
 - `ir_gen` 在**用户库**且程序 `import sched/chan/conc_sched` 时，于 loop/while/for 回边前发射 `conc_preempt_tick`。
+- 无回边的 straight-line 函数每 512 条 IR 指令也插一个 tick；IR 与 DF 节点顺序保持一致（tick 在当前指令前发射）。
 - `conc_preempt_tick` 每 M 一个 quantum（默认 2000）；到 0 调 `conc_yield`。
 - `conc_sched_init` 安装 SIGALRM + `setitimer`（5 ms）；handler 只写 `g_conc_preempt_flag`，下一次 tick 看到后让出。handler 不拿锁、不分配、不切 fiber。
 - 新增 naked `rt_sigreturn_stub`（elf.cr + rt.s），保证信号帧在 `RSP` 原样返回。
@@ -34,6 +35,8 @@ CP-6 分三批提交：
 - main 的阻塞 send/recv 也 park；2 ms timeout 只作为 channel 轮询的安全网，不靠忙等。
 - `_conc_lock` 的短暂竞争仍用 `sched_yield`，不改变锁语义。
 - `conc_shutdown` 置停止标志并唤醒所有 M 的 futex；空闲 worker 退出并累加 `conc_workers_done`。正在运行的 activation 需要到下一个 tick/阻塞点才会观察停止标志。
+- `conc_pi_lock/trylock/unlock` 暴露 Linux PI futex（LOCK_PI/TRYLOCK_PI/UNLOCK_PI）。
+- worker 启动时累加 `conc_workers_started`；`sched_init_n` 在 spawn 后做有界等待，`conc_worker_failures` 报告 clone 失败/未启动数量。
 
 测试：`futex_idle_stress`、`futex_cross_m_blocking_send`。
 
@@ -144,7 +147,7 @@ CP-6 分三批提交：
 
 - 已识别的入口是显式 range go：`go i a..b f(i)` → plan `body ... PAR` + `range`。
 - CPU 映射由 `conc_run_range` 和 `conc_run_cpu` 的 PAR 分支执行。
-- 普通 `for` 循环不做自动 PAR：没有跨迭代独立性证明时保持 serial fallback。这是本项采取的保守边界（对应规格 §10 未决问题 1）。
+- 普通 `for` 的自动 PAR 切片：识别 `for i in <literal range>: out[i] = f(i)`，其中 f 是只含整数常量、单参数和 `+ - * /` 的纯算术函数；lower 为 `conc_go` 逐索引调用 + `chan_recv` 写回。其他循环（含调用、loads/stores、reduction、非字面量范围）保持 serial fallback。
 - `CONC_BODY_DATA_PARALLEL`、`CONC_BODY_PIPELINE` 与 TASK 在 plan 中共存。
 
 ### 2.13 PIPELINE / flow / yield
@@ -168,7 +171,7 @@ CP-6 分三批提交：
 - 保留兼容入口：`sched_init`、`sched_init_n`、`sched_init_slots`、`sched_go`（委托 conc_go）、`sched_get_curg`、`sched_worker_run`（委托 conc_worker_run）、`m_start_workers`。
 - `build_kernel.py` 保留 `sched.cr`（rt.s 的 worker_entry 引用 `sched_worker_run`），移除 `goroutine.cr`。
 - 删除无人引用的 `rt_alloc_persistent` 与 4 MiB/M 持久对象 bump block。
-- `IR_SPAWN` 仍保留 wire/解释器兼容，但编译器不再发射。
+- `IR_SPAWN` 仍保留 wire/解释器兼容，但编译器不再发射；这是格式兼容，不是执行路径。
 
 测试：`go_e2e_test`、`go_final_test`、`go_parallel_test`、`conc_test`、`chan_test` 全部 ALL PASS；`test_chan_handle_model.py` 11/11。
 
@@ -181,10 +184,11 @@ test_conc_runtime.py        14/14
 test_conc_plan.py            5/5
 test_conc_plan_emitter.py   25/25
 test_conc_plan_v2.py         7/7（含 validate/explain/cycle、MPMC plan run、pipeline run）
+test_conc_autopar.py         4/4（pure arithmetic auto-PAR + serial fallback IR 对照）
 test_conc_transfer.py        2/2（含 CopySet/MOVE_SET）
 test_conc_sched.py          10/10
 test_multi_m.py              6/6
-test_conc_preempt.py         8/8（含跨 M close、shutdown）
+test_conc_preempt.py        11/11（含跨 M close、shutdown、PI lock、straight-line）
 test_chan_handle_model.py   11/11
 test_go_arena.py            PASS
 test_ccr_types.py           53/53
@@ -199,9 +203,9 @@ test_arg_inference_gap.py   PASS（18 例 + 路径 E）
 
 - 抢占是“回边 tick + SIGALRM pending flag”：长 straight-line 代码/长系统调用内不能切换；这是 CPU mapping 的显式边界。
 - 没有真实 GPU/FPGA/集群；跨 memory space MOVE/LOAN 只做 region 语义与 CPU 拷贝，不记物理传输预算。
-- DATA_PARALLEL 的自动识别只覆盖显式 range go；普通 `for` 循环 serial fallback。
+- DATA_PARALLEL 的自动识别覆盖 range go 与“纯算术 `out[i] = f(i)`”普通 for；其他循环 serial fallback。
 - MPMC plan 的 SPAWN edge 由 `conc_plan_run` 执行；SEND/RECV edge 仍是描述，实际收发由 body 在绑定通道上完成。
-- PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；编译器还不会自动把 `flow` 函数拆成多个 stage body，需要手写 stage 函数或后续 splitter。
+- PIPELINE 的 plan/executor 已支持多 stage + bounded 背压；编译器还不会自动把 `flow` 函数拆成多个 stage body，需要手写 stage 函数或 CPS splitter。
 - futex 的优先级继承未做；取消/关闭已有 `conc_shutdown` 与 channel close；等待使用 2 ms 安全超时。
 - layout 表是进程内全局表；plan 可声明并 apply，但未做跨进程持久化/文件格式。
 - `test_interp_parity.py` 的 `range_go_spawn_callee` 解释器侧按 loud 失败（255，arena allocation failed），ELF 侧为 5；这是 range go 切到 conc runtime 后的解释器边界，已按 loud 模式固化。

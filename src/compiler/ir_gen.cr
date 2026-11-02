@@ -9,6 +9,7 @@ g_no_auto_arena : int, mut = 0    // 1 while generating arena infrastructure
 g_program_has_arena : int, mut = 0 // 1 when the program imports the arena library
 g_program_has_conc : int, mut = 0  // 1 when the program imports sched/chan/conc
 g_emit_preempt_ticks : int, mut = 0 // 1 while generating user concurrent code
+g_emit_since_tick : int, mut = 0    // IR instructions since the last safe-point tick
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
 g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
@@ -1095,6 +1096,15 @@ fn opt_cmp_norm(node: int, var: int, out_absent: int, out_val: int):
     opt_cmp_extract_boxed(var, out_absent, out_val, zero)
 
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int):
+    // Compiler-inserted safe point: even a straight-line function with no
+    // backedges gets a tick every 512 IR instructions. Emitting it before the
+    // current instruction keeps IR and DF node order aligned.
+    if g_emit_preempt_ticks != 0:
+        g_emit_since_tick = g_emit_since_tick + 1
+        if g_emit_since_tick >= 512:
+            g_emit_since_tick = 0
+            emit(IR_CALL, -1, -1, 0, str_intern("conc_preempt_tick"), TI_UNIT)
+            g_emit_since_tick = 0
     // Build linear IR (.ccr) — consumed by x86-64 backend
     idx := g_ir_instr_count
     grow_ir_instrs(idx + 1)
@@ -4656,6 +4666,8 @@ fn gen_expr(node: int) -> int:
         var_ni := ast_a(node)
         iter := ast_b(node)
         body := ast_c(node)
+        if _try_auto_par_for(var_ni, iter, body) != 0:
+            return -1
         start_var : ., mut = -1
         end_var : ., mut = -1
         is_seq : ., mut = 0
@@ -6123,6 +6135,130 @@ fn is_arena_infra_name(name_idx: int) -> int:
         return 1
     return 0
 
+fn _par_arith(node: int, param_ni: int) -> int:
+    // Conservative purity proof for auto-PAR: only integer constants, the
+    // function's own single parameter, and + - * / trees. No loads, calls,
+    // stores, globals, or control flow.
+    if node < 0:
+        return 0
+    k := ast_kind(node)
+    if k == EXPR_INT:
+        return 1
+    if k == EXPR_IDENT:
+        if ast_int_val(node) == param_ni:
+            return 1
+        return 0
+    if k == EXPR_BINARY:
+        op := ast_c(node)
+        if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV:
+            if _par_arith(ast_a(node), param_ni) == 0:
+                return 0
+            return _par_arith(ast_b(node), param_ni)
+        return 0
+    return 0
+
+fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
+    // Recognize `for i in <literal range>: out[i] = f(i)` where f is a
+    // side-effect-free integer arithmetic function. This is the automatic
+    // DATA_PARALLEL slice; anything else keeps the serial loop.
+    if g_program_has_conc == 0:
+        return 0
+    if ast_kind(iter) != EXPR_RANGE:
+        return 0
+    if ast_kind(ast_a(iter)) != EXPR_INT || ast_kind(ast_b(iter)) != EXPR_INT:
+        return 0
+    stmt : ., mut = body
+    if ast_kind(stmt) == EXPR_BLOCK:
+        if ast_b(stmt) != 1:
+            return 0
+        stmt = cell_load(g_block_stmts, ast_a(stmt) * 8)
+    if ast_kind(stmt) == EXPR_STMT:
+        stmt = ast_a(stmt)
+    if ast_kind(stmt) != EXPR_ASSIGN:
+        return 0
+    target := ast_a(stmt)
+    value := ast_b(stmt)
+    if ast_kind(target) != EXPR_INDEX:
+        return 0
+    if ast_kind(value) != EXPR_CALL:
+        return 0
+    idx := ast_b(target)
+    if ast_kind(idx) != EXPR_IDENT || ast_int_val(idx) != var_ni:
+        return 0
+    fn_node := ast_a(value)
+    if ast_kind(fn_node) != EXPR_IDENT:
+        return 0
+    func_ni := ast_int_val(fn_node)
+    if ast_c(value) != 1:
+        return 0
+    arg : ., mut = ast_b(value)
+    if ast_kind(arg) == EXPR_ARG:
+        arg = ast_a(arg)
+    if ast_kind(arg) != EXPR_IDENT || ast_int_val(arg) != var_ni:
+        return 0
+    fi := find_func(func_ni)
+    if fi < 0:
+        return 0
+    if fi_param_count(fi) != 1:
+        return 0
+    if fi_param_type(fi, 0) != TI_INT || fi_return_type(fi) != TI_INT:
+        return 0
+    fn_ast := fi_ast_node(fi)
+    if fn_ast < 0:
+        return 0
+    pnode := ast_b(fn_ast)
+    if ast_kind(pnode) != EXPR_PARAM:
+        return 0
+    param_ni := ast_a(pnode)
+    fbody : ., mut = ast_data(fn_ast)
+    if fbody >= 0 && ast_kind(fbody) == EXPR_BLOCK:
+        if ast_b(fbody) != 1:
+            return 0
+        fbody = cell_load(g_block_stmts, ast_a(fbody) * 8)
+    if fbody >= 0 && ast_kind(fbody) == EXPR_STMT:
+        fbody = ast_a(fbody)
+    if fbody < 0 || ast_kind(fbody) != EXPR_RETURN:
+        return 0
+    if _par_arith(ast_a(fbody), param_ni) == 0:
+        return 0
+    start_c := ast_int_val(ast_a(iter))
+    end_c := ast_int_val(ast_b(iter))
+    count := end_c - start_c
+    if start_c < 0 || count <= 0:
+        return 0
+    arr := gen_expr(ast_a(target))
+    chs := new_ir_var("par_chs", TI_UNIT)
+    track_alloc_array(count)
+    emit(IR_ALLOC_ARRAY, chs, count, 0, 0, 0)
+    conc_go_ni := str_intern("conc_go")
+    k : ., mut = 0
+    loop:
+        if k >= count:
+            break
+        val := new_ir_var("par_val", TI_UNIT)
+        emit(IR_CONST, val, start_c + k, 0, 0, TI_INT)
+        faddr := new_ir_var("par_faddr", TI_INT)
+        emit(IR_FNADDR, faddr, func_ni, 0, 0, 0)
+        p0 := new_ir_var("par_a0", TI_INT)
+        emit(IR_STORE, -1, p0, faddr, 0, 0)
+        p1 := new_ir_var("par_a1", TI_INT)
+        emit(IR_STORE, -1, p1, val, 0, 0)
+        ch := new_ir_var("par_ch", TI_INT)
+        emit(IR_CALL, ch, p0, 2, conc_go_ni, TI_INT)
+        emit(IR_STORE_INDEX, -1, chs, ch, k, 0)
+        k = k + 1
+    k = 0
+    loop:
+        if k >= count:
+            break
+        chv := new_ir_var("par_chv", TI_INT)
+        emit(IR_LOAD_INDEX, chv, chs, 0, k, 0)
+        res := new_ir_var("par_res", TI_INT)
+        emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+        emit(IR_STORE_INDEX, -1, arr, res, start_c + k, TI_INT)
+        k = k + 1
+    return 1
+
 fn emit_preempt_tick():
     if g_emit_preempt_ticks == 0:
         return
@@ -6137,6 +6273,7 @@ fn ir_gen_func(fi: int):
     name_idx := ast_a(fn_node)
     g_no_auto_arena = is_arena_infra_name(name_idx)
     g_emit_preempt_ticks = 0
+    g_emit_since_tick = 0
     if g_program_has_conc != 0:
         owner := func_owner(fi)
         if owner < 0 || lib_kind(owner) == LIB_KIND_USER:
