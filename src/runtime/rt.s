@@ -286,6 +286,12 @@ rt_m_idx:
     mov rax, qword ptr fs:[8]
     ret
 
+.globl rt_sigreturn_stub
+.type rt_sigreturn_stub, @function
+rt_sigreturn_stub:
+    mov eax, 15
+    syscall
+
 .globl rt_set_m_idx
 .type rt_set_m_idx, @function
 rt_set_m_idx:

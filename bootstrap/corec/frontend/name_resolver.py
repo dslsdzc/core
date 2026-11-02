@@ -36,6 +36,7 @@ class NameResolver:
             ('m_start_workers', BaseType('unit')),
             ('rt_m_idx', BaseType('int')),
             ('rt_set_m_idx', BaseType('unit')),
+            ('rt_sigreturn_stub', BaseType('int')),
             ('rt_current_arena', BaseType('int')),
             ('rt_set_current_arena', BaseType('unit')),
             ('rt_arena_suspend', BaseType('int')),

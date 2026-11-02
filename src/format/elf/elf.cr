@@ -1017,6 +1017,22 @@ fn rt_emit_atomic_fetch_add(buf: string, pos: int) -> int:
     cp = cp + 1
     return cp
 
+fn emit_rt_sigreturn_stub(buf: string, pos: int) -> int:
+    // Naked rt_sigreturn trampoline: the kernel enters it with RSP pointing at
+    // the signal frame, so it must not touch the stack before syscall 15.
+    cp : ., mut = 0
+    w8(buf, pos+cp, 184)
+    w8(buf, pos+cp+1, 15)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 0)
+    w8(buf, pos+cp+4, 0)
+    cp = cp + 5
+    w8(buf, pos+cp, 15)
+    w8(buf, pos+cp+1, 5)
+    cp = cp + 2
+    cp = rt_pad16(buf, pos, cp)
+    return cp
+
 fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
     cp = cp + rt_emit_fs_load(buf, pos+cp, 8)
@@ -1933,6 +1949,8 @@ fn elf_gen(buf: string) -> int:
         total_code = total_code + 11
         // per-thread TLS + atomic stubs: 11 * 16 bytes (incl. rt_set_m_idx)
         total_code = total_code + 176
+        // naked rt_sigreturn trampoline (7 bytes, padded to 16)
+        total_code = total_code + 16
 
     hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE
     rodata_base := total_code
@@ -2238,6 +2256,10 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("rt_atomic_cas", 0, tls_start + 128)
         sched_reg_one("rt_atomic_fetch_add", 0, tls_start + 144)
         sched_reg_one("rt_set_m_idx", 0, tls_start + 160)
+
+        // Naked signal restorer: must keep RSP at the signal frame.
+        sched_reg_one("rt_sigreturn_stub", 0, cp)
+        cp = cp + emit_rt_sigreturn_stub(buf, cp)
 
     // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
     // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init

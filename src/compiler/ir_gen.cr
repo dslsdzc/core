@@ -7,6 +7,8 @@
 // Subgraph-level arena tracking for compile-time size estimation
 g_no_auto_arena : int, mut = 0    // 1 while generating arena infrastructure
 g_program_has_arena : int, mut = 0 // 1 when the program imports the arena library
+g_program_has_conc : int, mut = 0  // 1 when the program imports sched/chan/conc
+g_emit_preempt_ticks : int, mut = 0 // 1 while generating user concurrent code
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
 g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
@@ -4556,6 +4558,7 @@ fn gen_expr(node: int) -> int:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)  // arena reused per iteration
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
@@ -4595,6 +4598,7 @@ fn gen_expr(node: int) -> int:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
@@ -4736,6 +4740,7 @@ fn gen_expr(node: int) -> int:
         inc_var := new_ir_var("inc", TI_INT)
         emit(IR_BINARY, inc_var, ivar, one_var, OP_ADD, 0)
         emit(IR_STORE, -1, ivar, inc_var, 0, 0)
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         // Exit
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
@@ -6038,6 +6043,14 @@ fn gen_expr(node: int) -> int:
 
 fn is_arena_infra_name(name_idx: int) -> int:
     n := istr_get(name_idx)
+    if str_eq(n, "conc_preempt_tick") != 0:
+        return 1
+    if str_eq(n, "conc_preempt_signal") != 0:
+        return 1
+    if str_eq(n, "_conc_futex_wait") != 0:
+        return 1
+    if str_eq(n, "_conc_futex_wake") != 0:
+        return 1
     if str_eq(n, "arena_init") != 0:
         return 1
     if str_eq(n, "arena_new") != 0:
@@ -6058,6 +6071,11 @@ fn is_arena_infra_name(name_idx: int) -> int:
         return 1
     return 0
 
+fn emit_preempt_tick():
+    if g_emit_preempt_ticks == 0:
+        return
+    emit(IR_CALL, -1, -1, 0, str_intern("conc_preempt_tick"), TI_UNIT)
+
 fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
@@ -6066,6 +6084,11 @@ fn ir_gen_func(fi: int):
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
     g_no_auto_arena = is_arena_infra_name(name_idx)
+    g_emit_preempt_ticks = 0
+    if g_program_has_conc != 0:
+        owner := func_owner(fi)
+        if owner < 0 || lib_kind(owner) == LIB_KIND_USER:
+            g_emit_preempt_ticks = 1
     // main's automatic arena would be created before the user's arena_init
     // call and would share ids with the explicit arena. Arena programs use the
     // explicit arena instead.
@@ -7011,6 +7034,15 @@ fn ccr_set_raw_mode_from_source():
     // to corearch so both sides agree before code generation.
     g_ccr_emit_raw_int = 0
     g_program_has_arena = ccr_source_has_marker("fn arena_init")
+    g_program_has_conc = 0
+    // The tick lives in conc_sched; `import conc` alone only brings the
+    // plan/MessageRef substrate and does not link the scheduler.
+    if ccr_source_has_marker("import sched") != 0:
+        g_program_has_conc = 1
+    if ccr_source_has_marker("import chan") != 0:
+        g_program_has_conc = 1
+    if ccr_source_has_marker("import conc_sched") != 0:
+        g_program_has_conc = 1
     if ccr_source_has_marker("fn parse_expr") != 0:
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:

@@ -37,11 +37,77 @@ g_conc_ch_cap : int, mut = 0
 g_conc_free : string, mut
 g_conc_free_count : int, mut = 0
 g_conc_free_cap : int, mut = 0
+g_conc_quantum : int, mut = 2000
+g_conc_quantum_m : string, mut
+g_conc_seq_m : string, mut
+g_conc_timespec : string, mut
+g_conc_preempt_flag : int, mut = 0
+g_conc_signal_preempt : int, mut = 1
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
     // shared partition. Callers hold the conc lock while mutating them.
     return arena_shared_alloc(size)
+
+fn conc_preempt_signal():
+    // Async-signal-safe: one global store, no locks, no allocation, no TLS.
+    if g_conc_signal_preempt != 0:
+        g_conc_preempt_flag = 1
+
+fn _conc_preempt_install():
+    act := _conc_sched_alloc(32)
+    cell_store(act, 0, @addr(conc_preempt_signal))
+    // SA_RESTART | SA_RESTORER
+    cell_store(act, 8, 335544320)
+    cell_store(act, 16, @addr(rt_sigreturn_stub))
+    cell_store(act, 24, 0)
+    r := syscall4(13, 14, _conc_addr(act), 0, 8)
+    iv := _conc_sched_alloc(32)
+    cell_store(iv, 0, 0)
+    cell_store(iv, 8, 5000)
+    cell_store(iv, 16, 0)
+    cell_store(iv, 24, 5000)
+    r2 := syscall3(38, 0, _conc_addr(iv), 0)
+
+fn conc_set_signal_preempt(on: int), pub:
+    g_conc_signal_preempt = on
+
+fn conc_set_quantum(n: int), pub:
+    if n < 1:
+        n = 1
+    g_conc_quantum = n
+    if g_conc_inited != 0:
+        i : ., mut = 0
+        loop:
+            if i >= 64:
+                break
+            cell_store(g_conc_quantum_m, i * 8, n)
+            i = i + 1
+
+fn _conc_seq_addr(m: int) -> int:
+    return _conc_addr(g_conc_seq_m) + m * 8
+
+fn _conc_futex_wait(addr: int, val: int) -> int:
+    // futex(uaddr, FUTEX_WAIT, val, timeout, uaddr2, val3). The 2 ms timeout
+    // is a safety net for channel polling (the main thread is not a channel
+    // waiter), so a missed notification delays but never deadlocks.
+    return syscall6(202, addr, 0, val, _conc_addr(g_conc_timespec), 0, 0)
+
+fn _conc_futex_wake(addr: int) -> int:
+    // futex(uaddr, FUTEX_WAKE, 1, 0, 0, 0)
+    return syscall6(202, addr, 1, 1, 0, 0, 0)
+
+fn conc_park(m: int):
+    // Park until the home M's queue or sequence changes. The sequence is read
+    // under the same lock the waker uses, so a push between unlock and the
+    // futex call is observed as EAGAIN rather than a lost wakeup.
+    _conc_lock()
+    if cell_load(g_conc_ready_head_m, m * 8) >= 0:
+        _conc_unlock()
+        return
+    s := rt_atomic_load(g_conc_seq_m, m * 8)
+    _conc_unlock()
+    _conc_futex_wait(_conc_seq_addr(m), s)
 
 fn _conc_act_at(id: int) -> string:
     if id < 0 || id >= g_conc_act_count:
@@ -64,6 +130,12 @@ fn _conc_ready_push(id: int):
         if _conc_word(ta) != 0:
             cell_store(ta, 88, id)
     cell_store(g_conc_ready_tail_m, m * 8, id)
+    // futex protocol: bump the home M's sequence while still under the conc
+    // lock, then wake. A waiter that read the old sequence gets EAGAIN instead
+    // of sleeping through the wake.
+    seq := rt_atomic_load(g_conc_seq_m, m * 8)
+    rt_atomic_store(g_conc_seq_m, m * 8, seq + 1)
+    _conc_futex_wake(_conc_seq_addr(m))
 
 fn _conc_ready_pop() -> int:
     m := _conc_m()
@@ -157,6 +229,19 @@ fn conc_sched_init():
     g_conc_ch_cap = 16
     g_conc_free = _conc_sched_alloc(64 * 8)
     g_conc_free_cap = 64
+    g_conc_quantum_m = _conc_sched_alloc(64 * 8)
+    g_conc_seq_m = _conc_sched_alloc(64 * 8)
+    g_conc_timespec = _conc_sched_alloc(16)
+    cell_store(g_conc_timespec, 0, 0)
+    cell_store(g_conc_timespec, 8, 2000000)
+    _conc_preempt_install()
+    iq : ., mut = 0
+    loop:
+        if iq >= 64:
+            break
+        cell_store(g_conc_quantum_m, iq * 8, g_conc_quantum)
+        cell_store(g_conc_seq_m, iq * 8, 0)
+        iq = iq + 1
     g_conc_inited = 1
 
 fn _conc_free_push(id: int):
@@ -322,6 +407,23 @@ fn conc_yield(), pub:
     _conc_unlock()
     conc_schedule()
 
+fn conc_preempt_tick(), pub:
+    // Inserted at user loop backedges. No-op when the conc scheduler is not
+    // active, so ordinary programs and compiler/stdlib loops are untouched.
+    if g_conc_inited == 0:
+        return
+    if g_conc_preempt_flag != 0:
+        g_conc_preempt_flag = 0
+        conc_yield()
+        return
+    m := _conc_m()
+    q := cell_load(g_conc_quantum_m, m * 8) - 1
+    if q <= 0:
+        cell_store(g_conc_quantum_m, m * 8, g_conc_quantum)
+        conc_yield()
+    else:
+        cell_store(g_conc_quantum_m, m * 8, q)
+
 fn conc_worker_run(m_idx: int), pub:
     // The clone trampoline already installs the per-worker TLS block; set the
     // index again so this loop is correct even on a runtime that starts a
@@ -329,7 +431,7 @@ fn conc_worker_run(m_idx: int), pub:
     rt_set_m_idx(m_idx)
     loop:
         if conc_schedule() == 0:
-            syscall3(24, 0, 0, 0)
+            conc_park(m_idx)
 
 fn _conc_activation_entry():
     id := _conc_cur_id()
@@ -528,7 +630,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
                 if conc_schedule() == 0:
                     if g_conc_m_count <= 1:
                         return 0
-                    syscall3(24, 0, 0, 0)
+                    conc_park(_conc_m())
                 continue
             ca := _conc_act_at(_conc_cur_id())
             cell_store(ca, 72, val)
@@ -553,7 +655,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             if conc_schedule() == 0:
                 if g_conc_m_count <= 1:
                     return 0
-                syscall3(24, 0, 0, 0)
+                conc_park(_conc_m())
             continue
         _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
         a := _conc_act_at(_conc_cur_id())
@@ -594,7 +696,7 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
                 if conc_schedule() == 0:
                     if g_conc_m_count <= 1:
                         return 0
-                    syscall3(24, 0, 0, 0)
+                    conc_park(_conc_m())
                 continue
             ra := _conc_act_at(_conc_cur_id())
             _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
@@ -625,7 +727,7 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
             if conc_schedule() == 0:
                 if g_conc_m_count <= 1:
                     return 0
-                syscall3(24, 0, 0, 0)
+                conc_park(_conc_m())
             continue
         _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
         a := _conc_act_at(_conc_cur_id())

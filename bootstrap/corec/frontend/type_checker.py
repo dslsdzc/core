@@ -587,7 +587,7 @@ class TypeChecker:
                     'load8', 'store8', 'r64', 'w64', 'str_len',
                     'load_str_ptr', 'store_str_ptr',
                     'g_set_curg', 'g_get_curg', 'm_start_workers',
-                    'rt_m_idx', 'rt_set_m_idx', 'rt_current_arena', 'rt_set_current_arena',
+                    'rt_m_idx', 'rt_set_m_idx', 'rt_sigreturn_stub', 'rt_current_arena', 'rt_set_current_arena',
                     'rt_arena_suspend', 'rt_set_arena_suspend',
                     'rt_atomic_load', 'rt_atomic_store', 'rt_atomic_xchg',
                     'rt_atomic_cas', 'rt_atomic_fetch_add'}

@@ -6447,6 +6447,20 @@ fn compute_all_purity():
                 cell_store(pure, fi * 8, 1)
         fi = fi + 1
 
+    // Scheduling ticks are observationally transparent: they only yield the
+    // current activation. Mark them pure so user loops keep their purity.
+    fi = 0
+    loop:
+        if fi >= fcount:
+            break
+        if str_eq(istr_get(fi_name(fi)), "conc_preempt_tick") != 0:
+            cell_store(pure, fi * 8, 1)
+        if str_eq(istr_get(fi_name(fi)), "_conc_futex_wait") != 0:
+            cell_store(pure, fi * 8, 1)
+        if str_eq(istr_get(fi_name(fi)), "_conc_futex_wake") != 0:
+            cell_store(pure, fi * 8, 1)
+        fi = fi + 1
+
     // ── 5) 写回 ──
     fi = 0
     loop:
