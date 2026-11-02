@@ -149,6 +149,8 @@ fn main() -> int:
         return 11
     if cell_load(conc_ref_payload(c), 0) != 99:
         return 12
+    if conc_space_return(c, l) == 0:
+        return 33
     s0 := conc_space_split_part(c, d, 0, 2)
     s1 := conc_space_split_part(c, d, 1, 2)
     if conc_ref_ok(s0) == 0 || conc_ref_ok(s1) == 0:
@@ -158,6 +160,16 @@ fn main() -> int:
         return 14
     if conc_space_used(d) <= 0:
         return 15
+    if conc_xfer_move_bytes() < 16:
+        return 35
+    if conc_xfer_copy_bytes() < 16:
+        return 36
+    if conc_xfer_loan_bytes() < 32:
+        return 37
+    if conc_xfer_split_bytes() < 16:
+        return 38
+    if conc_space_in(d) <= 0 || conc_space_out(h) <= 0:
+        return 39
     return 0
 """
 

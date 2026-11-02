@@ -258,7 +258,7 @@ fn main() -> int:
 """
 
 
-_straight_stmts = "\n".join(f"    x = x + {i % 3 + 1}" for i in range(1000))
+_straight_stmts = "\n".join(f"    x = x + {i % 3 + 1}" for i in range(400))
 STRAIGHT = f"""\
 import sched
 import chan
@@ -280,7 +280,7 @@ fn long() -> int:
     return 0
 
 fn main() -> int:
-    conc_set_quantum(2)
+    conc_set_quantum(1)
     sched_init_n(2)
     a := go long()
     d := go dummy()
@@ -298,7 +298,7 @@ fn main() -> int:
 """
 
 STRAIGHT_OFF = STRAIGHT.replace(
-    "    conc_set_quantum(2)",
+    "    conc_set_quantum(1)",
     "    conc_set_signal_preempt(0)\n    conc_set_quantum(100000000)",
 )
 

@@ -122,6 +122,12 @@ g_conc_space_used : string, mut
 g_conc_space_bytes : string, mut
 g_conc_transfer_bytes : int, mut = 0
 g_conc_transfer_count : int, mut = 0
+g_conc_xfer_move_bytes : int, mut = 0
+g_conc_xfer_copy_bytes : int, mut = 0
+g_conc_xfer_loan_bytes : int, mut = 0
+g_conc_xfer_split_bytes : int, mut = 0
+g_conc_space_in : string, mut
+g_conc_space_out : string, mut
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
 g_conc_plan_parse_pos : int, mut = 0
@@ -374,6 +380,8 @@ fn _conc_space_ensure() -> int:
         g_conc_space_region = _conc_global_alloc(CONC_MAX_SPACES * 8)
         g_conc_space_used = _conc_global_alloc(CONC_MAX_SPACES * 8)
         g_conc_space_bytes = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_in = _conc_global_alloc(CONC_MAX_SPACES * 8)
+        g_conc_space_out = _conc_global_alloc(CONC_MAX_SPACES * 8)
         if _conc_is_null(g_conc_space_kind) != 0:
             return -1
         if _conc_is_null(g_conc_space_capacity) != 0:
@@ -383,6 +391,10 @@ fn _conc_space_ensure() -> int:
         if _conc_is_null(g_conc_space_used) != 0:
             return -1
         if _conc_is_null(g_conc_space_bytes) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_in) != 0:
+            return -1
+        if _conc_is_null(g_conc_space_out) != 0:
             return -1
     return 0
 
@@ -404,6 +416,8 @@ fn conc_space_create(kind: int, capacity: int) -> int, pub:
     cell_store(g_conc_space_region, id * 8, region)
     cell_store(g_conc_space_used, id * 8, 0)
     cell_store(g_conc_space_bytes, id * 8, 0)
+    cell_store(g_conc_space_in, id * 8, 0)
+    cell_store(g_conc_space_out, id * 8, 0)
     g_conc_space_count = id + 1
     return id
 
@@ -457,6 +471,28 @@ fn conc_transfer_bytes() -> int, pub:
 fn conc_transfer_count() -> int, pub:
     return g_conc_transfer_count
 
+fn conc_xfer_move_bytes() -> int, pub:
+    return g_conc_xfer_move_bytes
+
+fn conc_xfer_copy_bytes() -> int, pub:
+    return g_conc_xfer_copy_bytes
+
+fn conc_xfer_loan_bytes() -> int, pub:
+    return g_conc_xfer_loan_bytes
+
+fn conc_xfer_split_bytes() -> int, pub:
+    return g_conc_xfer_split_bytes
+
+fn conc_space_in(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_in, space * 8)
+
+fn conc_space_out(space: int) -> int, pub:
+    if conc_space_ok(space) == 0:
+        return -1
+    return cell_load(g_conc_space_out, space * 8)
+
 fn conc_ref_space(ref: string) -> int, pub:
     if conc_ref_ok(ref) == 0:
         return -1
@@ -472,15 +508,31 @@ fn conc_ref_alloc_space(space: int, size: int, layout: int) -> string, pub:
                    cell_load(g_conc_space_used, space * 8) + size)
     return ref
 
-fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int):
+fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int,
+                         kind: int):
     g_conc_transfer_bytes = g_conc_transfer_bytes + size
     g_conc_transfer_count = g_conc_transfer_count + 1
+    if kind == CONC_TRANSFER_MOVE:
+        g_conc_xfer_move_bytes = g_conc_xfer_move_bytes + size
+    else:
+        if kind == CONC_TRANSFER_COPY:
+            g_conc_xfer_copy_bytes = g_conc_xfer_copy_bytes + size
+        else:
+            if kind == CONC_TRANSFER_LOAN:
+                g_conc_xfer_loan_bytes = g_conc_xfer_loan_bytes + size
+            else:
+                if kind == CONC_TRANSFER_SPLIT:
+                    g_conc_xfer_split_bytes = g_conc_xfer_split_bytes + size
     if conc_space_ok(dst_space) != 0:
         cell_store(g_conc_space_bytes, dst_space * 8,
                    cell_load(g_conc_space_bytes, dst_space * 8) + size)
+        cell_store(g_conc_space_in, dst_space * 8,
+                   cell_load(g_conc_space_in, dst_space * 8) + size)
     if conc_space_ok(src_space) != 0:
         cell_store(g_conc_space_bytes, src_space * 8,
                    cell_load(g_conc_space_bytes, src_space * 8) + size)
+        cell_store(g_conc_space_out, src_space * 8,
+                   cell_load(g_conc_space_out, src_space * 8) + size)
 
 fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
     if conc_ref_ok(ref) == 0:
@@ -501,7 +553,7 @@ fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
         if mode == CONC_TRANSFER_MOVE:
             magic = CONC_REF_MOVED_MAGIC
         _conc_ref_invalidate(ref, magic)
-    _conc_space_note_xfer(src_space, dst_space, size)
+    _conc_space_note_xfer(src_space, dst_space, size, mode)
     return dst
 
 fn conc_space_move(ref: string, dst_space: int) -> string, pub:
@@ -535,7 +587,7 @@ fn conc_space_return(src_ref: string, loan: string) -> int, pub:
     cell_store(src_ref, 0, CONC_REF_MAGIC)
     src_space := conc_space_of_region(rid)
     loan_space := conc_space_of_region(cell_load(loan, 8))
-    _conc_space_note_xfer(loan_space, src_space, size)
+    _conc_space_note_xfer(loan_space, src_space, size, CONC_TRANSFER_LOAN)
     return 0
 
 fn conc_space_fill(space: int, size: int, layout: int) -> string, pub:
@@ -563,7 +615,7 @@ fn conc_space_split_part(ref: string, dst_space: int, index: int,
     if index == count - 1:
         _conc_ref_invalidate(ref, CONC_REF_MOVED_MAGIC)
     src_space := conc_space_of_region(cell_load(ref, 8))
-    _conc_space_note_xfer(src_space, dst_space, part)
+    _conc_space_note_xfer(src_space, dst_space, part, CONC_TRANSFER_SPLIT)
     return dst
 
 fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:

@@ -94,10 +94,10 @@ CP-6 分三批提交：
 - `conc_ref_fill`：预留目标 ref，生产方通过 `conc_ref_payload` 构造。
 - `conc_layout_add_field` + `conc_ref_copy_set`/`conc_ref_move_set`：只复制 CopySet 声明的字段，非复制字段在 CPU 映射上清零；无字段布局回退整 payload。
 - `conc_plan_run` 的 MPMC e2e 在 `test_conc_plan_v2.py` 覆盖。
-- 所有源失效都通过 descriptor magic/epoch，CPU 上不依赖物理地址失效。
-- 跨 memory space：`conc_space_create(HOST|DEVICE|REMOTE, capacity)` 建立独立 region/配额；`conc_ref_alloc_space`、`conc_space_move/copy/loan/return/split_part/fill` 在 space 间搬运；每次搬运记录 `conc_transfer_bytes/count` 和 `conc_space_bytes`。
+- 所有源失效都通过 descriptor magic/epoch，CPU 上不依赖物理地址失效；MOVE/LOAN 后旧 ref 立即失效，`return` 只接受仍处于 LOAN 状态的源，重复 return / epoch 变化 / 错误 size 都 fail-closed。
+- 跨 memory space：`conc_space_create(HOST|DEVICE|REMOTE, capacity)` 建立独立 region/配额；`conc_ref_alloc_space`、`conc_space_move/copy/loan/return/split_part/fill` 在 space 间搬运；每次成功搬运记录 `conc_transfer_bytes/count`、按 kind 的 `conc_xfer_{move,copy,loan,split}_bytes`、每 space 的 `conc_space_bytes/in/out`。失败路径不记账。
 - DEVICE/REMOTE 在当前 host 上使用独立本地 mapping（可运行的模拟）；搬运是真实字节 copy + 源失效/归还语义。真实设备后端只需替换 space 的 allocator/copy 实现。
-- plan v2 `space <id> HOST|DEVICE|REMOTE <capacity>` + `xfer <id> <kind> <src_body> <dst_body> <size> <src_space> <dst_space>`；`conc_plan_apply_spaces` 注册，`conc_plan_xfer_bytes` 汇总物理预算。
+- plan v2 `space <id> HOST|DEVICE|REMOTE <capacity>` + `xfer <id> <kind> <src_body> <dst_body> <size> <src_space> <dst_space>`；`conc_plan_apply_spaces` 注册，`conc_plan_xfer_bytes` 汇总物理预算；`conc_plan_budget_measure(plan, i, conc_plan_xfer_bytes(plan))` 把预算置为 MEASURED。
 
 测试：`ref_transfer` 覆盖五种 primitive。
 
