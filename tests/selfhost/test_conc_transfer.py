@@ -82,6 +82,18 @@ fn main() -> int:
         return 13
     if cell_load(conc_ref_payload(ref2), 0) != 99:
         return 14
+    if conc_ref_return(ref2, loan) == 0:
+        return 33
+    forged := conc_ref_alloc(r0, 8, 3)
+    loan2 := conc_ref_loan(ref2, r2)
+    if conc_ref_return(ref2, forged) == 0:
+        return 34
+    if conc_ref_return(ref2, loan2) != 0:
+        return 35
+    if conc_loan_count() != 0:
+        return 36
+    if conc_transfer_failures() < 2:
+        return 37
     ref3 := conc_ref_alloc(r0, 32, 4)
     sp0 := conc_ref_split_part(ref3, r2, 0, 2)
     sp1 := conc_ref_split_part(ref3, r2, 1, 2)
@@ -119,6 +131,8 @@ fn main() -> int:
     if h < 0 || d < 0:
         return 1
     conc_layout_declare(7, 16, 4660)
+    if conc_layout_add_field(7, 0, 8) != 0:
+        return 16
     r := conc_ref_alloc_space(h, 16, 7)
     if conc_ref_space(r) != h:
         return 2
@@ -141,16 +155,41 @@ fn main() -> int:
         return 8
     if conc_transfer_bytes() != 32:
         return 9
+    cs := conc_space_copy_set(m, h)
+    if conc_ref_ok(cs) == 0:
+        return 17
+    if cell_load(conc_ref_payload(cs), 0) != 11:
+        return 18
+    if cell_load(conc_ref_payload(cs), 8) != 0:
+        return 19
+    if conc_transfer_bytes() != 40:
+        return 20
+    ms := conc_space_move_set(cs, d)
+    if conc_ref_ok(cs) != 0:
+        return 21
+    if conc_ref_ok(ms) == 0:
+        return 22
+    if conc_transfer_bytes() != 48:
+        return 23
     l := conc_space_loan(c, d)
     if conc_ref_ok(c) != 0:
         return 10
+    if conc_ref_ok(l) == 0:
+        return 24
+    forged := conc_ref_alloc(h, 16, 7)
+    if conc_ref_ok(forged) == 0:
+        return 25
+    if conc_space_return(c, forged) == 0:
+        return 26
     cell_store(conc_ref_payload(l), 0, 99)
     if conc_space_return(c, l) != 0:
         return 11
     if cell_load(conc_ref_payload(c), 0) != 99:
         return 12
     if conc_space_return(c, l) == 0:
-        return 33
+        return 27
+    if conc_loan_count() != 0:
+        return 28
     s0 := conc_space_split_part(c, d, 0, 2)
     s1 := conc_space_split_part(c, d, 1, 2)
     if conc_ref_ok(s0) == 0 || conc_ref_ok(s1) == 0:
@@ -160,16 +199,18 @@ fn main() -> int:
         return 14
     if conc_space_used(d) <= 0:
         return 15
-    if conc_xfer_move_bytes() < 16:
-        return 35
-    if conc_xfer_copy_bytes() < 16:
-        return 36
+    if conc_xfer_move_bytes() < 24:
+        return 29
+    if conc_xfer_copy_bytes() < 24:
+        return 30
     if conc_xfer_loan_bytes() < 32:
-        return 37
+        return 31
     if conc_xfer_split_bytes() < 16:
-        return 38
+        return 32
+    if conc_transfer_failures() < 2:
+        return 33
     if conc_space_in(d) <= 0 || conc_space_out(h) <= 0:
-        return 39
+        return 34
     return 0
 """
 

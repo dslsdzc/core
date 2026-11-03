@@ -70,7 +70,8 @@ CONC_MSG_HEADER : int = 32
 CONC_REF_MAGIC : int = 1129270860
 CONC_REF_MOVED_MAGIC : int = 1129270862
 CONC_REF_LOAN_MAGIC : int = 1129270863
-CONC_REF_SIZE : int = 48
+CONC_REF_SIZE : int = 64
+CONC_REF_NONCE : int = 48
 CONC_MAX_LAYOUTS : int = 64
 CONC_MAX_LAYOUT_FIELDS : int = 16
 
@@ -78,6 +79,7 @@ CONC_SPACE_HOST : int, pub = 0
 CONC_SPACE_DEVICE : int, pub = 1
 CONC_SPACE_REMOTE : int, pub = 2
 CONC_MAX_SPACES : int = 16
+CONC_MAX_LOANS : int = 64
 
 // Region table. Each region owns a global-heap block and a bump cursor.
 g_conc_region_block : string, mut
@@ -122,12 +124,18 @@ g_conc_space_used : string, mut
 g_conc_space_bytes : string, mut
 g_conc_transfer_bytes : int, mut = 0
 g_conc_transfer_count : int, mut = 0
+g_conc_transfer_failures : int, mut = 0
 g_conc_xfer_move_bytes : int, mut = 0
 g_conc_xfer_copy_bytes : int, mut = 0
 g_conc_xfer_loan_bytes : int, mut = 0
 g_conc_xfer_split_bytes : int, mut = 0
 g_conc_space_in : string, mut
 g_conc_space_out : string, mut
+g_conc_loans_src : string, mut
+g_conc_loans_ref : string, mut
+g_conc_loans_nonce : string, mut
+g_conc_loan_count : int, mut = 0
+g_conc_loan_seq : int, mut = 0
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
 g_conc_plan_parse_pos : int, mut = 0
@@ -471,6 +479,12 @@ fn conc_transfer_bytes() -> int, pub:
 fn conc_transfer_count() -> int, pub:
     return g_conc_transfer_count
 
+fn conc_transfer_failures() -> int, pub:
+    return g_conc_transfer_failures
+
+fn conc_loan_count() -> int, pub:
+    return g_conc_loan_count
+
 fn conc_xfer_move_bytes() -> int, pub:
     return g_conc_xfer_move_bytes
 
@@ -492,6 +506,80 @@ fn conc_space_out(space: int) -> int, pub:
     if conc_space_ok(space) == 0:
         return -1
     return cell_load(g_conc_space_out, space * 8)
+
+fn _conc_xfer_fail() -> string:
+    g_conc_transfer_failures = g_conc_transfer_failures + 1
+    return _conc_ptr(0)
+
+fn _conc_xfer_fail_i() -> int:
+    g_conc_transfer_failures = g_conc_transfer_failures + 1
+    return -1
+
+fn _conc_loans_ensure() -> int:
+    if _conc_is_null(g_conc_loans_src) != 0:
+        g_conc_loans_src = _conc_global_alloc(CONC_MAX_LOANS * 8)
+        g_conc_loans_ref = _conc_global_alloc(CONC_MAX_LOANS * 8)
+        g_conc_loans_nonce = _conc_global_alloc(CONC_MAX_LOANS * 8)
+        if _conc_is_null(g_conc_loans_src) != 0:
+            return -1
+        if _conc_is_null(g_conc_loans_ref) != 0:
+            return -1
+        if _conc_is_null(g_conc_loans_nonce) != 0:
+            return -1
+    return 0
+
+fn _conc_loan_can() -> int:
+    if _conc_loans_ensure() != 0:
+        return 0
+    if g_conc_loan_count >= CONC_MAX_LOANS:
+        return 0
+    return 1
+
+fn _conc_loan_add(src: string, loan: string) -> int:
+    if _conc_loan_can() == 0:
+        return 0
+    g_conc_loan_seq = g_conc_loan_seq + 1
+    nonce := g_conc_loan_seq
+    cell_store(src, CONC_REF_NONCE, nonce)
+    cell_store(loan, CONC_REF_NONCE, nonce)
+    i := g_conc_loan_count
+    cell_store(g_conc_loans_src, i * 8, _conc_addr(src))
+    cell_store(g_conc_loans_ref, i * 8, _conc_addr(loan))
+    cell_store(g_conc_loans_nonce, i * 8, nonce)
+    g_conc_loan_count = i + 1
+    return nonce
+
+fn _conc_loan_take(src: string, loan: string) -> int:
+    if _conc_loans_ensure() != 0:
+        return 0
+    sa := _conc_addr(src)
+    la := _conc_addr(loan)
+    nonce := cell_load(src, CONC_REF_NONCE)
+    if nonce <= 0:
+        return 0
+    if cell_load(loan, CONC_REF_NONCE) != nonce:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= g_conc_loan_count:
+            return 0
+        if cell_load(g_conc_loans_src, i * 8) == sa:
+            if cell_load(g_conc_loans_ref, i * 8) == la:
+                if cell_load(g_conc_loans_nonce, i * 8) == nonce:
+                    last := g_conc_loan_count - 1
+                    if i != last:
+                        cell_store(g_conc_loans_src, i * 8,
+                                   cell_load(g_conc_loans_src, last * 8))
+                        cell_store(g_conc_loans_ref, i * 8,
+                                   cell_load(g_conc_loans_ref, last * 8))
+                        cell_store(g_conc_loans_nonce, i * 8,
+                                   cell_load(g_conc_loans_nonce, last * 8))
+                    g_conc_loan_count = last
+                    cell_store(src, CONC_REF_NONCE, 0)
+                    cell_store(loan, CONC_REF_NONCE, 0)
+                    return 1
+        i = i + 1
+    return 0
 
 fn conc_ref_space(ref: string) -> int, pub:
     if conc_ref_ok(ref) == 0:
@@ -536,17 +624,17 @@ fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int,
 
 fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
     if conc_ref_ok(ref) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     if conc_space_ok(dst_space) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     src_space := conc_space_of_region(cell_load(ref, 8))
     if src_space < 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     size := cell_load(ref, 24)
     layout := cell_load(ref, 32)
     dst := conc_ref_alloc_space(dst_space, size, layout)
     if _conc_is_null(dst) != 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     _conc_copy(conc_ref_payload(dst), conc_ref_payload(ref), size)
     if mode == CONC_TRANSFER_MOVE || mode == CONC_TRANSFER_LOAN:
         magic : ., mut = CONC_REF_LOAN_MAGIC
@@ -563,24 +651,35 @@ fn conc_space_copy(ref: string, dst_space: int) -> string, pub:
     return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_COPY)
 
 fn conc_space_loan(ref: string, dst_space: int) -> string, pub:
-    return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_LOAN)
+    if _conc_loan_can() == 0:
+        return _conc_xfer_fail()
+    out := _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_LOAN)
+    if _conc_is_null(out) != 0:
+        return _conc_ptr(0)
+    if _conc_loan_add(ref, out) == 0:
+        // The transfer already invalidated the source. Keep the loan usable
+        // rather than losing the payload, but report the bookkeeping failure.
+        g_conc_transfer_failures = g_conc_transfer_failures + 1
+    return out
 
 fn conc_space_return(src_ref: string, loan: string) -> int, pub:
     // Return a loan from its device/remote space to the source space.
     if _conc_is_null(src_ref) != 0:
-        return -1
+        return _conc_xfer_fail_i()
     if cell_load(src_ref, 0) != CONC_REF_LOAN_MAGIC:
-        return -1
+        return _conc_xfer_fail_i()
     if conc_ref_ok(loan) == 0:
-        return -1
+        return _conc_xfer_fail_i()
     size := cell_load(src_ref, 24)
     if cell_load(loan, 24) != size:
-        return -1
+        return _conc_xfer_fail_i()
     rid := cell_load(src_ref, 8)
     if _conc_region_valid(rid) == 0:
-        return -1
+        return _conc_xfer_fail_i()
     if cell_load(src_ref, 40) != cell_load(g_conc_region_epoch, rid * 8):
-        return -1
+        return _conc_xfer_fail_i()
+    if _conc_loan_take(src_ref, loan) == 0:
+        return _conc_xfer_fail_i()
     base := load_str_ptr(g_conc_region_block, rid * 8)
     dst := _conc_ptr(_conc_addr(base) + cell_load(src_ref, 16))
     _conc_copy(dst, conc_ref_payload(loan), size)
@@ -593,14 +692,99 @@ fn conc_space_return(src_ref: string, loan: string) -> int, pub:
 fn conc_space_fill(space: int, size: int, layout: int) -> string, pub:
     return conc_ref_alloc_space(space, size, layout)
 
+fn conc_space_copy_set(ref: string, dst_space: int) -> string, pub:
+    // Cross-space CopySet: allocate the destination in the target space, zero
+    // fields outside the declared layout, then copy only declared fields.
+    if conc_ref_ok(ref) == 0:
+        return _conc_xfer_fail()
+    if conc_space_ok(dst_space) == 0:
+        return _conc_xfer_fail()
+    size := cell_load(ref, 24)
+    layout := cell_load(ref, 32)
+    src_space := conc_space_of_region(cell_load(ref, 8))
+    dst := conc_ref_alloc_space(dst_space, size, layout)
+    if _conc_is_null(dst) != 0:
+        return _conc_xfer_fail()
+    sp := conc_ref_payload(ref)
+    dp := conc_ref_payload(dst)
+    nf : ., mut = 0
+    if conc_layout_ok(layout) != 0:
+        nf = cell_load(g_conc_layout_field_count, layout * 8)
+    if nf <= 0:
+        _conc_copy(dp, sp, size)
+        _conc_space_note_xfer(src_space, dst_space, size, CONC_TRANSFER_COPY)
+        return dst
+    zi : ., mut = 0
+    loop:
+        if zi >= size:
+            break
+        store8(dp, zi, 0)
+        zi = zi + 1
+    copied : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= nf:
+            break
+        off := conc_layout_field_offset(layout, i)
+        fsz := conc_layout_field_size(layout, i)
+        if off >= 0 && fsz > 0:
+            _conc_copy(_conc_ptr(_conc_addr(dp) + off),
+                       _conc_ptr(_conc_addr(sp) + off), fsz)
+            copied = copied + fsz
+        i = i + 1
+    _conc_space_note_xfer(src_space, dst_space, copied, CONC_TRANSFER_COPY)
+    return dst
+
+fn conc_space_move_set(ref: string, dst_space: int) -> string, pub:
+    if conc_ref_ok(ref) == 0:
+        return _conc_xfer_fail()
+    if conc_space_ok(dst_space) == 0:
+        return _conc_xfer_fail()
+    size := cell_load(ref, 24)
+    layout := cell_load(ref, 32)
+    src_space := conc_space_of_region(cell_load(ref, 8))
+    dst := conc_ref_alloc_space(dst_space, size, layout)
+    if _conc_is_null(dst) != 0:
+        return _conc_xfer_fail()
+    sp := conc_ref_payload(ref)
+    dp := conc_ref_payload(dst)
+    nf : ., mut = 0
+    if conc_layout_ok(layout) != 0:
+        nf = cell_load(g_conc_layout_field_count, layout * 8)
+    copied : ., mut = 0
+    if nf <= 0:
+        _conc_copy(dp, sp, size)
+        copied = size
+    else:
+        zi : ., mut = 0
+        loop:
+            if zi >= size:
+                break
+            store8(dp, zi, 0)
+            zi = zi + 1
+        i : ., mut = 0
+        loop:
+            if i >= nf:
+                break
+            off := conc_layout_field_offset(layout, i)
+            fsz := conc_layout_field_size(layout, i)
+            if off >= 0 && fsz > 0:
+                _conc_copy(_conc_ptr(_conc_addr(dp) + off),
+                           _conc_ptr(_conc_addr(sp) + off), fsz)
+                copied = copied + fsz
+            i = i + 1
+    _conc_ref_invalidate(ref, CONC_REF_MOVED_MAGIC)
+    _conc_space_note_xfer(src_space, dst_space, copied, CONC_TRANSFER_MOVE)
+    return dst
+
 fn conc_space_split_part(ref: string, dst_space: int, index: int,
                          count: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     if conc_space_ok(dst_space) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     if index < 0 || count <= 0 || index >= count:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     total := cell_load(ref, 24)
     part : ., mut = total / count
     if index == count - 1:
@@ -609,7 +793,7 @@ fn conc_space_split_part(ref: string, dst_space: int, index: int,
     src := conc_ref_payload(ref)
     dst := conc_ref_alloc_space(dst_space, part, layout)
     if _conc_is_null(dst) != 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     s := _conc_ptr(_conc_addr(src) + index * (total / count))
     _conc_copy(conc_ref_payload(dst), s, part)
     if index == count - 1:
@@ -877,9 +1061,11 @@ fn conc_ref_copy(ref: string, dst_region: int) -> string, pub:
 
 fn conc_ref_loan(ref: string, dst_region: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
     if _conc_region_valid(dst_region) == 0:
-        return _conc_ptr(0)
+        return _conc_xfer_fail()
+    if _conc_loan_can() == 0:
+        return _conc_xfer_fail()
     size := cell_load(ref, 24)
     layout := cell_load(ref, 32)
     src := conc_ref_payload(ref)
@@ -888,23 +1074,27 @@ fn conc_ref_loan(ref: string, dst_region: int) -> string, pub:
         return _conc_ptr(0)
     _conc_copy(conc_ref_payload(dst), src, size)
     _conc_ref_invalidate(ref, CONC_REF_LOAN_MAGIC)
+    if _conc_loan_add(ref, dst) == 0:
+        g_conc_transfer_failures = g_conc_transfer_failures + 1
     return dst
 
 fn conc_ref_return(src_ref: string, loan: string) -> int, pub:
     if _conc_is_null(src_ref) != 0:
-        return -1
+        return _conc_xfer_fail_i()
     if cell_load(src_ref, 0) != CONC_REF_LOAN_MAGIC:
-        return -1
+        return _conc_xfer_fail_i()
     if conc_ref_ok(loan) == 0:
-        return -1
+        return _conc_xfer_fail_i()
     size := cell_load(src_ref, 24)
     if cell_load(loan, 24) != size:
-        return -1
+        return _conc_xfer_fail_i()
     rid := cell_load(src_ref, 8)
     if _conc_region_valid(rid) == 0:
-        return -1
+        return _conc_xfer_fail_i()
     if cell_load(src_ref, 40) != cell_load(g_conc_region_epoch, rid * 8):
-        return -1
+        return _conc_xfer_fail_i()
+    if _conc_loan_take(src_ref, loan) == 0:
+        return _conc_xfer_fail_i()
     base := load_str_ptr(g_conc_region_block, rid * 8)
     dst := _conc_ptr(_conc_addr(base) + cell_load(src_ref, 16))
     _conc_copy(dst, conc_ref_payload(loan), size)
