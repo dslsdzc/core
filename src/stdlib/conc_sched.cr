@@ -41,6 +41,8 @@ g_conc_sched_sp_m : string, mut
 g_conc_lock : string, mut
 g_conc_ch_lock : string, mut
 g_conc_arena_lock : string, mut
+g_conc_tid_m : string, mut
+g_conc_timer_m : string, mut
 g_conc_m_count : int, mut = 1
 g_conc_slots : int, mut = 1
 g_conc_global_region : int, mut = -1
@@ -176,12 +178,47 @@ fn _conc_preempt_install():
     cell_store(act, 16, @addr(rt_sigreturn_stub))
     cell_store(act, 24, 0)
     r := syscall4(13, 14, _conc_addr(act), 0, 8)
-    iv := _conc_sched_alloc(32)
-    cell_store(iv, 0, 0)
-    cell_store(iv, 8, 5000)
-    cell_store(iv, 16, 0)
-    cell_store(iv, 24, 5000)
-    r2 := syscall3(38, 0, _conc_addr(iv), 0)
+
+fn _conc_preempt_timers_start():
+    if _conc_raw(g_conc_tid_m) == 0 || _conc_raw(g_conc_timer_m) == 0:
+        return
+    mc : ., mut = g_conc_m_count
+    if mc > 64:
+        mc = 64
+    started : ., mut = 0
+    m : ., mut = 0
+    loop:
+        if m >= mc:
+            break
+        tid := cell_load(g_conc_tid_m, m * 8)
+        if tid > 0 && cell_load(g_conc_timer_m, m * 8) < 0:
+            sev := alloc(64)
+            cell_store(sev, 0, 0)
+            cell_store(sev, 8, 14)   // SIGALRM
+            cell_store(sev, 12, 4)   // SIGEV_THREAD_ID
+            cell_store(sev, 16, tid)
+            tp := alloc(8)
+            r := syscall3(222, 1, sev, tp)  // timer_create(CLOCK_MONOTONIC)
+            if r == 0:
+                t := cell_load(tp, 0)
+                its := alloc(32)
+                cell_store(its, 0, 0)
+                cell_store(its, 8, 5000000)
+                cell_store(its, 16, 0)
+                cell_store(its, 24, 5000000)
+                r2 := syscall4(223, t, 0, its, 0)  // timer_settime
+                if r2 == 0:
+                    cell_store(g_conc_timer_m, m * 8, t)
+                    started = started + 1
+        m = m + 1
+    if started == 0:
+        // Fallback for kernels without SIGEV_THREAD_ID: process-wide timer.
+        iv := _conc_sched_alloc(32)
+        cell_store(iv, 0, 0)
+        cell_store(iv, 8, 5000000)
+        cell_store(iv, 16, 0)
+        cell_store(iv, 24, 5000000)
+        syscall3(38, 0, _conc_addr(iv), 0)
 
 fn conc_set_signal_preempt(on: int), pub:
     g_conc_signal_preempt = on
@@ -273,6 +310,19 @@ fn conc_preempt_tick_count() -> int, pub:
 
 fn conc_preempt_latency_max() -> int, pub:
     return g_conc_preempt_latency_max
+
+fn conc_timer_count() -> int, pub:
+    if _conc_raw(g_conc_timer_m) == 0:
+        return 0
+    n : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= 64:
+            return n
+        if cell_load(g_conc_timer_m, i * 8) >= 0:
+            n = n + 1
+        i = i + 1
+    return n
 
 fn conc_send_count() -> int, pub:
     return g_conc_send_count
@@ -444,6 +494,7 @@ fn conc_check_workers(expected: int):
         spins = spins + 1
     if expected > g_conc_workers_started:
         g_conc_worker_failures = expected - g_conc_workers_started
+    _conc_preempt_timers_start()
 
 fn conc_shutdown(), pub:
     // Cancel idle workers: set the stop flag and wake every M's futex word.
@@ -891,6 +942,16 @@ fn conc_sched_init():
         return
     g_conc_arena_lock = _conc_sched_alloc(8)
     cell_store(g_conc_arena_lock, 0, 0)
+    g_conc_tid_m = _conc_sched_alloc(64 * 8)
+    g_conc_timer_m = _conc_sched_alloc(64 * 8)
+    iti : ., mut = 0
+    loop:
+        if iti >= 64:
+            break
+        cell_store(g_conc_tid_m, iti * 8, -1)
+        cell_store(g_conc_timer_m, iti * 8, -1)
+        iti = iti + 1
+    cell_store(g_conc_tid_m, 0, syscall3(186, 0, 0, 0))
     g_conc_acts = _conc_sched_alloc(16 * 8)
     g_conc_act_cap = 16
     g_conc_ready_head_s = _conc_sched_alloc(4096 * 8)
@@ -946,6 +1007,7 @@ fn conc_sched_init():
     cell_store(g_conc_timespec, 0, 0)
     cell_store(g_conc_timespec, 8, 50000)
     _conc_preempt_install()
+    _conc_preempt_timers_start()
     iq : ., mut = 0
     loop:
         if iq >= 64:
@@ -2106,6 +2168,8 @@ fn conc_worker_run(m_idx: int), pub:
     // index again so this loop is correct even on a runtime that starts a
     // worker through a different path.
     rt_set_m_idx(m_idx)
+    if _conc_raw(g_conc_tid_m) != 0:
+        cell_store(g_conc_tid_m, m_idx * 8, syscall3(186, 0, 0, 0))
     _conc_lock()
     g_conc_workers_started = g_conc_workers_started + 1
     _conc_unlock()

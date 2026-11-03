@@ -124,6 +124,8 @@ fn long() -> int:
 fn main() -> int:
     conc_set_quantum(100000000)
     sched_init_n(2)
+    if conc_timer_count() < 2:
+        return 5
     a := go long()
     d := go dummy()
     b := go short()
