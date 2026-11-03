@@ -40,6 +40,7 @@ g_conc_spawn_rr : int, mut = 0
 g_conc_sched_sp_m : string, mut
 g_conc_lock : string, mut
 g_conc_ch_lock : string, mut
+g_conc_region_lock : string, mut
 g_conc_arena_lock : string, mut
 g_conc_tid_m : string, mut
 g_conc_timer_m : string, mut
@@ -903,6 +904,26 @@ fn _conc_ch_unlock():
         if d > 0:
             cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
 
+fn _conc_region_lock():
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        cell_store(g_conc_preempt_disable_m, cur * 8,
+                   cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    loop:
+        if rt_atomic_load(g_conc_region_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_region_lock, 0, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_region_unlock():
+    if _conc_raw(g_conc_region_lock) != 0:
+        rt_atomic_store(g_conc_region_lock, 0, 0)
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        d := cell_load(g_conc_preempt_disable_m, cur * 8)
+        if d > 0:
+            cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
+
 fn conc_preempt_disable(), pub:
     if g_conc_inited == 0:
         conc_sched_init()
@@ -975,6 +996,8 @@ fn conc_sched_init():
     cell_store(g_conc_lock, 0, 0)
     g_conc_ch_lock = _conc_sched_alloc(8)
     cell_store(g_conc_ch_lock, 0, 0)
+    g_conc_region_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_region_lock, 0, 0)
     g_conc_cur_m = _conc_sched_alloc(64 * 8)
     g_conc_preempt_disable_m = _conc_sched_alloc(64 * 8)
     g_conc_yield_claim_m = _conc_sched_alloc(64 * 8)
@@ -1709,11 +1732,8 @@ fn conc_flow_run_timeout(entry: int, arg: int, out: string,
     if timeout_ms <= 0:
         return CONC_RESULT_TIMEOUT
     conc_sched_init()
-    r := _conc_global_region_get()
-    if r < 0:
-        return -1
-    ych := conc_channel_new(r, 8, 1)
-    rch := conc_channel_new(r, 8, 1)
+    ych := _conc_global_channel(8, 1)
+    rch := _conc_global_channel(8, 1)
     if _conc_word(ych) == 0 || _conc_word(rch) == 0:
         return -1
     if g_conc_flow_cancel != 0:
@@ -1801,10 +1821,7 @@ fn conc_plan_run_timeout(plan: int, root: int, channels: string,
         return -1
     if _conc_is_null(channels) != 0:
         return -1
-    r := _conc_global_region_get()
-    if r < 0:
-        return -1
-    rch := conc_channel_new(r, 8, 1)
+    rch := _conc_global_channel(8, 1)
     if _conc_word(rch) == 0:
         return -1
     ctx := alloc(32)
@@ -2071,11 +2088,8 @@ fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
     // `out`. The flow fiber preserves arbitrary control flow and locals across
     // yields; no compiler stage splitting is required.
     conc_sched_init()
-    r := _conc_global_region_get()
-    if r < 0:
-        return -1
-    ych := conc_channel_new(r, 8, 1)
-    rch := conc_channel_new(r, 8, 1)
+    ych := _conc_global_channel(8, 1)
+    rch := _conc_global_channel(8, 1)
     if _conc_word(ych) == 0 || _conc_word(rch) == 0:
         return -1
     if g_conc_flow_cancel != 0:
@@ -2108,11 +2122,8 @@ fn conc_flow_run_token(entry: int, arg: int, out: string,
     if conc_cancelled(token) != 0:
         return CONC_RESULT_CANCELLED
     conc_sched_init()
-    r := _conc_global_region_get()
-    if r < 0:
-        return -1
-    ych := conc_channel_new(r, 8, 1)
-    rch := conc_channel_new(r, 8, 1)
+    ych := _conc_global_channel(8, 1)
+    rch := _conc_global_channel(8, 1)
     if _conc_word(ych) == 0 || _conc_word(rch) == 0:
         return -1
     conc_cancel_bind_flow(token, ych, rch)
@@ -2342,7 +2353,7 @@ fn _conc_ch_buf(ch: string) -> string:
 fn _conc_ch_esize(ch: string) -> int:
     return cell_load(ch, 40)
 
-fn _conc_global_region_get() -> int:
+fn _conc_global_region_get_locked() -> int:
     if g_conc_global_region >= 0:
         return g_conc_global_region
     r := conc_region_new(1048576)
@@ -2350,28 +2361,39 @@ fn _conc_global_region_get() -> int:
         g_conc_global_region = r
     return r
 
+fn _conc_global_region_get() -> int:
+    _conc_region_lock()
+    r := _conc_global_region_get_locked()
+    _conc_region_unlock()
+    return r
+
+fn _conc_global_channel(elemsize: int, cap: int) -> string:
+    _conc_region_lock()
+    out : ., mut = ""
+    r : ., mut = _conc_global_region_get_locked()
+    if r >= 0:
+        need : ., mut = 128 + cap * elemsize
+        if need < 1048576:
+            need = 1048576
+        ch : ., mut = conc_channel_new(r, elemsize, cap)
+        if _conc_word(ch) == 0:
+            r = conc_region_new(need)
+            if r >= 0:
+                g_conc_global_region = r
+                ch = conc_channel_new(r, elemsize, cap)
+        out = ch
+    _conc_region_unlock()
+    return out
+
 fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     conc_sched_init()
-    _conc_lock()
-    out : ., mut = ""
-    if elemsize > 0:
-        if cap >= 0:
-            if cap <= 1099511627776 / elemsize:
-                r : ., mut = _conc_global_region_get()
-                if r >= 0:
-                    need : ., mut = 128 + cap * elemsize
-                    if need < 1048576:
-                        need = 1048576
-                    ch : ., mut = conc_channel_new(r, elemsize, cap)
-                    if _conc_word(ch) == 0:
-                        r = conc_region_new(need)
-                        if r >= 0:
-                            g_conc_global_region = r
-                            ch = conc_channel_new(r, elemsize, cap)
-                    if _conc_word(ch) != 0:
-                        out = ch
-    _conc_unlock()
-    return out
+    if elemsize <= 0:
+        return ""
+    if cap < 0:
+        return ""
+    if cap > 1099511627776 / elemsize:
+        return ""
+    return _conc_global_channel(elemsize, cap)
 
 fn conc_sched_send_int(ch: string, val: int) -> int, pub:
     g_conc_send_count = g_conc_send_count + 1
@@ -2645,19 +2667,7 @@ fn conc_sched_close(ch: string), pub:
 
 fn conc_go(entry: int, arg: int) -> string, pub:
     conc_sched_init()
-    _conc_lock()
-    out : ., mut = ""
-    r : ., mut = _conc_global_region_get()
-    if r >= 0:
-        ch : ., mut = conc_channel_new(r, 8, 1)
-        if _conc_word(ch) == 0:
-            r = conc_region_new(1048576)
-            if r >= 0:
-                g_conc_global_region = r
-                ch = conc_channel_new(r, 8, 1)
-        if _conc_word(ch) != 0:
-            out = ch
-    _conc_unlock()
+    out := _conc_global_channel(8, 1)
     if _conc_word(out) == 0:
         return ""
     if conc_spawn(entry, arg, out) < 0:
