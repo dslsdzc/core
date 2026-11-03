@@ -61,6 +61,62 @@ fn main() -> int:
     return 0
 """
 
+TIMEOUT = """\
+import sched
+import chan
+
+g_ch : string, mut
+
+flow fn stuck(x: int) -> int:
+    return chan_recv(g_ch)
+
+fn main() -> int:
+    sched_init()
+    g_ch = chan_make(8, 0)
+    out := alloc(64)
+    r := conc_flow_run_timeout(@addr(stuck), 0, out, 20)
+    if r != CONC_RESULT_TIMEOUT:
+        return r
+    conc_flow_reset()
+    return 0
+"""
+
+CANCEL = """\
+import sched
+import chan
+
+flow fn gen(x: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 1000:
+            break
+        yield i
+        i = i + 1
+    return 0
+
+fn canceler(x: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 10000:
+            break
+        i = i + 1
+    conc_flow_cancel()
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    conc_flow_reset()
+    c := go canceler(0)
+    out := alloc(8192)
+    r := conc_flow_run(@addr(gen), 0, out)
+    if r != CONC_RESULT_CANCELLED:
+        return r
+    if conc_flow_cancelled() == 0:
+        return 2
+    conc_flow_reset()
+    return 0
+"""
+
 NESTED = """\
 import sched
 import chan
@@ -132,6 +188,8 @@ def main() -> int:
         ("flow_straight", STRAIGHT),
         ("flow_loop", LOOP),
         ("flow_nested", NESTED),
+        ("flow_cancel", CANCEL),
+        ("flow_timeout", TIMEOUT),
     ]
     ok = True
     for name, source in cases:

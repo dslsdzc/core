@@ -16,6 +16,11 @@ CONC_ACT_WAITING : int = 2
 CONC_ACT_DEAD : int = 3
 CONC_ACT_YIELDING : int = 4
 
+CONC_RESULT_CANCELLED : int, pub = -2
+CONC_RESULT_TIMEOUT : int, pub = -3
+CONC_TRY_EMPTY : int, pub = -9223372036854775807
+CONC_TRY_CLOSED : int, pub = -9223372036854775806
+
 CONC_CH_STATE_SIZE : int = 48
 CONC_WAIT_SEND : int = 0
 CONC_WAIT_RECV : int = 1
@@ -68,6 +73,10 @@ g_conc_preempt_tick_count : int, mut = 0
 g_conc_send_count : int, mut = 0
 g_conc_recv_count : int, mut = 0
 g_conc_close_count : int, mut = 0
+g_conc_flow_cancel : int, mut = 0
+g_conc_pipeline_cancel : int, mut = 0
+g_conc_flow_ych : string, mut
+g_conc_flow_rch : string, mut
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
@@ -289,6 +298,17 @@ fn conc_shutdown(), pub:
         _conc_unlock()
         return
     g_conc_shutdown = 1
+    // Cancellation propagation: close every registered channel and wake its
+    // send/receive waiters before parking workers. A blocked activation then
+    // returns through its normal close path instead of disappearing.
+    ci : ., mut = 0
+    loop:
+        if ci >= g_conc_ch_count:
+            break
+        _conc_ch_set_closed(ci)
+        _conc_wake_all(ci, CONC_WAIT_SEND)
+        _conc_wake_all(ci, CONC_WAIT_RECV)
+        ci = ci + 1
     m : ., mut = 0
     loop:
         if m >= 64:
@@ -1115,6 +1135,231 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         i = i + 1
     return total
 
+fn conc_flow_cancelled() -> int, pub:
+    return g_conc_flow_cancel
+
+fn conc_flow_cancel() -> int, pub:
+    g_conc_flow_cancel = 1
+    if _conc_word(g_conc_flow_ych) != 0:
+        conc_sched_close(g_conc_flow_ych)
+    if _conc_word(g_conc_flow_rch) != 0:
+        conc_sched_close(g_conc_flow_rch)
+    return 0
+
+fn conc_flow_reset() -> int, pub:
+    g_conc_flow_cancel = 0
+    g_conc_flow_ych = ""
+    g_conc_flow_rch = ""
+    return 0
+
+fn conc_pipeline_cancelled() -> int, pub:
+    return g_conc_pipeline_cancel
+
+fn conc_pipeline_cancel(plan: int, channels: string) -> int, pub:
+    g_conc_pipeline_cancel = 1
+    if conc_plan_validate(plan) != 0 && _conc_is_null(channels) == 0:
+        n := conc_plan_channel_count(plan)
+        i : ., mut = 0
+        loop:
+            if i >= n:
+                break
+            h := load_str_ptr(channels, i * 8)
+            if _conc_word(h) != 0:
+                conc_sched_close(h)
+            i = i + 1
+    return 0
+
+fn conc_pipeline_reset() -> int, pub:
+    g_conc_pipeline_cancel = 0
+    return 0
+
+fn conc_shutdown_requested() -> int, pub:
+    return g_conc_shutdown
+
+fn conc_activation_count() -> int, pub:
+    return g_conc_act_count
+
+fn conc_waiting_count() -> int, pub:
+    n : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= g_conc_act_count:
+            break
+        a := _conc_act_at(i)
+        if _conc_word(a) != 0:
+            if cell_load(a, 8) == CONC_ACT_WAITING:
+                n = n + 1
+        i = i + 1
+    return n
+
+fn conc_deadlock_suspect() -> int, pub:
+    // Conservative diagnostic: waiting activations, no ready work on any M,
+    // and no activation currently running. External events can still make
+    // this a false positive, so it is a suspect flag, not a proof.
+    if g_conc_inited == 0:
+        return 0
+    if conc_waiting_count() == 0:
+        return 0
+    mc : ., mut = g_conc_m_count
+    if mc > 64:
+        mc = 64
+    ready : ., mut = 0
+    m : ., mut = 0
+    loop:
+        if m >= mc:
+            break
+        ready = ready + conc_ready_len(m)
+        if cell_load(g_conc_cur_m, m * 8) >= 0:
+            return 0
+        m = m + 1
+    if ready > 0:
+        return 0
+    return 1
+
+fn conc_pipeline_run_timeout(plan: int, channels: string,
+                             timeout_ms: int) -> int, pub:
+    // Same stage spawn/join as conc_pipeline_run, but the join polls result
+    // channels with a monotonic deadline and cancels the pipeline on expiry.
+    if timeout_ms <= 0:
+        return CONC_RESULT_TIMEOUT
+    if g_conc_pipeline_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if conc_plan_apply_layouts(plan) < 0:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    n := conc_plan_stage_count(plan)
+    if n <= 0 || n > 64:
+        return -1
+    hs := alloc(64 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if g_conc_pipeline_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        body := conc_plan_stage_body(plan, i)
+        entry := conc_plan_body_entry(plan, body)
+        if entry <= 0:
+            return -1
+        ctx := alloc(16)
+        cell_store(ctx, 0, 0)
+        cell_store(ctx, 8, 0)
+        in_ch := conc_plan_stage_in(plan, i)
+        if in_ch >= 0:
+            ih := load_str_ptr(channels, in_ch * 8)
+            if _conc_is_null(ih) != 0:
+                return -1
+            store_str_ptr(ctx, 0, ih)
+        out_ch := conc_plan_stage_out(plan, i)
+        if out_ch >= 0:
+            oh := load_str_ptr(channels, out_ch * 8)
+            if _conc_is_null(oh) != 0:
+                return -1
+            store_str_ptr(ctx, 8, oh)
+        arg : ., mut = 0
+        unsafe:
+            arg = @ptr_of(ctx)
+        h := conc_go(entry, arg)
+        if _conc_word(h) == 0:
+            return -1
+        cell_store(hs, i * 8, h)
+        i = i + 1
+    done := alloc(n * 8)
+    i = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(done, i * 8, 0)
+        i = i + 1
+    deadline := _conc_now_ms() + timeout_ms
+    total : ., mut = 0
+    remaining : ., mut = n
+    loop:
+        if remaining <= 0:
+            break
+        i = 0
+        loop:
+            if i >= n:
+                break
+            if cell_load(done, i * 8) == 0:
+                v : ., mut = conc_sched_try_recv_int(cell_load(hs, i * 8))
+                if v != CONC_TRY_EMPTY:
+                    if v == CONC_TRY_CLOSED:
+                        v = 0
+                    total = total + v
+                    cell_store(done, i * 8, 1)
+                    remaining = remaining - 1
+            i = i + 1
+        if remaining <= 0:
+            break
+        if g_conc_pipeline_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        if _conc_now_ms() >= deadline:
+            conc_pipeline_cancel(plan, channels)
+            return CONC_RESULT_TIMEOUT
+        if conc_schedule() == 0:
+            _conc_sleep_ms(1)
+    return total
+
+fn conc_flow_run_timeout(entry: int, arg: int, out: string,
+                         timeout_ms: int) -> int, pub:
+    // Time-bounded flow driver. Yields are collected with try_recv; on expiry
+    // the flow is cancelled cooperatively and the driver returns TIMEOUT.
+    if timeout_ms <= 0:
+        return CONC_RESULT_TIMEOUT
+    conc_sched_init()
+    r := _conc_global_region_get()
+    if r < 0:
+        return -1
+    ych := conc_channel_new(r, 8, 1)
+    rch := conc_channel_new(r, 8, 1)
+    if _conc_word(ych) == 0 || _conc_word(rch) == 0:
+        return -1
+    if g_conc_flow_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    g_conc_flow_ych = ych
+    g_conc_flow_rch = rch
+    id := conc_spawn_flow(entry, arg, rch, ych)
+    if id < 0:
+        return -1
+    deadline := _conc_now_ms() + timeout_ms
+    n : ., mut = 0
+    closed : ., mut = 0
+    loop:
+        if closed != 0:
+            break
+        v := conc_sched_try_recv_int(ych)
+        if v == CONC_TRY_CLOSED:
+            closed = 1
+        else:
+            if v != CONC_TRY_EMPTY:
+                cell_store(out, n * 8, v)
+                n = n + 1
+        if g_conc_flow_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        if _conc_now_ms() >= deadline:
+            conc_flow_cancel()
+            return CONC_RESULT_TIMEOUT
+        if conc_schedule() == 0:
+            _conc_sleep_ms(1)
+    loop:
+        v := conc_sched_try_recv_int(rch)
+        if v != CONC_TRY_EMPTY:
+            if g_conc_flow_cancel != 0:
+                return CONC_RESULT_CANCELLED
+            return n
+        if g_conc_flow_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        if _conc_now_ms() >= deadline:
+            conc_flow_cancel()
+            return CONC_RESULT_TIMEOUT
+        if conc_schedule() == 0:
+            _conc_sleep_ms(1)
+    return n
+
 fn conc_pi_lock(word: string) -> int, pub:
     // Linux PI futex: FUTEX_LOCK_PI = 6. The kernel handles owner tracking and
     // priority inheritance; the word must be 4-byte aligned and zeroed first.
@@ -1136,6 +1381,8 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
     // CPU pipeline executor: each stage is a PIPE body taking a 16-byte
     // context (in/out channel handles). Stages run as activations; bounded
     // channels provide backpressure. Returns the sum of stage return values.
+    if g_conc_pipeline_cancel != 0:
+        return CONC_RESULT_CANCELLED
     if conc_plan_validate(plan) == 0:
         return -1
     if conc_plan_apply_layouts(plan) < 0:
@@ -1183,7 +1430,11 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
         if i >= n:
             break
         total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+        if g_conc_pipeline_cancel != 0:
+            return CONC_RESULT_CANCELLED
         i = i + 1
+    if g_conc_pipeline_cancel != 0:
+        return CONC_RESULT_CANCELLED
     return total
 
 fn conc_flow_yield(v: int), pub:
@@ -1194,6 +1445,11 @@ fn conc_flow_yield(v: int), pub:
     if _conc_word(a) == 0:
         return
     ych := load_str_ptr(a, 112)
+    if g_conc_flow_cancel != 0:
+        if _conc_word(ych) != 0:
+            conc_sched_close(ych)
+        _conc_abort_current()
+        return
     if _conc_word(ych) != 0:
         conc_sched_send_int(ych, v)
     conc_yield()
@@ -1217,17 +1473,27 @@ fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
     rch := conc_channel_new(r, 8, 1)
     if _conc_word(ych) == 0 || _conc_word(rch) == 0:
         return -1
+    if g_conc_flow_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    g_conc_flow_ych = ych
+    g_conc_flow_rch = rch
     id := conc_spawn_flow(entry, arg, rch, ych)
     if id < 0:
         return -1
     n : ., mut = 0
     loop:
         v := conc_sched_recv_int(ych)
+        if g_conc_flow_cancel != 0:
+            conc_sched_close(ych)
+            conc_sched_close(rch)
+            return CONC_RESULT_CANCELLED
         if conc_sched_is_closed(ych) != 0:
             break
         cell_store(out, n * 8, v)
         n = n + 1
     rv := conc_sched_recv_int(rch)
+    if g_conc_flow_cancel != 0:
+        return CONC_RESULT_CANCELLED
     return n
 
 fn conc_plan_mark_range(entry: int, start: int, count: int), pub:
@@ -1273,6 +1539,27 @@ fn conc_worker_run(m_idx: int), pub:
         if conc_schedule() == 0:
             conc_park(m_idx)
 
+fn _conc_abort_current():
+    // Terminate the current activation at a safe point. Used by cooperative
+    // cancellation at a flow yield. The fiber is never resumed; the scheduler
+    // resets its arena and returns the control block to the free list.
+    id := _conc_cur_id()
+    if id < 0:
+        return
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return
+    m := _conc_m()
+    if _conc_raw(g_conc_yield_claim_m) != 0:
+        loop:
+            if rt_atomic_cas(g_conc_yield_claim_m, m * 8, 0, 1) != 0:
+                break
+            syscall3(24, 0, 0, 0)
+    cell_store(a, 8, CONC_ACT_DEAD)
+    loop:
+        conc_schedule()
+    return
+
 fn _conc_activation_entry():
     id := _conc_cur_id()
     a := _conc_act_at(id)
@@ -1289,17 +1576,7 @@ fn _conc_activation_entry():
     ch := load_str_ptr(a, 48)
     if _conc_word(ch) != 0:
         conc_sched_send_int(ch, rc)
-    // Claim this M's yield slot for the teardown so a signal cannot push the
-    // dying activation back onto a ready queue between DEAD and the switch.
-    m := _conc_m()
-    if _conc_raw(g_conc_yield_claim_m) != 0:
-        loop:
-            if rt_atomic_cas(g_conc_yield_claim_m, m * 8, 0, 1) != 0:
-                break
-            syscall3(24, 0, 0, 0)
-    cell_store(a, 8, CONC_ACT_DEAD)
-    loop:
-        conc_schedule()
+    _conc_abort_current()
     return
 
 fn _conc_ch_grow():
@@ -1587,6 +1864,73 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
         cell_store(a, 8, CONC_ACT_WAITING)
         _conc_unlock()
         conc_schedule()
+
+fn conc_sched_try_recv_int(ch: string) -> int, pub:
+    // Non-blocking receive used by timeout executors. The sentinel values are
+    // not valid channel payloads in the timeout API contract.
+    conc_sched_init()
+    _conc_lock()
+    if conc_channel_len(ch) < 0:
+        _conc_unlock()
+        return CONC_TRY_CLOSED
+    esize := _conc_ch_esize(ch)
+    if esize < 8:
+        _conc_unlock()
+        return CONC_TRY_CLOSED
+    slot := _conc_ch_slot(ch)
+    n := _conc_ch_len(ch)
+    cap := _conc_ch_cap(ch)
+    if cap == 0:
+        if _conc_ch_closed(slot) != 0:
+            _conc_unlock()
+            return CONC_TRY_CLOSED
+        sid := _conc_wait_pop(slot, CONC_WAIT_SEND)
+        if sid >= 0:
+            sa := _conc_act_at(sid)
+            v : ., mut = 0
+            if _conc_word(sa) != 0:
+                v = cell_load(sa, 72)
+                cell_store(sa, 8, CONC_ACT_RUNNABLE)
+                _conc_ready_push(sid)
+            _conc_unlock()
+            return v
+        _conc_unlock()
+        return CONC_TRY_EMPTY
+    if n > 0:
+        buf := _conc_ch_buf(ch)
+        head : ., mut = _conc_ch_head(ch)
+        v := cell_load(buf, head * esize)
+        head = head + 1
+        if head >= _conc_ch_cap(ch):
+            head = 0
+        cell_store(ch, 32, head)
+        cell_store(ch, 24, n - 1)
+        _conc_wake_one(slot, CONC_WAIT_SEND)
+        _conc_unlock()
+        return v
+    if _conc_ch_closed(slot) != 0:
+        _conc_unlock()
+        return CONC_TRY_CLOSED
+    _conc_unlock()
+    return CONC_TRY_EMPTY
+
+fn _conc_now_ms() -> int:
+    ts := alloc(16)
+    cell_store(ts, 0, 0)
+    cell_store(ts, 8, 0)
+    r := syscall3(228, 1, ts, 0)  // clock_gettime(CLOCK_MONOTONIC)
+    if r < 0:
+        return -1
+    return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
+fn _conc_sleep_ms(ms: int):
+    if ms <= 0:
+        return
+    ts := alloc(16)
+    cell_store(ts, 0, ms / 1000)
+    cell_store(ts, 8, (ms % 1000) * 1000000)
+    r := syscall3(35, ts, 0, 0)  // nanosleep
+    return
 
 fn conc_sched_close(ch: string), pub:
     g_conc_close_count = g_conc_close_count + 1

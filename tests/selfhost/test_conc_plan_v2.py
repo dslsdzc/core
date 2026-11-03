@@ -367,6 +367,103 @@ fn main() -> int:
 """
 
 
+PIPE_TIMEOUT = """\
+import conc
+import sched
+import chan
+
+fn stage(ctx: string) -> int:
+    return chan_recv(conc_ctx_ch(ctx, 0))
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC)
+    conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED)
+    if conc_plan_validate(p) != 1:
+        return 2
+    c0 := chan_make(8, 1)
+    c1 := chan_make(8, 1)
+    cht := alloc(16)
+    cell_store(cht, 0, c0)
+    cell_store(cht, 8, c1)
+    r := conc_pipeline_run_timeout(p, cht, 20)
+    if r != CONC_RESULT_TIMEOUT:
+        return r
+    conc_pipeline_reset()
+    return 0
+"""
+
+PIPE_CANCEL = """\
+import conc
+import sched
+import chan
+
+g_p : int, mut = 0
+g_chs : string, mut
+
+fn stage(ctx: string) -> int:
+    v := chan_recv(conc_ctx_ch(ctx, 0))
+    chan_send(conc_ctx_ch(ctx, 8), v + 1)
+    return 0
+
+fn canceler(x: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 100000:
+            break
+        i = i + 1
+    conc_pipeline_cancel(g_p, g_chs)
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    p := conc_plan_new()
+    if p < 0:
+        return 1
+    if conc_plan_set_version(p, 2) != 0:
+        return 2
+    i : ., mut = 0
+    loop:
+        if i >= 4:
+            break
+        if conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC) != i:
+            return 3
+        i = i + 1
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED)
+    conc_plan_add_stage(p, 1, 1, 2, CONC_STAGE_BOUNDED)
+    conc_plan_add_stage(p, 2, 2, 3, CONC_STAGE_BOUNDED)
+    if conc_plan_validate(p) != 1:
+        return 4
+    c0 := chan_make(8, 1)
+    c1 := chan_make(8, 1)
+    c2 := chan_make(8, 1)
+    c3 := chan_make(8, 1)
+    cht := alloc(32)
+    cell_store(cht, 0, c0)
+    cell_store(cht, 8, c1)
+    cell_store(cht, 16, c2)
+    cell_store(cht, 24, c3)
+    g_p = p
+    g_chs = cht
+    conc_pipeline_reset()
+    go canceler(0)
+    r := conc_pipeline_run(p, cht)
+    if r != CONC_RESULT_CANCELLED:
+        return r
+    if conc_pipeline_cancelled() == 0:
+        return 5
+    conc_pipeline_reset()
+    return 0
+"""
+
 CHAIN_RUN = """\
 import conc
 import sched
@@ -643,6 +740,8 @@ def main() -> int:
         ("pipe_body_load", PIPE_LOAD, 60, 0),
         ("mpmc_plan_run", MPMC_RUN, 60, 0),
         ("pipeline_run", PIPELINE_RUN, 60, 0),
+        ("pipeline_cancel", PIPE_CANCEL, 90, 0),
+        ("pipeline_timeout", PIPE_TIMEOUT, 90, 0),
         ("slot_runtime", SLOTS, 60, 0),
         ("chain_plan_run", CHAIN_RUN, 60, 0),
         ("join_plan_run", JOIN_RUN, 60, 0),

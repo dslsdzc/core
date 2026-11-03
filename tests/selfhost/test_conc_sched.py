@@ -183,6 +183,35 @@ fn main() -> int:
 """
 
 
+DEADLOCK = """\
+import sched
+import chan
+
+fn waiter(ch: string) -> int:
+    return chan_recv(ch)
+
+fn main() -> int:
+    sched_init_n(1)
+    ch := chan_make(8, 0)
+    w := go waiter(ch)
+    i : ., mut = 0
+    loop:
+        if i >= 20:
+            break
+        conc_schedule()
+        i = i + 1
+    if conc_waiting_count() < 1:
+        return 1
+    if conc_deadlock_suspect() != 1:
+        return 2
+    chan_close(ch)
+    conc_schedule()
+    if conc_deadlock_suspect() != 0:
+        return 3
+    return 0
+"""
+
+
 def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
@@ -257,6 +286,7 @@ def main() -> int:
         ("conc_sched_range_go", RANGE_GO, 30),
         ("conc_sched_rendezvous", RENDEZVOUS, 30),
         ("conc_sched_mpmc", MPMC, 30),
+        ("conc_sched_deadlock", DEADLOCK, 30),
     ]
     passed = 0
     for name, source, timeout in cases:

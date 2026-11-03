@@ -303,6 +303,31 @@ STRAIGHT_OFF = STRAIGHT.replace(
 )
 
 
+SHUTDOWN_CANCEL = """\
+import sched
+import chan
+
+fn waiter(ch: string) -> int:
+    return chan_recv(ch)
+
+fn main() -> int:
+    sched_init_n(2)
+    ch := chan_make(8, 0)
+    w := go waiter(ch)
+    i : ., mut = 0
+    loop:
+        if i >= 20:
+            break
+        conc_schedule()
+        i = i + 1
+    conc_shutdown()
+    if conc_shutdown_requested() == 0:
+        return 1
+    if conc_sched_is_closed(ch) == 0:
+        return 2
+    return 0
+"""
+
 PREEMPT_DISABLE = """\
 import sched
 import chan
@@ -447,6 +472,7 @@ def main() -> int:
         ("preempt_signal_only", PREEMPT_SIGNAL, 90, 0),
         ("preempt_disabled_control", PREEMPT_OFF, 60, 1),
         ("preempt_disable_depth", PREEMPT_DISABLE, 60, 0),
+        ("shutdown_channel_cancel", SHUTDOWN_CANCEL, 60, 0),
         ("yield_switches", YIELD_SWITCH, 60, 0),
         ("futex_idle_stress", FUTEX_STRESS, 120, 0),
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
