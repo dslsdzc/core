@@ -2397,7 +2397,7 @@ fn rp_share_bad_prepare():
         callee := cell_load(q, qh * 8)
         qh = qh + 1
         cb := cell_load(g_share_bad, callee * 8)
-        e := cell_load(head, callee * 8)
+        e : ., mut = cell_load(head, callee * 8)
         loop:
             if e < 0:
                 break

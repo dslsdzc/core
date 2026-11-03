@@ -6187,8 +6187,8 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
     if ast_kind(stmt) != EXPR_ASSIGN:
         return 0
     target := ast_a(stmt)
-    value := ast_b(stmt)
-    mode := 0
+    value : ., mut = ast_b(stmt)
+    mode : ., mut = 0
     if ast_kind(target) == EXPR_INDEX:
         mode = 1
     else:
@@ -6218,7 +6218,7 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         return 0
     if ast_kind(value) != EXPR_CALL:
         return 0
-    reverse := 0
+    reverse : ., mut = 0
     if mode == 1:
         idx := ast_b(target)
         if ast_kind(idx) == EXPR_IDENT:
@@ -6358,26 +6358,10 @@ fn ir_dce_reachable():
         cell_store(reachable, i * 8, 0)
         i = i + 1
     has_main : ., mut = 0
-    // Address-taken functions are conservative roots even if the address is
-    // only mentioned from an otherwise unreachable body.
     i = 0
     loop:
         if i >= g_ir_func_count:
             break
-        ni := cell_load(g_df_func_node_start, i * 8)
-        nc := cell_load(g_df_func_node_count, i * 8)
-        if ni >= 0 && nc > 0:
-            j : ., mut = ni
-            loop:
-                if j >= ni + nc:
-                    break
-                op := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_OPCODE)
-                if op == IR_FNADDR:
-                    fn_ni := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S1)
-                    cfi := rc_func_by_name(fn_ni)
-                    if cfi >= 0:
-                        cell_store(reachable, cfi * 8, 1)
-                j = j + 1
         if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), "main") != 0:
             has_main = 1
             cell_store(reachable, i * 8, 1)
@@ -6410,6 +6394,14 @@ fn ir_dce_reachable():
                                 if cell_load(reachable, cfi * 8) == 0:
                                     cell_store(reachable, cfi * 8, 1)
                                     changed = 1
+                        else:
+                            if op == IR_FNADDR:
+                                fn_ni := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S1)
+                                cfi := rc_func_by_name(fn_ni)
+                                if cfi >= 0:
+                                    if cell_load(reachable, cfi * 8) == 0:
+                                        cell_store(reachable, cfi * 8, 1)
+                                        changed = 1
                         j = j + 1
             i = i + 1
     g_ir_func_reachable = alloc(g_ir_func_count * 8)
