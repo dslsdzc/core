@@ -2387,6 +2387,11 @@ fn _conc_plan_cert_find(plan: int, kind: int) -> int:
         i = i + 1
     return -1
 
+fn conc_plan_shared_mapping_supported() -> int, pub:
+    // The CPU runtime maps each space to a process-local region; there is no
+    // shared-mapping backend to certify.
+    return 0
+
 fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
     // Re-derive a known certificate from the plan. Unknown/unimplemented
     // certificate kinds stay UNKNOWN; they are never silently accepted.

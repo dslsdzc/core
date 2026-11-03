@@ -264,6 +264,33 @@ fn conc_ready_len(m: int) -> int, pub:
     _conc_queue_unlock(m)
     return total
 
+fn conc_runtime_target_name() -> string, pub:
+    return "cpu"
+
+fn conc_runtime_slots() -> int, pub:
+    return g_conc_m_count
+
+fn conc_runtime_memory() -> int, pub:
+    return g_arena_pool_limit
+
+fn conc_plan_target_compatible(plan: int) -> int, pub:
+    // Runtime probe: a plan is compatible when its declared target is cpu and
+    // its slot/memory request does not exceed this process's configured
+    // runtime. An empty target is treated as target-neutral.
+    if conc_plan_validate(plan) == 0:
+        return 0
+    name := conc_plan_target_name(plan)
+    if _conc_word(name) != 0:
+        if name != "cpu":
+            return 0
+    slots := conc_plan_target_slots(plan)
+    if slots > 0 && slots > g_conc_m_count:
+        return 0
+    mem := conc_plan_target_memory(plan)
+    if mem > 0 && g_arena_pool_limit > 0 && mem > g_arena_pool_limit:
+        return 0
+    return 1
+
 fn conc_steal_count() -> int, pub:
     return g_conc_steal_count
 

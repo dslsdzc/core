@@ -6218,10 +6218,35 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         return 0
     if ast_kind(value) != EXPR_CALL:
         return 0
+    reverse := 0
     if mode == 1:
         idx := ast_b(target)
-        if ast_kind(idx) != EXPR_IDENT || ast_int_val(idx) != var_ni:
-            return 0
+        if ast_kind(idx) == EXPR_IDENT:
+            if ast_int_val(idx) != var_ni:
+                return 0
+        else:
+            // Reverse map: out[end - 1 - i] = f(i). This is still a
+            // bijection over [start, end), so writes cannot alias.
+            if ast_kind(idx) != EXPR_BINARY || ast_c(idx) != OP_SUB:
+                return 0
+            rr := ast_b(idx)
+            ll := ast_a(idx)
+            if ast_kind(rr) != EXPR_IDENT || ast_int_val(rr) != var_ni:
+                return 0
+            if ast_kind(ll) == EXPR_INT:
+                if ast_int_val(ll) != ast_int_val(ast_b(iter)) - 1:
+                    return 0
+                reverse = 1
+            else:
+                if ast_kind(ll) != EXPR_BINARY || ast_c(ll) != OP_SUB:
+                    return 0
+                if ast_kind(ast_a(ll)) != EXPR_INT || ast_kind(ast_b(ll)) != EXPR_INT:
+                    return 0
+                if ast_int_val(ast_b(ll)) != 1:
+                    return 0
+                if ast_int_val(ast_a(ll)) != ast_int_val(ast_b(iter)) - 1:
+                    return 0
+                reverse = 1
     fn_node := ast_a(value)
     if ast_kind(fn_node) != EXPR_IDENT:
         return 0
@@ -6308,7 +6333,10 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         emit(IR_LOAD_INDEX, chv, chs, 0, k, 0)
         res := new_ir_var("par_res", TI_INT)
         emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
-        emit(IR_STORE_INDEX, -1, arr, res, start_c + k, TI_INT)
+        di : ., mut = start_c + k
+        if reverse != 0:
+            di = start_c + count - 1 - k
+        emit(IR_STORE_INDEX, -1, arr, res, di, TI_INT)
         k = k + 1
     return 1
 

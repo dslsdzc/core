@@ -13,6 +13,7 @@ COREARCH = BASE / "build" / "corearch"
 
 V2_LOAD = """\
 import conc
+import sched
 
 fn square(x: int) -> int:
     return x * x
@@ -30,6 +31,16 @@ fn main() -> int:
         return 3
     if conc_plan_target_slots(plan) != 2:
         return 4
+    if conc_runtime_target_name() != "cpu":
+        return 62
+    if conc_runtime_slots() < 1:
+        return 63
+    if conc_runtime_memory() <= 0:
+        return 64
+    if conc_plan_shared_mapping_supported() != 0:
+        return 65
+    if conc_plan_target_compatible(plan) != 0:
+        return 66
     if conc_plan_slot_count(plan) != 2:
         return 5
     if conc_plan_slot_kind(plan, 1) != CONC_SLOT_CPU_FIBER:
