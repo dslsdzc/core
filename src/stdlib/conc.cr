@@ -3138,3 +3138,11 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
         return -1
     cell_store(_conc_plan_at(p), 80, ver)
     return p
+
+fn conc_plan_measure_xfers(plan: int, i: int) -> int, pub:
+    bytes := conc_plan_xfer_bytes(plan)
+    if bytes < 0:
+        return -1
+    if conc_plan_budget_measure(plan, i, bytes) != 0:
+        return -1
+    return bytes

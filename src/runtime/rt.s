@@ -22,6 +22,9 @@ main_tls:
 
 .section .data
 heap_ptr: .quad 0
+# Current end of the active bump region. Starts at the static heap_end label and
+# is replaced by mmap-backed regions when the static 1 GiB arena is exhausted.
+heap_limit: .quad heap_end
 empty_str_hdr: .quad 1
 empty_str: .byte 0
 .balign 8
@@ -92,12 +95,17 @@ alloc:
     mov r8, rdi          # save requested size in r8
     add rdi, 15          # size + 8(header) + 7(align)
     and rdi, -8          # align to 8
+
+.Lalloc_try:
     lea r10, [rip + heap_ptr]
     mov rax, [r10]
     lea rdx, [rax + rdi]
-    lea rcx, [rip + heap_end]
+    lea rcx, [rip + heap_limit]
+    mov rcx, [rcx]
     cmp rdx, rcx
-    ja .Lalloc_oom
+    ja .Lalloc_grow
+
+.Lalloc_commit:
     mov [r10], rdx
 
     # Write requested size at header (before data ptr)
@@ -118,9 +126,47 @@ alloc:
     lea rax, [rax + 8]    # return ptr to data (after header)
     ret
 
-.Lalloc_oom:
-    xor eax, eax
-    ret
+# The static BSS heap is deliberately 1 GiB so every heap address stays inside
+# a signed 32-bit RIP-relative displacement. When it fills, map another region
+# with mmap and continue there instead of returning NULL (a NULL alloc used to
+# surface as an unrelated cell_load SIGSEGV in the compiler).
+.Lalloc_grow:
+    # r8 = requested size, rdi = aligned total. Grow by at least 1 GiB, and by
+    # the request size for larger allocations.
+    mov rsi, 1073741824
+    cmp rdi, rsi
+    jbe .Lalloc_grow_len
+    lea rsi, [rdi + 4096]
+.Lalloc_grow_len:
+    push rdi
+    push rsi
+    push r8
+    mov eax, 9            # mmap
+    xor edi, edi          # addr = NULL
+    mov edx, 3            # PROT_READ|PROT_WRITE
+    mov r10d, 34          # MAP_PRIVATE|MAP_ANONYMOUS
+    mov r8, -1            # fd = -1
+    xor r9d, r9d          # offset = 0
+    syscall
+    pop r8
+    pop rsi
+    pop rdi
+    test rax, rax
+    js .Lalloc_fail
+
+    lea r10, [rip + heap_ptr]
+    mov [r10], rax
+    lea rcx, [rax + rsi]
+    lea r11, [rip + heap_limit]
+    mov [r11], rcx
+    jmp .Lalloc_try
+
+.Lalloc_fail:
+    # Fail closed: a silent NULL return corrupts callers that cannot check it.
+    mov edi, 132
+    mov eax, 231          # exit_group
+    syscall
+    ud2
 
 
 # get_arg(n: int) -> string
