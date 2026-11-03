@@ -183,6 +183,37 @@ fn main() -> int:
 """
 
 
+PRIORITY = """\
+import sched
+import chan
+
+g_order : string, mut
+
+fn low(x: int) -> int:
+    if cell_load(g_order, 0) == 0:
+        cell_store(g_order, 0, 76)
+    return 0
+
+fn high(x: int) -> int:
+    cell_store(g_order, 0, 72)
+    return 0
+
+fn main() -> int:
+    sched_init_n(1)
+    g_order = alloc(8)
+    r1 := chan_make(8, 1)
+    r2 := chan_make(8, 1)
+    conc_spawn_priority(@addr(low), 0, r1, 0)
+    conc_spawn_priority(@addr(high), 0, r2, 7)
+    if chan_recv(r1) != 0:
+        return 1
+    if chan_recv(r2) != 0:
+        return 2
+    if cell_load(g_order, 0) != 72:
+        return 3
+    return 0
+"""
+
 CHANNEL_STATUS = """\
 import sched
 import chan
@@ -237,10 +268,13 @@ fn main() -> int:
         return 1
     if conc_deadlock_suspect() != 1:
         return 2
-    chan_close(ch)
+    if conc_deadlock_break() == 0:
+        return 4
     conc_schedule()
     if conc_deadlock_suspect() != 0:
         return 3
+    if conc_sched_is_closed(ch) == 0:
+        return 5
     return 0
 """
 
@@ -321,6 +355,7 @@ def main() -> int:
         ("conc_sched_mpmc", MPMC, 30),
         ("conc_sched_deadlock", DEADLOCK, 30),
         ("conc_sched_channel_status", CHANNEL_STATUS, 30),
+        ("conc_sched_priority", PRIORITY, 30),
         ("conc_sched_state", STATE, 30),
     ]
     passed = 0

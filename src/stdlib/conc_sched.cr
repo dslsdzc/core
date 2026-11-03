@@ -9,7 +9,7 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 144
+CONC_ACT_SIZE : int = 152
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -587,6 +587,20 @@ fn _conc_queue_append(slot: int, id: int):
             cell_store(ta, 88, id)
     cell_store(g_conc_ready_tail_s, slot * 8, id)
 
+fn _conc_queue_append_front(slot: int, id: int):
+    // Caller holds the owning M's queue lock.
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return
+    if cell_load(a, 120) != 0:
+        return
+    cell_store(a, 120, 1)
+    head := cell_load(g_conc_ready_head_s, slot * 8)
+    cell_store(a, 88, head)
+    cell_store(g_conc_ready_head_s, slot * 8, id)
+    if head < 0:
+        cell_store(g_conc_ready_tail_s, slot * 8, id)
+
 fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
     // Caller holds the owning M's queue lock. Skips YIELDING entries (their
     // yielding stack is still live) and, for stealing, started activations
@@ -680,7 +694,10 @@ fn _conc_ready_push(id: int):
     if g_conc_m_count > 0 && slot % g_conc_m_count != m:
         slot = m
     _conc_queue_lock(m)
-    _conc_queue_append(slot, id)
+    if cell_load(a, 144) > 0:
+        _conc_queue_append_front(slot, id)
+    else:
+        _conc_queue_append(slot, id)
     _conc_queue_unlock(m)
     // The sequence bump follows the queue insert, so a waiter that sampled
     // the old sequence either sees the non-empty queue or gets EAGAIN.
@@ -968,7 +985,7 @@ fn _conc_free_pop() -> int:
     g_conc_free_count = g_conc_free_count - 1
     return cell_load(g_conc_free, g_conc_free_count * 8)
 
-fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int) -> int:
+fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
     conc_sched_init()
     _conc_acts_grow()
     id : ., mut = _conc_free_pop()
@@ -1009,6 +1026,7 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, toke
     cell_store(a, 120, 0)
     cell_store(a, 128, slot)
     cell_store(a, 136, token)
+    cell_store(a, 144, priority)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
 
@@ -1031,7 +1049,18 @@ fn _conc_word(s: string) -> int:
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, "", -1)
+    id := _conc_act_new(entry, arg, result_ch, "", -1, 0)
+    _conc_unlock()
+    if id >= 0:
+        g_conc_spawn_count = g_conc_spawn_count + 1
+        _conc_ready_push(id)
+    return id
+
+fn conc_spawn_priority(entry: int, arg: int, result_ch: string,
+                      priority: int) -> int, pub:
+    conc_sched_init()
+    _conc_lock()
+    id := _conc_act_new(entry, arg, result_ch, "", -1, priority)
     _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
@@ -1042,7 +1071,7 @@ fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
                    yield_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, yield_ch, -1)
+    id := _conc_act_new(entry, arg, result_ch, yield_ch, -1, 0)
     _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
@@ -1053,7 +1082,7 @@ fn conc_spawn_flow_token(entry: int, arg: int, result_ch: string,
                         yield_ch: string, token: int) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, yield_ch, token)
+    id := _conc_act_new(entry, arg, result_ch, yield_ch, token, 0)
     _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
@@ -1770,6 +1799,25 @@ fn conc_plan_join(handle: string) -> int, pub:
     if _conc_word(handle) == 0:
         return -1
     return conc_sched_recv_int(handle)
+
+fn conc_deadlock_break() -> int, pub:
+    // Cooperative recovery: if the conservative detector sees waiting work with
+    // no ready activation, close every registered channel and wake its
+    // send/receive waiters. The waiting bodies return through the normal close
+    // path; the process keeps running (unlike conc_shutdown).
+    if conc_deadlock_suspect() == 0:
+        return 0
+    _conc_ch_lock()
+    i : ., mut = 0
+    loop:
+        if i >= g_conc_ch_count:
+            break
+        _conc_ch_set_closed(i)
+        _conc_wake_all(i, CONC_WAIT_SEND)
+        _conc_wake_all(i, CONC_WAIT_RECV)
+        i = i + 1
+    _conc_ch_unlock()
+    return 1
 
 fn conc_pi_lock(word: string) -> int, pub:
     // Linux PI futex: FUTEX_LOCK_PI = 6. The kernel handles owner tracking and
