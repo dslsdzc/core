@@ -80,6 +80,9 @@ g_conc_close_count : int, mut = 0
 g_conc_flow_cancel : int, mut = 0
 g_conc_pipeline_cancel : int, mut = 0
 g_conc_plan_cancel : int, mut = 0
+g_conc_sig_ts : string, mut
+g_conc_preempt_pending_ms : int, mut = 0
+g_conc_preempt_latency_max : int, mut = 0
 g_conc_flow_ych : string, mut
 g_conc_flow_rch : string, mut
 
@@ -87,6 +90,27 @@ fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
     // shared partition. Callers hold the conc lock while mutating them.
     return arena_shared_alloc(size)
+
+fn _conc_now_ms_sig() -> int:
+    if _conc_raw(g_conc_sig_ts) == 0:
+        return -1
+    cell_store(g_conc_sig_ts, 0, 0)
+    cell_store(g_conc_sig_ts, 8, 0)
+    r := syscall3(228, 1, g_conc_sig_ts, 0)
+    if r < 0:
+        return -1
+    return cell_load(g_conc_sig_ts, 0) * 1000 + cell_load(g_conc_sig_ts, 8) / 1000000
+
+fn _conc_preempt_latency_record():
+    if g_conc_preempt_pending_ms <= 0:
+        return
+    now := _conc_now_ms_sig()
+    if now < g_conc_preempt_pending_ms:
+        return
+    d := now - g_conc_preempt_pending_ms
+    if d > g_conc_preempt_latency_max:
+        g_conc_preempt_latency_max = d
+    g_conc_preempt_pending_ms = 0
 
 fn conc_preempt_signal():
     // The handler first publishes a pending flag (always safe). When the
@@ -96,6 +120,7 @@ fn conc_preempt_signal():
     // cooperative yield is already in flight.
     if g_conc_signal_preempt != 0:
         g_conc_preempt_signal_count = g_conc_preempt_signal_count + 1
+        g_conc_preempt_pending_ms = _conc_now_ms_sig()
         g_conc_preempt_flag = 1
         if g_conc_inited != 0:
             if _conc_raw(g_conc_preempt_disable_m) != 0:
@@ -117,6 +142,7 @@ fn conc_preempt_signal():
                                             g_conc_preempt_flag = 0
                                             g_conc_preempt_direct_count = g_conc_preempt_direct_count + 1
                                             _conc_yield_try(1)
+                                            _conc_preempt_latency_record()
 
 fn _conc_preempt_install():
     act := _conc_sched_alloc(32)
@@ -211,6 +237,9 @@ fn conc_preempt_direct_count() -> int, pub:
 
 fn conc_preempt_tick_count() -> int, pub:
     return g_conc_preempt_tick_count
+
+fn conc_preempt_latency_max() -> int, pub:
+    return g_conc_preempt_latency_max
 
 fn conc_send_count() -> int, pub:
     return g_conc_send_count
@@ -788,6 +817,7 @@ fn conc_sched_init():
     g_conc_quantum_cfg_m = _conc_sched_alloc(64 * 8)
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
     g_conc_timespec = _conc_sched_alloc(16)
+    g_conc_sig_ts = _conc_sched_alloc(16)
     cell_store(g_conc_timespec, 0, 0)
     cell_store(g_conc_timespec, 8, 2000000)
     _conc_preempt_install()
@@ -1516,6 +1546,34 @@ fn conc_plan_run_timeout(plan: int, root: int, channels: string,
             _conc_sleep_ms(1)
     return CONC_RESULT_TIMEOUT
 
+fn conc_plan_spawn(plan: int, body: int, channels: string) -> string, pub:
+    if conc_plan_validate(plan) == 0:
+        return ""
+    if body < 0 || body >= conc_plan_body_count(plan):
+        return ""
+    kind := conc_plan_body_kind(plan, body)
+    if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
+        return ""
+    entry := conc_plan_body_entry(plan, body)
+    if entry <= 0:
+        return ""
+    arg : ., mut = 0
+    ch := conc_plan_param_channel(plan, body, 0)
+    if ch >= 0:
+        if _conc_is_null(channels) != 0:
+            return ""
+        handle := load_str_ptr(channels, ch * 8)
+        if _conc_is_null(handle) != 0:
+            return ""
+        unsafe:
+            arg = @ptr_of(handle)
+    return conc_go(entry, arg)
+
+fn conc_plan_join(handle: string) -> int, pub:
+    if _conc_word(handle) == 0:
+        return -1
+    return conc_sched_recv_int(handle)
+
 fn conc_pi_lock(word: string) -> int, pub:
     // Linux PI futex: FUTEX_LOCK_PI = 6. The kernel handles owner tracking and
     // priority inheritance; the word must be 4-byte aligned and zeroed first.
@@ -1668,6 +1726,7 @@ fn conc_preempt_tick(), pub:
         if _conc_yield_try(0) != 0:
             g_conc_preempt_flag = 0
             g_conc_preempt_tick_count = g_conc_preempt_tick_count + 1
+            _conc_preempt_latency_record()
         return
     m := _conc_m()
     q := cell_load(g_conc_quantum_m, m * 8) - 1
@@ -1675,6 +1734,7 @@ fn conc_preempt_tick(), pub:
         cell_store(g_conc_quantum_m, m * 8, cell_load(g_conc_quantum_cfg_m, m * 8))
         if _conc_yield_try(0) != 0:
             g_conc_preempt_tick_count = g_conc_preempt_tick_count + 1
+            _conc_preempt_latency_record()
     else:
         cell_store(g_conc_quantum_m, m * 8, q)
 

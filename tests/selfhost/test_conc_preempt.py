@@ -49,6 +49,8 @@ fn main() -> int:
         return 2
     if z != 0:
         return 3
+    if conc_preempt_latency_max() < 0:
+        return 4
     return 0
 """
 

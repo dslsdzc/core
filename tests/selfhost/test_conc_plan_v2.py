@@ -378,6 +378,31 @@ fn main() -> int:
 """
 
 
+DYNAMIC_BODY = """\
+import conc
+import sched
+
+fn seven(x: int) -> int:
+    return 7
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(seven), 1)
+    if conc_plan_validate(p) != 1:
+        return 2
+    cht := alloc(8)
+    cell_store(cht, 0, 0)
+    h := conc_plan_spawn(p, 0, cht)
+    if str_len(h) == 0:
+        return 3
+    if conc_plan_join(h) != 7:
+        return 4
+    return 0
+"""
+
 PLAN_TIMEOUT = """\
 import conc
 import sched
@@ -788,6 +813,7 @@ def main() -> int:
         ("pipeline_cancel", PIPE_CANCEL, 90, 0),
         ("pipeline_timeout", PIPE_TIMEOUT, 90, 0),
         ("plan_timeout", PLAN_TIMEOUT, 90, 0),
+        ("dynamic_body", DYNAMIC_BODY, 60, 0),
         ("slot_runtime", SLOTS, 60, 0),
         ("chain_plan_run", CHAIN_RUN, 60, 0),
         ("join_plan_run", JOIN_RUN, 60, 0),
