@@ -61,6 +61,64 @@ fn main() -> int:
     return 0
 """
 
+TOKEN = """\
+import sched
+import chan
+
+g_t1 : int, mut = 0
+g_t2 : int, mut = 0
+g_r1 : string, mut
+g_r2 : string, mut
+
+flow fn endless(x: int) -> int:
+    i : ., mut = 0
+    loop:
+        yield i
+        i = i + 1
+    return 0
+
+flow fn once(x: int) -> int:
+    yield 1
+    return 0
+
+fn drive1(x: int) -> int:
+    out := alloc(4096)
+    r := conc_flow_run_token(@addr(endless), 0, out, g_t1)
+    chan_send(g_r1, r)
+    return 0
+
+fn drive2(x: int) -> int:
+    out := alloc(4096)
+    r := conc_flow_run_token(@addr(once), 0, out, g_t2)
+    chan_send(g_r2, r)
+    return 0
+
+fn main() -> int:
+    sched_init_n(2)
+    g_t1 = conc_cancel_new()
+    g_t2 = conc_cancel_new()
+    if g_t1 < 0 || g_t2 < 0:
+        return 1
+    g_r1 = chan_make(8, 1)
+    g_r2 = chan_make(8, 1)
+    c1 := go drive1(0)
+    c2 := go drive2(0)
+    r2 := chan_recv(g_r2)
+    if r2 != 1:
+        return r2
+    if conc_cancelled(g_t2) != 0:
+        return 2
+    conc_cancel_token(g_t1)
+    r1 := chan_recv(g_r1)
+    if r1 != CONC_RESULT_CANCELLED:
+        return r1
+    if conc_cancelled(g_t1) == 0:
+        return 3
+    conc_cancel_free(g_t1)
+    conc_cancel_free(g_t2)
+    return 0
+"""
+
 TIMEOUT = """\
 import sched
 import chan
@@ -190,6 +248,7 @@ def main() -> int:
         ("flow_nested", NESTED),
         ("flow_cancel", CANCEL),
         ("flow_timeout", TIMEOUT),
+        ("flow_token_isolation", TOKEN),
     ]
     ok = True
     for name, source in cases:

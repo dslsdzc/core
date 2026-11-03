@@ -85,6 +85,12 @@ g_conc_preempt_pending_ms : int, mut = 0
 g_conc_preempt_latency_max : int, mut = 0
 g_conc_flow_ych : string, mut
 g_conc_flow_rch : string, mut
+g_conc_cancel_used : string, mut
+g_conc_cancel_flags : string, mut
+g_conc_cancel_a : string, mut
+g_conc_cancel_b : string, mut
+g_conc_cancel_n : string, mut
+g_conc_cancel_mode : string, mut
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
@@ -818,6 +824,12 @@ fn conc_sched_init():
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
     g_conc_timespec = _conc_sched_alloc(16)
     g_conc_sig_ts = _conc_sched_alloc(16)
+    g_conc_cancel_used = _conc_sched_alloc(64 * 8)
+    g_conc_cancel_flags = _conc_sched_alloc(64 * 8)
+    g_conc_cancel_a = _conc_sched_alloc(64 * 8)
+    g_conc_cancel_b = _conc_sched_alloc(64 * 8)
+    g_conc_cancel_n = _conc_sched_alloc(64 * 8)
+    g_conc_cancel_mode = _conc_sched_alloc(64 * 8)
     cell_store(g_conc_timespec, 0, 0)
     cell_store(g_conc_timespec, 8, 200000)
     _conc_preempt_install()
@@ -827,6 +839,12 @@ fn conc_sched_init():
             break
         cell_store(g_conc_quantum_m, iq * 8, g_conc_quantum)
         cell_store(g_conc_quantum_cfg_m, iq * 8, g_conc_quantum)
+        cell_store(g_conc_cancel_used, iq * 8, 0)
+        cell_store(g_conc_cancel_flags, iq * 8, 0)
+        cell_store(g_conc_cancel_a, iq * 8, 0)
+        cell_store(g_conc_cancel_b, iq * 8, 0)
+        cell_store(g_conc_cancel_n, iq * 8, 0)
+        cell_store(g_conc_cancel_mode, iq * 8, 0)
         cell_store(g_conc_seq_m, iq * 8, 0)
         iq = iq + 1
     g_conc_inited = 1
@@ -854,7 +872,7 @@ fn _conc_free_pop() -> int:
     g_conc_free_count = g_conc_free_count - 1
     return cell_load(g_conc_free, g_conc_free_count * 8)
 
-fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string) -> int:
+fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int) -> int:
     conc_sched_init()
     _conc_acts_grow()
     id : ., mut = _conc_free_pop()
@@ -894,6 +912,7 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string) -> i
     cell_store(a, 104, slot)
     cell_store(a, 120, 0)
     cell_store(a, 128, slot)
+    cell_store(a, 136, token)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
 
@@ -916,7 +935,7 @@ fn _conc_word(s: string) -> int:
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, "")
+    id := _conc_act_new(entry, arg, result_ch, "", -1)
     _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
@@ -927,7 +946,18 @@ fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
                    yield_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, yield_ch)
+    id := _conc_act_new(entry, arg, result_ch, yield_ch, -1)
+    _conc_unlock()
+    if id >= 0:
+        g_conc_spawn_count = g_conc_spawn_count + 1
+        _conc_ready_push(id)
+    return id
+
+fn conc_spawn_flow_token(entry: int, arg: int, result_ch: string,
+                        yield_ch: string, token: int) -> int, pub:
+    conc_sched_init()
+    _conc_lock()
+    id := _conc_act_new(entry, arg, result_ch, yield_ch, token)
     _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
@@ -948,9 +978,17 @@ fn conc_current_slot() -> int, pub:
 
 fn conc_schedule() -> int, pub:
     ran : ., mut = 0
+    // M0 is the main/caller thread. With multiple Ms it must return after a
+    // bounded amount of activation work, otherwise an endless cooperative
+    // flow can monopolize M0 and starve the caller's own receive/join loop.
+    limit : ., mut = 100000000
+    if g_conc_m_count > 1 && _conc_m() == 0:
+        limit = 1
     if _conc_cur_id() < 0:
         saved := arena_current_unchecked()
         loop:
+            if ran >= limit:
+                return ran
             id := _conc_ready_pop()
             if id < 0:
                 return ran
@@ -983,7 +1021,7 @@ fn conc_schedule() -> int, pub:
                 cell_store(a, 24, stack)
                 cell_store(a, 64, aidp)
                 cell_store(a, 96, aidp)
-            ran = 1
+            ran = ran + 1
             _conc_set_cur(id)
             cell_store(a, 8, CONC_ACT_RUNNING)
             arena_set_current_unchecked(cell_load(a, 64))
@@ -1326,6 +1364,69 @@ fn conc_deadlock_suspect() -> int, pub:
         return 0
     return 1
 
+fn conc_pipeline_run_token(plan: int, channels: string,
+                           token: int) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return conc_pipeline_run(plan, channels)
+    if conc_cancelled(token) != 0:
+        return CONC_RESULT_CANCELLED
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if conc_plan_apply_layouts(plan) < 0:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    n := conc_plan_stage_count(plan)
+    if n <= 0 || n > 64:
+        return -1
+    conc_cancel_bind_pipeline(token, channels, conc_plan_channel_count(plan))
+    hs := alloc(64 * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if conc_cancelled(token) != 0:
+            return CONC_RESULT_CANCELLED
+        body := conc_plan_stage_body(plan, i)
+        entry := conc_plan_body_entry(plan, body)
+        if entry <= 0:
+            return -1
+        ctx := alloc(16)
+        cell_store(ctx, 0, 0)
+        cell_store(ctx, 8, 0)
+        in_ch := conc_plan_stage_in(plan, i)
+        if in_ch >= 0:
+            ih := load_str_ptr(channels, in_ch * 8)
+            if _conc_is_null(ih) != 0:
+                return -1
+            store_str_ptr(ctx, 0, ih)
+        out_ch := conc_plan_stage_out(plan, i)
+        if out_ch >= 0:
+            oh := load_str_ptr(channels, out_ch * 8)
+            if _conc_is_null(oh) != 0:
+                return -1
+            store_str_ptr(ctx, 8, oh)
+        arg : ., mut = 0
+        unsafe:
+            arg = @ptr_of(ctx)
+        h := conc_go(entry, arg)
+        if _conc_word(h) == 0:
+            return -1
+        cell_store(hs, i * 8, h)
+        i = i + 1
+    total : ., mut = 0
+    i = 0
+    loop:
+        if i >= n:
+            break
+        total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+        if conc_cancelled(token) != 0:
+            return CONC_RESULT_CANCELLED
+        i = i + 1
+    if conc_cancelled(token) != 0:
+        return CONC_RESULT_CANCELLED
+    return total
+
 fn conc_pipeline_run_timeout(plan: int, channels: string,
                              timeout_ms: int) -> int, pub:
     // Same stage spawn/join as conc_pipeline_run, but the join polls result
@@ -1651,6 +1752,80 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
         return CONC_RESULT_CANCELLED
     return total
 
+fn conc_cancel_new() -> int, pub:
+    if _conc_raw(g_conc_cancel_used) == 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= 64:
+            return -1
+        if cell_load(g_conc_cancel_used, i * 8) == 0:
+            cell_store(g_conc_cancel_used, i * 8, 1)
+            cell_store(g_conc_cancel_flags, i * 8, 0)
+            cell_store(g_conc_cancel_a, i * 8, 0)
+            cell_store(g_conc_cancel_b, i * 8, 0)
+            cell_store(g_conc_cancel_n, i * 8, 0)
+            cell_store(g_conc_cancel_mode, i * 8, 0)
+            return i
+        i = i + 1
+    return -1
+
+fn conc_cancel_free(token: int) -> int, pub:
+    if token < 0 || token >= 64:
+        return -1
+    if _conc_raw(g_conc_cancel_used) == 0:
+        return -1
+    cell_store(g_conc_cancel_used, token * 8, 0)
+    cell_store(g_conc_cancel_flags, token * 8, 0)
+    return 0
+
+fn conc_cancel_bind_flow(token: int, ych: string, rch: string) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return -1
+    cell_store(g_conc_cancel_mode, token * 8, 1)
+    store_str_ptr(g_conc_cancel_a, token * 8, ych)
+    store_str_ptr(g_conc_cancel_b, token * 8, rch)
+    return 0
+
+fn conc_cancel_bind_pipeline(token: int, channels: string, count: int) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return -1
+    cell_store(g_conc_cancel_mode, token * 8, 2)
+    store_str_ptr(g_conc_cancel_a, token * 8, channels)
+    cell_store(g_conc_cancel_n, token * 8, count)
+    return 0
+
+fn conc_cancelled(token: int) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return 0
+    return cell_load(g_conc_cancel_flags, token * 8)
+
+fn conc_cancel_token(token: int) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return -1
+    cell_store(g_conc_cancel_flags, token * 8, 1)
+    mode := cell_load(g_conc_cancel_mode, token * 8)
+    if mode == 1:
+        a := load_str_ptr(g_conc_cancel_a, token * 8)
+        b := load_str_ptr(g_conc_cancel_b, token * 8)
+        if _conc_word(a) != 0:
+            conc_sched_close(a)
+        if _conc_word(b) != 0:
+            conc_sched_close(b)
+    else:
+        if mode == 2:
+            chs := load_str_ptr(g_conc_cancel_a, token * 8)
+            n := cell_load(g_conc_cancel_n, token * 8)
+            i : ., mut = 0
+            loop:
+                if i >= n:
+                    break
+                h := load_str_ptr(chs, i * 8)
+                if _conc_word(h) != 0:
+                    conc_sched_close(h)
+                i = i + 1
+    return 0
+
 fn conc_flow_yield(v: int), pub:
     id := _conc_cur_id()
     if id < 0:
@@ -1659,7 +1834,14 @@ fn conc_flow_yield(v: int), pub:
     if _conc_word(a) == 0:
         return
     ych := load_str_ptr(a, 112)
-    if g_conc_flow_cancel != 0:
+    tok := cell_load(a, 136)
+    if tok >= 0:
+        if conc_cancelled(tok) != 0:
+            if _conc_word(ych) != 0:
+                conc_sched_close(ych)
+            _conc_abort_current()
+            return
+    if tok < 0 && g_conc_flow_cancel != 0:
         if _conc_word(ych) != 0:
             conc_sched_close(ych)
         _conc_abort_current()
@@ -1707,6 +1889,40 @@ fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
         n = n + 1
     rv := conc_sched_recv_int(rch)
     if g_conc_flow_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    return n
+
+fn conc_flow_run_token(entry: int, arg: int, out: string,
+                       token: int) -> int, pub:
+    if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
+        return conc_flow_run(entry, arg, out)
+    if conc_cancelled(token) != 0:
+        return CONC_RESULT_CANCELLED
+    conc_sched_init()
+    r := _conc_global_region_get()
+    if r < 0:
+        return -1
+    ych := conc_channel_new(r, 8, 1)
+    rch := conc_channel_new(r, 8, 1)
+    if _conc_word(ych) == 0 || _conc_word(rch) == 0:
+        return -1
+    conc_cancel_bind_flow(token, ych, rch)
+    id := conc_spawn_flow_token(entry, arg, rch, ych, token)
+    if id < 0:
+        return -1
+    n : ., mut = 0
+    loop:
+        v := conc_sched_recv_int(ych)
+        if conc_cancelled(token) != 0:
+            conc_sched_close(ych)
+            conc_sched_close(rch)
+            return CONC_RESULT_CANCELLED
+        if conc_sched_is_closed(ych) != 0:
+            break
+        cell_store(out, n * 8, v)
+        n = n + 1
+    rv := conc_sched_recv_int(rch)
+    if conc_cancelled(token) != 0:
         return CONC_RESULT_CANCELLED
     return n
 
