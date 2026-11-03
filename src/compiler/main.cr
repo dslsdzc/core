@@ -138,12 +138,17 @@ fn run_frontend(source_name: string) -> int:
         g_prelude_src = ""
         g_prelude_path = ""
         g_prelude_pending = 0
+    if cli_has("timing") != 0:
+        g_timing_last_ms = timing_now_ms()
     println("[1/5] tokenize...")
     tokenize(source_file, 0)
+    timing_mark("tokenize")
     println("[2/5] resolve imports...")
     res_imports()
+    timing_mark("imports")
     println("[3/5] parse...")
     parse_all_files()
+    timing_mark("parse")
     if g_diag_count > 0:
         print_diagnostics()
         return 1
@@ -152,6 +157,7 @@ fn run_frontend(source_name: string) -> int:
         return 1
     println("[4/5] type check...")
     check_all()
+    timing_mark("type_check")
     // Dump the VC list before the fail-closed gate, so red entries are still
     // listed. The dump only prints; it does not change rc or output.
     if cli_has("dump-vcs") != 0:
@@ -205,6 +211,7 @@ if g_opt_level >= 1 && g_func_count > 0 {
 
 */
     println("[5/5] frontend done")
+    timing_mark("frontend_done")
     // Hidden check: the named-type side table must agree with res_type_node.
     // It runs after check_all. A mismatch returns non-zero. Off by default.
     if cli_has("verify-named-dedup") != 0:
@@ -246,10 +253,28 @@ fn default_out_path(src_path: string, ext: string) -> string:
 
 // The old shadow-comparison finish hook and its CLI channels were removed.
 
+g_timing_last_ms : int, mut = 0
+
+fn timing_now_ms() -> int:
+    ts := alloc(16)
+    cell_store(ts, 0, 0)
+    cell_store(ts, 8, 0)
+    r := syscall3(228, 1, ts, 0)
+    if r < 0:
+        return 0
+    return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
 fn timing_mark(name: string):
     if cli_has("timing") != 0:
+        now := timing_now_ms()
+        if g_timing_last_ms == 0:
+            g_timing_last_ms = now
         print("[timing] ")
-        println(name)
+        print(name)
+        print(" ")
+        print(int_str(now - g_timing_last_ms))
+        println("ms")
+        g_timing_last_ms = now
 
 fn corec_main() -> int:
     cli_init("corec", "Core compiler frontend")
@@ -550,14 +575,6 @@ fn corec_main() -> int:
     // A cached caller does not replay monomorphization, so its specialized
     // callee FuncInfo entries would be missing on the next compile.
     cache_enabled : int, mut = 1
-    cache_scan : ., mut = 0
-    loop:
-        if cache_scan >= g_func_count:
-            break
-        if fi_generic_count(cache_scan) > 0:
-            cache_enabled = 0
-            break
-        cache_scan = cache_scan + 1
     // Optional representation uses process-local side tables that the snapshot
     // does not carry. A cache hit would unpack through the boxed path and diverge
     // from a cold build, so optional programs disable the cache.
@@ -585,11 +602,25 @@ fn corec_main() -> int:
         ir_func_idx := g_ir_func_count
         df_begin_func(ir_func_idx)
 
-        // Build cache key from source path + function name
+        // Content-addressed cache key: name + body fingerprint + signature.
+        // The old key included the top-level source path, so every test in a
+        // fresh temp directory recompiled the whole imported stdlib. The
+        // loader still verifies fingerprint/signature, so a collision is a
+        // cache miss, not a wrong hit.
         fn_node := fi_ast_node(fi)
         name_ni := ast_a(fn_node)
         name := istr_get(name_ni)
-        func_id := src_path + "::" + name
+        owner := func_owner(fi)
+        func_id : ., mut = ""
+        if owner >= 0 && lib_kind(owner) == LIB_KIND_USER:
+            // User code keeps the source-path identity used by the cache
+            // witness tests; imported stdlib functions below use content
+            // identity so fresh temp-directory tests can share entries.
+            func_id = src_path + "::" + name
+        else:
+            fp := func_fingerprint(fn_node)
+            sfp := sig_fingerprint(fn_node)
+            func_id = name + "_" + int_str(fp) + "_" + int_str(sfp)
 
         // Sanitize func_id for filesystem: replace / with _
         cache_path : ., mut = ".core/cache/cir/"
@@ -640,6 +671,7 @@ fn corec_main() -> int:
             // before any id is used. Optional-representation programs disable the
             // cache entirely.
             tc0 := g_type_count
+            gen0 := g_gen_instance_count
             // Intern journal window: record each new string created during this
             // function's generation. The entry stores the contents; the loader
             // replays them in order.
@@ -655,7 +687,7 @@ fn corec_main() -> int:
             // function is saved like any other. g_cir_has_match remains
             // diagnostic only.
             if cache_enabled != 0:
-                if g_type_count == tc0:
+                if g_type_count == tc0 && g_gen_instance_count == gen0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 
         fi = fi + 1
@@ -675,6 +707,7 @@ fn corec_main() -> int:
     // on it.
     df_state_finalize()
     compute_usage_counts()
+    ir_dce_reachable()
     timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived
@@ -768,9 +801,12 @@ fn corec_main() -> int:
         timing_mark("ptr_analysis_plan")
         region_check_all()
         timing_mark("region_check_plan")
-
-    byte_permission_all()
-    timing_mark("byte_permission")
+        // The plan regenerated IR, so re-run the byte-permission proof on the
+        // new graph. With no plan the first pass already proved this exact IR.
+        byte_permission_all()
+        timing_mark("byte_permission")
+    else:
+        timing_mark("byte_permission")
     provenance_verify_all()
     timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.

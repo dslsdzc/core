@@ -6340,6 +6340,94 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         k = k + 1
     return 1
 
+fn ir_dce_reachable():
+    g_ir_func_reachable = ""
+    // Remove unreachable functions from the analysis/lowering graph. Imported
+    // stdlib modules contain large functions that a small program never calls;
+    // generating their IR is cheap, but region/byte-permission proofs are not.
+    // A function is a root if it is main, or if any IR_FNADDR names it. Calls
+    // from reachable functions mark their callees. IR function indices stay
+    // stable; unreachable bodies get zero node/instr/var counts.
+    if g_ir_func_count <= 0:
+        return
+    reachable := alloc(g_ir_func_count * 8)
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        cell_store(reachable, i * 8, 0)
+        i = i + 1
+    has_main : ., mut = 0
+    // Address-taken functions are conservative roots even if the address is
+    // only mentioned from an otherwise unreachable body.
+    i = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        ni := cell_load(g_df_func_node_start, i * 8)
+        nc := cell_load(g_df_func_node_count, i * 8)
+        if ni >= 0 && nc > 0:
+            j : ., mut = ni
+            loop:
+                if j >= ni + nc:
+                    break
+                op := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_OPCODE)
+                if op == IR_FNADDR:
+                    fn_ni := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S1)
+                    cfi := rc_func_by_name(fn_ni)
+                    if cfi >= 0:
+                        cell_store(reachable, cfi * 8, 1)
+                j = j + 1
+        if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), "main") != 0:
+            has_main = 1
+            cell_store(reachable, i * 8, 1)
+        i = i + 1
+    if has_main == 0:
+        return
+    // Transitive closure over IR calls.
+    changed : ., mut = 1
+    loop:
+        if changed == 0:
+            break
+        changed = 0
+        i = 0
+        loop:
+            if i >= g_ir_func_count:
+                break
+            if cell_load(reachable, i * 8) != 0:
+                ni := cell_load(g_df_func_node_start, i * 8)
+                nc := cell_load(g_df_func_node_count, i * 8)
+                if ni >= 0 && nc > 0:
+                    j : ., mut = ni
+                    loop:
+                        if j >= ni + nc:
+                            break
+                        op := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_OPCODE)
+                        if op == IR_CALL:
+                            s3 := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S3)
+                            cfi := rc_func_by_name(s3)
+                            if cfi >= 0:
+                                if cell_load(reachable, cfi * 8) == 0:
+                                    cell_store(reachable, cfi * 8, 1)
+                                    changed = 1
+                        j = j + 1
+            i = i + 1
+    g_ir_func_reachable = alloc(g_ir_func_count * 8)
+    i = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        cell_store(g_ir_func_reachable, i * 8, cell_load(reachable, i * 8))
+        i = i + 1
+    return
+
+fn ir_func_reachable(fi: int) -> int:
+    if fi < 0 || fi >= g_ir_func_count:
+        return 0
+    if str_len(g_ir_func_reachable) <= 0:
+        return 1
+    return cell_load(g_ir_func_reachable, fi * 8)
+
 fn emit_preempt_tick():
     if g_emit_preempt_ticks == 0:
         return

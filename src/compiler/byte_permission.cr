@@ -544,6 +544,9 @@ fn bp_check_call(ni: int, first_arg: int, argc: int, fn_ni: int,
         j = j + 1
 
 fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
+    t0 : ., mut = 0
+    if cli_has("timing") != 0:
+        t0 = timing_now_ms()
     rc_ctl_prepare(nstart, ncount)
     bp_reset_last_store(vstart, vcount)
     ni : ., mut = nstart
@@ -619,6 +622,14 @@ fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
                 bp_check_call(ni, s1, s2, s3, nstart, fi)
 
         ni = ni + 1
+    if t0 > 0:
+        d := timing_now_ms() - t0
+        if d >= 10:
+            print("[bp] ")
+            print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
+            print(" ")
+            print(int_str(d))
+            println("ms")
 
 fn byte_permission_all():
     if g_pa_alloc_count > 0:
@@ -683,15 +694,30 @@ fn byte_permission_all():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
         rc_ctl_prepare(nstart, ncount)
+        tfi : ., mut = 0
+        if cli_has("timing") != 0:
+            tfi = timing_now_ms()
         bp_init_var_range(vstart, vcount)
         bp_infer_strings(nstart, ncount, vstart, vcount)
         bp_alias_compute(fi)
+        if tfi > 0:
+            dfi := timing_now_ms() - tfi
+            if dfi >= 10:
+                print("[bpa] ")
+                print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
+                print(" ")
+                print(int_str(dfi))
+                println("ms")
         fi = fi + 1
+    timing_mark("bp_init")
 
     changed : ., mut = 1
     rounds : ., mut = 0
@@ -707,14 +733,19 @@ fn byte_permission_all():
             if bp_summary_func(fi) != 0:
                 changed = 1
             fi = fi + 1
+    timing_mark("bp_summary")
 
     fi = 0
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
         bp_check_func(nstart, ncount, vstart, vcount, fi)
         fi = fi + 1
+    timing_mark("bp_check_done")

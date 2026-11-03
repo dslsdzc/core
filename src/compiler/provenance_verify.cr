@@ -221,6 +221,9 @@ fn provenance_verify_all():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         provenance_verify_func(nstart, ncount)

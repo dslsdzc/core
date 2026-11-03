@@ -188,6 +188,9 @@ import chan
 fn work(n: int) -> int:
     return n + 1
 
+fn waiter(ch: string) -> int:
+    return chan_recv(ch)
+
 fn main() -> int:
     sched_init_n(2)
     conc_metrics_reset()
@@ -213,6 +216,15 @@ fn main() -> int:
         return 8
     if str_len(conc_metrics_explain()) < 50:
         return 9
+    rch := chan_make(8, 0)
+    w := go waiter(rch)
+    chan_send(rch, 1)
+    if chan_recv(w) != 1:
+        return 10
+    if conc_wait_count() < 1:
+        return 11
+    if conc_wait_ms_max() < 0:
+        return 12
     return 0
 """
 

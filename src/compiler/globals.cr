@@ -364,6 +364,7 @@ g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
 g_dyn_type_set_cap : int, mut
 
+g_ir_func_reachable : string, mut
 g_ir_func_name_idx : string, mut
 g_ir_func_name_idx_cap : int, mut
 g_ir_func_ret_type : string, mut

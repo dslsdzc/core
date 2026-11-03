@@ -77,10 +77,15 @@ g_conc_preempt_tick_count : int, mut = 0
 g_conc_send_count : int, mut = 0
 g_conc_recv_count : int, mut = 0
 g_conc_close_count : int, mut = 0
+g_conc_wait_count : int, mut = 0
+g_conc_wait_ms_total : int, mut = 0
+g_conc_wait_ms_max : int, mut = 0
+g_conc_main_parked : int, mut = 0
 g_conc_flow_cancel : int, mut = 0
 g_conc_pipeline_cancel : int, mut = 0
 g_conc_plan_cancel : int, mut = 0
 g_conc_sig_ts : string, mut
+g_conc_now_ts_m : string, mut
 g_conc_preempt_pending_ms : int, mut = 0
 g_conc_preempt_latency_max : int, mut = 0
 g_conc_flow_ych : string, mut
@@ -202,6 +207,15 @@ fn conc_get_quantum_m(m: int) -> int, pub:
 fn _conc_seq_addr(m: int) -> int:
     return _conc_addr(g_conc_seq_m) + m * 8
 
+fn _conc_wake_main_seq():
+    if g_conc_m_count <= 1:
+        return
+    if g_conc_main_parked == 0:
+        return
+    seq := rt_atomic_load(g_conc_seq_m, 0)
+    rt_atomic_store(g_conc_seq_m, 0, seq + 1)
+    _conc_futex_wake(_conc_seq_addr(0))
+
 fn _conc_futex_wait(addr: int, val: int) -> int:
     g_conc_futex_wait_count = g_conc_futex_wait_count + 1
     // futex(uaddr, FUTEX_WAIT, val, timeout, uaddr2, val3). The 2 ms timeout
@@ -256,6 +270,15 @@ fn conc_recv_count() -> int, pub:
 fn conc_close_count() -> int, pub:
     return g_conc_close_count
 
+fn conc_wait_count() -> int, pub:
+    return g_conc_wait_count
+
+fn conc_wait_ms_total() -> int, pub:
+    return g_conc_wait_ms_total
+
+fn conc_wait_ms_max() -> int, pub:
+    return g_conc_wait_ms_max
+
 fn conc_metrics_reset() -> int, pub:
     g_conc_spawn_count = 0
     g_conc_yield_count = 0
@@ -272,6 +295,9 @@ fn conc_metrics_reset() -> int, pub:
     g_conc_send_count = 0
     g_conc_recv_count = 0
     g_conc_close_count = 0
+    g_conc_wait_count = 0
+    g_conc_wait_ms_total = 0
+    g_conc_wait_ms_max = 0
     return 0
 
 fn conc_metrics_explain() -> string, pub:
@@ -290,6 +316,9 @@ fn conc_metrics_explain() -> string, pub:
     out = out + " send=" + _conc_num_str(g_conc_send_count)
     out = out + " recv=" + _conc_num_str(g_conc_recv_count)
     out = out + " close=" + _conc_num_str(g_conc_close_count)
+    out = out + " waits=" + _conc_num_str(g_conc_wait_count)
+    out = out + " wait_ms=" + _conc_num_str(g_conc_wait_ms_total)
+    out = out + " wait_max=" + _conc_num_str(g_conc_wait_ms_max)
     return out
 
 fn conc_ready_len(m: int) -> int, pub:
@@ -311,8 +340,14 @@ fn conc_ready_len(m: int) -> int, pub:
         cur : ., mut = cell_load(g_conc_ready_head_s, (m + si * g_conc_m_count) * 8)
         lim : ., mut = 0
         loop:
-            if cur < 0 || lim > 10000:
+            if cur < 0:
                 break
+            lim = lim + 1
+            if lim > 100000:
+                msg : ., mut = "QCYCLE len m=" + _conc_num_str(m)
+                msg = msg + " cur=" + _conc_num_str(cur) + "\n"
+                syscall3(1, 2, msg, str_len(msg))
+                syscall3(60, 77, 0, 0)
             total = total + 1
             ca := _conc_act_at(cur)
             if _conc_word(ca) == 0:
@@ -355,6 +390,7 @@ fn conc_state_explain() -> string, pub:
     out = out + " acts=" + _conc_num_str(g_conc_act_count)
     out = out + " waiting=" + _conc_num_str(conc_waiting_count())
     out = out + " deadlock=" + _conc_num_str(conc_deadlock_suspect())
+    out = out + " shutdown=" + _conc_num_str(g_conc_shutdown)
     mc : ., mut = g_conc_m_count
     if mc > 64:
         mc = 64
@@ -476,7 +512,13 @@ fn conc_park(m: int):
         if found != 0:
             return
         vk = vk + 1
+    if m == 0:
+        g_conc_main_parked = 1
+    t0 := _conc_now_ms()
     _conc_futex_wait(_conc_seq_addr(m), s)
+    if m == 0:
+        g_conc_main_parked = 0
+    _conc_wait_record(t0)
 
 fn _conc_act_at(id: int) -> string:
     if id < 0 || id >= g_conc_act_count:
@@ -537,9 +579,16 @@ fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
     head := cell_load(g_conc_ready_head_s, slot * 8)
     prev : ., mut = -1
     cur : ., mut = head
+    qlim : ., mut = 0
     loop:
         if cur < 0:
             return -1
+        qlim = qlim + 1
+        if qlim > 100000:
+            msg : ., mut = "QCYCLE pop slot=" + _conc_num_str(slot)
+            msg = msg + " cur=" + _conc_num_str(cur) + "\n"
+            syscall3(1, 2, msg, str_len(msg))
+            syscall3(60, 77, 0, 0)
         a := _conc_act_at(cur)
         nxt : ., mut = -1
         if _conc_word(a) != 0:
@@ -582,9 +631,16 @@ fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
 fn _conc_queue_has_slot(slot: int, unstarted_only: int) -> int:
     // Caller holds the owning M's queue lock.
     cur : ., mut = cell_load(g_conc_ready_head_s, slot * 8)
+    hlim : ., mut = 0
     loop:
         if cur < 0:
             return 0
+        hlim = hlim + 1
+        if hlim > 100000:
+            msg : ., mut = "QCYCLE has slot=" + _conc_num_str(slot)
+            msg = msg + " cur=" + _conc_num_str(cur) + "\n"
+            syscall3(1, 2, msg, str_len(msg))
+            syscall3(60, 77, 0, 0)
         a := _conc_act_at(cur)
         if _conc_word(a) != 0:
             if cell_load(a, 8) == CONC_ACT_RUNNABLE:
@@ -824,6 +880,7 @@ fn conc_sched_init():
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
     g_conc_timespec = _conc_sched_alloc(16)
     g_conc_sig_ts = _conc_sched_alloc(16)
+    g_conc_now_ts_m = _conc_sched_alloc(64 * 16)
     g_conc_cancel_used = _conc_sched_alloc(64 * 8)
     g_conc_cancel_flags = _conc_sched_alloc(64 * 8)
     g_conc_cancel_a = _conc_sched_alloc(64 * 8)
@@ -831,7 +888,7 @@ fn conc_sched_init():
     g_conc_cancel_n = _conc_sched_alloc(64 * 8)
     g_conc_cancel_mode = _conc_sched_alloc(64 * 8)
     cell_store(g_conc_timespec, 0, 0)
-    cell_store(g_conc_timespec, 8, 200000)
+    cell_store(g_conc_timespec, 8, 50000)
     _conc_preempt_install()
     iq : ., mut = 0
     loop:
@@ -2183,6 +2240,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
                     cell_store(ra, 8, CONC_ACT_RUNNABLE)
                     _conc_ready_push(rid)
                     _conc_unlock()
+                    _conc_wake_main_seq()
                     return 0
                 _conc_unlock()
                 continue
@@ -2198,7 +2256,9 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
             cell_store(ca, 8, CONC_ACT_WAITING)
             _conc_unlock()
+            t0 := _conc_now_ms()
             conc_schedule()
+            _conc_wait_record(t0)
             return 0
         if n < cap:
             buf := _conc_ch_buf(ch)
@@ -2210,6 +2270,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             cell_store(ch, 24, n + 1)
             _conc_wake_one(slot, CONC_WAIT_RECV)
             _conc_unlock()
+            _conc_wake_main_seq()
             return 0
         if _conc_cur_id() < 0:
             _conc_unlock()
@@ -2222,7 +2283,9 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
         a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
         _conc_unlock()
+        t0 := _conc_now_ms()
         conc_schedule()
+        _conc_wait_record(t0)
 
 fn conc_sched_recv_int(ch: string) -> int, pub:
     g_conc_recv_count = g_conc_recv_count + 1
@@ -2264,7 +2327,9 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
             _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
             cell_store(ra, 8, CONC_ACT_WAITING)
             _conc_unlock()
+            t0 := _conc_now_ms()
             conc_schedule()
+            _conc_wait_record(t0)
             ra2 := _conc_act_at(_conc_cur_id())
             if _conc_word(ra2) == 0:
                 return 0
@@ -2295,7 +2360,9 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
         a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
         _conc_unlock()
+        t0 := _conc_now_ms()
         conc_schedule()
+        _conc_wait_record(t0)
 
 fn conc_sched_try_recv_int(ch: string) -> int, pub:
     // Non-blocking receive used by timeout executors. The sentinel values are
@@ -2347,13 +2414,31 @@ fn conc_sched_try_recv_int(ch: string) -> int, pub:
     return CONC_TRY_EMPTY
 
 fn _conc_now_ms() -> int:
-    ts := alloc(16)
+    // Per-M scratch timespec: this is called from every worker in park/wait
+    // accounting, so allocating here both raced and polluted the bump heap.
+    ts : ., mut = ""
+    if _conc_raw(g_conc_now_ts_m) != 0:
+        ts = _conc_ptr(_conc_addr(g_conc_now_ts_m) + _conc_m() * 16)
+    else:
+        ts = alloc(16)
     cell_store(ts, 0, 0)
     cell_store(ts, 8, 0)
     r := syscall3(228, 1, ts, 0)  // clock_gettime(CLOCK_MONOTONIC)
     if r < 0:
         return -1
     return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
+fn _conc_wait_record(t0: int):
+    if t0 < 0:
+        return
+    now := _conc_now_ms()
+    if now < t0:
+        return
+    d := now - t0
+    g_conc_wait_count = g_conc_wait_count + 1
+    g_conc_wait_ms_total = g_conc_wait_ms_total + d
+    if d > g_conc_wait_ms_max:
+        g_conc_wait_ms_max = d
 
 fn conc_now_ms() -> int, pub:
     return _conc_now_ms()

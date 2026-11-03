@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import subprocess
 import sys
@@ -76,16 +77,23 @@ def select_changed(files: list[str]) -> list[str]:
     return out or SMOKE
 
 
-def run_tests(names: list[str]) -> int:
+def run_one(name: str, env: dict[str, str]) -> tuple[str, int]:
+    print(f"== {name}", flush=True)
+    r = subprocess.run([sys.executable, str(TESTS / name)], cwd=BASE, env=env)
+    return name, r.returncode
+
+
+def run_tests(names: list[str], jobs: int | None = None) -> int:
     env = os.environ.copy()
     env.setdefault("TMPDIR", "/tmp")
+    workers = jobs or min(4, os.cpu_count() or 1)
     failed: list[str] = []
-    for name in names:
-        path = TESTS / name
-        print(f"== {name}", flush=True)
-        r = subprocess.run([sys.executable, str(path)], cwd=BASE, env=env)
-        if r.returncode != 0:
-            failed.append(name)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(run_one, name, env) for name in names]
+        for future in concurrent.futures.as_completed(futures):
+            name, rc = future.result()
+            if rc != 0:
+                failed.append(name)
     print()
     if failed:
         print(f"FAILED: {', '.join(failed)}")
@@ -96,6 +104,9 @@ def run_tests(names: list[str]) -> int:
 
 def main() -> int:
     arg = sys.argv[1] if len(sys.argv) > 1 else "changed"
+    jobs : int | None = None
+    if len(sys.argv) > 3 and sys.argv[2] == "--jobs":
+        jobs = max(1, int(sys.argv[3]))
     if arg == "list":
         print("conc:", " ".join(CONC))
         print("compiler:", " ".join(COMPILER))
@@ -106,11 +117,11 @@ def main() -> int:
         names = select_changed(files)
         print("changed files:", ", ".join(files) if files else "(clean)")
         print("selected:", ", ".join(names))
-        return run_tests(names)
+        return run_tests(names, jobs)
     if arg == "conc":
-        return run_tests(CONC)
+        return run_tests(CONC, jobs)
     if arg == "full":
-        return run_tests(CONC + COMPILER)
+        return run_tests(CONC + COMPILER, jobs)
     print(f"unknown gate: {arg}", file=sys.stderr)
     print("use: changed | conc | full | list", file=sys.stderr)
     return 2
