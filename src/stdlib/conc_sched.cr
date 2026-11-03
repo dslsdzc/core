@@ -819,7 +819,7 @@ fn conc_sched_init():
     g_conc_timespec = _conc_sched_alloc(16)
     g_conc_sig_ts = _conc_sched_alloc(16)
     cell_store(g_conc_timespec, 0, 0)
-    cell_store(g_conc_timespec, 8, 2000000)
+    cell_store(g_conc_timespec, 8, 200000)
     _conc_preempt_install()
     iq : ., mut = 0
     loop:
@@ -2138,6 +2138,9 @@ fn _conc_now_ms() -> int:
     if r < 0:
         return -1
     return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
+fn conc_now_ms() -> int, pub:
+    return _conc_now_ms()
 
 fn _conc_sleep_ms(ms: int):
     if ms <= 0:
