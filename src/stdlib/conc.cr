@@ -111,6 +111,8 @@ g_conc_call_table : string, mut
 // empty queue from an output-allocation failure without changing its string
 // return type.
 g_conc_last_error : int, mut = 0
+g_conc_alloc_fail_after : int, mut = -1
+g_conc_alloc_failures : int, mut = 0
 
 // Layout identity table: layout id -> element size + user hash. Populated by
 // conc_layout_declare; consumers can check that a descriptor's layout is known
@@ -184,6 +186,11 @@ fn _conc_global_alloc(size: int) -> string:
     // the previous "never reset" global-heap behavior.
     if size <= 0:
         return _conc_ptr(0)
+    if g_conc_alloc_fail_after >= 0:
+        if g_conc_alloc_fail_after == 0:
+            g_conc_alloc_failures = g_conc_alloc_failures + 1
+            return _conc_ptr(0)
+        g_conc_alloc_fail_after = g_conc_alloc_fail_after - 1
     // Ask for size + 8 so the payload can carry the Core string length word
     // immediately before its data pointer, like the heap allocator does.
     raw := syscall6(9, 0, size + 8, 3, 34, -1, 0)
@@ -386,6 +393,15 @@ fn conc_is_aligned(p: string, align: int) -> int, pub:
     if _conc_addr(p) % align == 0:
         return 1
     return 0
+
+fn conc_set_alloc_fail_after(n: int) -> int, pub:
+    if n < 0:
+        n = -1
+    g_conc_alloc_fail_after = n
+    return 0
+
+fn conc_alloc_failures() -> int, pub:
+    return g_conc_alloc_failures
 
 fn conc_last_error() -> int, pub:
     return g_conc_last_error

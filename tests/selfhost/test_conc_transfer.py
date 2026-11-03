@@ -215,6 +215,50 @@ fn main() -> int:
 """
 
 
+ALLOC_FAIL = """\
+import conc
+
+fn main() -> int:
+    r := conc_region_new(65536)
+    if r < 0:
+        return 1
+    ref := conc_ref_alloc(r, 8, 3)
+    if conc_ref_ok(ref) == 0:
+        return 2
+    conc_set_alloc_fail_after(0)
+    bad := conc_ref_alloc(r, 8, 3)
+    if conc_ref_ok(bad) != 0:
+        return 3
+    if conc_alloc_failures() < 1:
+        return 4
+    conc_set_alloc_fail_after(-1)
+    good := conc_ref_alloc(r, 8, 3)
+    if conc_ref_ok(good) == 0:
+        return 5
+    return 0
+"""
+
+SPACE_EXHAUST = """\
+import conc
+
+fn main() -> int:
+    h := conc_space_create(CONC_SPACE_HOST, 1024)
+    if h < 0:
+        return 1
+    conc_layout_declare(7, 512, 0)
+    r := conc_ref_alloc_space(h, 512, 7)
+    if conc_ref_ok(r) == 0:
+        return 2
+    c := conc_space_copy(r, h)
+    if conc_ref_ok(c) != 0:
+        return 3
+    if conc_transfer_failures() == 0:
+        return 4
+    if conc_xfer_copy_bytes() != 0:
+        return 5
+    return 0
+"""
+
 REF_EPOCH = """\
 import conc
 
@@ -280,6 +324,8 @@ def main() -> int:
         ("ref_transfer", TRANSFER, 60, 0),
         ("ref_channel_epoch", REF_EPOCH, 60, 0),
         ("space_transfer", SPACE_TRANSFER, 60, 0),
+        ("alloc_fail", ALLOC_FAIL, 60, 0),
+        ("space_exhaust", SPACE_EXHAUST, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

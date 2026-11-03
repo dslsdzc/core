@@ -181,6 +181,41 @@ fn main() -> int:
     return 0
 """
 
+METRICS = """\
+import sched
+import chan
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    conc_metrics_reset()
+    a := go work(1)
+    b := go work(2)
+    r1 := chan_recv(a)
+    r2 := chan_recv(b)
+    if r1 + r2 != 5:
+        return 1
+    if conc_spawn_count() < 2:
+        return 2
+    if conc_ready_push_count() < 2:
+        return 3
+    if conc_ready_pop_count() < 2:
+        return 4
+    if conc_send_count() < 2:
+        return 5
+    if conc_recv_count() < 2:
+        return 6
+    if conc_wake_count() < 1:
+        return 7
+    if conc_ready_len(0) < 0:
+        return 8
+    if str_len(conc_metrics_explain()) < 50:
+        return 9
+    return 0
+"""
+
 SPAWN_STRESS = """\
 import sched
 import chan
@@ -248,6 +283,7 @@ def main() -> int:
         ("four_workers_queue", FOUR_WORKERS, 60),
         ("eight_workers_queue", EIGHT_WORKERS, 90),
         ("cross_m_pingpong", CROSS_M_PINGPONG, 60),
+        ("metrics", METRICS, 90),
         ("work_steal", WORK_STEAL, 120),
         ("spawn_stress", SPAWN_STRESS, 120),
     ]

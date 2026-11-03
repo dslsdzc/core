@@ -55,6 +55,19 @@ g_conc_yield_claim_m : string, mut
 g_conc_queue_lock_m : string, mut
 g_conc_steal_attempts : int, mut = 0
 g_conc_steal_count : int, mut = 0
+g_conc_spawn_count : int, mut = 0
+g_conc_yield_count : int, mut = 0
+g_conc_ready_push_count : int, mut = 0
+g_conc_ready_pop_count : int, mut = 0
+g_conc_park_count : int, mut = 0
+g_conc_futex_wait_count : int, mut = 0
+g_conc_wake_count : int, mut = 0
+g_conc_preempt_signal_count : int, mut = 0
+g_conc_preempt_direct_count : int, mut = 0
+g_conc_preempt_tick_count : int, mut = 0
+g_conc_send_count : int, mut = 0
+g_conc_recv_count : int, mut = 0
+g_conc_close_count : int, mut = 0
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
@@ -68,6 +81,7 @@ fn conc_preempt_signal():
     // switch directly. The per-M claim word prevents a nested switch while a
     // cooperative yield is already in flight.
     if g_conc_signal_preempt != 0:
+        g_conc_preempt_signal_count = g_conc_preempt_signal_count + 1
         g_conc_preempt_flag = 1
         if g_conc_inited != 0:
             if _conc_raw(g_conc_preempt_disable_m) != 0:
@@ -87,6 +101,7 @@ fn conc_preempt_signal():
                                         if rt_atomic_cas(g_conc_yield_claim_m,
                                                          m * 8, 0, 1) != 0:
                                             g_conc_preempt_flag = 0
+                                            g_conc_preempt_direct_count = g_conc_preempt_direct_count + 1
                                             _conc_yield_try(1)
 
 fn _conc_preempt_install():
@@ -123,14 +138,122 @@ fn _conc_seq_addr(m: int) -> int:
     return _conc_addr(g_conc_seq_m) + m * 8
 
 fn _conc_futex_wait(addr: int, val: int) -> int:
+    g_conc_futex_wait_count = g_conc_futex_wait_count + 1
     // futex(uaddr, FUTEX_WAIT, val, timeout, uaddr2, val3). The 2 ms timeout
     // is a safety net for channel polling (the main thread is not a channel
     // waiter), so a missed notification delays but never deadlocks.
     return syscall6(202, addr, 0, val, _conc_addr(g_conc_timespec), 0, 0)
 
 fn _conc_futex_wake(addr: int) -> int:
+    g_conc_wake_count = g_conc_wake_count + 1
     // futex(uaddr, FUTEX_WAKE, 1, 0, 0, 0)
     return syscall6(202, addr, 1, 1, 0, 0, 0)
+
+fn conc_spawn_count() -> int, pub:
+    return g_conc_spawn_count
+
+fn conc_yield_count() -> int, pub:
+    return g_conc_yield_count
+
+fn conc_ready_push_count() -> int, pub:
+    return g_conc_ready_push_count
+
+fn conc_ready_pop_count() -> int, pub:
+    return g_conc_ready_pop_count
+
+fn conc_park_count() -> int, pub:
+    return g_conc_park_count
+
+fn conc_futex_wait_count() -> int, pub:
+    return g_conc_futex_wait_count
+
+fn conc_wake_count() -> int, pub:
+    return g_conc_wake_count
+
+fn conc_preempt_signal_count() -> int, pub:
+    return g_conc_preempt_signal_count
+
+fn conc_preempt_direct_count() -> int, pub:
+    return g_conc_preempt_direct_count
+
+fn conc_preempt_tick_count() -> int, pub:
+    return g_conc_preempt_tick_count
+
+fn conc_send_count() -> int, pub:
+    return g_conc_send_count
+
+fn conc_recv_count() -> int, pub:
+    return g_conc_recv_count
+
+fn conc_close_count() -> int, pub:
+    return g_conc_close_count
+
+fn conc_metrics_reset() -> int, pub:
+    g_conc_spawn_count = 0
+    g_conc_yield_count = 0
+    g_conc_ready_push_count = 0
+    g_conc_ready_pop_count = 0
+    g_conc_park_count = 0
+    g_conc_futex_wait_count = 0
+    g_conc_wake_count = 0
+    g_conc_steal_attempts = 0
+    g_conc_steal_count = 0
+    g_conc_preempt_signal_count = 0
+    g_conc_preempt_direct_count = 0
+    g_conc_preempt_tick_count = 0
+    g_conc_send_count = 0
+    g_conc_recv_count = 0
+    g_conc_close_count = 0
+    return 0
+
+fn conc_metrics_explain() -> string, pub:
+    out : ., mut = "spawn=" + _conc_num_str(g_conc_spawn_count)
+    out = out + " yield=" + _conc_num_str(g_conc_yield_count)
+    out = out + " push=" + _conc_num_str(g_conc_ready_push_count)
+    out = out + " pop=" + _conc_num_str(g_conc_ready_pop_count)
+    out = out + " park=" + _conc_num_str(g_conc_park_count)
+    out = out + " futexwait=" + _conc_num_str(g_conc_futex_wait_count)
+    out = out + " wake=" + _conc_num_str(g_conc_wake_count)
+    out = out + " steal=" + _conc_num_str(g_conc_steal_count)
+    out = out + " steal_try=" + _conc_num_str(g_conc_steal_attempts)
+    out = out + " sig=" + _conc_num_str(g_conc_preempt_signal_count)
+    out = out + " direct=" + _conc_num_str(g_conc_preempt_direct_count)
+    out = out + " tick=" + _conc_num_str(g_conc_preempt_tick_count)
+    out = out + " send=" + _conc_num_str(g_conc_send_count)
+    out = out + " recv=" + _conc_num_str(g_conc_recv_count)
+    out = out + " close=" + _conc_num_str(g_conc_close_count)
+    return out
+
+fn conc_ready_len(m: int) -> int, pub:
+    if m < 0 || m >= 64:
+        return -1
+    if _conc_raw(g_conc_queue_lock_m) == 0:
+        return 0
+    slots : ., mut = g_conc_slots
+    if slots < 1:
+        slots = 1
+    if slots > 64:
+        slots = 64
+    _conc_queue_lock(m)
+    total : ., mut = 0
+    si : ., mut = 0
+    loop:
+        if si >= slots:
+            break
+        cur : ., mut = cell_load(g_conc_ready_head_s, (m + si * g_conc_m_count) * 8)
+        lim : ., mut = 0
+        loop:
+            if cur < 0 || lim > 10000:
+                break
+            total = total + 1
+            ca := _conc_act_at(cur)
+            if _conc_word(ca) == 0:
+                break
+            cur = cell_load(ca, 88)
+            lim = lim + 1
+        si = si + 1
+    _conc_queue_unlock(m)
+    return total
 
 fn conc_steal_count() -> int, pub:
     return g_conc_steal_count
@@ -182,6 +305,7 @@ fn conc_park(m: int):
     // and the futex call is observed as EAGAIN rather than a lost wakeup.
     if _conc_raw(g_conc_queue_lock_m) == 0:
         return
+    g_conc_park_count = g_conc_park_count + 1
     slots : ., mut = g_conc_slots
     if slots < 1:
         slots = 1
@@ -347,6 +471,7 @@ fn _conc_queue_has_slot(slot: int, unstarted_only: int) -> int:
     return 0
 
 fn _conc_ready_push(id: int):
+    g_conc_ready_push_count = g_conc_ready_push_count + 1
     a := _conc_act_at(id)
     if _conc_word(a) == 0:
         return
@@ -367,6 +492,7 @@ fn _conc_ready_push(id: int):
     _conc_futex_wake(_conc_seq_addr(m))
 
 fn _conc_ready_pop() -> int:
+    g_conc_ready_pop_count = g_conc_ready_pop_count + 1
     m := _conc_m()
     if _conc_raw(g_conc_queue_lock_m) == 0:
         return -1
@@ -671,6 +797,7 @@ fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
     id := _conc_act_new(entry, arg, result_ch, "")
     _conc_unlock()
     if id >= 0:
+        g_conc_spawn_count = g_conc_spawn_count + 1
         _conc_ready_push(id)
     return id
 
@@ -681,6 +808,7 @@ fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
     id := _conc_act_new(entry, arg, result_ch, yield_ch)
     _conc_unlock()
     if id >= 0:
+        g_conc_spawn_count = g_conc_spawn_count + 1
         _conc_ready_push(id)
     return id
 
@@ -787,6 +915,7 @@ fn _conc_yield_try(claimed: int) -> int:
         rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
         return 0
     cell_store(a, 8, CONC_ACT_YIELDING)
+    g_conc_yield_count = g_conc_yield_count + 1
     _conc_ready_push(id)
     conc_schedule()
     return 1
@@ -1116,12 +1245,14 @@ fn conc_preempt_tick(), pub:
     if g_conc_preempt_flag != 0:
         if _conc_yield_try(0) != 0:
             g_conc_preempt_flag = 0
+            g_conc_preempt_tick_count = g_conc_preempt_tick_count + 1
         return
     m := _conc_m()
     q := cell_load(g_conc_quantum_m, m * 8) - 1
     if q <= 0:
         cell_store(g_conc_quantum_m, m * 8, g_conc_quantum)
-        conc_yield()
+        if _conc_yield_try(0) != 0:
+            g_conc_preempt_tick_count = g_conc_preempt_tick_count + 1
     else:
         cell_store(g_conc_quantum_m, m * 8, q)
 
@@ -1317,6 +1448,7 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     return out
 
 fn conc_sched_send_int(ch: string, val: int) -> int, pub:
+    g_conc_send_count = g_conc_send_count + 1
     conc_sched_init()
     loop:
         _conc_lock()
@@ -1384,6 +1516,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
         conc_schedule()
 
 fn conc_sched_recv_int(ch: string) -> int, pub:
+    g_conc_recv_count = g_conc_recv_count + 1
     conc_sched_init()
     loop:
         _conc_lock()
@@ -1456,6 +1589,7 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
         conc_schedule()
 
 fn conc_sched_close(ch: string), pub:
+    g_conc_close_count = g_conc_close_count + 1
     conc_sched_init()
     _conc_lock()
     if conc_channel_len(ch) < 0:

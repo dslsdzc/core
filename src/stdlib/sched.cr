@@ -9,6 +9,7 @@ import arena
 
 g_num_workers : int, mut = 0
 g_sched_inited : int, mut = 0
+g_sched_fail_workers : int, mut = 0
 
 
 fn sched_init(), pub:
@@ -70,10 +71,19 @@ fn sched_go(fn_ptr: int, arg: int) -> string, pub:
     conc_sched_init()
     return conc_go(fn_ptr, arg)
 
+fn sched_set_fail_workers(n: int) -> int, pub:
+    if n < 0:
+        n = 0
+    g_sched_fail_workers = n
+    return 0
+
 fn sched_spawn_workers(n: int), pub:
     if n <= 1:
         return
     g_num_workers = n - 1
+    if g_sched_fail_workers > 0:
+        g_sched_fail_workers = g_sched_fail_workers - 1
+        return
     m_start_workers(n)
 
 
