@@ -79,6 +79,8 @@ CONC_MSG_HEADER : int = 32
 CONC_REF_MAGIC : int = 1129270860
 CONC_REF_MOVED_MAGIC : int = 1129270862
 CONC_REF_LOAN_MAGIC : int = 1129270863
+CONC_REF_SHARED_MAGIC : int = 1129270864
+CONC_REF_SPACE_OFF : int = 56
 CONC_REF_SIZE : int = 64
 CONC_REF_NONCE : int = 48
 CONC_MAX_LAYOUTS : int = 64
@@ -147,6 +149,7 @@ g_conc_loans_ref : string, mut
 g_conc_loans_nonce : string, mut
 g_conc_loan_count : int, mut = 0
 g_conc_loan_seq : int, mut = 0
+g_conc_shared_maps : int, mut = 0
 
 // Cursor for the plan-text tokenizer. CP-2 loads one plan at a time.
 g_conc_plan_parse_pos : int, mut = 0
@@ -609,6 +612,8 @@ fn _conc_loan_take(src: string, loan: string) -> int:
 fn conc_ref_space(ref: string) -> int, pub:
     if conc_ref_ok(ref) == 0:
         return -1
+    if cell_load(ref, 0) == CONC_REF_SHARED_MAGIC:
+        return cell_load(ref, CONC_REF_SPACE_OFF)
     return conc_space_of_region(cell_load(ref, 8))
 
 fn conc_ref_alloc_space(space: int, size: int, layout: int) -> string, pub:
@@ -620,6 +625,30 @@ fn conc_ref_alloc_space(space: int, size: int, layout: int) -> string, pub:
         cell_store(g_conc_space_used, space * 8,
                    cell_load(g_conc_space_used, space * 8) + size)
     return ref
+
+fn conc_shared_map(ref: string, dst_space: int) -> string, pub:
+    // Host shared-mapping model: a descriptor that aliases the source payload
+    // in the destination space. No bytes are copied; writes through either
+    // descriptor are visible through the other.
+    if conc_ref_ok(ref) == 0:
+        return _conc_ptr(0)
+    if conc_space_ok(dst_space) == 0:
+        return _conc_ptr(0)
+    p := _conc_global_alloc(CONC_REF_SIZE)
+    if _conc_is_null(p) != 0:
+        return _conc_ptr(0)
+    cell_store(p, 0, CONC_REF_SHARED_MAGIC)
+    cell_store(p, 8, -1)
+    cell_store(p, 16, _conc_addr(conc_ref_payload(ref)))
+    cell_store(p, 24, cell_load(ref, 24))
+    cell_store(p, 32, cell_load(ref, 32))
+    cell_store(p, 40, 0)
+    cell_store(p, CONC_REF_SPACE_OFF, dst_space)
+    g_conc_shared_maps = g_conc_shared_maps + 1
+    return p
+
+fn conc_shared_map_count() -> int, pub:
+    return g_conc_shared_maps
 
 fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int,
                          kind: int):
@@ -652,7 +681,7 @@ fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
         return _conc_xfer_fail()
     if conc_space_ok(dst_space) == 0:
         return _conc_xfer_fail()
-    src_space := conc_space_of_region(cell_load(ref, 8))
+    src_space := conc_ref_space(ref)
     if src_space < 0:
         return _conc_xfer_fail()
     size := cell_load(ref, 24)
@@ -849,7 +878,18 @@ fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:
 fn conc_ref_ok(ref: string) -> int, pub:
     if _conc_is_null(ref) != 0:
         return 0
-    if cell_load(ref, 0) != CONC_REF_MAGIC:
+    magic := cell_load(ref, 0)
+    if magic == CONC_REF_SHARED_MAGIC:
+        sz := cell_load(ref, 24)
+        if sz <= 0:
+            return 0
+        sp := _conc_ptr(cell_load(ref, 16))
+        if _conc_header_ok(sp) == 0:
+            return 0
+        if _conc_msg_size(sp) != sz:
+            return 0
+        return 1
+    if magic != CONC_REF_MAGIC:
         return 0
     rid := cell_load(ref, 8)
     if _conc_region_valid(rid) == 0:
@@ -878,6 +918,8 @@ fn conc_ref_ok(ref: string) -> int, pub:
 fn conc_ref_payload(ref: string) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_ptr(0)
+    if cell_load(ref, 0) == CONC_REF_SHARED_MAGIC:
+        return _conc_ptr(cell_load(ref, 16))
     rid := cell_load(ref, 8)
     off := cell_load(ref, 16)
     base := load_str_ptr(g_conc_region_block, rid * 8)
@@ -886,10 +928,14 @@ fn conc_ref_payload(ref: string) -> string, pub:
 fn conc_ref_region(ref: string) -> int, pub:
     if _conc_is_null(ref) != 0:
         return -1
+    if cell_load(ref, 0) == CONC_REF_SHARED_MAGIC:
+        return -1
     return cell_load(ref, 8)
 
 fn conc_ref_offset(ref: string) -> int, pub:
     if _conc_is_null(ref) != 0:
+        return -1
+    if cell_load(ref, 0) == CONC_REF_SHARED_MAGIC:
         return -1
     return cell_load(ref, 16)
 
@@ -2388,9 +2434,9 @@ fn _conc_plan_cert_find(plan: int, kind: int) -> int:
     return -1
 
 fn conc_plan_shared_mapping_supported() -> int, pub:
-    // The CPU runtime maps each space to a process-local region; there is no
-    // shared-mapping backend to certify.
-    return 0
+    // Host shared mapping is implemented through conc_shared_map: descriptors
+    // alias the source payload across spaces without copying.
+    return 1
 
 fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
     // Re-derive a known certificate from the plan. Unknown/unimplemented

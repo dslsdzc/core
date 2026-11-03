@@ -37,7 +37,7 @@ fn main() -> int:
         return 63
     if conc_runtime_memory() <= 0:
         return 64
-    if conc_plan_shared_mapping_supported() != 0:
+    if conc_plan_shared_mapping_supported() != 1:
         return 65
     if conc_plan_target_compatible(plan) != 0:
         return 66

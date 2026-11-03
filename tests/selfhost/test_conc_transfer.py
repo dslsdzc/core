@@ -215,6 +215,43 @@ fn main() -> int:
 """
 
 
+SHARED_MAP = """\
+import conc
+
+fn main() -> int:
+    h := conc_space_create(CONC_SPACE_HOST, 4096)
+    d := conc_space_create(CONC_SPACE_DEVICE, 4096)
+    conc_layout_declare(7, 16, 0)
+    r := conc_ref_alloc_space(h, 16, 7)
+    if conc_ref_ok(r) == 0:
+        return 1
+    cell_store(conc_ref_payload(r), 0, 42)
+    s := conc_shared_map(r, d)
+    if conc_ref_ok(s) == 0:
+        return 2
+    if conc_ref_space(s) != d:
+        return 3
+    if conc_ref_region(s) != -1:
+        return 4
+    if cell_load(conc_ref_payload(s), 0) != 42:
+        return 5
+    cell_store(conc_ref_payload(s), 0, 43)
+    if cell_load(conc_ref_payload(r), 0) != 43:
+        return 6
+    if conc_shared_map_count() != 1:
+        return 7
+    c := conc_space_copy(s, h)
+    if conc_ref_ok(c) == 0:
+        return 8
+    if cell_load(conc_ref_payload(c), 0) != 43:
+        return 9
+    if conc_transfer_bytes() != 16:
+        return 10
+    if conc_xfer_copy_bytes() != 16:
+        return 11
+    return 0
+"""
+
 ALLOC_FAIL = """\
 import conc
 
@@ -324,6 +361,7 @@ def main() -> int:
         ("ref_transfer", TRANSFER, 60, 0),
         ("ref_channel_epoch", REF_EPOCH, 60, 0),
         ("space_transfer", SPACE_TRANSFER, 60, 0),
+        ("shared_map", SHARED_MAP, 60, 0),
         ("alloc_fail", ALLOC_FAIL, 60, 0),
         ("space_exhaust", SPACE_EXHAUST, 60, 0),
     ]
