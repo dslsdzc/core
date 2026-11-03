@@ -20,6 +20,9 @@ CONC_RESULT_CANCELLED : int, pub = -2
 CONC_RESULT_TIMEOUT : int, pub = -3
 CONC_TRY_EMPTY : int, pub = -9223372036854775807
 CONC_TRY_CLOSED : int, pub = -9223372036854775806
+CONC_CHAN_OK : int, pub = 0
+CONC_CHAN_CLOSED : int, pub = -1
+CONC_CHAN_INVALID : int, pub = -2
 
 CONC_CH_STATE_SIZE : int = 48
 CONC_WAIT_SEND : int = 0
@@ -47,6 +50,7 @@ g_conc_free_count : int, mut = 0
 g_conc_free_cap : int, mut = 0
 g_conc_quantum : int, mut = 2000
 g_conc_quantum_m : string, mut
+g_conc_quantum_cfg_m : string, mut
 g_conc_seq_m : string, mut
 g_conc_timespec : string, mut
 g_conc_preempt_flag : int, mut = 0
@@ -75,6 +79,7 @@ g_conc_recv_count : int, mut = 0
 g_conc_close_count : int, mut = 0
 g_conc_flow_cancel : int, mut = 0
 g_conc_pipeline_cancel : int, mut = 0
+g_conc_plan_cancel : int, mut = 0
 g_conc_flow_ych : string, mut
 g_conc_flow_rch : string, mut
 
@@ -141,7 +146,26 @@ fn conc_set_quantum(n: int), pub:
             if i >= 64:
                 break
             cell_store(g_conc_quantum_m, i * 8, n)
+            cell_store(g_conc_quantum_cfg_m, i * 8, n)
             i = i + 1
+
+fn conc_set_quantum_m(m: int, n: int) -> int, pub:
+    if m < 0 || m >= 64:
+        return -1
+    if n < 1:
+        n = 1
+    if _conc_raw(g_conc_quantum_cfg_m) == 0:
+        return -1
+    cell_store(g_conc_quantum_cfg_m, m * 8, n)
+    cell_store(g_conc_quantum_m, m * 8, n)
+    return 0
+
+fn conc_get_quantum_m(m: int) -> int, pub:
+    if m < 0 || m >= 64:
+        return -1
+    if _conc_raw(g_conc_quantum_cfg_m) == 0:
+        return g_conc_quantum
+    return cell_load(g_conc_quantum_cfg_m, m * 8)
 
 fn _conc_seq_addr(m: int) -> int:
     return _conc_addr(g_conc_seq_m) + m * 8
@@ -290,6 +314,25 @@ fn conc_plan_target_compatible(plan: int) -> int, pub:
     if mem > 0 && g_arena_pool_limit > 0 && mem > g_arena_pool_limit:
         return 0
     return 1
+
+fn conc_state_explain() -> string, pub:
+    out : ., mut = "ms=" + _conc_num_str(g_conc_m_count)
+    out = out + " acts=" + _conc_num_str(g_conc_act_count)
+    out = out + " waiting=" + _conc_num_str(conc_waiting_count())
+    out = out + " deadlock=" + _conc_num_str(conc_deadlock_suspect())
+    mc : ., mut = g_conc_m_count
+    if mc > 64:
+        mc = 64
+    m : ., mut = 0
+    loop:
+        if m >= mc:
+            break
+        out = out + "\nM" + _conc_num_str(m)
+        out = out + " cur=" + _conc_num_str(cell_load(g_conc_cur_m, m * 8))
+        out = out + " ready=" + _conc_num_str(conc_ready_len(m))
+        out = out + " quantum=" + _conc_num_str(conc_get_quantum_m(m))
+        m = m + 1
+    return out
 
 fn conc_steal_count() -> int, pub:
     return g_conc_steal_count
@@ -742,6 +785,7 @@ fn conc_sched_init():
     g_conc_free = _conc_sched_alloc(64 * 8)
     g_conc_free_cap = 64
     g_conc_quantum_m = _conc_sched_alloc(64 * 8)
+    g_conc_quantum_cfg_m = _conc_sched_alloc(64 * 8)
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
     g_conc_timespec = _conc_sched_alloc(16)
     cell_store(g_conc_timespec, 0, 0)
@@ -752,6 +796,7 @@ fn conc_sched_init():
         if iq >= 64:
             break
         cell_store(g_conc_quantum_m, iq * 8, g_conc_quantum)
+        cell_store(g_conc_quantum_cfg_m, iq * 8, g_conc_quantum)
         cell_store(g_conc_seq_m, iq * 8, 0)
         iq = iq + 1
     g_conc_inited = 1
@@ -971,6 +1016,8 @@ fn conc_yield(), pub:
     _conc_yield_try(0)
 
 fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
+    if g_conc_plan_cancel != 0:
+        return CONC_RESULT_CANCELLED
     // Edge-driven CPU executor. The caller is already executing `root`; this
     // function spawns the transitive SPAWN/JOIN graph, uses SPAWN and JOIN
     // edges as start dependencies, and joins every activation exactly once.
@@ -1096,6 +1143,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
     loop:
         if oi >= on:
             break
+        if g_conc_plan_cancel != 0:
+            return CONC_RESULT_CANCELLED
         b := cell_load(order, oi * 8)
         // JOIN: wait for each incoming source that has already run.
         je : ., mut = 0
@@ -1150,6 +1199,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
             if _conc_word(h) == 0:
                 return -1
             cell_store(handles, b * 8, h)
+        if g_conc_plan_cancel != 0:
+            return CONC_RESULT_CANCELLED
         oi = oi + 1
     // Receive the results of bodies that were not consumed by a JOIN.
     i = 0
@@ -1159,6 +1210,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         if cell_load(handles, i * 8) >= 0:
             if cell_load(recv_done, i * 8) == 0:
                 total = total + conc_sched_recv_int(cell_load(handles, i * 8))
+                if g_conc_plan_cancel != 0:
+                    return CONC_RESULT_CANCELLED
         i = i + 1
     return total
 
@@ -1387,6 +1440,82 @@ fn conc_flow_run_timeout(entry: int, arg: int, out: string,
             _conc_sleep_ms(1)
     return n
 
+fn conc_plan_cancelled() -> int, pub:
+    return g_conc_plan_cancel
+
+fn conc_plan_cancel(plan: int, channels: string) -> int, pub:
+    g_conc_plan_cancel = 1
+    if conc_plan_validate(plan) != 0 && _conc_is_null(channels) == 0:
+        n := conc_plan_channel_count(plan)
+        i : ., mut = 0
+        loop:
+            if i >= n:
+                break
+            h := load_str_ptr(channels, i * 8)
+            if _conc_word(h) != 0:
+                conc_sched_close(h)
+            i = i + 1
+    return 0
+
+fn conc_plan_reset() -> int, pub:
+    g_conc_plan_cancel = 0
+    return 0
+
+fn _conc_plan_timeout_entry(ctx: string) -> int:
+    plan := cell_load(ctx, 0)
+    root := cell_load(ctx, 8)
+    chs := load_str_ptr(ctx, 16)
+    rch := load_str_ptr(ctx, 24)
+    rc := conc_plan_run(plan, root, chs)
+    if _conc_word(rch) != 0:
+        conc_sched_send_int(rch, rc)
+    return 0
+
+fn conc_plan_run_timeout(plan: int, root: int, channels: string,
+                         timeout_ms: int) -> int, pub:
+    if timeout_ms <= 0:
+        return CONC_RESULT_TIMEOUT
+    if g_conc_plan_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if root < 0 || root >= conc_plan_body_count(plan):
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    r := _conc_global_region_get()
+    if r < 0:
+        return -1
+    rch := conc_channel_new(r, 8, 1)
+    if _conc_word(rch) == 0:
+        return -1
+    ctx := alloc(32)
+    cell_store(ctx, 0, plan)
+    cell_store(ctx, 8, root)
+    store_str_ptr(ctx, 16, channels)
+    store_str_ptr(ctx, 24, rch)
+    arg : ., mut = 0
+    unsafe:
+        arg = @ptr_of(ctx)
+    h := conc_spawn(@addr(_conc_plan_timeout_entry), arg, "")
+    if h < 0:
+        return -1
+    deadline := _conc_now_ms() + timeout_ms
+    loop:
+        v := conc_sched_try_recv_int(rch)
+        if v != CONC_TRY_EMPTY:
+            if v == CONC_TRY_CLOSED:
+                return -1
+            return v
+        if g_conc_plan_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        if _conc_now_ms() >= deadline:
+            conc_plan_cancel(plan, channels)
+            return CONC_RESULT_TIMEOUT
+        if conc_schedule() == 0:
+            _conc_sleep_ms(1)
+    return CONC_RESULT_TIMEOUT
+
 fn conc_pi_lock(word: string) -> int, pub:
     // Linux PI futex: FUTEX_LOCK_PI = 6. The kernel handles owner tracking and
     // priority inheritance; the word must be 4-byte aligned and zeroed first.
@@ -1543,7 +1672,7 @@ fn conc_preempt_tick(), pub:
     m := _conc_m()
     q := cell_load(g_conc_quantum_m, m * 8) - 1
     if q <= 0:
-        cell_store(g_conc_quantum_m, m * 8, g_conc_quantum)
+        cell_store(g_conc_quantum_m, m * 8, cell_load(g_conc_quantum_cfg_m, m * 8))
         if _conc_yield_try(0) != 0:
             g_conc_preempt_tick_count = g_conc_preempt_tick_count + 1
     else:
@@ -1958,6 +2087,24 @@ fn _conc_sleep_ms(ms: int):
     cell_store(ts, 8, (ms % 1000) * 1000000)
     r := syscall3(35, ts, 0, 0)  // nanosleep
     return
+
+fn conc_sched_send_int_status(ch: string, val: int) -> int, pub:
+    if conc_channel_len(ch) < 0:
+        return CONC_CHAN_INVALID
+    if conc_sched_is_closed(ch) != 0:
+        return CONC_CHAN_CLOSED
+    conc_sched_send_int(ch, val)
+    return CONC_CHAN_OK
+
+fn conc_sched_recv_int_status(ch: string, out: string) -> int, pub:
+    if conc_channel_len(ch) < 0:
+        return CONC_CHAN_INVALID
+    if conc_sched_is_closed(ch) != 0:
+        if conc_channel_len(ch) <= 0:
+            return CONC_CHAN_CLOSED
+    v := conc_sched_recv_int(ch)
+    cell_store(out, 0, v)
+    return CONC_CHAN_OK
 
 fn conc_sched_close(ch: string), pub:
     g_conc_close_count = g_conc_close_count + 1

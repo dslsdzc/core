@@ -183,6 +183,39 @@ fn main() -> int:
 """
 
 
+CHANNEL_STATUS = """\
+import sched
+import chan
+
+fn main() -> int:
+    sched_init()
+    ch := chan_make(8, 0)
+    out := alloc(8)
+    chan_close(ch)
+    if conc_sched_send_int_status(ch, 1) != CONC_CHAN_CLOSED:
+        return 1
+    if conc_sched_recv_int_status(ch, out) != CONC_CHAN_CLOSED:
+        return 2
+    bad := alloc(8)
+    if conc_sched_send_int_status(bad, 1) != CONC_CHAN_INVALID:
+        return 3
+    return 0
+"""
+
+STATE = """\
+import sched
+
+fn main() -> int:
+    sched_init_n(2)
+    if conc_set_quantum_m(0, 7) != 0:
+        return 1
+    if conc_get_quantum_m(0) != 7:
+        return 2
+    if str_len(conc_state_explain()) < 20:
+        return 3
+    return 0
+"""
+
 DEADLOCK = """\
 import sched
 import chan
@@ -287,6 +320,8 @@ def main() -> int:
         ("conc_sched_rendezvous", RENDEZVOUS, 30),
         ("conc_sched_mpmc", MPMC, 30),
         ("conc_sched_deadlock", DEADLOCK, 30),
+        ("conc_sched_channel_status", CHANNEL_STATUS, 30),
+        ("conc_sched_state", STATE, 30),
     ]
     passed = 0
     for name, source, timeout in cases:

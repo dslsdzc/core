@@ -378,6 +378,40 @@ fn main() -> int:
 """
 
 
+PLAN_TIMEOUT = """\
+import conc
+import sched
+import chan
+
+fn wait(ch: string) -> int:
+    return chan_recv(ch)
+
+fn dummy(x: int) -> int:
+    return 0
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_channel(p, 8, 0, CONC_PC_MPMC)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(wait), 1)
+    conc_plan_bind_param(p, 1, 0, 0)
+    conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
+    if conc_plan_validate(p) != 1:
+        return 2
+    ch := chan_make(8, 0)
+    cht := alloc(8)
+    cell_store(cht, 0, ch)
+    conc_plan_reset()
+    r := conc_plan_run_timeout(p, 0, cht, 20)
+    if r != CONC_RESULT_TIMEOUT:
+        return r
+    conc_plan_reset()
+    return 0
+"""
+
 PIPE_TIMEOUT = """\
 import conc
 import sched
@@ -753,6 +787,7 @@ def main() -> int:
         ("pipeline_run", PIPELINE_RUN, 60, 0),
         ("pipeline_cancel", PIPE_CANCEL, 90, 0),
         ("pipeline_timeout", PIPE_TIMEOUT, 90, 0),
+        ("plan_timeout", PLAN_TIMEOUT, 90, 0),
         ("slot_runtime", SLOTS, 60, 0),
         ("chain_plan_run", CHAIN_RUN, 60, 0),
         ("join_plan_run", JOIN_RUN, 60, 0),
