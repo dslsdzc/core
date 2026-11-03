@@ -39,6 +39,8 @@ g_conc_slot_rr_m : string, mut
 g_conc_spawn_rr : int, mut = 0
 g_conc_sched_sp_m : string, mut
 g_conc_lock : string, mut
+g_conc_ch_lock : string, mut
+g_conc_arena_lock : string, mut
 g_conc_m_count : int, mut = 1
 g_conc_slots : int, mut = 1
 g_conc_global_region : int, mut = -1
@@ -99,8 +101,19 @@ g_conc_cancel_mode : string, mut
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
-    // shared partition. Callers hold the conc lock while mutating them.
-    return arena_shared_alloc(size)
+    // shared partition. The shared arena allocator is not reentrant, and callers
+    // now hold different domain locks (global/channel/queue), so serialize the
+    // allocation itself here.
+    if _conc_raw(g_conc_arena_lock) == 0:
+        return arena_shared_alloc(size)
+    loop:
+        if rt_atomic_load(g_conc_arena_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_arena_lock, 0, 0, 1) != 0:
+                break
+        syscall3(24, 0, 0, 0)
+    p := arena_shared_alloc(size)
+    rt_atomic_store(g_conc_arena_lock, 0, 0)
+    return p
 
 fn _conc_now_ms_sig() -> int:
     if _conc_raw(g_conc_sig_ts) == 0:
@@ -442,6 +455,7 @@ fn conc_shutdown(), pub:
     // Cancellation propagation: close every registered channel and wake its
     // send/receive waiters before parking workers. A blocked activation then
     // returns through its normal close path instead of disappearing.
+    _conc_ch_lock()
     ci : ., mut = 0
     loop:
         if ci >= g_conc_ch_count:
@@ -450,6 +464,7 @@ fn conc_shutdown(), pub:
         _conc_wake_all(ci, CONC_WAIT_SEND)
         _conc_wake_all(ci, CONC_WAIT_RECV)
         ci = ci + 1
+    _conc_ch_unlock()
     m : ., mut = 0
     loop:
         if m >= 64:
@@ -800,6 +815,26 @@ fn _conc_unlock():
         if d > 0:
             cell_store(g_conc_preempt_disable_m, m * 8, d - 1)
 
+fn _conc_ch_lock():
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        cell_store(g_conc_preempt_disable_m, cur * 8,
+                   cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    loop:
+        if rt_atomic_load(g_conc_ch_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_ch_lock, 0, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_ch_unlock():
+    if _conc_raw(g_conc_ch_lock) != 0:
+        rt_atomic_store(g_conc_ch_lock, 0, 0)
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        d := cell_load(g_conc_preempt_disable_m, cur * 8)
+        if d > 0:
+            cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
+
 fn conc_preempt_disable(), pub:
     if g_conc_inited == 0:
         conc_sched_init()
@@ -837,6 +872,8 @@ fn conc_sched_init():
     arena_shared_init()
     if g_conc_inited != 0:
         return
+    g_conc_arena_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_arena_lock, 0, 0)
     g_conc_acts = _conc_sched_alloc(16 * 8)
     g_conc_act_cap = 16
     g_conc_ready_head_s = _conc_sched_alloc(4096 * 8)
@@ -858,6 +895,8 @@ fn conc_sched_init():
     g_conc_sched_sp_m = _conc_sched_alloc(64 * 8)
     g_conc_lock = _conc_sched_alloc(8)
     cell_store(g_conc_lock, 0, 0)
+    g_conc_ch_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_ch_lock, 0, 0)
     g_conc_cur_m = _conc_sched_alloc(64 * 8)
     g_conc_preempt_disable_m = _conc_sched_alloc(64 * 8)
     g_conc_yield_claim_m = _conc_sched_alloc(64 * 8)
@@ -1911,8 +1950,11 @@ fn conc_sched_is_closed(ch: string) -> int, pub:
     conc_sched_init()
     if conc_channel_len(ch) < 0:
         return 1
-    slot := _conc_ch_slot(ch)
-    return _conc_ch_closed(slot)
+    _conc_ch_lock()
+    slot := _conc_ch_slot_locked(ch)
+    out := _conc_ch_closed(slot)
+    _conc_ch_unlock()
+    return out
 
 fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
     // Drive a coroutine flow to completion, collecting each yielded int in
@@ -2084,8 +2126,7 @@ fn _conc_ch_grow():
     g_conc_ch_states = nb
     g_conc_ch_cap = nc
 
-fn _conc_ch_slot(ch: string) -> int:
-    conc_sched_init()
+fn _conc_ch_slot_locked(ch: string) -> int:
     i : ., mut = 0
     loop:
         if i >= g_conc_ch_count:
@@ -2103,6 +2144,13 @@ fn _conc_ch_slot(ch: string) -> int:
     cell_store(g_conc_ch_states, slot * CONC_CH_STATE_SIZE + 32, -1)
     cell_store(g_conc_ch_states, slot * CONC_CH_STATE_SIZE + 40, -1)
     g_conc_ch_count = slot + 1
+    return slot
+
+fn _conc_ch_slot(ch: string) -> int:
+    conc_sched_init()
+    _conc_ch_lock()
+    slot := _conc_ch_slot_locked(ch)
+    _conc_ch_unlock()
     return slot
 
 fn _conc_wait_push(slot: int, kind: int, id: int):
@@ -2217,17 +2265,17 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
     g_conc_send_count = g_conc_send_count + 1
     conc_sched_init()
     loop:
-        _conc_lock()
+        _conc_ch_lock()
         if conc_channel_len(ch) < 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             return -1
         esize := _conc_ch_esize(ch)
         if esize < 8:
-            _conc_unlock()
+            _conc_ch_unlock()
             return -1
-        slot := _conc_ch_slot(ch)
+        slot := _conc_ch_slot_locked(ch)
         if _conc_ch_closed(slot) != 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             return 0
         cap := _conc_ch_cap(ch)
         n := _conc_ch_len(ch)
@@ -2239,13 +2287,13 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
                     cell_store(ra, 72, val)
                     cell_store(ra, 8, CONC_ACT_RUNNABLE)
                     _conc_ready_push(rid)
-                    _conc_unlock()
+                    _conc_ch_unlock()
                     _conc_wake_main_seq()
                     return 0
-                _conc_unlock()
+                _conc_ch_unlock()
                 continue
             if _conc_cur_id() < 0:
-                _conc_unlock()
+                _conc_ch_unlock()
                 if conc_schedule() == 0:
                     if g_conc_m_count <= 1:
                         return 0
@@ -2255,7 +2303,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             cell_store(ca, 72, val)
             _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
             cell_store(ca, 8, CONC_ACT_WAITING)
-            _conc_unlock()
+            _conc_ch_unlock()
             t0 := _conc_now_ms()
             conc_schedule()
             _conc_wait_record(t0)
@@ -2269,11 +2317,11 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
             cell_store(buf, pos * esize, val)
             cell_store(ch, 24, n + 1)
             _conc_wake_one(slot, CONC_WAIT_RECV)
-            _conc_unlock()
+            _conc_ch_unlock()
             _conc_wake_main_seq()
             return 0
         if _conc_cur_id() < 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             if conc_schedule() == 0:
                 if g_conc_m_count <= 1:
                     return 0
@@ -2282,7 +2330,7 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
         _conc_wait_push(slot, CONC_WAIT_SEND, _conc_cur_id())
         a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
-        _conc_unlock()
+        _conc_ch_unlock()
         t0 := _conc_now_ms()
         conc_schedule()
         _conc_wait_record(t0)
@@ -2291,20 +2339,20 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
     g_conc_recv_count = g_conc_recv_count + 1
     conc_sched_init()
     loop:
-        _conc_lock()
+        _conc_ch_lock()
         if conc_channel_len(ch) < 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             return 0
         esize := _conc_ch_esize(ch)
         if esize < 8:
-            _conc_unlock()
+            _conc_ch_unlock()
             return 0
-        slot := _conc_ch_slot(ch)
+        slot := _conc_ch_slot_locked(ch)
         n := _conc_ch_len(ch)
         cap := _conc_ch_cap(ch)
         if cap == 0:
             if _conc_ch_closed(slot) != 0:
-                _conc_unlock()
+                _conc_ch_unlock()
                 return 0
             sid := _conc_wait_pop(slot, CONC_WAIT_SEND)
             if sid >= 0:
@@ -2314,10 +2362,10 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
                     v = cell_load(sa, 72)
                     cell_store(sa, 8, CONC_ACT_RUNNABLE)
                     _conc_ready_push(sid)
-                _conc_unlock()
+                _conc_ch_unlock()
                 return v
             if _conc_cur_id() < 0:
-                _conc_unlock()
+                _conc_ch_unlock()
                 if conc_schedule() == 0:
                     if g_conc_m_count <= 1:
                         return 0
@@ -2326,7 +2374,7 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
             ra := _conc_act_at(_conc_cur_id())
             _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
             cell_store(ra, 8, CONC_ACT_WAITING)
-            _conc_unlock()
+            _conc_ch_unlock()
             t0 := _conc_now_ms()
             conc_schedule()
             _conc_wait_record(t0)
@@ -2344,13 +2392,13 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
             cell_store(ch, 32, head)
             cell_store(ch, 24, n - 1)
             _conc_wake_one(slot, CONC_WAIT_SEND)
-            _conc_unlock()
+            _conc_ch_unlock()
             return v
         if _conc_ch_closed(slot) != 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             return 0
         if _conc_cur_id() < 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             if conc_schedule() == 0:
                 if g_conc_m_count <= 1:
                     return 0
@@ -2359,7 +2407,7 @@ fn conc_sched_recv_int(ch: string) -> int, pub:
         _conc_wait_push(slot, CONC_WAIT_RECV, _conc_cur_id())
         a := _conc_act_at(_conc_cur_id())
         cell_store(a, 8, CONC_ACT_WAITING)
-        _conc_unlock()
+        _conc_ch_unlock()
         t0 := _conc_now_ms()
         conc_schedule()
         _conc_wait_record(t0)
@@ -2368,20 +2416,20 @@ fn conc_sched_try_recv_int(ch: string) -> int, pub:
     // Non-blocking receive used by timeout executors. The sentinel values are
     // not valid channel payloads in the timeout API contract.
     conc_sched_init()
-    _conc_lock()
+    _conc_ch_lock()
     if conc_channel_len(ch) < 0:
-        _conc_unlock()
+        _conc_ch_unlock()
         return CONC_TRY_CLOSED
     esize := _conc_ch_esize(ch)
     if esize < 8:
-        _conc_unlock()
+        _conc_ch_unlock()
         return CONC_TRY_CLOSED
-    slot := _conc_ch_slot(ch)
+    slot := _conc_ch_slot_locked(ch)
     n := _conc_ch_len(ch)
     cap := _conc_ch_cap(ch)
     if cap == 0:
         if _conc_ch_closed(slot) != 0:
-            _conc_unlock()
+            _conc_ch_unlock()
             return CONC_TRY_CLOSED
         sid := _conc_wait_pop(slot, CONC_WAIT_SEND)
         if sid >= 0:
@@ -2391,9 +2439,9 @@ fn conc_sched_try_recv_int(ch: string) -> int, pub:
                 v = cell_load(sa, 72)
                 cell_store(sa, 8, CONC_ACT_RUNNABLE)
                 _conc_ready_push(sid)
-            _conc_unlock()
+            _conc_ch_unlock()
             return v
-        _conc_unlock()
+        _conc_ch_unlock()
         return CONC_TRY_EMPTY
     if n > 0:
         buf := _conc_ch_buf(ch)
@@ -2405,12 +2453,12 @@ fn conc_sched_try_recv_int(ch: string) -> int, pub:
         cell_store(ch, 32, head)
         cell_store(ch, 24, n - 1)
         _conc_wake_one(slot, CONC_WAIT_SEND)
-        _conc_unlock()
+        _conc_ch_unlock()
         return v
     if _conc_ch_closed(slot) != 0:
-        _conc_unlock()
+        _conc_ch_unlock()
         return CONC_TRY_CLOSED
-    _conc_unlock()
+    _conc_ch_unlock()
     return CONC_TRY_EMPTY
 
 fn _conc_now_ms() -> int:
@@ -2473,15 +2521,15 @@ fn conc_sched_recv_int_status(ch: string, out: string) -> int, pub:
 fn conc_sched_close(ch: string), pub:
     g_conc_close_count = g_conc_close_count + 1
     conc_sched_init()
-    _conc_lock()
+    _conc_ch_lock()
     if conc_channel_len(ch) < 0:
-        _conc_unlock()
+        _conc_ch_unlock()
         return
-    slot := _conc_ch_slot(ch)
+    slot := _conc_ch_slot_locked(ch)
     _conc_ch_set_closed(slot)
     _conc_wake_all(slot, CONC_WAIT_SEND)
     _conc_wake_all(slot, CONC_WAIT_RECV)
-    _conc_unlock()
+    _conc_ch_unlock()
 
 fn conc_go(entry: int, arg: int) -> string, pub:
     conc_sched_init()
