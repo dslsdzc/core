@@ -144,6 +144,43 @@ fn main() -> int:
     return 0
 """
 
+WORK_STEAL = """\
+import sched
+import chan
+
+fn spin() -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 4000000:
+            break
+        i = i + 1
+    return 0
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    a := go spin()
+    sum : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= 200:
+            break
+        ch := go work(i)
+        sum = sum + chan_recv(ch)
+        i = i + 1
+    if sum != 20100:
+        return sum
+    if chan_recv(a) != 0:
+        return 2
+    if conc_steal_attempts() <= 0:
+        return 3
+    if conc_steal_count() <= 0:
+        return 4
+    return 0
+"""
+
 SPAWN_STRESS = """\
 import sched
 import chan
@@ -211,6 +248,7 @@ def main() -> int:
         ("four_workers_queue", FOUR_WORKERS, 60),
         ("eight_workers_queue", EIGHT_WORKERS, 90),
         ("cross_m_pingpong", CROSS_M_PINGPONG, 60),
+        ("work_steal", WORK_STEAL, 120),
         ("spawn_stress", SPAWN_STRESS, 120),
     ]
     ok = True

@@ -79,7 +79,7 @@ fn long() -> int:
 fn main() -> int:
     conc_set_signal_preempt(0)
     conc_set_quantum(100000000)
-    sched_init_n(2)
+    sched_init_n(1)
     a := go long()
     d := go dummy()
     b := go short()

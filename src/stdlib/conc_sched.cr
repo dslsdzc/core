@@ -9,11 +9,12 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 120
+CONC_ACT_SIZE : int = 144
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
 CONC_ACT_DEAD : int = 3
+CONC_ACT_YIELDING : int = 4
 
 CONC_CH_STATE_SIZE : int = 48
 CONC_WAIT_SEND : int = 0
@@ -51,6 +52,9 @@ g_conc_worker_failures : int, mut = 0
 g_conc_signal_preempt : int, mut = 1
 g_conc_preempt_disable_m : string, mut
 g_conc_yield_claim_m : string, mut
+g_conc_queue_lock_m : string, mut
+g_conc_steal_attempts : int, mut = 0
+g_conc_steal_count : int, mut = 0
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
@@ -74,6 +78,8 @@ fn conc_preempt_signal():
                         if id >= 0:
                             a := _conc_act_at(id)
                             if _conc_word(a) != 0:
+                                if cell_load(a, 8) != CONC_ACT_RUNNING:
+                                    return
                                 stack := cell_load(a, 24)
                                 if stack > 0:
                                     sp := rt_sp()
@@ -126,6 +132,12 @@ fn _conc_futex_wake(addr: int) -> int:
     // futex(uaddr, FUTEX_WAKE, 1, 0, 0, 0)
     return syscall6(202, addr, 1, 1, 0, 0, 0)
 
+fn conc_steal_count() -> int, pub:
+    return g_conc_steal_count
+
+fn conc_steal_attempts() -> int, pub:
+    return g_conc_steal_attempts
+
 fn conc_workers_done() -> int, pub:
     return g_conc_workers_done
 
@@ -166,30 +178,173 @@ fn conc_shutdown(), pub:
 
 fn conc_park(m: int):
     // Park until the home M's queue or sequence changes. The sequence is read
-    // under the same lock the waker uses, so a push between unlock and the
-    // futex call is observed as EAGAIN rather than a lost wakeup.
-    _conc_lock()
+    // under the same per-M queue lock the waker uses, so a push between unlock
+    // and the futex call is observed as EAGAIN rather than a lost wakeup.
+    if _conc_raw(g_conc_queue_lock_m) == 0:
+        return
     slots : ., mut = g_conc_slots
     if slots < 1:
         slots = 1
     if slots > 64:
         slots = 64
+    _conc_queue_lock(m)
+    ready : ., mut = 0
     k : ., mut = 0
     loop:
         if k >= slots:
             break
-        if cell_load(g_conc_ready_head_s, (m + k * g_conc_m_count) * 8) >= 0:
-            _conc_unlock()
-            return
+        if _conc_queue_has_slot(m + k * g_conc_m_count, 0) != 0:
+            ready = 1
+            break
         k = k + 1
     s := rt_atomic_load(g_conc_seq_m, m * 8)
-    _conc_unlock()
+    _conc_queue_unlock(m)
+    if ready != 0:
+        return
+    // If another M has an unstarted activation, return so conc_schedule can
+    // steal it instead of sleeping through the work.
+    mc : ., mut = g_conc_m_count
+    if mc > 64:
+        mc = 64
+    vk : ., mut = 1
+    loop:
+        if vk >= mc:
+            break
+        victim : ., mut = m + vk
+        if victim >= mc:
+            victim = victim - mc
+        _conc_queue_lock(victim)
+        vs : ., mut = 0
+        found : ., mut = 0
+        loop:
+            if vs >= slots:
+                break
+            if _conc_queue_has_slot(victim + vs * mc, 1) != 0:
+                found = 1
+                break
+            vs = vs + 1
+        _conc_queue_unlock(victim)
+        if found != 0:
+            return
+        vk = vk + 1
     _conc_futex_wait(_conc_seq_addr(m), s)
 
 fn _conc_act_at(id: int) -> string:
     if id < 0 || id >= g_conc_act_count:
         return ""
     return load_str_ptr(g_conc_acts, id * 8)
+
+fn _conc_queue_lock(m: int):
+    if m < 0 || m >= 64:
+        m = 0
+    if _conc_raw(g_conc_queue_lock_m) == 0:
+        return
+    // The queue link is a multi-word update. A signal must not switch in the
+    // middle of it, or a second M can pop a node that is still being linked.
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        cell_store(g_conc_preempt_disable_m, cur * 8,
+                   cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    loop:
+        if rt_atomic_load(g_conc_queue_lock_m, m * 8) == 0:
+            if rt_atomic_cas(g_conc_queue_lock_m, m * 8, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_queue_unlock(m: int):
+    if m < 0 || m >= 64:
+        m = 0
+    if _conc_raw(g_conc_queue_lock_m) != 0:
+        rt_atomic_store(g_conc_queue_lock_m, m * 8, 0)
+    cur := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        d := cell_load(g_conc_preempt_disable_m, cur * 8)
+        if d > 0:
+            cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
+
+fn _conc_queue_append(slot: int, id: int):
+    // Caller holds the owning M's queue lock.
+    a := _conc_act_at(id)
+    if _conc_word(a) == 0:
+        return
+    if cell_load(a, 120) != 0:
+        // Defensive: never link the same activation twice.
+        return
+    cell_store(a, 120, 1)
+    cell_store(a, 88, -1)
+    tail := cell_load(g_conc_ready_tail_s, slot * 8)
+    if tail < 0:
+        cell_store(g_conc_ready_head_s, slot * 8, id)
+    else:
+        ta := _conc_act_at(tail)
+        if _conc_word(ta) != 0:
+            cell_store(ta, 88, id)
+    cell_store(g_conc_ready_tail_s, slot * 8, id)
+
+fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
+    // Caller holds the owning M's queue lock. Skips YIELDING entries (their
+    // yielding stack is still live) and, for stealing, started activations
+    // (they are pinned to their home M).
+    head := cell_load(g_conc_ready_head_s, slot * 8)
+    prev : ., mut = -1
+    cur : ., mut = head
+    loop:
+        if cur < 0:
+            return -1
+        a := _conc_act_at(cur)
+        nxt : ., mut = -1
+        if _conc_word(a) != 0:
+            nxt = cell_load(a, 88)
+        take : ., mut = 0
+        if _conc_word(a) != 0:
+            st := cell_load(a, 8)
+            if st == CONC_ACT_RUNNABLE:
+                if unstarted_only == 0 || cell_load(a, 64) < 0:
+                    take = 1
+        if take != 0:
+            if prev < 0:
+                cell_store(g_conc_ready_head_s, slot * 8, nxt)
+            else:
+                pa := _conc_act_at(prev)
+                if _conc_word(pa) != 0:
+                    cell_store(pa, 88, nxt)
+            if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
+                cell_store(g_conc_ready_tail_s, slot * 8, prev)
+            if _conc_word(a) != 0:
+                cell_store(a, 120, 0)
+                cell_store(a, 88, -1)
+            return cur
+        if _conc_word(a) == 0:
+            // Drop a dead table entry from the queue.
+            if prev < 0:
+                cell_store(g_conc_ready_head_s, slot * 8, nxt)
+            else:
+                pa := _conc_act_at(prev)
+                if _conc_word(pa) != 0:
+                    cell_store(pa, 88, nxt)
+            if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
+                cell_store(g_conc_ready_tail_s, slot * 8, prev)
+            cur = nxt
+        else:
+            prev = cur
+            cur = nxt
+    return -1
+
+fn _conc_queue_has_slot(slot: int, unstarted_only: int) -> int:
+    // Caller holds the owning M's queue lock.
+    cur : ., mut = cell_load(g_conc_ready_head_s, slot * 8)
+    loop:
+        if cur < 0:
+            return 0
+        a := _conc_act_at(cur)
+        if _conc_word(a) != 0:
+            if cell_load(a, 8) == CONC_ACT_RUNNABLE:
+                if unstarted_only == 0 || cell_load(a, 64) < 0:
+                    return 1
+            cur = cell_load(a, 88)
+        else:
+            cur = -1
+    return 0
 
 fn _conc_ready_push(id: int):
     a := _conc_act_at(id)
@@ -201,24 +356,20 @@ fn _conc_ready_push(id: int):
     slot : ., mut = cell_load(a, 104)
     if slot < 0 || slot >= 4096:
         slot = m
-    cell_store(a, 88, -1)
-    tail := cell_load(g_conc_ready_tail_s, slot * 8)
-    if tail < 0:
-        cell_store(g_conc_ready_head_s, slot * 8, id)
-    else:
-        ta := _conc_act_at(tail)
-        if _conc_word(ta) != 0:
-            cell_store(ta, 88, id)
-    cell_store(g_conc_ready_tail_s, slot * 8, id)
-    // futex protocol: bump the home M's sequence while still under the conc
-    // lock, then wake. A waiter that read the old sequence gets EAGAIN instead
-    // of sleeping through the wake.
-    seq := rt_atomic_load(g_conc_seq_m, m * 8)
-    rt_atomic_store(g_conc_seq_m, m * 8, seq + 1)
+    if g_conc_m_count > 0 && slot % g_conc_m_count != m:
+        slot = m
+    _conc_queue_lock(m)
+    _conc_queue_append(slot, id)
+    _conc_queue_unlock(m)
+    // The sequence bump follows the queue insert, so a waiter that sampled
+    // the old sequence either sees the non-empty queue or gets EAGAIN.
+    rt_atomic_fetch_add(g_conc_seq_m, m * 8, 1)
     _conc_futex_wake(_conc_seq_addr(m))
 
 fn _conc_ready_pop() -> int:
     m := _conc_m()
+    if _conc_raw(g_conc_queue_lock_m) == 0:
+        return -1
     slots : ., mut = g_conc_slots
     if slots < 1:
         slots = 1
@@ -227,26 +378,64 @@ fn _conc_ready_pop() -> int:
     start : ., mut = cell_load(g_conc_slot_rr_m, m * 8)
     if start < 0 || start >= slots:
         start = 0
+    _conc_queue_lock(m)
     k : ., mut = 0
     loop:
         if k >= slots:
-            return -1
+            break
         si : ., mut = start + k
         if si >= slots:
             si = si - slots
         slot := m + si * g_conc_m_count
-        id := cell_load(g_conc_ready_head_s, slot * 8)
+        id := _conc_queue_pop_slot(slot, 0)
         if id >= 0:
-            nxt : ., mut = -1
-            a := _conc_act_at(id)
-            if _conc_word(a) != 0:
-                nxt = cell_load(a, 88)
-            cell_store(g_conc_ready_head_s, slot * 8, nxt)
-            if nxt < 0:
-                cell_store(g_conc_ready_tail_s, slot * 8, -1)
             cell_store(g_conc_slot_rr_m, m * 8, si + 1)
+            _conc_queue_unlock(m)
             return id
         k = k + 1
+    _conc_queue_unlock(m)
+    // Work stealing: take an unstarted activation from another M and re-home
+    // it here, so its lazy arena/stack is created by the new owner. Started
+    // activations stay pinned to their home M.
+    mc : ., mut = g_conc_m_count
+    if mc > 64:
+        mc = 64
+    if mc <= 1:
+        return -1
+    vk : ., mut = 1
+    loop:
+        if vk >= mc:
+            return -1
+        victim : ., mut = m + vk
+        if victim >= mc:
+            victim = victim - mc
+        g_conc_steal_attempts = g_conc_steal_attempts + 1
+        _conc_queue_lock(victim)
+        vs : ., mut = 0
+        stolen : ., mut = -1
+        loop:
+            if vs >= slots:
+                break
+            vslot := victim + vs * mc
+            id2 := _conc_queue_pop_slot(vslot, 1)
+            if id2 >= 0:
+                stolen = id2
+                break
+            vs = vs + 1
+        if stolen >= 0:
+            sa := _conc_act_at(stolen)
+            if _conc_word(sa) != 0:
+                cell_store(sa, 80, m)
+                cell_store(sa, 104, m)
+        _conc_queue_unlock(victim)
+        if stolen >= 0:
+            // The steal removed the activation from the victim queue. Return
+            // it directly to conc_schedule; do not append it to this M's queue
+            // and also run it, or the queue would retain a link to a running
+            // (later dead) activation.
+            g_conc_steal_count = g_conc_steal_count + 1
+            return stolen
+        vk = vk + 1
     return -1
 
 fn _conc_acts_grow():
@@ -286,9 +475,10 @@ fn _conc_lock():
     // Disable direct signal preemption while waiting for or holding the global
     // scheduler lock. The depth is per-M and read by the signal handler.
     m := _conc_m()
+    cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
-        cell_store(g_conc_preempt_disable_m, m * 8,
-                   cell_load(g_conc_preempt_disable_m, m * 8) + 1)
+        cell_store(g_conc_preempt_disable_m, cur * 8,
+                   cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
     loop:
         if rt_atomic_load(g_conc_lock, 0) == 0:
             if rt_atomic_cas(g_conc_lock, 0, 0, 1) != 0:
@@ -364,6 +554,7 @@ fn conc_sched_init():
     g_conc_cur_m = _conc_sched_alloc(64 * 8)
     g_conc_preempt_disable_m = _conc_sched_alloc(64 * 8)
     g_conc_yield_claim_m = _conc_sched_alloc(64 * 8)
+    g_conc_queue_lock_m = _conc_sched_alloc(64 * 8)
     i : ., mut = 0
     loop:
         if i >= 64:
@@ -371,6 +562,7 @@ fn conc_sched_init():
         cell_store(g_conc_cur_m, i * 8, -1)
         cell_store(g_conc_preempt_disable_m, i * 8, 0)
         cell_store(g_conc_yield_claim_m, i * 8, 0)
+        cell_store(g_conc_queue_lock_m, i * 8, 0)
         i = i + 1
     g_conc_ch_states = _conc_sched_alloc(16 * CONC_CH_STATE_SIZE)
     g_conc_ch_cap = 16
@@ -452,6 +644,8 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string) -> i
     cell_store(a, 88, -1)
     cell_store(a, 96, -1)
     cell_store(a, 104, slot)
+    cell_store(a, 120, 0)
+    cell_store(a, 128, slot)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
 
@@ -475,9 +669,9 @@ fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
     conc_sched_init()
     _conc_lock()
     id := _conc_act_new(entry, arg, result_ch, "")
+    _conc_unlock()
     if id >= 0:
         _conc_ready_push(id)
-    _conc_unlock()
     return id
 
 fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
@@ -485,9 +679,9 @@ fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
     conc_sched_init()
     _conc_lock()
     id := _conc_act_new(entry, arg, result_ch, yield_ch)
+    _conc_unlock()
     if id >= 0:
         _conc_ready_push(id)
-    _conc_unlock()
     return id
 
 fn conc_sched_curg() -> int, pub:
@@ -500,29 +694,29 @@ fn conc_current_slot() -> int, pub:
     a := _conc_act_at(id)
     if _conc_word(a) == 0:
         return -1
-    return cell_load(a, 104)
+    return cell_load(a, 128)
 
 fn conc_schedule() -> int, pub:
     ran : ., mut = 0
     if _conc_cur_id() < 0:
         saved := arena_current_unchecked()
         loop:
-            _conc_lock()
             id := _conc_ready_pop()
             if id < 0:
-                _conc_unlock()
                 return ran
             a := _conc_act_at(id)
             if _conc_word(a) == 0:
-                _conc_unlock()
                 continue
             if cell_load(a, 64) < 0:
-                // First run on the home M: create the activation arena and
+                // First run on the home M (or on a thief that re-homed an
+                // unstarted activation): create the activation arena and
                 // fiber stack here, so the owning partition is only touched
                 // by its own thread.
                 aidp := arena_new()
                 if aidp < 0:
                     cell_store(a, 8, CONC_ACT_DEAD)
+                    _conc_lock()
+                    _conc_free_push(id)
                     _conc_unlock()
                     continue
                 stack := alloc(CONC_SCHED_STACK)
@@ -530,6 +724,8 @@ fn conc_schedule() -> int, pub:
                 if _conc_word(stack) == 0:
                     arena_reset(aidp)
                     cell_store(a, 8, CONC_ACT_DEAD)
+                    _conc_lock()
+                    _conc_free_push(id)
                     _conc_unlock()
                     continue
                 sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
@@ -540,7 +736,6 @@ fn conc_schedule() -> int, pub:
             ran = 1
             _conc_set_cur(id)
             cell_store(a, 8, CONC_ACT_RUNNING)
-            _conc_unlock()
             arena_set_current_unchecked(cell_load(a, 64))
             fiber_switch(_conc_ptr_addr(_conc_sched_sp_cell()), cell_load(a, 16))
             arena_set_current_unchecked(saved)
@@ -548,8 +743,15 @@ fn conc_schedule() -> int, pub:
             st := cell_load(a, 8)
             root := cell_load(a, 96)
             if st == CONC_ACT_DEAD:
+                rt_atomic_store(g_conc_yield_claim_m, _conc_m() * 8, 0)
                 arena_reset(root)
                 _conc_free_push(id)
+            else:
+                if st == CONC_ACT_YIELDING:
+                    // The yielding stack is now suspended; release the
+                    // per-M claim before making it stealable.
+                    rt_atomic_store(g_conc_yield_claim_m, _conc_m() * 8, 0)
+                    cell_store(a, 8, CONC_ACT_RUNNABLE)
             _conc_set_cur(-1)
             _conc_unlock()
     else:
@@ -584,12 +786,9 @@ fn _conc_yield_try(claimed: int) -> int:
     if _conc_word(a) == 0:
         rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
         return 0
-    cell_store(a, 8, CONC_ACT_RUNNABLE)
-    _conc_lock()
+    cell_store(a, 8, CONC_ACT_YIELDING)
     _conc_ready_push(id)
-    _conc_unlock()
     conc_schedule()
-    rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
     return 1
 
 fn conc_yield(), pub:
@@ -821,6 +1020,14 @@ fn _conc_activation_entry():
     ch := load_str_ptr(a, 48)
     if _conc_word(ch) != 0:
         conc_sched_send_int(ch, rc)
+    // Claim this M's yield slot for the teardown so a signal cannot push the
+    // dying activation back onto a ready queue between DEAD and the switch.
+    m := _conc_m()
+    if _conc_raw(g_conc_yield_claim_m) != 0:
+        loop:
+            if rt_atomic_cas(g_conc_yield_claim_m, m * 8, 0, 1) != 0:
+                break
+            syscall3(24, 0, 0, 0)
     cell_store(a, 8, CONC_ACT_DEAD)
     loop:
         conc_schedule()
