@@ -590,7 +590,7 @@ class TypeChecker:
                     'rt_m_idx', 'rt_set_m_idx', 'rt_sigreturn_stub', 'rt_current_arena', 'rt_set_current_arena',
                     'rt_arena_suspend', 'rt_set_arena_suspend',
                     'rt_atomic_load', 'rt_atomic_store', 'rt_atomic_xchg',
-                    'rt_atomic_cas', 'rt_atomic_fetch_add'}
+                    'rt_atomic_cas', 'rt_atomic_fetch_add', 'rt_sp'}
         if isinstance(call.func, Ident) and call.func.name in rt_funcs:
             sym = self.symtab.lookup(call.func.name)
             if sym and sym.type:

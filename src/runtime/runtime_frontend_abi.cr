@@ -36,6 +36,7 @@ fn runtime_frontend_builtin_register():
     prelude_builtin_add("rt_atomic_xchg", TI_INT, 0)
     prelude_builtin_add("rt_atomic_cas", TI_INT, 0)
     prelude_builtin_add("rt_atomic_fetch_add", TI_INT, 0)
+    prelude_builtin_add("rt_sp", TI_INT, 0)
 
 fn runtime_frontend_builtin_is_alloc(name_ni: int) -> int:
     if name_ni < 0:

@@ -49,6 +49,8 @@ g_conc_workers_done : int, mut = 0
 g_conc_workers_started : int, mut = 0
 g_conc_worker_failures : int, mut = 0
 g_conc_signal_preempt : int, mut = 1
+g_conc_preempt_disable_m : string, mut
+g_conc_yield_claim_m : string, mut
 
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
@@ -56,9 +58,30 @@ fn _conc_sched_alloc(size: int) -> string:
     return arena_shared_alloc(size)
 
 fn conc_preempt_signal():
-    // Async-signal-safe: one global store, no locks, no allocation, no TLS.
+    // The handler first publishes a pending flag (always safe). When the
+    // interrupted thread is running an activation, is not inside a disabled
+    // critical section, and is actually on that activation's stack, it may
+    // switch directly. The per-M claim word prevents a nested switch while a
+    // cooperative yield is already in flight.
     if g_conc_signal_preempt != 0:
         g_conc_preempt_flag = 1
+        if g_conc_inited != 0:
+            if _conc_raw(g_conc_preempt_disable_m) != 0:
+                m := rt_m_idx()
+                if m >= 0 && m < 64:
+                    if cell_load(g_conc_preempt_disable_m, m * 8) == 0:
+                        id := cell_load(g_conc_cur_m, m * 8)
+                        if id >= 0:
+                            a := _conc_act_at(id)
+                            if _conc_word(a) != 0:
+                                stack := cell_load(a, 24)
+                                if stack > 0:
+                                    sp := rt_sp()
+                                    if sp >= stack && sp < stack + CONC_SCHED_STACK:
+                                        if rt_atomic_cas(g_conc_yield_claim_m,
+                                                         m * 8, 0, 1) != 0:
+                                            g_conc_preempt_flag = 0
+                                            _conc_yield_try(1)
 
 fn _conc_preempt_install():
     act := _conc_sched_alloc(32)
@@ -260,6 +283,12 @@ fn _conc_sched_sp_cell() -> string:
     return _conc_ptr(_conc_addr(g_conc_sched_sp_m) + _conc_m() * 8)
 
 fn _conc_lock():
+    // Disable direct signal preemption while waiting for or holding the global
+    // scheduler lock. The depth is per-M and read by the signal handler.
+    m := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        cell_store(g_conc_preempt_disable_m, m * 8,
+                   cell_load(g_conc_preempt_disable_m, m * 8) + 1)
     loop:
         if rt_atomic_load(g_conc_lock, 0) == 0:
             if rt_atomic_cas(g_conc_lock, 0, 0, 1) != 0:
@@ -268,6 +297,33 @@ fn _conc_lock():
 
 fn _conc_unlock():
     rt_atomic_store(g_conc_lock, 0, 0)
+    m := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        d := cell_load(g_conc_preempt_disable_m, m * 8)
+        if d > 0:
+            cell_store(g_conc_preempt_disable_m, m * 8, d - 1)
+
+fn conc_preempt_disable(), pub:
+    if g_conc_inited == 0:
+        conc_sched_init()
+    m := _conc_m()
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        cell_store(g_conc_preempt_disable_m, m * 8,
+                   cell_load(g_conc_preempt_disable_m, m * 8) + 1)
+
+fn conc_preempt_enable(), pub:
+    if _conc_raw(g_conc_preempt_disable_m) == 0:
+        return
+    m := _conc_m()
+    d := cell_load(g_conc_preempt_disable_m, m * 8)
+    if d > 0:
+        cell_store(g_conc_preempt_disable_m, m * 8, d - 1)
+
+fn conc_preempt_depth() -> int, pub:
+    if _conc_raw(g_conc_preempt_disable_m) == 0:
+        return 0
+    m := _conc_m()
+    return cell_load(g_conc_preempt_disable_m, m * 8)
 
 fn conc_sched_set_m(n: int), pub:
     if n < 1:
@@ -306,11 +362,15 @@ fn conc_sched_init():
     g_conc_lock = _conc_sched_alloc(8)
     cell_store(g_conc_lock, 0, 0)
     g_conc_cur_m = _conc_sched_alloc(64 * 8)
+    g_conc_preempt_disable_m = _conc_sched_alloc(64 * 8)
+    g_conc_yield_claim_m = _conc_sched_alloc(64 * 8)
     i : ., mut = 0
     loop:
         if i >= 64:
             break
         cell_store(g_conc_cur_m, i * 8, -1)
+        cell_store(g_conc_preempt_disable_m, i * 8, 0)
+        cell_store(g_conc_yield_claim_m, i * 8, 0)
         i = i + 1
     g_conc_ch_states = _conc_sched_alloc(16 * CONC_CH_STATE_SIZE)
     g_conc_ch_cap = 16
@@ -507,17 +567,33 @@ fn _conc_ptr_addr(s: string) -> int:
         v = @ptr_of(s)
     return v
 
-fn conc_yield(), pub:
-    if _conc_cur_id() < 0:
-        return
-    a := _conc_act_at(_conc_cur_id())
+fn _conc_yield_try(claimed: int) -> int:
+    if g_conc_inited == 0:
+        return 0
+    if _conc_raw(g_conc_yield_claim_m) == 0:
+        return 0
+    m := _conc_m()
+    if claimed == 0:
+        if rt_atomic_cas(g_conc_yield_claim_m, m * 8, 0, 1) == 0:
+            return 0
+    id := _conc_cur_id()
+    if id < 0:
+        rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
+        return 0
+    a := _conc_act_at(id)
     if _conc_word(a) == 0:
-        return
+        rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
+        return 0
     cell_store(a, 8, CONC_ACT_RUNNABLE)
     _conc_lock()
-    _conc_ready_push(_conc_cur_id())
+    _conc_ready_push(id)
     _conc_unlock()
     conc_schedule()
+    rt_atomic_store(g_conc_yield_claim_m, m * 8, 0)
+    return 1
+
+fn conc_yield(), pub:
+    _conc_yield_try(0)
 
 fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
     // CPU edge executor: spawn every body reachable by a SPAWN edge from
@@ -697,9 +773,12 @@ fn conc_preempt_tick(), pub:
     // active, so ordinary programs and compiler/stdlib loops are untouched.
     if g_conc_inited == 0:
         return
+    if _conc_raw(g_conc_preempt_disable_m) != 0:
+        if cell_load(g_conc_preempt_disable_m, _conc_m() * 8) != 0:
+            return
     if g_conc_preempt_flag != 0:
-        g_conc_preempt_flag = 0
-        conc_yield()
+        if _conc_yield_try(0) != 0:
+            g_conc_preempt_flag = 0
         return
     m := _conc_m()
     q := cell_load(g_conc_quantum_m, m * 8) - 1

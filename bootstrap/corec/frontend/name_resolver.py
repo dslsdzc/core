@@ -46,6 +46,7 @@ class NameResolver:
             ('rt_atomic_xchg', BaseType('int')),
             ('rt_atomic_cas', BaseType('int')),
             ('rt_atomic_fetch_add', BaseType('int')),
+            ('rt_sp', BaseType('int')),
         ]
         for name, typ in rt_funcs:
             self.symtab.define(name, SymbolKind.FUNCTION, typ)

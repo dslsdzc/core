@@ -909,6 +909,18 @@ fn rt_emit_fs_store_rdi(buf: string, pos: int, disp: int) -> int:
     cp = cp + 1
     return cp
 
+fn rt_emit_sp(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 224)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
 fn rt_emit_atomic_load(buf: string, pos: int) -> int:
     cp : ., mut = 0
     w8(buf, pos+cp, 72)
@@ -1057,6 +1069,9 @@ fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
     cp = rt_pad16(buf, pos, cp)
     // rt_set_m_idx (fs:8), appended so existing registered offsets stay stable.
     cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 8)
+    cp = rt_pad16(buf, pos, cp)
+    // rt_sp (current stack pointer), appended after rt_set_m_idx.
+    cp = cp + rt_emit_sp(buf, pos+cp)
     cp = rt_pad16(buf, pos, cp)
     return cp
 
@@ -2168,6 +2183,7 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("rt_atomic_cas", 0, tls_start + 128)
         sched_reg_one("rt_atomic_fetch_add", 0, tls_start + 144)
         sched_reg_one("rt_set_m_idx", 0, tls_start + 160)
+        sched_reg_one("rt_sp", 0, tls_start + 176)
 
         // Naked signal restorer: must keep RSP at the signal frame.
         sched_reg_one("rt_sigreturn_stub", 0, cp)

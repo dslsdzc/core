@@ -369,6 +369,12 @@ rt_set_arena_suspend:
     ret
 
 # Atomic primitives. Offsets are byte offsets; callers keep them 8-byte aligned.
+.globl rt_sp
+.type rt_sp, @function
+rt_sp:
+    mov rax, rsp
+    ret
+
 .globl rt_atomic_load
 .type rt_atomic_load, @function
 rt_atomic_load:

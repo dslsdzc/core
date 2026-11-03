@@ -303,6 +303,49 @@ STRAIGHT_OFF = STRAIGHT.replace(
 )
 
 
+PREEMPT_DISABLE = """\
+import sched
+import chan
+
+g_b_ran : int, mut = 0
+
+fn b() -> int:
+    g_b_ran = 1
+    return 0
+
+fn a() -> int:
+    conc_preempt_disable()
+    if conc_preempt_depth() < 1:
+        return 1
+    i : ., mut = 0
+    loop:
+        if i >= 200000:
+            break
+        i = i + 1
+    if g_b_ran != 0:
+        return 2
+    conc_preempt_enable()
+    if conc_preempt_depth() != 0:
+        return 3
+    yield 0
+    if g_b_ran != 1:
+        return 4
+    return 0
+
+fn main() -> int:
+    conc_set_quantum(1)
+    sched_init_n(1)
+    x := go a()
+    y := go b()
+    r1 := chan_recv(x)
+    r2 := chan_recv(y)
+    if r1 != 0:
+        return r1
+    if r2 != 0:
+        return r2
+    return 0
+"""
+
 FUTEX_STRESS = """\
 import sched
 import chan
@@ -403,6 +446,7 @@ def main() -> int:
         ("preempt_same_m", PREEMPT, 60, 0),
         ("preempt_signal_only", PREEMPT_SIGNAL, 90, 0),
         ("preempt_disabled_control", PREEMPT_OFF, 60, 1),
+        ("preempt_disable_depth", PREEMPT_DISABLE, 60, 0),
         ("yield_switches", YIELD_SWITCH, 60, 0),
         ("futex_idle_stress", FUTEX_STRESS, 120, 0),
         ("futex_cross_m_blocking_send", FUTEX_CROSS_M, 60, 0),
