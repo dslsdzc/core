@@ -329,6 +329,110 @@ fn main() -> int:
 """
 
 
+CHAIN_RUN = """\
+import conc
+import sched
+
+fn stage1(x: int) -> int:
+    return 1
+
+fn stage2(x: int) -> int:
+    return 2
+
+fn stage3(x: int) -> int:
+    return 3
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage1), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage2), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage3), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage1), 1)
+    conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
+    conc_plan_add_edge(p, 1, 2, CONC_EDGE_SPAWN)
+    conc_plan_add_edge(p, 2, 3, CONC_EDGE_SPAWN)
+    if conc_plan_validate(p) != 1:
+        return 2
+    cht := alloc(8)
+    cell_store(cht, 0, 0)
+    if conc_plan_run(p, 0, cht) != 6:
+        return 3
+    return 0
+"""
+
+JOIN_RUN = """\
+import conc
+import sched
+
+g_order : int, mut = 0
+
+fn first(x: int) -> int:
+    yield 0
+    g_order = 1
+    return 1
+
+fn second(x: int) -> int:
+    if g_order != 1:
+        return 9
+    return 2
+
+fn dummy(x: int) -> int:
+    return 0
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(first), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(second), 1)
+    conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
+    conc_plan_add_edge(p, 1, 2, CONC_EDGE_JOIN)
+    if conc_plan_validate(p) != 1:
+        return 2
+    cht := alloc(8)
+    cell_store(cht, 0, 0)
+    if conc_plan_run(p, 0, cht) != 3:
+        return 3
+    if g_order != 1:
+        return 4
+    return 0
+"""
+
+PAR_BODY_RUN = """\
+import conc
+import sched
+
+fn square(x: int) -> int:
+    return x * x
+
+fn dummy(x: int) -> int:
+    return 0
+
+fn main() -> int:
+    sched_init()
+    p := conc_plan_new()
+    if conc_plan_set_version(p, 2) != 0:
+        return 1
+    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
+    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(square), 4)
+    if conc_plan_add_range(p, 1, 0, 4) != 0:
+        return 2
+    conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
+    if conc_plan_validate(p) != 1:
+        return 3
+    cht := alloc(8)
+    cell_store(cht, 0, 0)
+    if conc_plan_run(p, 0, cht) != 14:
+        return 4
+    return 0
+"""
+
+
 def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
@@ -502,6 +606,9 @@ def main() -> int:
         ("mpmc_plan_run", MPMC_RUN, 60, 0),
         ("pipeline_run", PIPELINE_RUN, 60, 0),
         ("slot_runtime", SLOTS, 60, 0),
+        ("chain_plan_run", CHAIN_RUN, 60, 0),
+        ("join_plan_run", JOIN_RUN, 60, 0),
+        ("parallel_body_plan_run", PAR_BODY_RUN, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

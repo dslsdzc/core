@@ -6188,13 +6188,40 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         return 0
     target := ast_a(stmt)
     value := ast_b(stmt)
-    if ast_kind(target) != EXPR_INDEX:
+    mode := 0
+    if ast_kind(target) == EXPR_INDEX:
+        mode = 1
+    else:
+        if ast_kind(target) == EXPR_IDENT:
+            // Reduction: acc = acc + f(i) or acc = f(i) + acc. The parallel
+            // tasks only evaluate f(i); the accumulator is combined serially
+            // in iteration order, so integer overflow behavior is unchanged.
+            acc_ni := ast_int_val(target)
+            if ast_kind(value) == EXPR_BINARY && ast_c(value) == OP_ADD:
+                l := ast_a(value)
+                r := ast_b(value)
+                call_node : ., mut = -1
+                if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == acc_ni:
+                    call_node = r
+                else:
+                    if ast_kind(r) == EXPR_IDENT && ast_int_val(r) == acc_ni:
+                        call_node = l
+                if call_node >= 0 && ast_kind(call_node) == EXPR_CALL:
+                    av := find_local(acc_ni)
+                    if av >= 0:
+                        if irv_type(av) == TI_UNIT:
+                            irv_set_type(av, TI_INT)
+                        if irv_type(av) == TI_INT:
+                            mode = 2
+                            value = call_node
+    if mode == 0:
         return 0
     if ast_kind(value) != EXPR_CALL:
         return 0
-    idx := ast_b(target)
-    if ast_kind(idx) != EXPR_IDENT || ast_int_val(idx) != var_ni:
-        return 0
+    if mode == 1:
+        idx := ast_b(target)
+        if ast_kind(idx) != EXPR_IDENT || ast_int_val(idx) != var_ni:
+            return 0
     fn_node := ast_a(value)
     if ast_kind(fn_node) != EXPR_IDENT:
         return 0
@@ -6236,7 +6263,9 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
     count := end_c - start_c
     if start_c < 0 || count <= 0:
         return 0
-    arr := gen_expr(ast_a(target))
+    arr : ., mut = 0
+    if mode == 1:
+        arr = gen_expr(ast_a(target))
     chs := new_ir_var("par_chs", TI_UNIT)
     track_alloc_array(count)
     emit(IR_ALLOC_ARRAY, chs, count, 0, 0, 0)
@@ -6258,6 +6287,20 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         emit(IR_STORE_INDEX, -1, chs, ch, k, 0)
         k = k + 1
     k = 0
+    if mode == 2:
+        acc_var := find_local(ast_int_val(target))
+        loop:
+            if k >= count:
+                break
+            chv := new_ir_var("par_chv", TI_INT)
+            emit(IR_LOAD_INDEX, chv, chs, 0, k, 0)
+            res := new_ir_var("par_res", TI_INT)
+            emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+            sumv := new_ir_var("par_sum", TI_INT)
+            emit(IR_BINARY, sumv, acc_var, res, OP_ADD, TI_INT)
+            emit(IR_STORE, -1, acc_var, sumv, 0, 0)
+            k = k + 1
+        return 1
     loop:
         if k >= count:
             break

@@ -28,6 +28,41 @@ fn main() -> int:
     return 0
 """
 
+AUTO_REDUCTION = """\
+import sched
+import chan
+
+fn square(x: int) -> int:
+    return x * x
+
+fn main() -> int:
+    sched_init()
+    sum : ., mut = 0
+    for i in 0..100:
+        sum = sum + square(i)
+    if sum != 328350:
+        return sum
+    return 0
+"""
+
+REDUCTION_FALLBACK = """\
+import sched
+import chan
+
+fn helper(x: int) -> int:
+    y := str_len("abcd")
+    return x + y
+
+fn main() -> int:
+    sched_init()
+    sum : ., mut = 0
+    for i in 0..10:
+        sum = sum + helper(i)
+    if sum != 85:
+        return sum
+    return 0
+"""
+
 SERIAL_FALLBACK = """\
 import sched
 import chan
@@ -102,20 +137,28 @@ def ir_conc_go_count(source: str, name: str) -> int:
 
 def main() -> int:
     ok = build_run("autopar_pure_arithmetic", AUTO_PAR, 0)
+    ok = build_run("autopar_reduction", AUTO_REDUCTION, 0) and ok
+    ok = build_run("autopar_reduction_fallback", REDUCTION_FALLBACK, 0) and ok
     ok = build_run("autopar_serial_fallback", SERIAL_FALLBACK, 0) and ok
     n = ir_conc_go_count(AUTO_PAR, "autopar_pure")
+    rn = ir_conc_go_count(AUTO_REDUCTION, "autopar_reduction")
     m = ir_conc_go_count(SERIAL_FALLBACK, "autopar_serial")
     if n < 1:
         print(f"FAIL auto_par_ir: main conc_go count={n}, expected >=1")
         ok = False
     else:
         print(f"PASS auto_par_ir (main conc_go={n})")
+    if rn < 1:
+        print(f"FAIL reduction_ir: main conc_go count={rn}, expected >=1")
+        ok = False
+    else:
+        print(f"PASS reduction_ir (main conc_go={rn})")
     if m != 0:
         print(f"FAIL serial_fallback_ir: main conc_go count={m}, expected 0")
         ok = False
     else:
         print("PASS serial_fallback_ir (no conc_go in main)")
-    total = 4
+    total = 7
     print(f"{total if ok else 0}/{total} passed")
     return 0 if ok else 1
 

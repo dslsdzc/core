@@ -795,56 +795,194 @@ fn conc_yield(), pub:
     _conc_yield_try(0)
 
 fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
-    // CPU edge executor: spawn every body reachable by a SPAWN edge from
-    // `root`, pass its bound channel handle, then join the result channels and
-    // sum body return values. SEND/RECV edges are documentation; the body
-    // itself performs those operations on the bound channel.
+    // Edge-driven CPU executor. The caller is already executing `root`; this
+    // function spawns the transitive SPAWN/JOIN graph, uses SPAWN and JOIN
+    // edges as start dependencies, and joins every activation exactly once.
+    // SEND/RECV edges carry channel bindings; the bodies perform those
+    // operations themselves on the handles in `channels`. DATA_PARALLEL
+    // bodies execute through conc_run_range.
     if conc_plan_validate(plan) == 0:
         return -1
     if conc_plan_apply_layouts(plan) < 0:
         return -1
-    if root < 0 || root >= conc_plan_body_count(plan):
+    n := conc_plan_body_count(plan)
+    if root < 0 || root >= n:
         return -1
     if _conc_is_null(channels) != 0:
         return -1
-    hs := alloc(64 * 8)
-    n : ., mut = 0
-    ne := conc_plan_edge_count(plan)
-    e : ., mut = 0
-    loop:
-        if e >= ne:
-            break
-        if conc_plan_edge_kind(plan, e) == CONC_EDGE_SPAWN:
-            if conc_plan_edge_from(plan, e) == root:
-                to := conc_plan_edge_to(plan, e)
-                if n >= 64:
-                    return -1
-                kind := conc_plan_body_kind(plan, to)
-                if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
-                    return -1
-                arg : ., mut = 0
-                ch := conc_plan_param_channel(plan, to, 0)
-                if ch >= 0:
-                    handle := load_str_ptr(channels, ch * 8)
-                    if _conc_is_null(handle) != 0:
-                        return -1
-                    unsafe:
-                        arg = @ptr_of(handle)
-                entry := conc_plan_body_entry(plan, to)
-                if entry <= 0:
-                    return -1
-                h := conc_go(entry, arg)
-                if _conc_word(h) == 0:
-                    return -1
-                cell_store(hs, n * 8, h)
-                n = n + 1
-        e = e + 1
-    total : ., mut = 0
+    reach := alloc(n * 8)
+    indeg := alloc(n * 8)
+    placed := alloc(n * 8)
+    handles := alloc(n * 8)
+    recv_done := alloc(n * 8)
     i : ., mut = 0
     loop:
         if i >= n:
             break
-        total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+        cell_store(reach, i * 8, 0)
+        cell_store(indeg, i * 8, 0)
+        cell_store(placed, i * 8, 0)
+        cell_store(handles, i * 8, -1)
+        cell_store(recv_done, i * 8, 0)
+        i = i + 1
+    // Reachability follows every edge kind; only SPAWN/JOIN impose start
+    // ordering. SEND/RECV are channel bindings.
+    q := alloc(n * 8)
+    qh : ., mut = 0
+    qt : ., mut = 0
+    cell_store(q, 0, root)
+    qt = 1
+    cell_store(reach, root * 8, 1)
+    ne := conc_plan_edge_count(plan)
+    loop:
+        if qh >= qt:
+            break
+        b := cell_load(q, qh * 8)
+        qh = qh + 1
+        be : ., mut = 0
+        loop:
+            if be >= ne:
+                break
+            if conc_plan_edge_from(plan, be) == b:
+                to := conc_plan_edge_to(plan, be)
+                if to >= 0 && to < n:
+                    if cell_load(reach, to * 8) == 0:
+                        cell_store(reach, to * 8, 1)
+                        cell_store(q, qt * 8, to)
+                        qt = qt + 1
+            be = be + 1
+    reachable : ., mut = 0
+    i = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(reach, i * 8) != 0:
+            reachable = reachable + 1
+        i = i + 1
+    // In-degree for SPAWN/JOIN edges; the root is considered already placed.
+    ie : ., mut = 0
+    loop:
+        if ie >= ne:
+            break
+        kind := conc_plan_edge_kind(plan, ie)
+        if kind == CONC_EDGE_SPAWN || kind == CONC_EDGE_JOIN:
+            f := conc_plan_edge_from(plan, ie)
+            t := conc_plan_edge_to(plan, ie)
+            if f >= 0 && f < n && t >= 0 && t < n:
+                if cell_load(reach, f * 8) != 0 && cell_load(reach, t * 8) != 0:
+                    cell_store(indeg, t * 8, cell_load(indeg, t * 8) + 1)
+        ie = ie + 1
+    order := alloc(n * 8)
+    on : ., mut = 0
+    cell_store(order, 0, root)
+    on = 1
+    cell_store(placed, root * 8, 1)
+    re : ., mut = 0
+    loop:
+        if re >= ne:
+            break
+        if conc_plan_edge_kind(plan, re) == CONC_EDGE_SPAWN || conc_plan_edge_kind(plan, re) == CONC_EDGE_JOIN:
+            if conc_plan_edge_from(plan, re) == root:
+                t := conc_plan_edge_to(plan, re)
+                if t >= 0 && t < n:
+                    cell_store(indeg, t * 8, cell_load(indeg, t * 8) - 1)
+        re = re + 1
+    loop:
+        if on >= reachable:
+            break
+        pick : ., mut = -1
+        i = 0
+        loop:
+            if i >= n:
+                break
+            if cell_load(reach, i * 8) != 0 && cell_load(placed, i * 8) == 0:
+                if cell_load(indeg, i * 8) == 0:
+                    pick = i
+                    break
+            i = i + 1
+        if pick < 0:
+            return -1
+        cell_store(order, on * 8, pick)
+        on = on + 1
+        cell_store(placed, pick * 8, 1)
+        te : ., mut = 0
+        loop:
+            if te >= ne:
+                break
+            if conc_plan_edge_from(plan, te) == pick:
+                if conc_plan_edge_kind(plan, te) == CONC_EDGE_SPAWN || conc_plan_edge_kind(plan, te) == CONC_EDGE_JOIN:
+                    t := conc_plan_edge_to(plan, te)
+                    if t >= 0 && t < n && cell_load(reach, t * 8) != 0:
+                        cell_store(indeg, t * 8, cell_load(indeg, t * 8) - 1)
+            te = te + 1
+    total : ., mut = 0
+    oi : ., mut = 1
+    loop:
+        if oi >= on:
+            break
+        b := cell_load(order, oi * 8)
+        // JOIN: wait for each incoming source that has already run.
+        je : ., mut = 0
+        loop:
+            if je >= ne:
+                break
+            if conc_plan_edge_kind(plan, je) == CONC_EDGE_JOIN:
+                if conc_plan_edge_to(plan, je) == b:
+                    src := conc_plan_edge_from(plan, je)
+                    if src != root:
+                        if cell_load(handles, src * 8) >= 0:
+                            if cell_load(recv_done, src * 8) == 0:
+                                total = total + conc_sched_recv_int(cell_load(handles, src * 8))
+                                cell_store(recv_done, src * 8, 1)
+            je = je + 1
+        kind := conc_plan_body_kind(plan, b)
+        if kind == CONC_BODY_DATA_PARALLEL:
+            rn := conc_plan_range_count(plan)
+            ri : ., mut = 0
+            loop:
+                if ri >= rn:
+                    break
+                if conc_plan_range_body(plan, ri) == b:
+                    start := conc_plan_range_start(plan, ri)
+                    cnt := conc_plan_range_len(plan, ri)
+                    if cnt > 0:
+                        out := alloc(cnt * 8)
+                        if conc_run_range(plan, b, start, start + cnt, out) != 0:
+                            return -1
+                        j : ., mut = 0
+                        loop:
+                            if j >= cnt:
+                                break
+                            total = total + cell_load(out, j * 8)
+                            j = j + 1
+                ri = ri + 1
+        else:
+            if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
+                return -1
+            arg : ., mut = 0
+            ch := conc_plan_param_channel(plan, b, 0)
+            if ch >= 0:
+                handle := load_str_ptr(channels, ch * 8)
+                if _conc_is_null(handle) != 0:
+                    return -1
+                unsafe:
+                    arg = @ptr_of(handle)
+            entry := conc_plan_body_entry(plan, b)
+            if entry <= 0:
+                return -1
+            h := conc_go(entry, arg)
+            if _conc_word(h) == 0:
+                return -1
+            cell_store(handles, b * 8, h)
+        oi = oi + 1
+    // Receive the results of bodies that were not consumed by a JOIN.
+    i = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(handles, i * 8) >= 0:
+            if cell_load(recv_done, i * 8) == 0:
+                total = total + conc_sched_recv_int(cell_load(handles, i * 8))
         i = i + 1
     return total
 
