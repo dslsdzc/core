@@ -41,6 +41,15 @@ CONC_BUDGET_PROGRESSIVE : int, pub = 1
 CONC_BUDGET_COUNT : int, pub = 2
 CONC_BUDGET_WAIT : int, pub = 3
 
+// Certificate kinds used by conc_plan_cert_prove. Unknown kinds are accepted
+// as opaque certificates, but the known kinds are re-derived from the plan.
+CONC_CERT_ACYCLIC : int, pub = 1
+CONC_CERT_DETERMINISTIC : int, pub = 2
+CONC_CERT_BUDGET : int, pub = 3
+CONC_CERT_TRANSFER : int, pub = 4
+CONC_CERT_SHARED_MAPPING : int, pub = 5
+CONC_CERT_EQUIVALENCE : int, pub = 6
+
 CONC_STATUS_PROVED : int, pub = 1
 CONC_STATUS_UNKNOWN : int, pub = 2
 CONC_STATUS_VIOLATED : int, pub = 3
@@ -1806,6 +1815,9 @@ fn conc_plan_validate(plan: int) -> int, pub:
             return 0
         if st < CONC_STATUS_PROVED || st > CONC_STATUS_MEASURED:
             return 0
+        bd := cell_load(bbase2, b * 40 + 32)
+        if bd < -1 || bd >= n:
+            return 0
         b = b + 1
     nc := cell_load(p, 128)
     cbase := load_str_ptr(p, 168)
@@ -2217,6 +2229,10 @@ fn conc_plan_transfer_size(plan: int, i: int) -> int, pub:
     return cell_load(load_str_ptr(p, 152), i * 40 + 24)
 
 fn conc_plan_add_budget(plan: int, kind: int, bound: int, status: int) -> int, pub:
+    return _conc_plan_add_budget_body(plan, kind, bound, status, -1)
+
+fn _conc_plan_add_budget_body(plan: int, kind: int, bound: int, status: int,
+                              body: int) -> int:
     if _conc_plan_valid(plan) == 0:
         return -1
     if kind < CONC_BUDGET_PROGRESSIVE || kind > CONC_BUDGET_WAIT:
@@ -2226,6 +2242,8 @@ fn conc_plan_add_budget(plan: int, kind: int, bound: int, status: int) -> int, p
     if status < CONC_STATUS_PROVED || status > CONC_STATUS_MEASURED:
         return -1
     p := _conc_plan_at(plan)
+    if body < -1 || body >= cell_load(p, 0):
+        return -1
     n := cell_load(p, 120)
     if n >= 64:
         return -1
@@ -2235,9 +2253,21 @@ fn conc_plan_add_budget(plan: int, kind: int, bound: int, status: int) -> int, p
     cell_store(base, off + 8, bound)
     cell_store(base, off + 16, status)
     cell_store(base, off + 24, 0)
-    cell_store(base, off + 32, 0)
+    cell_store(base, off + 32, body)
     cell_store(p, 120, n + 1)
     return n
+
+fn conc_plan_add_budget_body(plan: int, kind: int, bound: int, status: int,
+                             body: int) -> int, pub:
+    return _conc_plan_add_budget_body(plan, kind, bound, status, body)
+
+fn conc_plan_budget_body(plan: int, i: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    p := _conc_plan_at(plan)
+    if i < 0 || i >= cell_load(p, 120):
+        return -1
+    return cell_load(load_str_ptr(p, 160), i * 40 + 32)
 
 fn conc_plan_budget_count(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -2329,6 +2359,122 @@ fn conc_plan_cert_status(plan: int, i: int) -> int, pub:
     if i < 0 || i >= cell_load(p, 128):
         return -1
     return cell_load(load_str_ptr(p, 168), i * 32 + 8)
+
+fn _conc_plan_cert_find(plan: int, kind: int) -> int:
+    n := conc_plan_cert_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            return -1
+        if conc_plan_cert_kind(plan, i) == kind:
+            return i
+        i = i + 1
+    return -1
+
+fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
+    // Re-derive a known certificate from the plan. Unknown/unimplemented
+    // certificate kinds stay UNKNOWN; they are never silently accepted.
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if kind < 0:
+        return -1
+    st : ., mut = CONC_STATUS_UNKNOWN
+    if kind == CONC_CERT_ACYCLIC:
+        if conc_plan_acyclic(plan) != 0:
+            st = CONC_STATUS_PROVED
+        else:
+            st = CONC_STATUS_VIOLATED
+    else:
+        if kind == CONC_CERT_DETERMINISTIC:
+            if conc_plan_deterministic(plan) != 0:
+                st = CONC_STATUS_PROVED
+            else:
+                st = CONC_STATUS_VIOLATED
+        else:
+            if kind == CONC_CERT_BUDGET:
+                if conc_plan_budget_ok(plan) != 0:
+                    st = CONC_STATUS_PROVED
+                else:
+                    st = CONC_STATUS_VIOLATED
+            else:
+                if kind == CONC_CERT_TRANSFER:
+                    if conc_plan_validate(plan) != 0 && conc_plan_xfer_bytes(plan) >= 0:
+                        st = CONC_STATUS_PROVED
+                    else:
+                        st = CONC_STATUS_VIOLATED
+    i := _conc_plan_cert_find(plan, kind)
+    if i >= 0:
+        p := _conc_plan_at(plan)
+        cell_store(load_str_ptr(p, 168), i * 32 + 8, st)
+        return i
+    return conc_plan_add_cert(plan, kind, st)
+
+fn conc_plan_obligations_ok(plan: int) -> int, pub:
+    // Scoped budgets are execution obligations. Global budgets remain
+    // advisory metadata. A scoped obligation passes only when its status is
+    // PROVED or MEASURED and its structural bound is satisfied.
+    if _conc_plan_valid(plan) == 0:
+        return 0
+    n := conc_plan_budget_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        body := conc_plan_budget_body(plan, i)
+        if body >= 0:
+            st := conc_plan_budget_status(plan, i)
+            if st != CONC_STATUS_PROVED && st != CONC_STATUS_MEASURED:
+                return 0
+            kind := conc_plan_budget_kind(plan, i)
+            bound := conc_plan_budget_bound(plan, i)
+            if kind == CONC_BUDGET_COUNT:
+                if bound < conc_plan_body_params(plan, body):
+                    return 0
+            else:
+                if bound < 0:
+                    return 0
+        i = i + 1
+    return 1
+
+fn conc_plan_explain_full(plan: int) -> string, pub:
+    out : ., mut = conc_plan_explain(plan)
+    out = out + " budget_ok " + _conc_num_str(conc_plan_budget_ok(plan))
+    out = out + " cert_ok " + _conc_num_str(conc_plan_cert_ok(plan))
+    out = out + " deterministic " + _conc_num_str(conc_plan_deterministic(plan))
+    out = out + " obligations " + _conc_num_str(conc_plan_obligations_ok(plan))
+    nb := conc_plan_budget_count(plan)
+    b : ., mut = 0
+    loop:
+        if b >= nb:
+            break
+        out = out + "\nbudget " + _conc_num_str(b)
+        out = out + " kind " + _conc_num_str(conc_plan_budget_kind(plan, b))
+        out = out + " bound " + _conc_num_str(conc_plan_budget_bound(plan, b))
+        out = out + " status " + _conc_num_str(conc_plan_budget_status(plan, b))
+        out = out + " value " + _conc_num_str(conc_plan_budget_value(plan, b))
+        out = out + " body " + _conc_num_str(conc_plan_budget_body(plan, b))
+        b = b + 1
+    nc := conc_plan_cert_count(plan)
+    c : ., mut = 0
+    loop:
+        if c >= nc:
+            break
+        out = out + "\ncert " + _conc_num_str(c)
+        out = out + " kind " + _conc_num_str(conc_plan_cert_kind(plan, c))
+        out = out + " status " + _conc_num_str(conc_plan_cert_status(plan, c))
+        c = c + 1
+    nx := conc_plan_xfer_count(plan)
+    x : ., mut = 0
+    loop:
+        if x >= nx:
+            break
+        out = out + "\nxfer " + _conc_num_str(x)
+        out = out + " kind " + _conc_num_str(conc_plan_xfer_kind(plan, x))
+        out = out + " size " + _conc_num_str(conc_plan_xfer_size(plan, x))
+        out = out + " src " + _conc_num_str(conc_plan_xfer_src_space(plan, x))
+        out = out + " dst " + _conc_num_str(conc_plan_xfer_dst_space(plan, x))
+        x = x + 1
+    return out
 
 fn conc_plan_add_space(plan: int, kind: int, capacity: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -2944,6 +3090,16 @@ fn conc_run_range(plan: int, body: int, start: int, end: int,
         rc := _conc_call_int(entry, j)
         cell_store(out, (j - start) * 8, rc)
         j = j + 1
+    // A scoped COUNT obligation on this body becomes a measured budget.
+    nb := conc_plan_budget_count(plan)
+    bi : ., mut = 0
+    loop:
+        if bi >= nb:
+            break
+        if conc_plan_budget_body(plan, bi) == body:
+            if conc_plan_budget_kind(plan, bi) == CONC_BUDGET_COUNT:
+                conc_plan_budget_measure(plan, bi, end - start)
+        bi = bi + 1
     return 0
 
 // ── Plan text loader (CP-2) ───────────────────────────────────────────────
@@ -3176,6 +3332,40 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         if id != conc_plan_budget_count(p):
             return -1
         if conc_plan_add_budget(p, kind, bound, status) != id:
+            return -1
+        return 0
+    if tok == "obligation":
+        id := _conc_plan_read_int(text)
+        ks := _conc_plan_next(text)
+        kind : ., mut = -1
+        if ks == "PROGRESSIVE":
+            kind = CONC_BUDGET_PROGRESSIVE
+        else:
+            if ks == "COUNT":
+                kind = CONC_BUDGET_COUNT
+            else:
+                if ks == "WAIT":
+                    kind = CONC_BUDGET_WAIT
+        bound := _conc_plan_read_int(text)
+        ss := _conc_plan_next(text)
+        status : ., mut = -1
+        if ss == "PROVED":
+            status = CONC_STATUS_PROVED
+        else:
+            if ss == "UNKNOWN":
+                status = CONC_STATUS_UNKNOWN
+            else:
+                if ss == "VIOLATED":
+                    status = CONC_STATUS_VIOLATED
+                else:
+                    if ss == "MEASURED":
+                        status = CONC_STATUS_MEASURED
+        body := _conc_plan_read_int(text)
+        if id < 0 || kind < 0 || status < 0 || body < 0:
+            return -1
+        if id != conc_plan_budget_count(p):
+            return -1
+        if conc_plan_add_budget_body(p, kind, bound, status, body) != id:
             return -1
         return 0
     if tok == "cert":

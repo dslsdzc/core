@@ -392,7 +392,10 @@ fn conc_plan_emit_write(path: string) -> int:
         out2 = out2 + "budget 0 PROGRESSIVE 0 UNKNOWN\n"
         out2 = out2 + "budget 1 COUNT " + int_str(range_count) + " PROVED\n"
         out2 = out2 + "budget 2 WAIT " + int_str(range_count) + " UNKNOWN\n"
+        out2 = out2 + "obligation 3 COUNT " + int_str(range_count) + " PROVED 1\n"
+        out2 = out2 + "obligation 4 WAIT " + int_str(range_count) + " UNKNOWN 1\n"
         out2 = out2 + "cert 0 1 UNKNOWN\n"
+        out2 = out2 + "cert 1 2 UNKNOWN\n"
         out2 = out2 + "edge 0 1 SPAWN -1\n"
         nwritten2 := write_file(path, out2)
         if nwritten2 != str_len(out2):

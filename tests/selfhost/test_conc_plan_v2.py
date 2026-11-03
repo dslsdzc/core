@@ -88,8 +88,49 @@ fn main() -> int:
         return 44
     if conc_plan_validate(plan) != 1:
         return 26
+    if conc_plan_add_budget_body(plan, CONC_BUDGET_COUNT, 16,
+                                 CONC_STATUS_PROVED, 0) != 1:
+        return 45
+    if conc_plan_budget_body(plan, 1) != 0:
+        return 46
+    if conc_plan_add_budget_body(plan, CONC_BUDGET_COUNT, 16,
+                                 CONC_STATUS_UNKNOWN, 0) != 2:
+        return 47
+    if conc_plan_obligations_ok(plan) != 0:
+        return 48
+    out := alloc(16 * 8)
+    if conc_run_range(plan, 0, 0, 16, out) != 0:
+        return 16
+    if conc_plan_budget_status(plan, 2) != CONC_STATUS_MEASURED:
+        return 49
+    if conc_plan_budget_value(plan, 2) != 16:
+        return 50
+    if conc_plan_obligations_ok(plan) != 1:
+        return 51
+    if conc_plan_cert_prove(plan, CONC_CERT_ACYCLIC) != 0:
+        return 52
+    if conc_plan_cert_status(plan, 0) != CONC_STATUS_PROVED:
+        return 53
+    if conc_plan_cert_prove(plan, CONC_CERT_BUDGET) != 1:
+        return 54
+    if conc_plan_cert_status(plan, 1) != CONC_STATUS_PROVED:
+        return 55
+    if conc_plan_cert_prove(plan, CONC_CERT_DETERMINISTIC) != 2:
+        return 56
+    if conc_plan_cert_status(plan, 2) != CONC_STATUS_VIOLATED:
+        return 57
     if str_len(conc_plan_explain(plan)) < 20:
         return 27
+    if str_len(conc_plan_explain_full(plan)) < 120:
+        return 58
+    obl_text := "v 2\\nentries 1\\nbody 0 PAR 0 4\\nrange 0 0 4\\nobligation 0 COUNT 4 PROVED 0\\n"
+    op := conc_plan_load(obl_text, tbl)
+    if op < 0:
+        return 59
+    if conc_plan_budget_body(op, 0) != 0:
+        return 60
+    if conc_plan_obligations_ok(op) != 1:
+        return 61
     cyc := conc_plan_new()
     conc_plan_add_body(cyc, CONC_BODY_TASK, 1, 0)
     conc_plan_add_body(cyc, CONC_BODY_TASK, 1, 0)
@@ -101,9 +142,6 @@ fn main() -> int:
         return 29
     if conc_plan_channel_cap(plan, 0) != 0:
         return 15
-    out := alloc(16 * 8)
-    if conc_run_range(plan, 0, 0, 16, out) != 0:
-        return 16
     sum : ., mut = 0
     i : ., mut = 0
     loop:
@@ -508,7 +546,7 @@ fn main() -> int:
         return 2
     if conc_plan_range_len(plan, 0) != 4:
         return 3
-    if conc_plan_budget_count(plan) != 3:
+    if conc_plan_budget_count(plan) != 5:
         return 6
     if conc_plan_budget_ok(plan) != 0:
         return 7
