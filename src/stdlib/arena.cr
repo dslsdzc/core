@@ -133,6 +133,10 @@ fn arena_scalar_set(off: int, val: int):
 fn arena_set_current(val: int):
     rt_set_current_arena(val)
     g_current_arena = val
+    // The interpreter and the allocator blob read the current arena from the
+    // raw scalar slot; keep it in lockstep with TLS and the legacy global.
+    if g_arena_scalars_ready != 0:
+        arena_scalar_set(0, val)
 
 fn arena_set_zero_on_reset(v: int), pub:
     g_arena_zero_on_reset = v
@@ -166,7 +170,7 @@ fn _arena_zero_reset_slots(ai: int):
 // load/store + g_current_arena. Calling these indirectly is not supported; the
 // fallback bodies exist so the type checker resolves the names.
 fn arena_current_unchecked() -> int, pub:
-    return rt_current_arena()
+    return arena_scalar_get(0)
 
 fn arena_set_current_unchecked(v: int), pub:
     arena_set_current(v)
@@ -319,10 +323,12 @@ fn _grow_arena_meta(needed: int):
 fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     if m_count < 1:
         m_count = 1
-    rt_set_arena_suspend(1)
+    g_arena_suspend = 1
     if arena_size < 131072:
         arena_size = 131072
-    prev := rt_current_arena()
+    prev : ., mut = -1
+    if g_arena_scalars_ready != 0:
+        prev = arena_scalar_get(0)
     arena_set_current(-1)
     g_arena_scalars_ready = 0
     g_arena_shared_arena = -1
@@ -379,10 +385,14 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
         seg := mi * SEGMENTS_PER_M
         cell_store(g_segment_count_m, mi * 8, seg)
         p := syscall6(9, 0, 67108864, 3, 34, -1, 0)
-        if p >= 0:
-            ps : ., mut = ""
+        ps : ., mut = ""
+        if p > 0:
             unsafe:
                 ps = @str_of(p)
+        if _arena_word(ps) == 0:
+            // The interpreter maps syscall6 to 0; use the host heap there.
+            ps = alloc(67108864)
+        if _arena_word(ps) != 0:
             store_str_ptr(g_segment_base, seg * 8, ps)
             cell_store(g_segment_count_m, mi * 8, seg + 1)
         mi = mi + 1
@@ -443,7 +453,7 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     g_arena_cap = total
     g_arena_count = total
     g_arena_scalars_ready = 1
-    rt_set_arena_suspend(0)
+    g_arena_suspend = 0
     arena_set_current(prev)
 
 fn arena_init(pool_size: int, arena_size: int), pub:
@@ -510,18 +520,21 @@ fn arena_grow_pool_m(m: int), pub:
     if g_arena_pool_limit > 0 && (local_seg + 1) * 67108864 > g_arena_pool_limit:
         println("arena: pool limit exceeded")
         return
-    saved := rt_current_arena()
-    rt_set_current_arena(-1)
+    saved := arena_scalar_get(0)
+    arena_set_current(-1)
     p := syscall6(9, 0, 67108864, 3, 34, -1, 0)
-    if p < 0:
-        rt_set_current_arena(saved)
-        return
     ps : ., mut = ""
-    unsafe:
-        ps = @str_of(p)
+    if p > 0:
+        unsafe:
+            ps = @str_of(p)
+    if _arena_word(ps) == 0:
+        ps = alloc(67108864)
+    if _arena_word(ps) == 0:
+        arena_set_current(saved)
+        return
     store_str_ptr(g_segment_base, seg * 8, ps)
     cell_store(g_segment_count_m, m * 8, seg + 1)
-    rt_set_current_arena(saved)
+    arena_set_current(saved)
 
 fn arena_grow_pool(), pub:
     arena_grow_pool_m(rt_m_idx())
@@ -572,7 +585,7 @@ fn arena_new_sized(peak: int) -> int, pub:
         cell_store(g_class_limit, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
         ci = ci + 1
 
-    cur := rt_current_arena()
+    cur := arena_scalar_get(0)
     if cur >= 0:
         cell_store(g_arena_parents, ai * 8, cur)
     arena_set_current(ai)
@@ -588,7 +601,7 @@ fn arena_reset(ai: int), pub:
         return
     m := ai / ARENA_PER_M
     cell_store(g_arena_live, ai * 8, 0)
-    rt_set_arena_suspend(1)
+    g_arena_suspend = 1
 
     parent := cell_load(g_arena_parents, ai * 8)
 
@@ -615,6 +628,10 @@ fn arena_reset(ai: int), pub:
         cell_store(g_arena_slot_next, sl * 8, cell_load(g_slot_free_m, m * 8))
         cell_store(g_slot_free_m, m * 8, sl)
         sl = nxt
+    // The chain walk is newest -> oldest and prepends each slot, so the
+    // per-M head ends up at the oldest slot. Mirror that head in the legacy
+    // global used by the interpreter/tests.
+    g_arena_free_list = cell_load(g_slot_free_m, m * 8)
     cell_store(g_arena_slot, ai * 8, -1)
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     ci : ., mut = 0
@@ -633,7 +650,7 @@ fn arena_reset(ai: int), pub:
         arena_set_current(parent)
     else:
         arena_set_current(-1)
-    rt_set_arena_suspend(0)
+    g_arena_suspend = 0
 
 // Early clear (V2.1): reset the current slot's cursor, size-class metadata and
 // dedicated large extents, but keep the arena id live and current. Older slots
@@ -644,7 +661,7 @@ fn arena_clear(ai: int), pub:
         return
     if cell_load(g_arena_live, ai * 8) == 0:
         return
-    rt_set_arena_suspend(1)
+    g_arena_suspend = 1
 
     ln : ., mut = cell_load(g_arena_large_count, ai * 8)
     loop:
@@ -669,7 +686,7 @@ fn arena_clear(ai: int), pub:
         cell_store(g_class_cursor, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
         cell_store(g_class_limit, (ai * ARENA_CLASS_COUNT + ci) * 8, 0)
         ci = ci + 1
-    rt_set_arena_suspend(0)
+    g_arena_suspend = 0
 
 // ── Interpreter allocation path ──
 // The ELF backend uses the precompiled raw blob. `corec run` interprets this
@@ -757,11 +774,11 @@ fn arena_alloc(size: int) -> string:
         return _arena_ptr(0)
     if size > 1099511627776:
         return _arena_ptr(0)
-    if rt_arena_suspend() != 0 || g_arena_scalars_ready == 0:
+    if g_arena_suspend != 0 || g_arena_scalars_ready == 0:
         return _arena_ptr(0)
     if _arena_word(g_arena_scalars) == 0:
         return _arena_ptr(0)
-    ai := rt_current_arena()
+    ai := arena_scalar_get(0)
     if ai < 0:
         return _arena_ptr(0)
     aligned := (size + 15) / 8 * 8

@@ -143,7 +143,7 @@ def build_and_run(src: Path, root: Path, tag: str, limit_as: int = 0):
     r = run([str(COREC), "ccr", str(src), "-o", str(ccr)])
     if r.returncode != 0:
         return None, f"corec ccr failed: {r.stdout}\n{r.stderr}"
-    r = run([str(COREARCH), str(ccr), "--static", "-o", str(elf)])
+    r = run([str(COREARCH), str(ccr), "--raw-int", "--static", "-o", str(elf)])
     if r.returncode != 0:
         return None, f"corearch failed: {r.stdout}\n{r.stderr}"
     if limit_as > 0:
