@@ -1278,16 +1278,23 @@ fn _conc_free_pop() -> int:
     _conc_free_unlock()
     return id
 
-fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int):
+fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int, forced_slot: int):
     slots : ., mut = g_conc_slots
     if slots < 1:
         slots = 1
     if slots > 64:
         slots = 64
-    rr : ., mut = 0
-    if _conc_raw(g_conc_spawn_rr_buf) != 0:
-        rr = rt_atomic_fetch_add(g_conc_spawn_rr_buf, 0, 1)
-    slot := rr % (g_conc_m_count * slots)
+    span : ., mut = g_conc_m_count * slots
+    if span < 1:
+        span = 1
+    slot : ., mut = forced_slot
+    if slot < 0:
+        rr : ., mut = 0
+        if _conc_raw(g_conc_spawn_rr_buf) != 0:
+            rr = rt_atomic_fetch_add(g_conc_spawn_rr_buf, 0, 1)
+        slot = rr % span
+    else:
+        slot = slot % span
     home : ., mut = slot % g_conc_m_count
     cell_store(a, 0, id)
     cell_store(a, 8, CONC_ACT_RUNNABLE)
@@ -1311,7 +1318,7 @@ fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, y
     cell_store(a, 152, -1)   // ready-queue prev link (doubly linked)
     store_str_ptr(g_conc_acts, id * 8, a)
 
-fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
+fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int, forced_slot: int) -> int:
     // New ids are issued atomically; the table lock only covers growth and the
     // control-block install. Free-list reuse never reaches here.
     id : ., mut = 0
@@ -1329,21 +1336,21 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, toke
         if _conc_word(a) == 0:
             _conc_table_unlock()
             return -1
-    _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority)
+    _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority, forced_slot)
     _conc_table_unlock()
     return id
 
-fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
+fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int, forced_slot: int) -> int:
     conc_sched_init()
     id : ., mut = _conc_free_pop()
     if id >= 0:
         a := _conc_act_at(id)
         if _conc_raw(a) != 0:
-            _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority)
+            _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority, forced_slot)
         else:
             id = -1
     if id < 0:
-        id = _conc_act_new(entry, arg, result_ch, yield_ch, token, priority)
+        id = _conc_act_new(entry, arg, result_ch, yield_ch, token, priority, forced_slot)
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
         _conc_ready_push(id)
@@ -1366,19 +1373,31 @@ fn _conc_word(s: string) -> int:
     return v
 
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
-    return _conc_spawn_common(entry, arg, result_ch, "", -1, 0)
+    return _conc_spawn_common(entry, arg, result_ch, "", -1, 0, -1)
+
+fn conc_spawn_slot(entry: int, arg: int, result_ch: string, slot: int) -> int, pub:
+    return _conc_spawn_common(entry, arg, result_ch, "", -1, 0, slot)
 
 fn conc_spawn_priority(entry: int, arg: int, result_ch: string,
                       priority: int) -> int, pub:
-    return _conc_spawn_common(entry, arg, result_ch, "", -1, priority)
+    return _conc_spawn_common(entry, arg, result_ch, "", -1, priority, -1)
 
 fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
                    yield_ch: string) -> int, pub:
-    return _conc_spawn_common(entry, arg, result_ch, yield_ch, -1, 0)
+    return _conc_spawn_common(entry, arg, result_ch, yield_ch, -1, 0, -1)
 
 fn conc_spawn_flow_token(entry: int, arg: int, result_ch: string,
                         yield_ch: string, token: int) -> int, pub:
-    return _conc_spawn_common(entry, arg, result_ch, yield_ch, token, 0)
+    return _conc_spawn_common(entry, arg, result_ch, yield_ch, token, 0, -1)
+
+fn conc_go_slot(entry: int, arg: int, slot: int) -> string, pub:
+    conc_sched_init()
+    out := _conc_global_channel(8, 1)
+    if _conc_word(out) == 0:
+        return ""
+    if conc_spawn_slot(entry, arg, out, slot) < 0:
+        return ""
+    return out
 
 fn conc_sched_curg() -> int, pub:
     return _conc_cur_id()
@@ -1777,6 +1796,101 @@ fn conc_plan_run_all(plan: int, channels: string) -> int, pub:
             if entry <= 0:
                 return -1
             h := conc_go(entry, arg)
+            if _conc_word(h) == 0:
+                return -1
+            cell_store(hs, b * 8, h)
+        b = b + 1
+    i = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(hs, i * 8) >= 0:
+            total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+            if g_conc_plan_cancel != 0:
+                return CONC_RESULT_CANCELLED
+        i = i + 1
+    _conc_plan_measure_wait(plan, wait_t0)
+    return total
+
+fn conc_plan_run_mapped(mapping_id: int, channels: string) -> int, pub:
+    // MappingPlan-aware executor: the slot kind chosen by the mapping is
+    // translated into a logical slot id and passed to conc_go_slot.
+    if conc_mapping_plan_applied(mapping_id) == 0:
+        return -1
+    plan := conc_mapping_plan_plan(mapping_id)
+    if conc_plan_apply_layouts(plan) < 0:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    n := conc_plan_body_count(plan)
+    if n <= 0:
+        return -1
+    slots : ., mut = g_conc_slots
+    if slots < 1:
+        slots = 1
+    if slots > 64:
+        slots = 64
+    span : ., mut = g_conc_m_count * slots
+    if span < 1:
+        span = 1
+    wait_t0 := _conc_now_ms()
+    hs := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(hs, i * 8, -1)
+        i = i + 1
+    total : ., mut = 0
+    b : ., mut = 0
+    loop:
+        if b >= n:
+            break
+        if g_conc_plan_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        kind := conc_plan_body_kind(plan, b)
+        if kind == CONC_BODY_DATA_PARALLEL:
+            rn := conc_plan_range_count(plan)
+            ri : ., mut = 0
+            loop:
+                if ri >= rn:
+                    break
+                if conc_plan_range_body(plan, ri) == b:
+                    start := conc_plan_range_start(plan, ri)
+                    cnt := conc_plan_range_len(plan, ri)
+                    if cnt > 0:
+                        out := alloc(cnt * 8)
+                        if conc_run_range(plan, b, start, start + cnt, out) != 0:
+                            return -1
+                        j : ., mut = 0
+                        loop:
+                            if j >= cnt:
+                                break
+                            total = total + cell_load(out, j * 8)
+                            j = j + 1
+                ri = ri + 1
+        else:
+            if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
+                return -1
+            arg : ., mut = 0
+            ch := conc_plan_param_channel(plan, b, 0)
+            if ch >= 0:
+                handle := load_str_ptr(channels, ch * 8)
+                if _conc_is_null(handle) != 0:
+                    return -1
+                unsafe:
+                    arg = @ptr_of(handle)
+            entry := conc_plan_body_entry(plan, b)
+            if entry <= 0:
+                return -1
+            chosen := conc_mapping_plan_choose_slot(mapping_id, b)
+            if chosen < 0:
+                return -1
+            si : ., mut = 0
+            if chosen == CONC_SLOT_FIBER && slots > 1:
+                si = 1
+            slot := (b + si * g_conc_m_count) % span
+            h := conc_go_slot(entry, arg, slot)
             if _conc_word(h) == 0:
                 return -1
             cell_store(hs, b * 8, h)

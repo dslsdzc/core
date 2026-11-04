@@ -4,9 +4,9 @@
 //   - owner-region bump allocation for runtime objects;
 //   - typed MessageRef channels (payload bytes follow a 32-byte header);
 //   - a target-neutral fixture plan (bodies, channels, edges);
-//   - CPU and host-SIMT executors that consume the same plan.
+//   - host and lane executors that consume the same plan.
 //
-// No source syntax is added here. The plan carries structure only; CPU/SIMT
+// No source syntax is added here. The plan carries structure only; executors
 // are mappings, not semantics.
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -20,13 +20,13 @@ CONC_EDGE_SEND : int, pub = 2
 CONC_EDGE_JOIN : int, pub = 3
 CONC_EDGE_RECV : int, pub = 4
 
-// Channel ordering. The CPU runtime supports both; MPMC is validated in the
+// Channel ordering. The host runtime supports both; MPMC is validated in the
 // plan and executed by the conc scheduler's multi-waiter queues.
 CONC_PC_SPSC : int, pub = 1
 CONC_PC_MPMC : int, pub = 2
 
-CONC_SLOT_CPU_THREAD : int, pub = 1
-CONC_SLOT_CPU_FIBER : int, pub = 2
+CONC_SLOT_THREAD : int, pub = 1
+CONC_SLOT_FIBER : int, pub = 2
 
 CONC_TRANSFER_MOVE : int, pub = 1
 CONC_TRANSFER_LOAN : int, pub = 2
@@ -1071,7 +1071,7 @@ fn conc_ref_copy_set(ref: string, dst_region: int) -> string, pub:
     if nf <= 0:
         _conc_copy(dp, src, size)
         return dst
-    // CopySet semantics leave non-copied fields undefined; this CPU mapping
+    // CopySet semantics leave non-copied fields undefined; this host mapping
     // zeroes them so the result is deterministic.
     zi : ., mut = 0
     loop:
@@ -1444,7 +1444,7 @@ fn conc_recv(ch: string) -> string, pub:
 //   24 body_cap, 32 channel_cap, 40 edge_cap,
 //   48 body_base, 56 channel_base, 64 edge_base, 72 reserved.
 // Body/channel/edge records are 32 bytes each and contain structure only:
-// no CPU/GPU/slot/memory values.
+// no target-specific slot/memory values.
 
 fn _conc_plan_ensure(needed: int) -> int:
     if needed <= g_conc_plan_array_cap:
@@ -1867,7 +1867,7 @@ fn conc_plan_validate(plan: int) -> int, pub:
         kind := cell_load(sbase, s * 32)
         parent := cell_load(sbase, s * 32 + 8)
         count := cell_load(sbase, s * 32 + 16)
-        if kind != CONC_SLOT_CPU_THREAD && kind != CONC_SLOT_CPU_FIBER:
+        if kind != CONC_SLOT_THREAD && kind != CONC_SLOT_FIBER:
             return 0
         if parent < -1 || parent >= s:
             return 0
@@ -2169,9 +2169,9 @@ fn conc_plan_target_memory(plan: int) -> int, pub:
 
 fn _conc_profile_slot_kind(name: string) -> int:
     if name == "THREAD":
-        return CONC_SLOT_CPU_THREAD
+        return CONC_SLOT_THREAD
     if name == "FIBER":
-        return CONC_SLOT_CPU_FIBER
+        return CONC_SLOT_FIBER
     return -1
 
 fn _conc_profile_space_kind(name: string) -> int:
@@ -2379,9 +2379,9 @@ fn conc_target_profile_scheduling(id: int) -> int, pub:
     return cell_load(_conc_profile_at(id), 56)
 
 fn _conc_profile_slot_name(kind: int) -> string:
-    if kind == CONC_SLOT_CPU_THREAD:
+    if kind == CONC_SLOT_THREAD:
         return "THREAD"
-    if kind == CONC_SLOT_CPU_FIBER:
+    if kind == CONC_SLOT_FIBER:
         return "FIBER"
     return "UNKNOWN"
 
@@ -2504,7 +2504,7 @@ fn conc_target_profile_compatible(profile: int, plan: int) -> int, pub:
                 return 0
         xi = xi + 1
     // OS thread budget for the runtime's M count.
-    tmax := _conc_profile_slot_max_for(profile, CONC_SLOT_CPU_THREAD)
+    tmax := _conc_profile_slot_max_for(profile, CONC_SLOT_THREAD)
     slots := conc_plan_target_slots(plan)
     if slots > 0 && tmax > 0 && slots > tmax:
         return 0
@@ -2623,11 +2623,11 @@ fn conc_mapping_plan_choose_slot(id: int, body: int) -> int, pub:
     kind := conc_plan_body_kind(plan, body)
     if kind < 0:
         return -1
-    first : ., mut = CONC_SLOT_CPU_FIBER
-    second : ., mut = CONC_SLOT_CPU_THREAD
+    first : ., mut = CONC_SLOT_FIBER
+    second : ., mut = CONC_SLOT_THREAD
     if kind != CONC_BODY_DATA_PARALLEL:
-        first = CONC_SLOT_CPU_THREAD
-        second = CONC_SLOT_CPU_FIBER
+        first = CONC_SLOT_THREAD
+        second = CONC_SLOT_FIBER
     if _conc_profile_slot_max_for(prof, first) >= 0:
         return first
     if _conc_profile_slot_max_for(prof, second) >= 0:
@@ -2735,7 +2735,7 @@ fn conc_plan_range_len(plan: int, i: int) -> int, pub:
 fn conc_plan_add_slot(plan: int, kind: int, parent: int, count: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
-    if kind != CONC_SLOT_CPU_THREAD && kind != CONC_SLOT_CPU_FIBER:
+    if kind != CONC_SLOT_THREAD && kind != CONC_SLOT_FIBER:
         return -1
     if count <= 0:
         return -1
@@ -3026,7 +3026,7 @@ fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
                 else:
                     // Shared mapping/equivalence are only provable when no
                     // aliasing shared map exists. A live conc_shared_map makes
-                    // the plan conservatively UNKNOWN: the current CPU model
+                    // the plan conservatively UNKNOWN: the current host model
                     // has no equivalence proof for it.
                     if kind == CONC_CERT_SHARED_MAPPING || kind == CONC_CERT_EQUIVALENCE:
                         if g_conc_shared_maps == 0 && conc_plan_validate(plan) != 0:
@@ -3461,8 +3461,8 @@ fn _conc_body_at(plan: int, idx: int) -> string:
 // ── Executors ─────────────────────────────────────────────────────────────
 //
 // Both executors consume the same plan's body list. Channel/edge descriptors
-// are validated by the fixture but are not executed in CP-1. CPU is a single
-// logical slot with a serial fallback for DATA_PARALLEL; SIMT is a host-side
+// are validated by the fixture but are not executed in CP-1. The host mapping
+// is a single logical slot with a serial fallback for DATA_PARALLEL; lanes are a host-side
 // index-domain mapping. Neither executor invents target capabilities.
 
 fn _conc_call_ready() -> int:
@@ -3496,7 +3496,7 @@ fn _conc_call_int(entry: int, arg: int) -> int:
     cell_store(g_conc_call_table, 0, entry)
     return sched_call_1(_conc_addr(g_conc_call_table), 0, arg)
 
-fn conc_run_cpu(plan: int, arg: string) -> int, pub:
+fn conc_run_host(plan: int, arg: string) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
     n := cell_load(_conc_plan_at(plan), 0)
@@ -3599,7 +3599,7 @@ fn conc_run_body_bound(plan: int, body: int, channels: string) -> int, pub:
         return 0
     return -1
 
-fn conc_run_simt(plan: int, start: int, end: int) -> int, pub:
+fn conc_run_lanes(plan: int, start: int, end: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
     if start < 0:
@@ -3702,7 +3702,7 @@ fn conc_plan_deterministic(plan: int) -> int, pub:
 fn conc_run_range(plan: int, body: int, start: int, end: int,
                   out: string) -> int, pub:
     // Execute one PAR body over [start, end) and write entry(i) into out.
-    // This is the CPU executor used by the v2 range record.
+    // This is the host executor used by the v2 range record.
     if _conc_plan_valid(plan) == 0:
         return -1
     if body < 0 || body >= conc_plan_body_count(plan):
@@ -3812,10 +3812,10 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         ks := _conc_plan_next(text)
         kind : ., mut = -1
         if ks == "THREAD":
-            kind = CONC_SLOT_CPU_THREAD
+            kind = CONC_SLOT_THREAD
         else:
             if ks == "FIBER":
-                kind = CONC_SLOT_CPU_FIBER
+                kind = CONC_SLOT_FIBER
         parent := _conc_plan_read_int(text)
         count := _conc_plan_read_int(text)
         if id < 0 || kind < 0 || parent < -1 || count <= 0:

@@ -285,7 +285,7 @@ fn main() -> int:
     v := conc_alloc(r, 8)
     cell_store(v, 0, 41)
     conc_send(req, v)
-    rc := conc_run_cpu(p, req)
+    rc := conc_run_host(p, req)
     if rc != 0:
         return 2
     out := conc_recv(g_out)
@@ -308,7 +308,7 @@ fn zero() -> int:
 fn main() -> int:
     p := conc_plan_new()
     conc_plan_add_body(p, CONC_BODY_TASK, @addr(zero), 0)
-    if conc_run_cpu(p, "") != 0:
+    if conc_run_host(p, "") != 0:
         return 1
     if g_hit != 1:
         return 2
@@ -329,7 +329,7 @@ fn main() -> int:
     g_arr = conc_alloc(r, 8 * 16)
     p := conc_plan_new()
     conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(par), 16)
-    if conc_run_cpu(p, "") != 0:
+    if conc_run_host(p, "") != 0:
         return 1
     i : ., mut = 0
     loop:
@@ -339,7 +339,7 @@ fn main() -> int:
             return 2
         cell_store(g_arr, i * 8, -1)
         i = i + 1
-    if conc_run_simt(p, 0, 16) != 0:
+    if conc_run_lanes(p, 0, 16) != 0:
         return 3
     i = 0
     loop:
@@ -354,7 +354,7 @@ fn main() -> int:
             break
         cell_store(g_arr, i * 8, -1)
         i = i + 1
-    if conc_run_simt(p, 4, 8) != 0:
+    if conc_run_lanes(p, 4, 8) != 0:
         return 5
     i = 0
     loop:
@@ -453,7 +453,7 @@ fn main() -> int:
         return 4
     if conc_plan_add_body(p, CONC_BODY_TASK, @addr(task), 1) != 0:
         return 5
-    if conc_run_simt(p, 0, 1) != -1:
+    if conc_run_lanes(p, 0, 1) != -1:
         return 6
     if conc_channel_len(bad) != -1:
         return 8

@@ -141,7 +141,7 @@ fn main() -> int:
     p := conc_plan_load("v 1\\nentries 1\\nbody 0 PAR 0 8\\n", tbl)
     if p < 0:
         return 1
-    if conc_run_cpu(p, "") != 0:
+    if conc_run_host(p, "") != 0:
         return 2
     i : ., mut = 0
     loop:
@@ -151,7 +151,7 @@ fn main() -> int:
             return 3
         cell_store(g_arr, i * 8, -1)
         i = i + 1
-    if conc_run_simt(p, 0, 8) != 0:
+    if conc_run_lanes(p, 0, 8) != 0:
         return 4
     i = 0
     loop:

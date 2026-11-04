@@ -43,7 +43,7 @@ fn main() -> int:
         return 66
     if conc_plan_slot_count(plan) != 2:
         return 5
-    if conc_plan_slot_kind(plan, 1) != CONC_SLOT_CPU_FIBER:
+    if conc_plan_slot_kind(plan, 1) != CONC_SLOT_FIBER:
         return 6
     if conc_plan_slot_parent(plan, 1) != 0:
         return 7
@@ -666,7 +666,7 @@ fn main() -> int:
         return 2
     if conc_target_profile_slot_count(prof) != 2:
         return 3
-    if conc_target_profile_slot_kind(prof, 0) != CONC_SLOT_CPU_THREAD:
+    if conc_target_profile_slot_kind(prof, 0) != CONC_SLOT_THREAD:
         return 4
     if conc_target_profile_slot_max(prof, 0) != 64:
         return 5
@@ -710,7 +710,7 @@ fn main() -> int:
         return 23
     if str_len(conc_mapping_plan_export(0)) < 10:
         return 24
-    if conc_mapping_plan_choose_slot(0, 0) != CONC_SLOT_CPU_THREAD:
+    if conc_mapping_plan_choose_slot(0, 0) != CONC_SLOT_THREAD:
         return 25
     if conc_mapping_plan_choose_space(0, 0) != CONC_SPACE_DEVICE:
         return 26
@@ -718,6 +718,10 @@ fn main() -> int:
         return 27
     if conc_mapping_plan_applied(0) != 1:
         return 28
+    chs := alloc(8)
+    cell_store(chs, 0, 0)
+    if conc_plan_run_mapped(0, chs) != 0:
+        return 29
     bad := conc_target_profile_load("v 1\\nslot THREAD 1 64 1\\nspace HOST 1024\\nsched 1\\n")
     if bad < 0:
         return 19
