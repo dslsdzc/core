@@ -104,6 +104,16 @@ g_conc_region_array_cap : int, mut = 0
 g_conc_plans : string, mut
 g_conc_plan_count : int, mut = 0
 g_conc_plan_array_cap : int, mut = 0
+// Plan -> TargetProfile binding (indexed by plan id, -1 = unbound).
+g_conc_plan_profile : string, mut
+
+// Versioned TargetProfile artifacts and MappingPlan bindings. These are
+// deliberately separate from the 256B plan record: a plan is target-neutral,
+// and the mapping is a side artifact.
+g_conc_profiles : string, mut
+g_conc_profile_count : int, mut = 0
+g_conc_mappings : string, mut
+g_conc_mapping_count : int, mut = 0
 
 // A single 8-byte table used by sched_call_*. CP-1 executes one body at a
 // time; concurrent mappings will eventually own their own call tables.
@@ -1450,6 +1460,20 @@ fn _conc_plan_ensure(needed: int) -> int:
     if g_conc_plan_array_cap > 0:
         _conc_copy(nb, g_conc_plans, g_conc_plan_array_cap * 8)
     g_conc_plans = nb
+    // Parallel plan -> profile table, initialized to unbound.
+    pb := _conc_global_alloc(nc * 8)
+    if _conc_is_null(pb) != 0:
+        return -1
+    if g_conc_plan_array_cap > 0:
+        _conc_copy(pb, g_conc_plan_profile, g_conc_plan_array_cap * 8)
+    oldcap : ., mut = g_conc_plan_array_cap
+    pi : ., mut = oldcap
+    loop:
+        if pi >= nc:
+            break
+        cell_store(pb, pi * 8, -1)
+        pi = pi + 1
+    g_conc_plan_profile = pb
     g_conc_plan_array_cap = nc
     return 0
 
@@ -2130,6 +2154,407 @@ fn conc_plan_target_memory(plan: int) -> int, pub:
         return -1
     return cell_load(_conc_plan_at(plan), 184)
 
+// ── TargetProfile / MappingPlan ───────────────────────────────────────────
+//
+// TargetProfile text (versioned; separate from the plan):
+//   v 1
+//   slot THREAD <min> <max> <preemptive:0|1>
+//   slot FIBER  <min> <max> <preemptive:0|1>
+//   space HOST|DEVICE|REMOTE <capacity>
+//   xfer <src_space> <dst_space> <supported:0|1>
+//   sched <cooperative:0|preemptive:1>
+//
+// A MappingPlan is a validated binding of one plan to one profile. The plan
+// itself stays target-neutral; this side artifact is what a deployment stores.
+
+fn _conc_profile_slot_kind(name: string) -> int:
+    if name == "THREAD":
+        return CONC_SLOT_CPU_THREAD
+    if name == "FIBER":
+        return CONC_SLOT_CPU_FIBER
+    return -1
+
+fn _conc_profile_space_kind(name: string) -> int:
+    if name == "HOST":
+        return CONC_SPACE_HOST
+    if name == "DEVICE":
+        return CONC_SPACE_DEVICE
+    if name == "REMOTE":
+        return CONC_SPACE_REMOTE
+    return -1
+
+fn _conc_profile_valid(id: int) -> int:
+    if id < 0 || id >= g_conc_profile_count:
+        return 0
+    if _conc_is_null(g_conc_profiles) != 0:
+        return 0
+    p := load_str_ptr(g_conc_profiles, id * 8)
+    if _conc_is_null(p) != 0:
+        return 0
+    return 1
+
+fn _conc_profile_at(id: int) -> string:
+    if _conc_profile_valid(id) == 0:
+        return _conc_ptr(0)
+    return load_str_ptr(g_conc_profiles, id * 8)
+
+fn conc_target_profile_load(text: string) -> int, pub:
+    if g_conc_profile_count >= 8:
+        return -1
+    if _conc_is_null(g_conc_profiles) != 0:
+        g_conc_profiles = _conc_global_alloc(8 * 8)
+        if _conc_is_null(g_conc_profiles) != 0:
+            return -1
+    p := _conc_global_alloc(96)
+    slots := _conc_global_alloc(8 * 32)
+    spaces := _conc_global_alloc(8 * 24)
+    xfers := _conc_global_alloc(16 * 24)
+    if _conc_is_null(p) != 0 || _conc_is_null(slots) != 0 || _conc_is_null(spaces) != 0 || _conc_is_null(xfers) != 0:
+        return -1
+    cell_store(p, 0, 0)
+    cell_store(p, 8, 0)
+    cell_store(p, 24, 0)
+    cell_store(p, 40, 0)
+    cell_store(p, 56, 0)
+    store_str_ptr(p, 16, slots)
+    store_str_ptr(p, 32, spaces)
+    store_str_ptr(p, 48, xfers)
+    g_conc_plan_parse_pos = 0
+    loop:
+        tok := _conc_plan_next(text)
+        if tok == "":
+            break
+        if tok == "v":
+            v := _conc_plan_read_int(text)
+            if v <= 0:
+                return -1
+            cell_store(p, 0, v)
+        else:
+            if tok == "slot":
+                kind := _conc_profile_slot_kind(_conc_plan_next(text))
+                if kind < 0:
+                    return -1
+                mn := _conc_plan_read_int(text)
+                mx := _conc_plan_read_int(text)
+                pre := _conc_plan_read_int(text)
+                if mn < 0 || mx < 0 || pre < 0 || pre > 1:
+                    return -1
+                n := cell_load(p, 8)
+                if n >= 8:
+                    return -1
+                base := load_str_ptr(p, 16)
+                cell_store(base, n * 32, kind)
+                cell_store(base, n * 32 + 8, mn)
+                cell_store(base, n * 32 + 16, mx)
+                cell_store(base, n * 32 + 24, pre)
+                cell_store(p, 8, n + 1)
+            else:
+                if tok == "space":
+                    kind := _conc_profile_space_kind(_conc_plan_next(text))
+                    if kind < 0:
+                        return -1
+                    cap := _conc_plan_read_int(text)
+                    if cap <= 0:
+                        return -1
+                    n := cell_load(p, 24)
+                    if n >= 8:
+                        return -1
+                    base := load_str_ptr(p, 32)
+                    cell_store(base, n * 24, kind)
+                    cell_store(base, n * 24 + 8, cap)
+                    cell_store(p, 24, n + 1)
+                else:
+                    if tok == "xfer":
+                        src := _conc_profile_space_kind(_conc_plan_next(text))
+                        dst := _conc_profile_space_kind(_conc_plan_next(text))
+                        sup := _conc_plan_read_int(text)
+                        if src < 0 || dst < 0 || sup < 0 || sup > 1:
+                            return -1
+                        n := cell_load(p, 40)
+                        if n >= 16:
+                            return -1
+                        base := load_str_ptr(p, 48)
+                        cell_store(base, n * 24, src)
+                        cell_store(base, n * 24 + 8, dst)
+                        cell_store(base, n * 24 + 16, sup)
+                        cell_store(p, 40, n + 1)
+                    else:
+                        if tok == "sched":
+                            s := _conc_plan_read_int(text)
+                            if s < 0 || s > 1:
+                                return -1
+                            cell_store(p, 56, s)
+                        else:
+                            return -1
+    if cell_load(p, 0) <= 0 || cell_load(p, 8) <= 0 || cell_load(p, 24) <= 0:
+        return -1
+    id := g_conc_profile_count
+    store_str_ptr(g_conc_profiles, id * 8, p)
+    g_conc_profile_count = id + 1
+    return id
+
+fn conc_target_profile_count() -> int, pub:
+    return g_conc_profile_count
+
+fn conc_target_profile_version(id: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    return cell_load(_conc_profile_at(id), 0)
+
+fn conc_target_profile_slot_count(id: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    return cell_load(_conc_profile_at(id), 8)
+
+fn conc_target_profile_slot_kind(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 8):
+        return -1
+    return cell_load(load_str_ptr(p, 16), i * 32)
+
+fn conc_target_profile_slot_min(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 8):
+        return -1
+    return cell_load(load_str_ptr(p, 16), i * 32 + 8)
+
+fn conc_target_profile_slot_max(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 8):
+        return -1
+    return cell_load(load_str_ptr(p, 16), i * 32 + 16)
+
+fn conc_target_profile_slot_preemptive(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 8):
+        return -1
+    return cell_load(load_str_ptr(p, 16), i * 32 + 24)
+
+fn conc_target_profile_space_count(id: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    return cell_load(_conc_profile_at(id), 24)
+
+fn conc_target_profile_space_kind(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 24):
+        return -1
+    return cell_load(load_str_ptr(p, 32), i * 24)
+
+fn conc_target_profile_space_capacity(id: int, i: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    if i < 0 || i >= cell_load(p, 24):
+        return -1
+    return cell_load(load_str_ptr(p, 32), i * 24 + 8)
+
+fn conc_target_profile_xfer_supported(id: int, src_kind: int, dst_kind: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    p := _conc_profile_at(id)
+    n := cell_load(p, 40)
+    base := load_str_ptr(p, 48)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            return 0
+        if cell_load(base, i * 24) == src_kind && cell_load(base, i * 24 + 8) == dst_kind:
+            return cell_load(base, i * 24 + 16)
+        i = i + 1
+
+fn conc_target_profile_scheduling(id: int) -> int, pub:
+    if _conc_profile_valid(id) == 0:
+        return -1
+    return cell_load(_conc_profile_at(id), 56)
+
+fn _conc_profile_slot_max_for(profile: int, kind: int) -> int:
+    p := _conc_profile_at(profile)
+    n := cell_load(p, 8)
+    base := load_str_ptr(p, 16)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            return -1
+        if cell_load(base, i * 32) == kind:
+            return cell_load(base, i * 32 + 16)
+        i = i + 1
+
+fn _conc_profile_space_cap_for(profile: int, kind: int) -> int:
+    p := _conc_profile_at(profile)
+    n := cell_load(p, 24)
+    base := load_str_ptr(p, 32)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            return -1
+        if cell_load(base, i * 24) == kind:
+            return cell_load(base, i * 24 + 8)
+        i = i + 1
+
+fn conc_target_profile_compatible(profile: int, plan: int) -> int, pub:
+    if _conc_profile_valid(profile) == 0:
+        return 0
+    if conc_plan_validate(plan) == 0:
+        return 0
+    // Slots: kind must exist; requested count must fit max (0 = unlimited).
+    ns := conc_plan_slot_count(plan)
+    si : ., mut = 0
+    loop:
+        if si >= ns:
+            break
+        kind := conc_plan_slot_kind(plan, si)
+        mx := _conc_profile_slot_max_for(profile, kind)
+        if mx < 0:
+            return 0
+        cnt := conc_plan_slot_len(plan, si)
+        if mx > 0 && cnt > mx:
+            return 0
+        si = si + 1
+    // Spaces: kind must exist and fit the declared capacity.
+    nsp := conc_plan_space_count(plan)
+    spi : ., mut = 0
+    loop:
+        if spi >= nsp:
+            break
+        kind := conc_plan_space_kind(plan, spi)
+        cap := _conc_profile_space_cap_for(profile, kind)
+        if cap < 0:
+            return 0
+        if conc_plan_space_capacity(plan, spi) > cap:
+            return 0
+        spi = spi + 1
+    // Physical transfers: every concrete space pair must have a path.
+    nx := conc_plan_xfer_count(plan)
+    xi : ., mut = 0
+    loop:
+        if xi >= nx:
+            break
+        ss := conc_plan_xfer_src_space(plan, xi)
+        ds := conc_plan_xfer_dst_space(plan, xi)
+        if ss >= 0 && ds >= 0:
+            sk := conc_plan_space_kind(plan, ss)
+            dk := conc_plan_space_kind(plan, ds)
+            if conc_target_profile_xfer_supported(profile, sk, dk) != 1:
+                return 0
+        xi = xi + 1
+    // OS thread budget for the runtime's M count.
+    tmax := _conc_profile_slot_max_for(profile, CONC_SLOT_CPU_THREAD)
+    slots := conc_plan_target_slots(plan)
+    if slots > 0 && tmax > 0 && slots > tmax:
+        return 0
+    mem := conc_plan_target_memory(plan)
+    hcap := _conc_profile_space_cap_for(profile, CONC_SPACE_HOST)
+    if mem > 0 && hcap > 0 && mem > hcap:
+        return 0
+    return 1
+
+fn conc_plan_bind_profile(plan: int, profile: int) -> int, pub:
+    if conc_target_profile_compatible(profile, plan) == 0:
+        return -1
+    if _conc_is_null(g_conc_plan_profile) != 0:
+        return -1
+    cell_store(g_conc_plan_profile, plan * 8, profile)
+    return 0
+
+fn conc_plan_profile(plan: int) -> int, pub:
+    if _conc_plan_valid(plan) == 0:
+        return -1
+    if _conc_is_null(g_conc_plan_profile) != 0:
+        return -1
+    return cell_load(g_conc_plan_profile, plan * 8)
+
+fn _conc_mapping_valid(id: int) -> int:
+    if id < 0 || id >= g_conc_mapping_count:
+        return 0
+    if _conc_is_null(g_conc_mappings) != 0:
+        return 0
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    if _conc_is_null(p) != 0:
+        return 0
+    return 1
+
+fn conc_mapping_plan_new(plan: int, profile: int) -> int, pub:
+    if conc_target_profile_compatible(profile, plan) == 0:
+        return -1
+    if g_conc_mapping_count >= 8:
+        return -1
+    if _conc_is_null(g_conc_mappings) != 0:
+        g_conc_mappings = _conc_global_alloc(8 * 8)
+        if _conc_is_null(g_conc_mappings) != 0:
+            return -1
+    p := _conc_global_alloc(24)
+    if _conc_is_null(p) != 0:
+        return -1
+    cell_store(p, 0, plan)
+    cell_store(p, 8, profile)
+    cell_store(p, 16, 0)
+    id := g_conc_mapping_count
+    store_str_ptr(g_conc_mappings, id * 8, p)
+    g_conc_mapping_count = id + 1
+    conc_plan_bind_profile(plan, profile)
+    return id
+
+fn conc_mapping_plan_count() -> int, pub:
+    return g_conc_mapping_count
+
+fn conc_mapping_plan_plan(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return -1
+    return cell_load(load_str_ptr(g_conc_mappings, id * 8), 0)
+
+fn conc_mapping_plan_profile(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return -1
+    return cell_load(load_str_ptr(g_conc_mappings, id * 8), 8)
+
+fn conc_mapping_plan_validate(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return 0
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    return conc_target_profile_compatible(cell_load(p, 8), cell_load(p, 0))
+
+fn conc_mapping_plan_budget_ok(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return 0
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    return conc_plan_budget_ok(cell_load(p, 0))
+
+fn conc_mapping_plan_cert_ok(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return 0
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    return conc_plan_cert_ok(cell_load(p, 0))
+
+fn conc_mapping_plan_cert_prove(id: int, kind: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return -1
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    return conc_plan_cert_prove(cell_load(p, 0), kind)
+
+fn conc_mapping_plan_explain(id: int) -> string, pub:
+    if _conc_mapping_valid(id) == 0:
+        return ""
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    plan := cell_load(p, 0)
+    prof := cell_load(p, 8)
+    out : ., mut = "mapping plan=" + _conc_num_str(plan)
+    out = out + " profile=" + _conc_num_str(prof)
+    out = out + " legal=" + _conc_num_str(conc_mapping_plan_validate(id))
+    out = out + " budgets=" + _conc_num_str(conc_mapping_plan_budget_ok(id))
+    out = out + " certs=" + _conc_num_str(conc_mapping_plan_cert_ok(id))
+    return out
+
 fn conc_plan_add_range(plan: int, body: int, start: int, count: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2469,6 +2894,16 @@ fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
                         st = CONC_STATUS_PROVED
                     else:
                         st = CONC_STATUS_VIOLATED
+                else:
+                    // Shared mapping/equivalence are only provable when no
+                    // aliasing shared map exists. A live conc_shared_map makes
+                    // the plan conservatively UNKNOWN: the current CPU model
+                    // has no equivalence proof for it.
+                    if kind == CONC_CERT_SHARED_MAPPING || kind == CONC_CERT_EQUIVALENCE:
+                        if g_conc_shared_maps == 0 && conc_plan_validate(plan) != 0:
+                            st = CONC_STATUS_PROVED
+                        else:
+                            st = CONC_STATUS_UNKNOWN
     i := _conc_plan_cert_find(plan, kind)
     if i >= 0:
         p := _conc_plan_at(plan)

@@ -130,6 +130,18 @@ fn main() -> int:
         return 56
     if conc_plan_cert_status(plan, 2) != CONC_STATUS_VIOLATED:
         return 57
+    if conc_plan_cert_prove(plan, CONC_CERT_TRANSFER) != 3:
+        return 67
+    if conc_plan_cert_status(plan, 3) != CONC_STATUS_PROVED:
+        return 68
+    if conc_plan_cert_prove(plan, CONC_CERT_SHARED_MAPPING) != 4:
+        return 69
+    if conc_plan_cert_status(plan, 4) != CONC_STATUS_PROVED:
+        return 70
+    if conc_plan_cert_prove(plan, CONC_CERT_EQUIVALENCE) != 5:
+        return 71
+    if conc_plan_cert_status(plan, 5) != CONC_STATUS_PROVED:
+        return 72
     if str_len(conc_plan_explain(plan)) < 20:
         return 27
     if str_len(conc_plan_explain_full(plan)) < 120:
@@ -638,6 +650,92 @@ fn main() -> int:
 """
 
 
+PROFILE_LOAD = """\
+import conc
+import sched
+
+fn worker() -> int:
+    return 0
+
+fn main() -> int:
+    prof_text := "v 1\\nslot THREAD 1 64 1\\nslot FIBER 1 1024 0\\nspace HOST 1073741824\\nspace DEVICE 1073741824\\nxfer DEVICE DEVICE 1\\nsched 1\\n"
+    prof := conc_target_profile_load(prof_text)
+    if prof < 0:
+        return 1
+    if conc_target_profile_version(prof) != 1:
+        return 2
+    if conc_target_profile_slot_count(prof) != 2:
+        return 3
+    if conc_target_profile_slot_kind(prof, 0) != CONC_SLOT_CPU_THREAD:
+        return 4
+    if conc_target_profile_slot_max(prof, 0) != 64:
+        return 5
+    if conc_target_profile_space_count(prof) != 2:
+        return 6
+    if conc_target_profile_space_kind(prof, 1) != CONC_SPACE_DEVICE:
+        return 7
+    if conc_target_profile_xfer_supported(prof, CONC_SPACE_DEVICE, CONC_SPACE_DEVICE) != 1:
+        return 8
+    if conc_target_profile_scheduling(prof) != 1:
+        return 9
+    tbl := alloc(8)
+    cell_store(tbl, 0, @addr(worker))
+    plan_text := "v 2\\nentries 1\\ntarget cpu 2 1\\nslot 0 THREAD -1 2\\nslot 1 FIBER 0 4\\nspace 0 DEVICE 1048576\\nbody 0 TASK 0 0\\nxfer 0 MOVE 0 0 16 0 0\\n"
+    plan := conc_plan_load(plan_text, tbl)
+    if plan < 0:
+        return 10
+    if conc_plan_bind_profile(plan, prof) != 0:
+        return 11
+    if conc_plan_profile(plan) != prof:
+        return 12
+    if conc_plan_target_compatible(plan) != 1:
+        return 13
+    if conc_mapping_plan_new(plan, prof) != 0:
+        return 14
+    if conc_mapping_plan_validate(0) != 1:
+        return 15
+    if conc_mapping_plan_plan(0) != plan:
+        return 16
+    if conc_mapping_plan_profile(0) != prof:
+        return 17
+    if str_len(conc_mapping_plan_explain(0)) < 20:
+        return 18
+    bad := conc_target_profile_load("v 1\\nslot THREAD 1 64 1\\nspace HOST 1024\\nsched 1\\n")
+    if bad < 0:
+        return 19
+    if conc_target_profile_compatible(bad, plan) != 0:
+        return 20
+    return 0
+"""
+
+
+WAIT_RUN = """\
+import conc
+import sched
+
+fn worker(x: int) -> int:
+    return x
+
+fn main() -> int:
+    sched_init()
+    tbl := alloc(8)
+    cell_store(tbl, 0, @addr(worker))
+    text := "v 2\\nentries 1\\nbody 0 TASK 0 1\\nbudget 0 WAIT 0 UNKNOWN\\n"
+    plan := conc_plan_load(text, tbl)
+    if plan < 0:
+        return 1
+    chs := alloc(8)
+    cell_store(chs, 0, 0)
+    if conc_plan_run(plan, 0, chs) != 0:
+        return 2
+    if conc_plan_budget_status(plan, 0) != CONC_STATUS_MEASURED:
+        return 3
+    if conc_plan_budget_value(plan, 0) < 0:
+        return 4
+    return 0
+"""
+
+
 def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
                           timeout=timeout)
@@ -818,6 +916,8 @@ def main() -> int:
         ("chain_plan_run", CHAIN_RUN, 60, 0),
         ("join_plan_run", JOIN_RUN, 60, 0),
         ("parallel_body_plan_run", PAR_BODY_RUN, 60, 0),
+        ("wait_budget_writeback", WAIT_RUN, 60, 0),
+        ("profile_mapping_plan", PROFILE_LOAD, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

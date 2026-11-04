@@ -30,8 +30,12 @@ CONC = [
     "test_conc_flow.py",
     "test_conc_transfer.py",
     "test_conc_preempt.py",
+    "test_conc_plan.py",
+    "test_conc_plan_emitter.py",
     "test_conc_plan_v2.py",
     "test_conc_autopar.py",
+    "test_chan_handle_model.py",
+    "test_go_arena.py",
 ]
 
 COMPILER = [
@@ -64,7 +68,9 @@ def select_changed(files: list[str]) -> list[str]:
         if "conc_sched" in p or "src/stdlib/sched.cr" in p or "src/stdlib/chan.cr" in p or p.endswith("src/stdlib/conc.cr"):
             picked.extend(CONC)
         if "ir_gen" in p or "conc_plan_emit" in p:
-            picked.extend(["test_conc_autopar.py", "test_conc_plan_v2.py"])
+            picked.extend(["test_conc_autopar.py", "test_conc_plan.py",
+                           "test_conc_plan_emitter.py",
+                           "test_conc_plan_v2.py"])
         if "src/runtime/rt.s" in p or "src/format/elf/elf.cr" in p:
             picked.extend(["test_conc_preempt.py", "test_conc_sched.py"])
         if "src/stdlib/panic.cr" in p:

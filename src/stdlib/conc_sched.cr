@@ -437,6 +437,9 @@ fn conc_plan_target_compatible(plan: int) -> int, pub:
     // runtime. An empty target is treated as target-neutral.
     if conc_plan_validate(plan) == 0:
         return 0
+    prof := conc_plan_profile(plan)
+    if prof >= 0:
+        return conc_target_profile_compatible(prof, plan)
     name := conc_plan_target_name(plan)
     if _conc_word(name) != 0:
         if name != "cpu":
@@ -1293,6 +1296,19 @@ fn _conc_yield_try(claimed: int) -> int:
 fn conc_yield(), pub:
     _conc_yield_try(0)
 
+// Write the observed wall time back into every WAIT budget of the plan. This
+// is evidence, not a proof: status becomes MEASURED, and only the executor can
+// produce it. Plans without WAIT rows are untouched.
+fn _conc_plan_measure_wait(plan: int, t0: int):
+    n := conc_plan_budget_count(plan)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if conc_plan_budget_kind(plan, i) == CONC_BUDGET_WAIT:
+            conc_plan_budget_measure(plan, i, _conc_now_ms() - t0)
+        i = i + 1
+
 fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
     if g_conc_plan_cancel != 0:
         return CONC_RESULT_CANCELLED
@@ -1311,6 +1327,7 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         return -1
     if _conc_is_null(channels) != 0:
         return -1
+    wait_t0 := _conc_now_ms()
     reach := alloc(n * 8)
     indeg := alloc(n * 8)
     placed := alloc(n * 8)
@@ -1491,6 +1508,7 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
                 if g_conc_plan_cancel != 0:
                     return CONC_RESULT_CANCELLED
         i = i + 1
+    _conc_plan_measure_wait(plan, wait_t0)
     return total
 
 fn conc_flow_cancelled() -> int, pub:
