@@ -39,7 +39,7 @@ fn ea_modrm(buf: string, pos: int, m: int, reg: int, rm: int) -> int:
     return 1
 
 fn ea_mov_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -47,7 +47,7 @@ fn ea_mov_rr(buf: string, pos: int, dst: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
     w8(buf, cp, 139)
     cp = cp + 1
@@ -62,7 +62,7 @@ fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
     return cp - pos
 
 fn ea_mov_rip_store(buf: string, pos: int, src: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, 0)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -80,8 +80,8 @@ fn ea_mov_load(buf: string, pos: int, dst: int, base: int) -> int:
     // A base whose low three bits are 5 (rbp/r13) cannot use mod=00: that
     // encoding means RIP-relative or disp32 with no base. Use mod=01 with a
     // zero displacement instead.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
@@ -94,7 +94,7 @@ fn ea_mov_load(buf: string, pos: int, dst: int, base: int) -> int:
     return cp - pos
 
 fn ea_mov_load_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
     w8(buf, cp, 139)
     cp = cp + 1
@@ -106,34 +106,34 @@ fn ea_mov_load_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> i
 fn ea_load_arena_scalar(buf: string, pos: int, dst: int, gid: int, disp: int) -> int:
     // Scalar cells hold raw machine values. cell_load/cell_store tag and untag
     // at the library boundary; the allocator reads the cells directly.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, dst, gid)
     cp = cp + ea_mov_load_disp8(buf, cp, dst, dst, disp)
     return cp - pos
 
 fn ea_store_arena_scalar(buf: string, pos: int, src: int, gid: int, disp: int, scratch: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, scratch, gid)
     cp = cp + ea_mov_store_disp8(buf, cp, scratch, disp, src)
     return cp - pos
 
 fn ea_load_meta_index8(buf: string, pos: int, dst: int, gid: int, index: int) -> int:
     // r12 holds the table base so dst may equal the index register.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, 12, gid)
     cp = cp + ea_mov_load_index8(buf, cp, dst, 12, index)
     return cp - pos
 
 fn ea_store_meta_index8(buf: string, pos: int, gid: int, index: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, 12, gid)
     cp = cp + ea_mov_store_index8(buf, cp, 12, index, src)
     return cp - pos
 
 fn ea_mov_load_index8(buf: string, pos: int, dst: int, base: int, index: int) -> int:
     // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, index / 8, base / 8)
@@ -149,8 +149,8 @@ fn ea_mov_load_index8(buf: string, pos: int, dst: int, base: int, index: int) ->
 
 fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -> int:
     // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, src / 8, index / 8, base / 8)
@@ -165,7 +165,7 @@ fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -
     return cp - pos
 
 fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -180,7 +180,7 @@ fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
     return cp - pos
 
 fn ea_lea_base_index8(buf: string, pos: int, dst: int, base: int, index: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, index / 8, base / 8)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -192,7 +192,7 @@ fn ea_lea_base_index8(buf: string, pos: int, dst: int, base: int, index: int, di
     return cp - pos
 
 fn ea_lea_base_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -202,7 +202,7 @@ fn ea_lea_base_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> i
     return cp - pos
 
 fn ea_add_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -212,7 +212,7 @@ fn ea_add_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_and_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -222,7 +222,7 @@ fn ea_and_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_add_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 1)
     cp = cp + 1
@@ -230,7 +230,7 @@ fn ea_add_rr(buf: string, pos: int, dst: int, src: int) -> int:
     return cp - pos
 
 fn ea_cmp_rr(buf: string, pos: int, left: int, right: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, right / 8, 0, left / 8)
     w8(buf, cp, 57)
     cp = cp + 1
@@ -238,7 +238,7 @@ fn ea_cmp_rr(buf: string, pos: int, left: int, right: int) -> int:
     return cp - pos
 
 fn ea_test_rr(buf: string, pos: int, a: int, b: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, b / 8, 0, a / 8)
     w8(buf, cp, 133)
     cp = cp + 1
@@ -261,7 +261,7 @@ fn ea_jmp8(buf: string, pos: int, rel: int) -> int:
     return 2
 
 fn ea_mul(buf: string, pos: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, src / 8)
     w8(buf, cp, 247)
     cp = cp + 1
@@ -269,7 +269,7 @@ fn ea_mul(buf: string, pos: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_store(buf: string, pos: int, base: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, base / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -277,7 +277,7 @@ fn ea_mov_store(buf: string, pos: int, base: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_store_disp8(buf: string, pos: int, base: int, disp: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, base / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -287,7 +287,7 @@ fn ea_mov_store_disp8(buf: string, pos: int, base: int, disp: int, src: int) -> 
     return cp - pos
 
 fn ea_cmp_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 129)
     cp = cp + 1
@@ -313,7 +313,7 @@ fn ea_ud2(buf: string, pos: int) -> int:
     return 2
 
 fn ea_sar_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -323,7 +323,7 @@ fn ea_sar_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -333,7 +333,7 @@ fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_shl_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -343,7 +343,7 @@ fn ea_shl_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, src / 8)
     w8(buf, cp, 107)
     cp = cp + 1
@@ -353,7 +353,7 @@ fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
     return cp - pos
 
 fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 184 + dst % 8)
     cp = cp + 1
@@ -364,7 +364,7 @@ fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
 fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     // REX.W + C7 /0 id: mov r64, sign-extended imm32. B8+rd with REX.W is
     // mov r64, imm64 and would desynchronise the stream if only 4 bytes follow.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 199)
     cp = cp + 1
@@ -374,7 +374,7 @@ fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_cmp_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -384,7 +384,7 @@ fn ea_cmp_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_add_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 129)
     cp = cp + 1
@@ -394,7 +394,7 @@ fn ea_add_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_sub_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 41)
     cp = cp + 1
@@ -459,7 +459,7 @@ fn ea_jmp32(buf: string, pos: int, rel: int) -> int:
     return 5
 
 fn ea_dec(buf: string, pos: int, dst: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 255)
     cp = cp + 1
@@ -483,7 +483,7 @@ fn ea_jnz8(buf: string, pos: int, rel: int) -> int:
     return 2
 
 fn ea_inc(buf: string, pos: int, dst: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 255)
     cp = cp + 1

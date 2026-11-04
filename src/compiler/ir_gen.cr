@@ -4462,8 +4462,19 @@ fn gen_expr(node: int) -> int:
         if g_plan_active != 0:
             mi := lazy_memo_index_of_ast(node)
             if mi >= 0:
-                if cell_load(g_lazy_memo_var, mi * 8) < 0:
-                    lazy_memo_site_begin(mi, first_arg_var, ac)
+                kind := cell_load(g_lazy_memo_kind, mi * 8)
+                if kind == 1:
+                    if cell_load(g_lazy_memo_var, mi * 8) < 0:
+                        lazy_memo_site_begin(mi, first_arg_var, ac)
+                else:
+                    // The loop-invariant memo was registered during Phase A
+                    // with Phase A variable ids. Phase B regenerates the IR
+                    // with new ids, so refresh the captured arguments here
+                    // rather than reusing stale ids (they may name unrelated
+                    // values in the new graph).
+                    arg0 := lazy_pack_args(first_arg_var, ac)
+                    cell_store(g_lazy_memo_arg0, mi * 8, arg0)
+                    cell_store(g_lazy_memo_argc, mi * 8, ac)
                 mv := cell_load(g_lazy_memo_var, mi * 8)
                 if mv >= 0:
                     return mv
@@ -6610,6 +6621,14 @@ fn ir_dce_reachable():
         if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), "main") != 0:
             has_main = 1
             cell_store(reachable, i * 8, 1)
+        else:
+            // User code is a root even when nothing calls it: diagnostics in
+            // an uncalled function are still part of the program's contract.
+            // The DCE shortcut exists for unused imported stdlib bodies, not
+            // for the user's own graph.
+            own := func_owner(i)
+            if own >= 0 && lib_kind(own) == LIB_KIND_USER:
+                cell_store(reachable, i * 8, 1)
         i = i + 1
     if has_main == 0:
         return

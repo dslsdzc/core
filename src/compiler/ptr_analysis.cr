@@ -282,10 +282,12 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                 if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY || op == IR_ALLOC_AT:
                     // IR_ALLOC marks a scalar slot and is not tracked. Heap and
                     // fixed-address allocations receive points-to bits.
-                    if pa_pts_empty(d) != 0:
+                    if pa_pts_empty(d) != 0 && g_pa_alloc_count < g_pa_alloc_max:
                         // Give each allocation its own bit and record the mapping
                         // from bit to DF node for size queries. The set width is
-                        // pre-scanned, so there is no 64-allocation cap.
+                        // pre-scanned, so there is no 64-allocation cap. The
+                        // bound check keeps a count/filter mismatch from turning
+                        // into an endless fixed-point iteration.
                         grow_pa_alloc_nodes(g_pa_alloc_count + 1)
                         cell_store(g_pa_alloc_nodes, g_pa_alloc_count * 8, ni)
                         pa_pts_add(d, g_pa_alloc_count)
@@ -465,6 +467,13 @@ fn ptr_analysis_all():
     loop:
         if fi >= g_ir_func_count:
             break
+        // Match pa_count_allocs: dead functions are not part of the points-to
+        // universe. Analyzing them here would discover allocation nodes that
+        // the pre-scan never counted, and the pre-scan's allocation IDs would
+        // never reach them.
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)

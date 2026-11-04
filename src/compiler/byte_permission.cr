@@ -288,6 +288,12 @@ fn bp_def_state(def_node: int, var: int, depth: int) -> int:
 fn bp_value_state_at(var: int, at_node: int, depth: int) -> int:
     if var < 0 || var >= g_ir_var_count || depth > RC_MAX_DEPTH:
         return BP_RW
+    // Read-only strings are the only BP_READ source: string constants and the
+    // string fixed point. A non-string value has no string provenance, so its
+    // reaching definitions cannot change the answer. Keep the conservative
+    // default (writable) and skip the dataflow for scalar-heavy functions.
+    if bp_var_is_string(var) == 0:
+        return BP_RW
     if rc_rd_any(var, at_node) != 0:
         base := rc_rd_collect(var, at_node, depth)
         dc := g_rc_rd_def_count

@@ -2093,14 +2093,43 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
 // before the destination. Both cases report EC_B_LIFETIME; the messages keep
 // the two causes distinguishable.
 fn rc_store_value_is_pointer(val: int) -> int:
-    if val < 0:
+    cur : ., mut = val
+    depth : ., mut = 0
+    loop:
+        if cur < 0 || depth > RC_MAX_DEPTH:
+            return 0
+        // A deferred pure call is stored through its _forced temporary; the
+        // value's provenance lives on the thunk source.
+        lazy := rc_lazy_source(cur)
+        if lazy >= 0:
+            cur = lazy
+            depth = depth + 1
+            continue
+        ti := irv_type(cur)
+        if ti >= 0 && (get_type_kind(ti) == TYP_PTR || get_type_kind(ti) == TYP_REF):
+            return 1
+        if pa_pts_empty(cur) == 0:
+            return 1
+        // Pointer analysis leaves call results empty (no summaries), so the
+        // type row is the only clue. A callee that aliases a parameter into
+        // its return can still carry a region-local pointer.
+        prod := cell_load(g_df_var_producer, cur * 8)
+        if prod >= 0:
+            op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+            if op == IR_CALL:
+                s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+                callee := rc_func_by_name(s3)
+                if callee < 0:
+                    return 1
+                pc := cell_load(g_ir_func_param_count, callee * 8)
+                j : ., mut = 0
+                loop:
+                    if j >= pc || j >= 64:
+                        break
+                    if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                        return 1
+                    j = j + 1
         return 0
-    ti := irv_type(val)
-    if ti >= 0 && (get_type_kind(ti) == TYP_PTR || get_type_kind(ti) == TYP_REF):
-        return 1
-    if pa_pts_empty(val) == 0:
-        return 1
-    return 0
 
 fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
     if rc_var_dead(val_var, ni) != 0:
@@ -2159,12 +2188,15 @@ fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int
         if op == IR_STORE_PTR:
             rc_store_escape(ni, s1, s2, nstart)
 
-        // Direct global assignment of a region-local pointer.
+        // Direct global assignment of a region-local pointer. Scalar stores
+        // cannot carry region provenance; skip the reaching-def dataflow for
+        // them (large generated functions otherwise compute it per value).
         if op == IR_STORE && s1 >= 0 && s2 >= 0 && rc_is_global_var(s1) != 0:
-            if rc_value_has_release(s2, ni, nstart, 0) != 0:
-                check_error(EC_B_LIFETIME,
-                    "store escape: global outlives the stored allocation",
-                    0, 0)
+            if rc_store_value_is_pointer(s2) != 0:
+                if rc_value_has_release(s2, ni, nstart, 0) != 0:
+                    check_error(EC_B_LIFETIME,
+                        "store escape: global outlives the stored allocation",
+                        0, 0)
 
         // Element/field stores go through a base object instead of IR_STORE_PTR.
         if op == IR_STORE_INDEX && s1 >= 0 && s2 >= 0:
