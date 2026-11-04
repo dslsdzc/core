@@ -82,6 +82,60 @@ fn main() -> int:
     return 0
 """
 
+NESTED_CALL = """\
+import sched
+import chan
+
+fn inner(x: int) -> int:
+    return x * 2
+
+fn outer(x: int) -> int:
+    return inner(x) + 1
+
+fn main() -> int:
+    sched_init()
+    arr := alloc(4 * 8)
+    for i in 0..4:
+        arr[i] = outer(i)
+    if arr[0] + arr[1] + arr[2] + arr[3] != 16:
+        return 1
+    return 0
+"""
+
+MUL_REDUCTION = """\
+import sched
+import chan
+
+fn step(x: int) -> int:
+    return x + 1
+
+fn main() -> int:
+    sched_init()
+    prod : ., mut = 1
+    for i in 0..4:
+        prod = prod * step(i)
+    if prod != 24:
+        return prod
+    return 0
+"""
+
+SUB_REDUCTION = """\
+import sched
+import chan
+
+fn ident(x: int) -> int:
+    return x
+
+fn main() -> int:
+    sched_init()
+    sum : ., mut = 0
+    for i in 0..4:
+        sum = sum - ident(i)
+    if sum != -6:
+        return sum
+    return 0
+"""
+
 SERIAL_FALLBACK = """\
 import sched
 import chan
@@ -159,10 +213,16 @@ def main() -> int:
     ok = build_run("autopar_reverse", AUTO_REVERSE, 0) and ok
     ok = build_run("autopar_reduction", AUTO_REDUCTION, 0) and ok
     ok = build_run("autopar_reduction_fallback", REDUCTION_FALLBACK, 0) and ok
+    ok = build_run("autopar_nested_call", NESTED_CALL, 0) and ok
+    ok = build_run("autopar_mul_reduction", MUL_REDUCTION, 0) and ok
+    ok = build_run("autopar_sub_reduction", SUB_REDUCTION, 0) and ok
     ok = build_run("autopar_serial_fallback", SERIAL_FALLBACK, 0) and ok
     n = ir_conc_go_count(AUTO_PAR, "autopar_pure")
     rn = ir_conc_go_count(AUTO_REDUCTION, "autopar_reduction")
     rvn = ir_conc_go_count(AUTO_REVERSE, "autopar_reverse")
+    nn = ir_conc_go_count(NESTED_CALL, "autopar_nested")
+    mn = ir_conc_go_count(MUL_REDUCTION, "autopar_mul")
+    sn = ir_conc_go_count(SUB_REDUCTION, "autopar_sub")
     m = ir_conc_go_count(SERIAL_FALLBACK, "autopar_serial")
     if n < 1:
         print(f"FAIL auto_par_ir: main conc_go count={n}, expected >=1")
@@ -179,12 +239,27 @@ def main() -> int:
         ok = False
     else:
         print(f"PASS reduction_ir (main conc_go={rn})")
+    if nn < 1:
+        print(f"FAIL nested_call_ir: main conc_go count={nn}, expected >=1")
+        ok = False
+    else:
+        print(f"PASS nested_call_ir (main conc_go={nn})")
+    if mn < 1:
+        print(f"FAIL mul_reduction_ir: main conc_go count={mn}, expected >=1")
+        ok = False
+    else:
+        print(f"PASS mul_reduction_ir (main conc_go={mn})")
+    if sn < 1:
+        print(f"FAIL sub_reduction_ir: main conc_go count={sn}, expected >=1")
+        ok = False
+    else:
+        print(f"PASS sub_reduction_ir (main conc_go={sn})")
     if m != 0:
         print(f"FAIL serial_fallback_ir: main conc_go count={m}, expected 0")
         ok = False
     else:
         print("PASS serial_fallback_ir (no conc_go in main)")
-    total = 9
+    total = 15
     print(f"{total if ok else 0}/{total} passed")
     return 0 if ok else 1
 

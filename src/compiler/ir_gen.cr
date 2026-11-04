@@ -6248,10 +6248,52 @@ fn is_arena_infra_name(name_idx: int) -> int:
         return 1
     return 0
 
+g_par_arith_depth : int, mut = 0
+
+fn _par_arith_call(node: int, param_ni: int) -> int:
+    // A call is pure for auto-PAR only when it is a one-int-parameter user
+    // function whose body is itself a pure arithmetic return, and the call
+    // argument is the caller's parameter (so no substitution is needed).
+    if ast_c(node) != 1:
+        return 0
+    fn_node := ast_a(node)
+    if ast_kind(fn_node) != EXPR_IDENT:
+        return 0
+    arg := ast_b(node)
+    if ast_kind(arg) == EXPR_ARG:
+        arg = ast_a(arg)
+    if ast_kind(arg) != EXPR_IDENT || ast_int_val(arg) != param_ni:
+        return 0
+    fi := find_func(ast_int_val(fn_node))
+    if fi < 0:
+        return 0
+    if fi_param_count(fi) != 1:
+        return 0
+    if fi_param_type(fi, 0) != TI_INT || fi_return_type(fi) != TI_INT:
+        return 0
+    fn_ast := fi_ast_node(fi)
+    if fn_ast < 0:
+        return 0
+    pnode := ast_b(fn_ast)
+    if ast_kind(pnode) != EXPR_PARAM:
+        return 0
+    callee_param := ast_a(pnode)
+    body : ., mut = ast_data(fn_ast)
+    if body >= 0 && ast_kind(body) == EXPR_BLOCK:
+        if ast_b(body) != 1:
+            return 0
+        body = cell_load(g_block_stmts, ast_a(body) * 8)
+    if body >= 0 && ast_kind(body) == EXPR_STMT:
+        body = ast_a(body)
+    if body < 0 || ast_kind(body) != EXPR_RETURN:
+        return 0
+    return _par_arith(ast_a(body), callee_param)
+
 fn _par_arith(node: int, param_ni: int) -> int:
-    // Conservative purity proof for auto-PAR: only integer constants, the
-    // function's own single parameter, and + - * / trees. No loads, calls,
-    // stores, globals, or control flow.
+    // Conservative purity proof for auto-PAR: integer constants, the
+    // function's own single parameter, + - * / trees, unary negation, and
+    // nested calls to other pure arithmetic functions. No loads, stores,
+    // globals, or control flow.
     if node < 0:
         return 0
     k := ast_kind(node)
@@ -6268,6 +6310,17 @@ fn _par_arith(node: int, param_ni: int) -> int:
                 return 0
             return _par_arith(ast_b(node), param_ni)
         return 0
+    if k == EXPR_UNARY:
+        if ast_c(node) == UOP_NEG:
+            return _par_arith(ast_a(node), param_ni)
+        return 0
+    if k == EXPR_CALL:
+        if g_par_arith_depth >= 8:
+            return 0
+        g_par_arith_depth = g_par_arith_depth + 1
+        r := _par_arith_call(node, param_ni)
+        g_par_arith_depth = g_par_arith_depth - 1
+        return r
     return 0
 
 fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
@@ -6292,31 +6345,39 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
     target := ast_a(stmt)
     value : ., mut = ast_b(stmt)
     mode : ., mut = 0
+    red_op : ., mut = OP_ADD
     if ast_kind(target) == EXPR_INDEX:
         mode = 1
     else:
         if ast_kind(target) == EXPR_IDENT:
-            // Reduction: acc = acc + f(i) or acc = f(i) + acc. The parallel
-            // tasks only evaluate f(i); the accumulator is combined serially
-            // in iteration order, so integer overflow behavior is unchanged.
+            // Reduction: acc = acc op f(i) or acc = f(i) op acc, with op in
+            // {+, *, -}. The parallel tasks only evaluate f(i); the
+            // accumulator is combined serially in iteration order, so integer
+            // overflow and subtraction order stay unchanged.
             acc_ni := ast_int_val(target)
-            if ast_kind(value) == EXPR_BINARY && ast_c(value) == OP_ADD:
-                l := ast_a(value)
-                r := ast_b(value)
-                call_node : ., mut = -1
-                if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == acc_ni:
-                    call_node = r
-                else:
-                    if ast_kind(r) == EXPR_IDENT && ast_int_val(r) == acc_ni:
-                        call_node = l
-                if call_node >= 0 && ast_kind(call_node) == EXPR_CALL:
-                    av := find_local(acc_ni)
-                    if av >= 0:
-                        if irv_type(av) == TI_UNIT:
-                            irv_set_type(av, TI_INT)
-                        if irv_type(av) == TI_INT:
-                            mode = 2
-                            value = call_node
+            if ast_kind(value) == EXPR_BINARY:
+                ropp := ast_c(value)
+                if ropp == OP_ADD || ropp == OP_MUL || ropp == OP_SUB:
+                    l := ast_a(value)
+                    r := ast_b(value)
+                    call_node : ., mut = -1
+                    if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == acc_ni:
+                        call_node = r
+                    else:
+                        if ast_kind(r) == EXPR_IDENT && ast_int_val(r) == acc_ni:
+                            call_node = l
+                            // acc = f(i) - acc is not a left-fold.
+                            if ropp == OP_SUB:
+                                call_node = -1
+                    if call_node >= 0 && ast_kind(call_node) == EXPR_CALL:
+                        av := find_local(acc_ni)
+                        if av >= 0:
+                            if irv_type(av) == TI_UNIT:
+                                irv_set_type(av, TI_INT)
+                            if irv_type(av) == TI_INT:
+                                mode = 2
+                                value = call_node
+                                red_op = ropp
     if mode == 0:
         return 0
     if ast_kind(value) != EXPR_CALL:
@@ -6425,7 +6486,7 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
             res := new_ir_var("par_res", TI_INT)
             emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
             sumv := new_ir_var("par_sum", TI_INT)
-            emit(IR_BINARY, sumv, acc_var, res, OP_ADD, TI_INT)
+            emit(IR_BINARY, sumv, acc_var, res, red_op, TI_INT)
             emit(IR_STORE, -1, acc_var, sumv, 0, 0)
             k = k + 1
         return 1
@@ -7210,6 +7271,7 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_live_seg_count"))
     reg_one_global(str_intern("g_live_seg_cap"))
     reg_one_global(str_intern("g_ctiming_last_ms"))
+    reg_one_global(str_intern("g_par_arith_depth"))
     reg_one_global(str_intern("g_glob_cap"))
     reg_one_global(str_intern("g_glob_rows"))
     reg_one_global(str_intern("g_glob_first_any"))
