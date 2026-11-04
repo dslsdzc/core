@@ -222,7 +222,10 @@
 #   pa_static_ccr 4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2fdeac7ebe69e 97958
 #   gt_ccr        2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a 132546
 #   gt_static_ccr e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8 132768
-canary_elf	pa	af606c27be2b3100d7e5ea408ff273545931f33725d8d6cddbc79b9ecf83209c	61622
+# 2026-11-05 追加：alloc_body 改调公共 arena_grow_pool wrapper，allocator blob
+# 字节变化 ⇒ canary ELF sha 变、size 仍 61622；四条 `.ccr` 不变。D1 5/5 PASS。
+# 旧值：canary_elf af606c27be2b3100d7e5ea408ff273545931f33725d8d6cddbc79b9ecf83209c 61622
+canary_elf	pa	fd37b88a2c5383a8b7f607c0675790413dfb4a0103b9feb658e739d1a7d86e0c	61622
 pa_ccr	pa.ccr	7cf5392284b67133b12e4985440ded33332cdb116b7b5a3a6a68fe7edc6a50e2	100202
 pa_static_ccr	pa_st.bin.ccr	f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920ebed5a809b49	100314
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──

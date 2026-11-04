@@ -136,7 +136,7 @@ fn arena_get_slot(ai: int, size: int) -> int:
         cell_store(g_slot_count_m, m * 8, count + 1)
         seg := slot / 64
         if seg >= cell_load(g_segment_count_m, m * 8):
-            arena_grow_pool_m(m)
+            arena_grow_pool()
         if seg >= cell_load(g_segment_count_m, m * 8):
             return arena_fail_slot(size, seg, 0)
     // Both the free-list and bump paths must link the new slot into this
