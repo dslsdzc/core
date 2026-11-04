@@ -8,12 +8,13 @@
 
 C 风格原始指针表达力强，但没有安全保障。Rust 用借用检查器换取安全，代价是学习成本和表达力限制。Core 的目标是保留 C 风格指针的自由，同时不要求用户写安全标注。
 
-编译器维护完整的 HDFG。图中每个值的产生节点记录来源（provenance），每个解引用是 DEREF 或 STORE_PTR 节点。三个 pass 在图上验证指针安全，与类型系统解耦：
+编译器维护完整的 HDFG。图中每个值的产生节点记录来源（provenance），每个解引用是 DEREF 或 STORE_PTR 节点。四个 pass 在图上验证指针安全，与类型系统解耦：
 
 | Pass | 文件 | 功能 |
 |---|---|---|
 | PointerAnalysis | `ptr_analysis.cr` | 建立 points-to 关系，做约束求解，跟踪 alloc content |
-| RegionCheck | `region_check.cr` | 检查内存是否离开分配区域。过期解引用、返回值离开区域、存储离开区域三种情况已实现；参数离开区域未实现 |
+| RegionCheck | `region_check.cr` | 检查内存是否离开分配区域。过期解引用、返回值离开区域、存储离开区域、参数离开区域、out 参数配对与返回值别名已实现 |
+| BytePermission | `byte_permission.cr` | 检查每字节可读/可写权限；字符串字面量与只读分配不可写，`unsafe` 域跳过 |
 | ProvenanceVerify | `provenance_verify.cr` | 检查 DEREF 和 STORE_PTR 是否越界，静态证明或插入运行时检查 |
 
 ## 术语
@@ -21,7 +22,7 @@ C 风格原始指针表达力强，但没有安全保障。Rust 用借用检查�
 | 术语 | 含义 |
 |---|---|
 | provenance | 指针的来源，即它出自哪个分配（ALLOC、ALLOC_STRUCT、ALLOC_ARRAY 等），沿 provenance 边追踪 |
-| points-to（pts） | 指针可能指向哪些分配块，用位图表示 |
+| points-to（pts） | 指针可能指向哪些分配块，用动态宽度位集表示 |
 | alloc content | 存入某个分配块的值集合，记为 `g_alloc_pts`，是 Store 和 Load 规则的中介 |
 | direct flow | 值沿 def-use 关系直接传递 |
 | pointer-induced flow | 值经 STORE_PTR 或 DEREF 间接传递，需要 pts 才能追踪 |
@@ -48,7 +49,7 @@ unsafe:
 
 ## Pass 1：PointerAnalysis
 
-算法是在数据流图上运行过程间 Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016），使用包含约束和过程间函数摘要。
+算法是在数据流图上运行**过程内** Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016）；`IR_CALL` 结果保守置空，过程间函数摘要尚未实现。
 
 | 规则 | 触发 | 动作 |
 |---|---|---|
@@ -56,15 +57,15 @@ unsafe:
 | Copy | LOAD、STORE 沿 def-use | 沿 def-use 关系传播 pts |
 | Store | STORE_PTR | 对每个 alloc 属于 ptr 的 pts，把 val 的 pts 并入 `g_alloc_pts[alloc]` |
 | Load | DEREF | dest 的 pts 并入每个 alloc 的 `g_alloc_pts[alloc]` |
-| Call | 调用 | 传播函数摘要，参数保守处理 |
+| Call | 调用 | 结果置空，参数不传播（函数摘要未实现） |
 
 实现要点：
 
-- pts 是位图，使用 `pa_set_bit` 等函数，`grow_pa_alloc_nodes` 动态扩容，不是逐对象列表。
+- pts 是**动态宽度位集**：分配预扫描决定每行的 64 位 lane 数（`g_pts_words`），`g_pts`/`g_alloc_pts` 按集合数扩容，不再有 64 个分配的硬上限。访问统一走 `pa_pts_has`/`pa_pts_add`/`pa_pts_empty`，不暴露位图布局。`grow_pa_alloc_nodes` 动态扩容。
 - alloc content 跟踪使用 `g_alloc_pts[alloc_id]` 记录存入该分配块的值集合。DEREF 读取它，这是 pointer-induced flow 的实现形式，不在图上物理加边。
 - `pa_in_unsafe` 使 `unsafe` 域内的指针不参与正常约束。
 
-分析按子图独立进行，函数摘要跨子图传播，不需要全程序统一求解。
+分析按函数独立进行；`IR_CALL` 结果保守置空，函数摘要尚未实现（TODO `#2026-09-17-20(b)`）。跨函数逃逸因此仍是已知缺口。
 
 ## Pass 2：RegionCheck
 
@@ -74,15 +75,17 @@ unsafe:
 
 1. 过期 DEREF（`IR_DEREF`），错误码 `B011`（`EC_B_LIFETIME`）。
 2. 返回值离开区域（`IR_RETURN`，`rc_return_escape`），错误码 `B010`（`EC_B_ESCAPE`）。错误信息见 `errors.md:245`，例子是 `return &x`。
-3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。
-4. 参数离开区域：把分配指针作为参数传给外部。该检查尚未实现。
+3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿到达定义与声明区追踪；条件/PHI 定义逐 use 求值。直接 `IR_STORE` 到全局指针也检查（`global outlives the stored allocation`）。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
+4. 参数离开区域（`IR_CALL`，`rc_call_check`）：按函数摘要判定。摘要标记可能被存入全局、另一个函数的指针参数或未知目标的参数；被调函数本地槽位（含 `&param` 参数槽）和 `alloc()` 本地堆目标不计逃逸。摘要用两个 32 位字覆盖 64 个形参，跳过 `unsafe` 节点，沿调用图传递（`rc_param_summaries` 固定点）。调用点若实参指向归还区，报 `parameter escape`。外部/未知被调函数不建摘要。
 
 区域活性语义：
 
 - 区间是半开区间 `[OFF_SG_NSTART, OFF_SG_EXIT)`。`OFF_SG_EXIT` 由 `sg_pop()` 写成当时的 `g_df_node_count`，即区域关闭后第一个节点的下标，见 `dataflow.cr:78-82`。因此使用点在区域外等价于 `ni >= EXIT`。
 - 只有出口归还内存的区域才是离开点。`SG_LOOP`、`SG_FOR` 和 `SG_UNSAFE` 在出口发射 `IR_ARENA_RESET`，后端 `src/arch/x86_64/instr.cr` 确实调用 `arena_new` 和 `arena_reset`。`SG_IF` 只做 `sg_push` 和 `sg_pop`，不建 arena，见 `ir_gen.cr:2414` 和 `ir_gen.cr:2437`。`SG_FUNC` 的 arena 在函数出口才重置，返回给调用者时仍然有效。分配点在 `if` 内时，沿父区域向上查找到真正归还内存的区域。
 - 类型门是 `TYP_PTR` 和 `TYP_REF` 的并集。当前实际生效的是 REF 一侧，因为 `&局部` 一律判为 REF，而 `&局部 as *T` 本身会触发 TF01。并集保留，PTR 一侧对 `alloc()` 和 FFI 派生值仍然有效。
-- 重赋值清除：pts 是流不敏感并集。如果 `[EXIT, ni)` 内对该指针变量有重赋值，并且写入值本身不含已经离开区域的分配，那么并集失效，不报告。已知不完整：当值是跨调用结果时 pts 为空，会被当作明确不离开区域而清除，这类真阳性会漏检。原因是 pts 流不敏感。
+- 标量指针的到达定义：RegionCheck 为每个函数从 `IR_JUMP` 标签和 `IR_MATCH` CASE 目标构建 CFG，运行前向 may-reaching-definitions 数据流。在 use 点只评估真正到达的定义（分支/循环/PHI 按交汇），因此“if 两支都覆盖更早死定义”不会误报，嵌套条件拷贝也能递归追踪；循环第二次可能执行 0 次时仍会保留前一轮定义。实现见 `region_check.cr` 的 `rc_rd_*`。
+- 堆指针的使用点同样走到达定义：先取该 use 的 reaching definitions，再对每个到达值检查其 pts/标量寿命。pts 内容集本身仍是包含式（不是流敏感 points-to）。没有到达定义时（参数/全局/未知值）才回退到 `[EXIT, ni)` 重赋值清除。
+- 跨过程摘要：`g_rc_ret_alias` 记录函数返回哪个形参，调用结果沿 lazy thunk/force 链继续求值；`g_rc_out_pairs` 把"源形参 j 可能经目标形参 i 写出"传回调用点，调用点用 `rc_store_outlives` 比较目标实参与源实参寿命，同区 out 参数不误报；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容；`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，按目标寿命比较。`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 与 `IR_STORE`/`IR_STORE_PTR` 同样接入摘要。FFI 边界按 `unsafe` 处理：非 `unsafe` 域的 `IR_CALL_EXTERN` 只要实参是归还区指针就报 B11；形参经包装函数转发给 extern 时，摘要把同一约束传回调用点。不单列"返回本地堆对象"摘要：`alloc()` 的返回类型是 `string`，走全局堆而非区域 arena；`IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` 只能通过 `&` 引用逃逸，已由指针路径覆盖。
 
 ## Pass 3：ProvenanceVerify
 
@@ -116,15 +119,29 @@ p := mmio + 4096        // 越界，编译错误或运行时检查
 
 声明是唯一可信来源。它与 2026-08-10 的结论不冲突：`0x` 字面量仍然只作为 `unsafe` 的外部输入。
 
+实现（2026-10-29）：IR 节点 `IR_ALLOC_AT`（opcode 55，`s1`=地址、`s2`=字节大小、`s3`=对齐、`tk`=元素类型）。v1 约束：
+
+- 返回 `*int`；地址、大小、对齐必须是编译期整数字面量（部署配置值尚未接入）。
+- 大小必须是正的 8 字节倍数；IR 边界以 8 字节 cell 计，4096 字节 = 512 个 `*int` cell。
+- 节点标记为 SYSTEM；固定地址为程序寿命，RegionCheck 不把所在循环/if 当作回收点，BytePermission 默认可读写。
+- ProvenanceVerify 复用分配边界：静态偏移编译期证明，动态偏移插入运行时边界检查；后端把地址常量写入结果指针。
+- 解释器不支持固定地址访问，`corec run` 明确报错，不伪造宿主指针。
+
 ## 字节权限层
 
-字节权限层仍在设计阶段。经典映射在字节序列、宽度和边界之上增加每字节权限，来源是 CompCert v2 投影和 `cache-semantics` 规则 7：
+字节权限的验证器侧已实现（`src/compiler/byte_permission.cr`，错误码 B012）。经典映射在字节序列、宽度和边界之上增加每字节权限，来源是 CompCert v2 投影和 `cache-semantics` 规则 7：
 
 ```text
 Freeable > Writable > Readable > Nonempty > Empty
 ```
 
-权限和 provenance、offset、size 一样是图数据。验证器读取图数据即可获得每字节的控制。实现状态见 `region-model.md` 第 5 节，当前为设计阶段。
+实现只保留两个独立位：`readable` 和 `writable`，状态为 none / read-only / write-only / read-write，只允许下降。`Nonempty`/`Empty` 归 ENT/REG，`Freeable` 归区域所有权。
+
+- 表示：当前按分配和槽位保存状态（每个 pts 分配一格、每个 IR 变量一格）。没有操作降低子区间，因此不需要每字节覆盖表；以后加稀疏区间表即可扩展，不改权限格。
+- 推断：字符串字面量为 read-only；Core 分配（`IR_ALLOC_ARRAY/STRUCT`、`alloc()` 缓冲区）与未知值为 read-write。全局槽字节可写，`mut` 只限制按名赋值（TA06），不进入字节权限；`&g` 取到的是可写存储。带到达定义的值逐定义取 meet，因此可变全局重新赋值为可写缓冲区后可以写，而仍指向字面量时不能写。
+- 检查：`cell_store`/`store8` 要求可写，`cell_load`/`load8`/`str_len` 要求可读；`IR_STORE_PTR`、`IR_STORE_INDEX`、`IR_STORE_INDEX_VAR`、`IR_STORE_FIELD` 经只读分配时拒绝；`unsafe` 域跳过。
+- 跨过程：`g_bp_param_write` 记录"形参可能被 `cell_store` 写入"，沿调用图固定点传播；字面量实参在调用点报 B012。
+- 未做：运行期权限元数据与 trap、每字节子区间、`alloc_at` 的权限声明、write-only 状态的产生点。
 
 ## 与其他语言的对比
 

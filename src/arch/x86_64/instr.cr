@@ -1948,6 +1948,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_ALLOC:
         return 0
 
+    if op == IR_ALLOC_AT:
+        // Declarative placement: the address is a compile-time fact. Materialize
+        // it as the value of the destination pointer variable.
+        if d < 0:
+            return 0
+        do2 := g2_slot(d)
+        cp = cp + e2_movabs_rdi(buf, pos+cp, s1)
+        cp = cp + e2_mov(buf, pos+cp, 0, 7)  // rax <- rdi
+        cp = cp + e2_st(buf, pos+cp, 0, do2)
+        return cp
+
     if op == IR_ALLOC_STRUCT:
         do2 := g2_slot(d)
         name_ni := s3
@@ -2009,9 +2020,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_ARENA_NEW:
         do2 := g2_slot(d)
-        if s1 > 0:
-            // Scope actually allocates: create a fresh arena via arena_new().
-            ni_arena_new := str_intern("arena_new")
+        if s1 != 0:
+            // s1 > 0 is a static peak in bytes; s1 < 0 means the region has
+            // an unknown-size allocation and uses the dynamic arena.
+            ni_arena_new : ., mut = str_intern("arena_new")
+            if s1 > 0:
+                ni_arena_new = str_intern("arena_new_sized")
+                // mov rdi, s1. In tagged mode the callee receives a tagged
+                // int, so double the raw byte peak before the call.
+                peak_arg : ., mut = s1
+                if g_x86_big_enabled != 0:
+                    peak_arg = s1 * 2
+                w8(buf, pos+cp, 72)
+                w8(buf, pos+cp+1, 199)
+                w8(buf, pos+cp+2, 199)
+                e2_w32(buf, pos+cp+3, peak_arg)
+                cp = cp + 7
             grow_call_patch(g_x86_call_patch_count + 1)
             cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
             cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_new)
@@ -2025,11 +2049,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // Avoids calling arena_new from arena infrastructure itself
             // (arena_new/arena_reset/_grow_arena_meta), which would recurse.
             // IR_ARENA_RESET with id < 0 is a safe no-op in arena_reset.
+            none_id : ., mut = -1
+            if g_x86_big_enabled != 0:
+                // Tagged -1 is -2. A raw -1 would be odd and the tagged
+                // comparison in arena_reset would treat it as a boxed pointer.
+                none_id = -2
             w8(buf, pos+cp, 72)
             w8(buf, pos+cp+1, 199)
             w8(buf, pos+cp+2, 192)
-            e2_w32(buf, pos+cp+3, -1)
-            cp = cp + 7  // mov rax, -1
+            e2_w32(buf, pos+cp+3, none_id)
+            cp = cp + 7  // mov rax, -1 (tagged -1 in big mode)
             cp = cp + e2_st(buf, pos+cp, 0, do2)
         return cp
 
@@ -2056,6 +2085,26 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
         cp = cp + 5  // call placeholder
+        return cp
+
+    if op == IR_ARENA_CLEAR:
+        // Same guard shape as IR_ARENA_RESET, but clear keeps the arena live.
+        cp = cp + e2_load_var(buf, pos+cp, 7, s1)
+        w8(buf, pos+cp, 72)
+        w8(buf, pos+cp+1, 133)
+        w8(buf, pos+cp+2, 255)
+        cp = cp + 3
+        w8(buf, pos+cp, 124)
+        w8(buf, pos+cp+1, 5)
+        cp = cp + 2
+        ni_arena_clear := str_intern("arena_clear")
+        grow_call_patch(g_x86_call_patch_count + 1)
+        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_clear)
+        g_x86_call_patch_count = g_x86_call_patch_count + 1
+        e2_w8(buf, pos+cp, 232)
+        e2_w32(buf, pos+cp+1, 0)
+        cp = cp + 5
         return cp
 
     if op == IR_LOAD && d >= 0:

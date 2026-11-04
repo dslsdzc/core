@@ -111,17 +111,30 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_te
     cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
     g_df_node_count = nid + 1
 
-    // Record that this node produces `dest`
-    if dest >= 0:
+    // Record that this node produces `dest`. IR_STORE_INDEX_VAR is the one
+    // opcode whose dest is the stored value, not a definition: the node reads
+    // dest and writes through the array, so the previous producer must stay.
+    if dest >= 0 && opcode != IR_STORE_INDEX_VAR:
         grow_df_arrays(dest + 1)
         cell_store(g_df_var_producer, dest * 8, nid)
 
     // Add edges for src fields that are IR variables (based on opcode)
     // 第 6 参 = 辅码（IR_BOUNDS_CHECK 的 `!= 0` = 动态上限旗标，单槽化后旗标在
     // 辅码槽；见 df_connect_srcs 的 IR_BOUNDS_CHECK 分支）。
-    df_connect_srcs(nid, opcode, src1, src2, src3, tk_aux)
+    if opcode == IR_STORE_INDEX_VAR:
+        // dest = value var, s1 = array var, s2 = index var.
+        df_use_var(nid, dest)
+        df_use_var(nid, src1)
+        df_use_var(nid, src2)
+    else:
+        df_connect_srcs(nid, opcode, src1, src2, src3, tk_aux)
     // VSDG state chain（kind=1）不在此连接，见 df_replay_state_chain 头注
     // （时点：真纯度需要全程序 IR 体 -> 状态依赖关系统一在 IR 生成结束后重建）。
+    // V2.1 early clear: a planned label is followed by clear nodes before the
+    // next instruction is emitted.
+    if opcode == IR_LABEL && g_plan_active != 0:
+        region_plan_emit_clears(src1)
+        region_plan_emit_share_resets(src1)
     return nid
 
 // --- Edge creation ---
@@ -191,7 +204,7 @@ fn df_state_close_regions_at(head: string, next: string, pos: int):
         if last_node >= nstart:
             // 终止边源必须在区内（循环体无副作用时序列头是区前的 store，连过去等于
             // 宣称循环退出依赖于该区不含的副作用）。
-            if g_last_state_node >= nstart:
+            if g_last_state_node >= nstart && g_last_state_node != last_node:
                 df_add_edge_kind(g_last_state_node, last_node, 1)  // termination dependency
             // 序列头推进到区退出节点：循环之后的副作用必须依赖循环终止
             // （spec 4.2：不终止的循环必须终止整图）。
@@ -332,9 +345,7 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux:
         df_use_var(node_id, s2)  // index var
         return
     if opcode == IR_STORE_INDEX_VAR:
-        df_use_var(node_id, s1)  // value var
-        df_use_var(node_id, s2)  // array var
-        df_use_var(node_id, s3)  // index var
+        // Handled in df_create_node: dest is the value; s3 is a literal zero.
         return
     if opcode == IR_MATCH:
         // The scrutinee is the only variable read; case targets are labels in
@@ -373,6 +384,9 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux:
         df_use_var(node_id, s1)
         return
     if opcode == IR_ARENA_RESET:
+        df_use_var(node_id, s1)
+        return
+    if opcode == IR_ARENA_CLEAR:
         df_use_var(node_id, s1)
         return
     if opcode == IR_INLINE:
@@ -419,7 +433,14 @@ fn grow_var_use_count(needed: int):
 
 fn compute_usage_counts():
     // For each edge from_id->to_id, increment the usage count of
-    // from_id's dest variable (the IR variable it produces).
+    // from_id's dest variable (the IR variable it produces). Clear first so a
+    // second call (post-finalize planning and later lowering) is idempotent.
+    vi : ., mut = 0
+    loop:
+        if vi >= g_var_use_count_cap:
+            break
+        cell_store(g_var_use_count, vi * 8, 0)
+        vi = vi + 1
     ei : ., mut = 0
     loop:
         if ei >= g_df_edge_count:
@@ -577,6 +598,10 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "alloc_struct"
     if opcode == IR_ALLOC_ARRAY:
         return "alloc_array"
+    if opcode == IR_ALLOC_AT:
+        return "alloc_at"
+    if opcode == IR_ARENA_CLEAR:
+        return "arena_clear"
     if opcode == IR_STORE:
         return "store"
     if opcode == IR_LOAD:

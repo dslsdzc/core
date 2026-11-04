@@ -387,6 +387,12 @@ fn ccr_nod_type_domain(ii: int, op: int, d: int, s1: int, s2: int, s3: int) -> i
         return ccr_var_type_row(d)
     if op == IR_STORE_PTR:
         return ccr_var_type_row(s2)
+    if op == IR_ALLOC_AT:
+        t := ccr_var_type_row(d)
+        ein := ccr_inner_type_row(t)
+        if ein >= 0:
+            return ein
+        return TI_INT
     if op == IR_ALLOC_ARRAY:
         t := ccr_var_type_row(d)
         ein := ccr_inner_type_row(t)

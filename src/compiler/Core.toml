@@ -1,1 +1,2 @@
 name = "corec"
+arena_pool_limit = 1073741824

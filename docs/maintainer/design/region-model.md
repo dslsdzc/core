@@ -15,7 +15,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 两个核心性质：
 
 1. 无碎片，静态已知大小的分配路径保持纯 bump，零碎片
-2. 动态模式下工程可控的极低碎片，动态大小分配路径走分档子区域，浪费上限由 size class 表决定（档位越细上限越低：pow2 档约 50%，细分档约 12.5%）
+2. 动态模式下工程可控的极低碎片，动态大小分配路径走分档子区域，浪费上限由 size class 表决定（档位越细上限越低：pow2 档约 50%，细分档约 12.5%）。当前规格使用 1.25 倍步长、上限 20%，见 `docs/superpowers/specs/2026-10-28-arena-size-classes.md`
 
 长期运行服务的内存占用上限由并发区域数量决定，因此没有 GC 停顿。
 
@@ -91,7 +91,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 | 策略推导 | 大小预计算（IR 层） |
 
 实现要点（已实现）：
-- stdlib arena.cr 完整生命周期（init/new/reset）、动态元数据、free list、嵌套
+- stdlib arena.cr 完整生命周期（init/new/reset）、动态元数据、arena slot free list（复用整个 slot，不是对象级 free list）、嵌套
 - IR 子图绑定：函数/loop/for/unsafe 自动 arena lifecycle + 编译期大小预计算（ir_gen.cr）
 - ELF 后端双路径 alloc:arena 感知(`g_current_arena` 检查）+ 全局 bump 回退；mmap 堆扩展（BSS 用满后自动 mmap）
 - `emit_alloc_body` 零初始化 + 按需扩容
@@ -116,7 +116,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
 | 回收时机（指定回收） | 图分析生成回收点（IR 层），推断在编译器内部，用户看不到 |
 | 碎片策略 / size class | 图分析推导分配策略 |
 | 跨区域合法性 | RegionCheck 自动判定 |
-| 所有验证 | 三个 pass 自动 |
+| 所有验证 | 四个 pass 自动 |
 
 用户只表达两件只有用户自己知道的事实：
 
@@ -141,17 +141,31 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 
 已实现：
 - 多 Arena 模型（2026-07-28）：stdlib arena + IR 子图绑定 + ELF 双路径 + mmap 扩展（第 4 节）
-- 三个 pass（provenance/region/bounds，与 pointer-model 共享）
+- size class 分档（2026-10-28 规格，2026-10-29 边界收尾）：25 档 + 大对象区；
+  动态 arena 按 1MiB slot 增长，`>1MiB` 请求走独立 extent；simple/arena 共用
+  Core blob；tagged BigInt、失败 trap 和解释器 parity 已覆盖
+  （`tests/selfhost/test_alloc_arena_parity.py`、`test_arena_interp.py`）
+- 四个 pass（provenance/region/byte permission/bounds，与 pointer-model 共享）
+- 字节权限层验证器侧（2026-10-29）：`src/compiler/byte_permission.cr`，两 bit 权限格、按分配/槽位推断、`unsafe` 跳过、`cell_store` 形参写入摘要，错误码 B012
+- `alloc_at` 声明式放置（2026-10-29）：`IR_ALLOC_AT`（opcode 55）+ 前端识别 + provenance/边界 + 后端地址常量；v1 限制见 pointer-model
+- V2.0 IF split（2026-10-29）：无逃逸 `if` 获得子 arena，出口 reset；两阶段 IR 生成 + 保守 plan（`src/compiler/region_plan.cr`）。逃逸判定覆盖嵌套在非释放 IF 内、实际落入该子槽的 allocation
+- V2.1 early clear（2026-10-30）：`IR_ARENA_CLEAR`（opcode 56）+ `arena_clear`；V2.1b 用控制邻接上的后支配集合选择 clear 点，清空并保留槽
+- V2.2 merge 复制（2026-10-30）：任意常量长度数组（长数组用 IR 循环复制）、POD 结构体、POD 元组、字符串/字符串聚合存入外层局部槽；在赋值分支出口复制到父槽副本并重绑，子槽在汇合点 reset；副本大小在 IF 入口计入父槽 peak，merge IF 不进入任何 IF 子槽。if/else 两个分支各分配同类型同长度数组时复用一个 `_merge_copy`，各分支出口分别填充；分支范围由指向 IF 汇合 label 的两个 jump 切分。结构体逐字段复制；元组逐元素复制；标量叶子直接复制，字符串叶子用 `str_sub` 深复制到父 arena。字符串字面量在 IF 入口预生成，动态值在分支出口临时切换 current arena；纯 fmt 构造调用允许，用户调用/extern/spawn 仍拒绝。嵌套数组/结构体、指针/optional 字段保持 v1。merge 可位于 loop/for/已规划 IF 内，但要求外层槽不在释放祖先退出后使用且不被别名；unsafe 祖先仍拒绝。同期修正 arena peak 记账：alloc 累计按当前打开子图（`g_cur_sg`）而不是高水位末项，非 split 子图关闭时把总量加到记录的 parent。`IR_STORE_INDEX_VAR` 的 DF 映射修正为 dest=值、s1=数组、s2=下标（s3 为字面量 0），避免 `arr[i]=i` 自环
+- V2.3 share（2026-10-30）：顶层 IF 的单个标量数组由 IF 后的只读消费者共享；IF 出口不 reset，Q（最后一个使用后的安全 label/区域退出）reset；支持 LOOP/FOR、split IF、嵌套 loop、parent-level 读、多个 share（含嵌套重叠，按 SG 降序 LIFO reset），以及传递的跨函数只读证明（函数级 hazard 位沿调用图固定点传播；共享数组实参要求 heap-readonly 与空写/逃逸/返回/FFI 摘要；消费者窗口拒绝 FFI/动态派发/hotpatch，callee 分配或返回非标量值也拒绝）；`RegionCheck` lifetime exit 用 Q 的 label id；父槽 early clear 可与 share 在同一 label 共存。写消费者经外层槽写时采用 COW：IF 前在父 arena 预分配同长度副本和 flag，IF 后第一次写复制元素、重绑外层槽；只读 share 不分配副本。这是 share 槽的软件 COW（父 arena 预分配副本 + 首写复制），不是消息边界的页级 COW；页级 COW 仍属 message-copy 设计。别名写、切片/取址/身份观察、窗口分配/未证明 call/`g_current_arena` 读、unsafe、break/return 保持 v1
+- V2.4 清零配置（2026-10-30）：运行时 `g_arena_zero_on_reset` + `arena_set_zero_on_reset`；`arena_reset` 按配置清零当前槽已用前缀/旧槽整槽；编译器 `--arena-zero-on-reset` 在 main 初始化；默认关闭
 
 设计阶段（M1-M3 推进，以计划为准）：
-- split/merge/share 沿图边操作、IR 层回收点生成（自动 early deallocation）
-- size class 分档策略推导（动态路径碎片上界）
-- 字节权限层使用（验证器侧）
+- V2.2 字符串聚合目前只覆盖一层字符串叶子；嵌套数组/结构体、指针/optional 字段保持 v1
 
 待解决问题：
-- 区域级空间浪费（小分配占大区域；动态区域大小调整，设计已定分档，待实现）
-- 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互，需验证
-- 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）
+- 区域复用清零（敏感数据/跨安全边界，部署配置控制，非默认）；普通分配在复用时
+  已通过 `_arena_zero`/`_memzero` 清零
+- 逃逸分析精度：函数指针/接口间接逃逸、条件性逃逸、RawRef 与 unsafe 交互；
+  具体 RegionCheck 缺口（B010 零 raise、B011 零覆盖、store/call/区域内返回逃逸、
+  pts 流不敏感）见 `TODO.md` 条目 `#2026-09-20-1`
+- 字节权限的持久化/运行期表示、每字节子区间尚未实现
+- `alloc_at` v1 只接受编译期字面量、固定 `*int`、8 字节 cell；部署配置地址、显式元素类型、对齐的运行时落实尚未实现
+- 并发区域（2026-10-30）：每 G 独立 arena 已接入调度切换。G 结构体 +80 保存嵌套 current arena；`sched_schedule`/`sched_worker_run` 在 fiber_switch 前后保存/恢复；`sched_go`/`fiber_spawn` 创建 G arena 后恢复 spawner current。编译器内建 `arena_current_unchecked`/`arena_set_current_unchecked` 直接读写 allocator scalar，不创建函数 arena。`test_go_arena.py` 用 raw-int 构建验证 go/chan_recv 后 main 的 current arena 保持一致。
 
 ---
 
@@ -160,7 +174,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096))
 - 层定义：docs/maintainer/design/materialization-space.md（存在格 / Materialization Space）
 - 规则来源：docs/academic/cache-semantics.md（规则 1–7；规则 7 = 本方案正确性标准）
 - IR 定位点：docs/maintainer/design/existence-structure.md（REG first_ent/last_ent）
-- 指针模型：docs/maintainer/design/pointer-model.md（provenance 三个 pass、RegionCheck）
+- 指针模型：docs/maintainer/design/pointer-model.md（四个 pass、RegionCheck）
 - 并发衔接：execution-model.md 第 4 节（每 G arena 生命周期）
 - 设计依据：docs/archive/2026-08-13-graph-anchored-regions-design.md、2026-07-28-arena-model-design.md
 - 术语索引：docs/glossary.md

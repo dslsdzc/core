@@ -21,6 +21,7 @@ class NameResolver:
             ('str_len', BaseType('int')),
             ('syscall3', BaseType('int')),
             ('syscall4', BaseType('int')),
+            ('syscall6', BaseType('int')),
             ('fiber_init', BaseType('int')),
             ('fiber_switch', BaseType('int')),
             ('load_str_ptr', BaseType('string')),

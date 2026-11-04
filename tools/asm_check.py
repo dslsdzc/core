@@ -27,15 +27,19 @@ def check_asm(path):
         m = re.match(r'^([a-zA-Z_][a-zA-Z0-9_.]*):$', line_s)
         if m:
             name = m.group(1)
-            if not name.startswith('.') and name not in ('_start',):
-                if not name.startswith('_g_') and not name.startswith('then_') \
-                   and not name.startswith('if_merge_') and not name.startswith('loop_'):
-                    cur_func = name
-                    inside = True
-                    funcs[name] = {'line': lnum, 'sub_rsp': 0, 'has_push': False,
-                                   'has_pop': False, 'has_add': 0}
-                    continue
-            cur_func = None
+            # Local control-flow labels belong to the current function.
+            if name.startswith('.') or name in ('_start',) \
+               or name.startswith('then_') or name.startswith('else_') \
+               or name.startswith('if_merge_') or name.startswith('loop_'):
+                continue
+            if name.startswith('_g_'):
+                cur_func = None
+                continue
+            cur_func = name
+            inside = True
+            funcs[name] = {'line': lnum, 'sub_rsp': 0, 'has_push': False,
+                           'has_pop': False, 'has_add': 0}
+            continue
 
         if not inside or not cur_func or cur_func not in funcs:
             continue
@@ -51,6 +55,10 @@ def check_asm(path):
         if m:
             f['has_add'] = int(m.group(1))
         if 'pop rbp' in line_s:
+            f['has_pop'] = True
+        # `leave` is `mov rsp, rbp; pop rbp` in one instruction.
+        if re.search(r'^\s*leave\b', line_s):
+            f['has_add'] = f['sub_rsp']
             f['has_pop'] = True
 
     # Validate functions

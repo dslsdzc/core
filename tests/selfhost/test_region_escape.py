@@ -205,6 +205,264 @@ def test_p9_ref_typed_dangling_deref_is_b011():
     )
 
 
+def test_p8_return_inside_loop_escapes():
+    """P8 区域内 return：RETURN 节点在循环区内（ni < EXIT），但返回本身结束
+    了循环区域的生命周期 ⇒ 必须报 B10。修前 rc=0（判定只看 ni >= EXIT）。"""
+    assert_rejected(
+        "fn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        return &arr[0]\n    seed := 0\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p10_more_than_64_allocations_are_tracked():
+    """P10 第 65 个以后的分配也必须进入 pts。旧实现是单个 64 位位图，
+    `g_pa_alloc_count < 64` ⇒ 第 65 个分配起静默不登记，循环分配逃逸不报。
+    这里先放 70 个数组字面量，再让循环里的分配逃逸；动态宽度位集必须报 B11。"""
+    lines = ["fn main() -> int:"]
+    for i in range(70):
+        lines.append(f"    a{i} := [{i}, {i + 1}]")
+    lines.append("    seed := 0")
+    lines.append("    p : ., mut = &seed")
+    lines.append("    i : ., mut = 0")
+    lines.append("    while i < 1:")
+    lines.append("        arr := [700, 701]")
+    lines.append("        p = &arr[0]")
+    lines.append("        i = i + 1")
+    lines.append("    return *p")
+    assert_rejected("\n".join(lines) + "\n", "error[B11]", "dangling pointer")
+
+
+def test_p11_store_outlives_destination():
+    """P11 存储逃逸的双边寿命判定：值在 store 时还活着（在循环区内），但目标
+    是函数级槽位 ⇒ 循环结束后目标仍持有已死指针。修前只查「值在 store 时已死」，
+    本形态 rc=0；现在必须报 B11 的 destination outlives 分支。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p12_scalar_return_inside_loop_escapes():
+    """P12 标量槽位 `&x`：`IR_ALLOC` 标量没有 pts 位，旧实现直接放行。这里
+    x 声明在循环内、return 在循环内 ⇒ B10。"""
+    assert_rejected(
+        "fn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        return &x\n    seed := 0\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p13_scalar_store_outlives():
+    """P13 标量槽位存储逃逸：循环内 `&x` 存入函数级槽位 ⇒ B11 outlives。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        *slotp = &x\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p14_ref_destination_inside_loop():
+    """P14 REF 目标寿命：slot 在函数级声明、`&slot` 在循环内求值。目标寿命必须
+    取 slot 的声明区（函数级），不是 REF 节点所在的循环区。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        slotp := &slot\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p15_conditional_reassign_does_not_clear():
+    """P15 条件重赋值：循环后 `if cond == 1: p = &seed` 可能不执行 ⇒ 不得把
+    循环内已死的 arr 指针清除；解引用必须报 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        i = i + 1\n    cond := 0\n    if cond == 1:\n        p = &seed\n    return *p\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
+def test_p16_conditional_scalar_return_escapes():
+    """P16 条件标量定义：if 两支分别指向循环局部 x 与函数级 seed，最后一条
+    定义若是安全支，单条 last-store 追踪会漏报。全定义检查必须报 B10。"""
+    assert_rejected(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        if cond == 1:\n            p = &x\n        else:\n            p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p17_conditional_destination_outlives():
+    """P17 条件目标：slotp 的一支指向函数级 slot、另一支指向循环局部 slot；
+    存入循环局部 x 后，函数级分支必须触发 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp : ., mut = &slot\n    cond := 1\n    i : ., mut = 0\n    while i < 1:\n        local_seed := 0\n        local_slot : ., mut = &local_seed\n        x := 7\n        if cond == 1:\n            slotp = &slot\n        else:\n            slotp = &local_slot\n        *slotp = &x\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p18_conditional_scalar_store_outlives():
+    """P18 条件标量值：p 的一支是循环局部 x、另一支是函数级 seed；存入函数级
+    槽位必须报 B11。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    p : ., mut = &seed\n    cond := 1\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        if cond == 1:\n            p = &x\n        else:\n            p = &seed\n        *slotp = p\n        i = i + 1\n    return 0\n",
+        "error[B11]", "destination outlives",
+    )
+
+
+def test_p19_nested_conditional_copy_escapes():
+    """P19 嵌套条件拷贝：p = q，q 自身是条件定义（一支 &x、一支 &seed）。
+    值追踪必须递归到 q 的全定义，不能只信 q 的最后一条安全分支。"""
+    assert_rejected(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    q : ., mut = &seed\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        if cond == 1:\n            q = &x\n        else:\n            q = &seed\n        if cond == 1:\n            p = q\n        else:\n            p = q\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n",
+        "error[B10]", "region escape: returning pointer",
+    )
+
+
+def test_p20_loop_reassign_may_not_run():
+    """P20 第二个循环可能执行 0 次：p 在第一轮持有已死 &x，第二轮的安全写入
+    不能清除判定。标量 last-store 在 SG_LOOP 内也必须走全定义检查。"""
+    assert_rejected(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p = &x\n        i = i + 1\n    i = 0\n    while i < 0:\n        p = &seed\n        i = i + 1\n    return *p\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
+def test_p21_parameter_escape_to_global():
+    """P21 参数逃逸：sink 把参数存入全局指针，调用方传入循环局部的 &x
+    ⇒ 调用点报 parameter escape。"""
+    assert_rejected(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        sink(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p22_parameter_escape_transitive():
+    """P22 传递参数逃逸：forward 调 sink，sink 存全局 ⇒ 调用链上仍报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn forward(p: &int):\n    sink(p)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        forward(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p23_direct_global_store_escape():
+    """P23 直接全局赋值：循环局部指针 p 赋给全局 gp ⇒ B11 global outlives。
+    该形态不经过 IR_STORE_PTR，旧存储检查看不到。"""
+    assert_rejected(
+        "gp : &int, mut\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p := &x\n        gp = p\n        i = i + 1\n    return 0\n",
+        "error[B11]", "global outlives",
+    )
+
+
+def test_p24_returned_parameter_crosses_region():
+    """P24 返回值别名：`id(&x)` 返回其形参，结果在循环后解引用 ⇒ B011。
+    调用结果经 lazy thunk / force 链进入 q，必须沿返回形参找到 &x。"""
+    assert_rejected(
+        "fn id(p: &int) -> &int:\n    return p\nfn main() -> int:\n    seed := 0\n    q : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        q = id(&x)\n        i = i + 1\n    return *q\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
+def test_p25_returned_parameter_stored_to_global():
+    """P25 返回值别名存入全局：`gp = id(&x)` ⇒ B11 global outlives。"""
+    assert_rejected(
+        "gp : &int, mut\nfn id(p: &int) -> &int:\n    return p\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        gp = id(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "global outlives",
+    )
+
+
+def test_p26_returned_parameter_transitive():
+    """P26 返回值别名传递：forward 把形参转发给 id 并返回其结果 ⇒ 仍沿链追到 &x。"""
+    assert_rejected(
+        "fn id(p: &int) -> &int:\n    return p\nfn forward(p: &int) -> &int:\n    return id(p)\nfn main() -> int:\n    seed := 0\n    q : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        q = forward(&x)\n        i = i + 1\n    return *q\n",
+        "error[B11]", "dangling pointer",
+    )
+
+
+def test_p27_out_parameter_global_destination():
+    """P27 out 参数写入全局：`set(&gp, &x)` 的目标寿命是程序级 ⇒ 报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn set(dst: & &int, src: &int):\n    *dst = src\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        set(&gp, &x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p28_out_parameter_destination_outlives():
+    """P28 out 参数目标存活更久：循环外局部槽 p 接收循环内 &x ⇒ 报。"""
+    assert_rejected(
+        "fn set(dst: & &int, src: &int):\n    *dst = src\nfn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        set(&p, &x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p29_global_struct_field_escape():
+    """P29 全局结构体字段：`gb.p = &x` 经 IR_STORE_FIELD ⇒ 目标为程序级，报。"""
+    assert_rejected(
+        "struct Box:\n    p: &int\ngb : Box, mut\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        gb.p = &x\n        i = i + 1\n    return 0\n",
+        "error[B11]", "global outlives",
+    )
+
+
+def test_p30_field_out_parameter_escape():
+    """P30 字段 out 参数：被调函数 `b.p = src`，调用方传入全局结构体与循环局部
+    &x ⇒ 摘要按源/目标配对在调用点报。"""
+    assert_rejected(
+        "struct Box:\n    p: &int\ngb : Box, mut\nfn sink(b: &Box, src: &int):\n    b.p = src\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        sink(&gb, &x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "parameter escape",
+    )
+
+
+def test_p31_deref_loaded_pointer_escapes():
+    """P31 解引用加载：`gp = *pp` 把 pp 指向槽里的循环局部指针写入全局 ⇒ 报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn leak(pp: & &int):\n    gp = *pp\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        leak(&p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "leaks the pointee",
+    )
+
+
+def test_p32_deref_loaded_pointer_transitive():
+    """P32 解引用加载经转发：wrap 只转发 pp，内容逃逸关系仍传回调用点。"""
+    assert_rejected(
+        "gp : &int, mut\nfn leak(pp: & &int):\n    gp = *pp\nfn wrap(pp: & &int):\n    leak(pp)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        wrap(&p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "leaks the pointee",
+    )
+
+
+def test_p33_extern_region_local_argument_requires_unsafe():
+    """P33 FFI 边界：非 unsafe 的 extern 调用传归还区指针 ⇒ 报 B11。"""
+    assert_rejected(
+        "extern fn dummy(p: &int) -> int\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        dummy(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "requires unsafe",
+    )
+
+
+def test_p34_extern_argument_forwarded_through_wrapper():
+    """P34 FFI 边界经转发：wrap 把形参交给 extern，调用点的归还区实参仍报。"""
+    assert_rejected(
+        "extern fn dummy(p: &int) -> int\nfn wrap(p: &int) -> int:\n    return dummy(p)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        wrap(&x)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "requires unsafe",
+    )
+
+
+def test_p35_pointee_content_through_out_parameter():
+    """P35 pointee 内容经 out 参数：`*dst = *pp`，dst 指向全局 ⇒ 报。"""
+    assert_rejected(
+        "gp : &int, mut\nfn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        set(&gp, &p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
+def test_p36_pointee_content_out_parameter_transitive():
+    """P36 pointee 内容经转发：forward 转发 dst/pp，内容逃逸关系仍传回调用点。"""
+    assert_rejected(
+        "gp : &int, mut\nfn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn forward(dst: & &int, pp: & &int):\n    set(dst, pp)\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        forward(&gp, &p)\n        i = i + 1\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
+def test_p37_pointee_content_outer_slot():
+    """P37 外层槽接收内层内容：p/q 为函数级，循环内 p=&x，循环后 `*q = *p`
+    ⇒ q 比 x 长寿，报。"""
+    assert_rejected(
+        "fn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    q : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p = &x\n        i = i + 1\n    set(&q, &p)\n    return 0\n",
+        "error[B11]", "out-parameter",
+    )
+
+
 # ── 反向对照：必须保持 rc=0（否则「一律报」会让正固定全绿）─────────────────
 
 def test_r1_function_level_alloc_may_be_returned():
@@ -260,6 +518,151 @@ def test_r6_store_of_live_pointer_stays_clean():
     )
 
 
+def test_r13_global_target_is_program_lifetime():
+    """R13 全局目标：`&g` 是程序级寿命，循环内 return 合法；不得沿用 REF 节点
+    所在的循环区。"""
+    assert_accepted(
+        "g : int, mut = 7\nfn make() -> &int:\n    i : ., mut = 0\n    while i < 1:\n        return &g\n    return &g\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r14_parameter_target_is_function_lifetime():
+    """R14 参数目标：参数槽位在本模型下是函数级，循环内 return 参数合法。"""
+    assert_accepted(
+        "fn make(p: &int) -> &int:\n    i : ., mut = 0\n    while i < 1:\n        return p\n    return p\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r16_parameter_stored_in_local_slot_is_safe():
+    """R16 参数只存入被调函数的本地槽位 ⇒ 调用结束即消失，不得报。"""
+    assert_accepted(
+        "fn sink(p: &int):\n    slot : ., mut = p\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        sink(&x)\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r17_function_level_argument_is_safe():
+    """R17 函数级实参：&x 不属归还区，调用方函数返回前仍有效 ⇒ 不得报。"""
+    assert_accepted(
+        "gp : &int, mut\nfn sink(p: &int):\n    gp = p\nfn main() -> int:\n    x := 7\n    sink(&x)\n    return 0\n"
+    )
+
+
+def test_r19_returned_parameter_same_region_is_safe():
+    """R19 返回值别名的反向对照：`id(&x)` 的结果在同一区域内使用 ⇒ 接受。"""
+    assert_accepted(
+        "fn id(p: &int) -> &int:\n    return p\nfn main() -> int:\n    seed := 0\n    x := 7\n    q : ., mut = &seed\n    q = id(&x)\n    return *q\n"
+    )
+
+
+def test_r20_out_parameter_same_region_is_safe():
+    """R20 out 参数同区反向对照：目标槽与源值同属循环区域 ⇒ 不得报。"""
+    assert_accepted(
+        "fn set(dst: & &int, src: &int):\n    *dst = src\nfn main() -> int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &seed\n        set(&p, &x)\n        if *p != 7:\n            return 1\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r21_out_parameter_transitive_same_region():
+    """R21 传递 out 参数同区：forward 只转发，目标槽与源值同区 ⇒ 接受。"""
+    assert_accepted(
+        "fn set(dst: & &int, src: &int):\n    *dst = src\nfn forward(dst: & &int, src: &int):\n    set(dst, src)\nfn main() -> int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &seed\n        forward(&p, &x)\n        if *p != 7:\n            return 1\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r22_local_struct_field_same_region():
+    """R22 结构体字段同区：局部 b.p 接收同区 &x ⇒ 接受。"""
+    assert_accepted(
+        "struct Box:\n    p: &int\nfn sink(b: &Box, src: &int):\n    b.p = src\nfn main() -> int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        b : ., mut = Box { p = &seed }\n        sink(&b, &x)\n        if *b.p != 7:\n            return 1\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r23_deref_loaded_global_pointer_is_safe():
+    """R23 解引用加载反向对照：槽里存的是全局指针 ⇒ 写入全局不产生悬垂。"""
+    assert_accepted(
+        "g2 : &int, mut\ngp : &int, mut\nfn leak(pp: & &int):\n    gp = *pp\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        p : ., mut = &g2\n        leak(&p)\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r24_deref_loaded_pointer_read_only_is_safe():
+    """R24 只读反向对照：被调函数只读取 pp 的内容，不写全局 ⇒ 不得报。"""
+    assert_accepted(
+        "fn read(pp: & &int) -> int:\n    return **pp\nfn main() -> int:\n    i : ., mut = 0\n    total : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        total = total + read(&p)\n        i = i + 1\n    return total - 7\n"
+    )
+
+
+def test_r25_extern_global_argument_is_safe():
+    """R25 FFI 反向对照：全局对象是程序寿命，非 unsafe 调用不产生悬垂。"""
+    assert_accepted(
+        "extern fn dummy(p: &int) -> int\ng : int, mut\nfn main() -> int:\n    return dummy(&g)\n"
+    )
+
+
+def test_r26_extern_inside_unsafe_is_safe():
+    """R26 FFI 反向对照：归还区指针在 unsafe 域内传给 extern ⇒ 接受。"""
+    assert_accepted(
+        "extern fn dummy(p: &int) -> int\nfn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        unsafe:\n            dummy(&x)\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r27_pointee_content_same_region_is_safe():
+    """R27 pointee 内容同区反向对照：dst 与内容同属循环区域 ⇒ 接受。"""
+    assert_accepted(
+        "fn set(dst: & &int, pp: & &int):\n    *dst = *pp\nfn main() -> int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        x := 7\n        p : ., mut = &x\n        q : ., mut = &seed\n        set(&q, &p)\n        if *q != 7:\n            return 1\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r18_in_loop_safe_overwrite():
+    """R18 堆指针到达定义：循环内先写死指针、再无条件写活指针，循环后解引用
+    ⇒ 到达定义只有安全写入，不得保守误报。"""
+    assert_accepted(
+        "fn main() -> int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        p = &seed\n        i = i + 1\n    return *p\n"
+    )
+
+
+def test_r15_all_branches_overwrite_dead_definition():
+    """R15 到达定义：`p := &x` 在 if 前，但 if 两支都覆盖成 `&seed`；返回的
+    到达定义只有两个安全分支，不得因更早的死定义误报。"""
+    assert_accepted(
+        "fn make(cond: int) -> &int:\n    seed := 7\n    i : ., mut = 0\n    while i < 1:\n        x := 9\n        p : ., mut = &x\n        if cond == 1:\n            p = &seed\n        else:\n            p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r12_scalar_function_level_return_is_clean():
+    """R12 标量槽位反向对照：x 在函数级声明 ⇒ `return &x` 合法。"""
+    assert_accepted(
+        "fn make() -> &int:\n    x := 7\n    return &x\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r10_store_live_into_function_level_slot():
+    """R10 存储逃逸反向对照：函数级值存入函数级槽位 ⇒ 两者同寿命，不得报。"""
+    assert_accepted(
+        "fn main() -> int:\n    seed := 0\n    slot : ., mut = &seed\n    slotp := &slot\n    i : ., mut = 0\n    while i < 1:\n        *slotp = &seed\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r11_store_loop_value_into_loop_slot():
+    """R11 存储逃逸反向对照：循环内槽位与循环内值同属循环区 ⇒ 不得报。"""
+    assert_accepted(
+        "fn main() -> int:\n    i : ., mut = 0\n    while i < 1:\n        seed := 0\n        slot : ., mut = &seed\n        slotp := &slot\n        arr := [7, 8]\n        *slotp = &arr[0]\n        i = i + 1\n    return 0\n"
+    )
+
+
+def test_r8_return_inside_loop_of_function_alloc_is_clean():
+    """R8 区域内 return 的反向对照：被返回的是函数级分配 ⇒ 不属任何归还区，
+    循环内 return 仍合法。"""
+    assert_accepted(
+        "fn make() -> &int:\n    seed := 0\n    i : ., mut = 0\n    while i < 1:\n        return &seed\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
+def test_r9_reassign_before_return_clears():
+    """R9 区域内 return 的重赋值清除：先写循环局部指针、再改指活对象后返回
+    ⇒ 不得误报。"""
+    assert_accepted(
+        "fn make() -> &int:\n    seed := 0\n    p : ., mut = &seed\n    i : ., mut = 0\n    while i < 1:\n        arr := [7, 8]\n        p = &arr[0]\n        p = &seed\n        return p\n    return &seed\nfn main() -> int:\n    return 0\n"
+    )
+
+
 def test_r7_loop_without_heap_alloc_stays_clean():
     """R7 无堆分配面：循环内只有标量槽（IR_ALLOC 不参与 pts）⇒ 不得报。"""
     assert_accepted(
@@ -276,7 +679,19 @@ if __name__ == "__main__":
         test_p5_alloc_inside_if_inside_loop_escapes_loop,
         test_p6_reassign_to_another_dead_pointer_still_reports,
         test_p7_build_face_is_hard_error_with_zero_artifact,
+        test_p8_return_inside_loop_escapes,
         test_p9_ref_typed_dangling_deref_is_b011,
+        test_p10_more_than_64_allocations_are_tracked,
+        test_p11_store_outlives_destination,
+        test_p12_scalar_return_inside_loop_escapes,
+        test_p13_scalar_store_outlives,
+        test_p14_ref_destination_inside_loop,
+        test_p15_conditional_reassign_does_not_clear,
+        test_p16_conditional_scalar_return_escapes,
+        test_p17_conditional_destination_outlives,
+        test_p18_conditional_scalar_store_outlives,
+        test_p19_nested_conditional_copy_escapes,
+        test_p20_loop_reassign_may_not_run,
         test_r1_function_level_alloc_may_be_returned,
         test_r2_if_branch_alloc_is_not_released_at_branch_end,
         test_r3_reassign_to_live_pointer_after_loop,
@@ -284,6 +699,43 @@ if __name__ == "__main__":
         test_r5_deref_loaded_int_is_not_pointer_escape,
         test_r6_store_of_live_pointer_stays_clean,
         test_r7_loop_without_heap_alloc_stays_clean,
+        test_r8_return_inside_loop_of_function_alloc_is_clean,
+        test_r9_reassign_before_return_clears,
+        test_r10_store_live_into_function_level_slot,
+        test_r11_store_loop_value_into_loop_slot,
+        test_r12_scalar_function_level_return_is_clean,
+        test_r13_global_target_is_program_lifetime,
+        test_r14_parameter_target_is_function_lifetime,
+        test_r15_all_branches_overwrite_dead_definition,
+        test_p21_parameter_escape_to_global,
+        test_p22_parameter_escape_transitive,
+        test_p23_direct_global_store_escape,
+        test_r16_parameter_stored_in_local_slot_is_safe,
+        test_r17_function_level_argument_is_safe,
+        test_r18_in_loop_safe_overwrite,
+        test_p24_returned_parameter_crosses_region,
+        test_p25_returned_parameter_stored_to_global,
+        test_p26_returned_parameter_transitive,
+        test_r19_returned_parameter_same_region_is_safe,
+        test_p27_out_parameter_global_destination,
+        test_p28_out_parameter_destination_outlives,
+        test_p29_global_struct_field_escape,
+        test_p30_field_out_parameter_escape,
+        test_r20_out_parameter_same_region_is_safe,
+        test_r21_out_parameter_transitive_same_region,
+        test_r22_local_struct_field_same_region,
+        test_p31_deref_loaded_pointer_escapes,
+        test_p32_deref_loaded_pointer_transitive,
+        test_r23_deref_loaded_global_pointer_is_safe,
+        test_r24_deref_loaded_pointer_read_only_is_safe,
+        test_p33_extern_region_local_argument_requires_unsafe,
+        test_p34_extern_argument_forwarded_through_wrapper,
+        test_r25_extern_global_argument_is_safe,
+        test_r26_extern_inside_unsafe_is_safe,
+        test_p35_pointee_content_through_out_parameter,
+        test_p36_pointee_content_out_parameter_transitive,
+        test_p37_pointee_content_outer_slot,
+        test_r27_pointee_content_same_region_is_safe,
     ]
     failures = 0
     for test in tests:

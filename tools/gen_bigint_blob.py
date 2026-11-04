@@ -34,6 +34,25 @@ from corec.frontend.type_checker import TypeChecker
 
 def compile_runtime() -> bytes:
     src = (BASE / "src" / "runtime" / "bigint.cr").read_text(encoding="utf-8")
+    # The blob is self-contained: provide the raw cell helpers it uses instead
+    # of leaving cell_load/cell_store as unresolved external symbols.
+    src = """
+fn cell_load(buf: string, pos: int) -> int:
+    return load64(buf, pos)
+
+fn cell_store(buf: string, pos: int, val: int):
+    cur : ., mut = val
+    i : ., mut = 0
+    loop:
+        if i >= 8:
+            break
+        byte : ., mut = cur % 256
+        if byte < 0:
+            byte = byte + 256
+        store8(buf, pos + i, byte)
+        cur = (cur - byte) / 256
+        i = i + 1
+""" + src
     ast = Parser(Lexer(src).tokenize()).parse_compilation_unit()
     resolver = NameResolver()
     resolver.resolve(ast)

@@ -22,6 +22,9 @@ fn load_project(dir: string) -> string:
     pname : ., mut = ""
     if str_len(tc) > 0:
         pname = extract_toml_name(tc)
+        lim := toml_get_int(tc, "arena_pool_limit")
+        if lim > 0:
+            g_arena_pool_limit_cfg = lim
 
     g_project_name = pname
     if str_len(g_project_name) == 0:

@@ -550,6 +550,27 @@ class X86_64StackAsmGen:
                 self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+        elif instr.func == 'syscall6':
+            # syscall6(num, a, b, c, d, e, f): the 7th argument is pushed by
+            # gen_call and sits at [rsp]. Linux wants rax=nr and
+            # rdi/rsi/rdx/r10/r8/r9 for the six arguments.
+            if self.bigint_mode:
+                for reg, arg in zip(['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'],
+                                    instr.args[:6]):
+                    if self._is_int_var(arg):
+                        self.emit(f"    sar {reg}, 1")
+            self.emit("    mov rax, rdi")
+            self.emit("    mov rdi, rsi")
+            self.emit("    mov rsi, rdx")
+            self.emit("    mov rdx, rcx")
+            self.emit("    mov r10, r8")
+            self.emit("    mov r8, r9")
+            self.emit("    mov r9, [rsp]")
+            self.emit("    syscall")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'load8':
             # load8(string_ptr, idx) → byte at ptr+idx (zero-extended)
             if self.bigint_mode:

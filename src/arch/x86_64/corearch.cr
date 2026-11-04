@@ -674,6 +674,9 @@ fn corearch_main() -> int:
             out_path = "core_lib.so"
         g_elf_buf = alloc(16777216)
         sz := elf_gen(g_elf_buf)
+        if sz <= 0:
+            println("error: allocator blob relocation failed")
+            return 1
         w16(g_elf_buf, 16, 3)
         fd := syscall3(2, out_path, 577, linux_mode_rw())
         if fd < 0:
@@ -721,6 +724,9 @@ fn corearch_main() -> int:
         else:
             split_links(link_val)
         sz : ., mut = elf_gen(g_elf_buf)
+        if sz <= 0:
+            println("error: allocator blob relocation failed")
+            return 1
         cs : ., mut = sz - 176
         if cs <= 0:
             println("error: empty code")
@@ -791,6 +797,9 @@ fn corearch_main() -> int:
             return 1
     else:
         sz := elf_gen(g_elf_buf)
+        if sz <= 0:
+            println("error: allocator blob relocation failed")
+            return 1
         fd := syscall3(2, out_path, 577, linux_mode_exec())  // 0755：可执行输出（同静态路径修复）        if fd < 0 { print("error: cannot write "); println(out_path); return 1; }
         syscall3(1, fd, g_elf_buf, sz)
         syscall3(3, fd, 0, 0)

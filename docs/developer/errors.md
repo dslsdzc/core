@@ -231,6 +231,7 @@ TF01 已从豁免表移除。原因是 `alloc: () -> string` 模型与三处 han
 |----|---------|------|
 | B010 | `Reference to local `{name}` escapes the function` | `fn f() -> &int { x := 42; return &x; }` |
 | B011 | `Borrowed value does not live long enough` | 引用比原对象存在时间更长 |
+| B012 | `Byte permission: read-only byte was written` | 字符串字面量或只读分配被写入；`unsafe` 域除外 |
 
 ## R0xx：运行时检查
 

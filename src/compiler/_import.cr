@@ -41,12 +41,15 @@ import ty_shadow
 import ccr_types
 import type_selftest
 import purity_selftest
+import stub_regalloc
+import stub_regalloc_selftest
 import diag
 import ir_gen
 import dataflow
 import ccr_lower
 import ccr_io
 import ent_kernel
+import regalloc_cag
 import module
 import toml
 import project
@@ -64,6 +67,8 @@ import pass
 import opt
 import ptr_analysis
 import region_check
+import region_plan
+import byte_permission
 import provenance_verify
 import rt
 import main

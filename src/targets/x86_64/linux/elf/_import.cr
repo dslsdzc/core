@@ -36,6 +36,7 @@ import regalloc
 import sizes
 import int_rep
 import bigint_blob
+import alloc_blob
 import instr
 // Function frame layout: pf_frame_size, pf_prologue, pf_epilogue.
 import frame

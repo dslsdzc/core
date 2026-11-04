@@ -90,8 +90,8 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量）、`src/compiler/
 | 43 | `IR_DYN_PACK` | 动态 | `ir_gen` | 有 | 无 | 2.6 |
 | 44 | `IR_DYN_DISPATCH` | 动态 | `ir_gen` | 有（占位） | 无 | 2.6 |
 | 45 | `IR_CALL_EXTERN` | 调用 | `ir_gen` | 有 | 无 | 2.5 |
-| 46 | `IR_LAZY_THUNK` | 惰性 | `ir_gen` | 有（eager） | 有（eager） | 2.7 |
-| 47 | `IR_LAZY_FORCE` | 惰性 | `ir_gen` | 有（eager） | 有（eager） | 2.7 |
+| 46 | `IR_LAZY_THUNK` | 惰性 | `ir_gen` | 有（eager 兼容；控制流下沉不走此 op） | 有（eager） | 2.7 |
+| 47 | `IR_LAZY_FORCE` | 惰性 | `ir_gen` | 有（eager 兼容；控制流下沉不走此 op） | 有（eager） | 2.7 |
 | 48 | `IR_FNADDR` | 地址 | `ir_gen` | 有 | 有（d=0） | 2.5 |
 | 49 | `IR_I2F` | 转换 | `ir_gen` | 有 | 无 | 2.3 |
 | 50 | `IR_F2I` | 转换 | `ir_gen` | 有 | 无 | 2.3 |
@@ -220,7 +220,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - IR_SPAWN：见 2.5。
 - IR_YIELD（28）：语义是向 flow 消费者通道发送 `ρ(s1)`。ELF 和解释器都使用 eager 值传递近似：`d := ρ(s1)`。解释器保留 `d >= 0` 检查，避免 dest 为 -1 时写入值缓冲区之外。完整 go/G-M 调度见 `docs/maintainer/design/execution-model.md` 第 3 节。
 - IR_AWAIT（29）：语义 = 阻塞直到 future 就绪，`d` = 结果。ELF/interp 均为值复制（eager 近似，已文档化），D：单线程模式的既定近似。
-- IR_LAZY_THUNK（46）：`d` = 惰性包装（s1 = 表达式求值）。IR_LAZY_FORCE（47）：`d` = 强求结果。两者当前均 eager 近似（值传递，ELF/interp 一致），D：惰性求值尚未实现（lazy 设计文档），IR 保留显式 thunk 形态以便迁移。
+- IR_LAZY_THUNK（46）：`d` = 惰性包装（s1 = 表达式求值）。IR_LAZY_FORCE（47）：`d` = 强求结果。两者仍为 eager 兼容值传递；控制流级惰性采用 Phase A/Phase B 的编译期下沉（纯零参数标量调用延迟到唯一 if/loop force 点），不走这两个 op。
 
 ### 2.8 注解（无运行语义；对照：CompCert 无对应，D）
 

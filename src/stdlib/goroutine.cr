@@ -16,7 +16,7 @@ g_next_id : int, mut = 1
 // frontend type-layout rule.
 G_STACK_SIZE : int = 16384
 
-// G struct layout (80 bytes):
+// G struct layout (88 bytes):
 //   0: id
 //   8: status (0=runnable, 1=running, 2=waiting, 3=dead)
 //  16: sp (stack pointer for fiber)
@@ -27,6 +27,7 @@ G_STACK_SIZE : int = 16384
 //  56: saved_fn (entry function ptr, for wrapper dispatch)
 //  64: saved_arg (saved argument, for wrapper dispatch)
 //  72: temp_val (temp value for wait queue handoff)
+//  80: saved_current_arena (nested region current; -1 = use base arena)
 
 fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     // Create the goroutine's arena FIRST: the fiber stack and G struct must
@@ -47,8 +48,8 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     wrap_addr := goroutine_wrapper_addr()
     sp := fiber_init(stack_top, wrap_addr)
 
-    // Allocate G struct (80 bytes)
-    g := alloc(80)
+    // Allocate G struct (88 bytes; offset 80 saves the nested current arena)
+    g := alloc(88)
     id := g_next_id
     g_next_id = g_next_id + 1
     cell_store(g, 0, id)           // id
@@ -61,6 +62,7 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string, pub:
     cell_store(g, 56, entry_fn)    // saved_fn = entry function ptr
     cell_store(g, 64, arg)         // saved_arg
     cell_store(g, 72, 0)           // temp_val = 0
+    cell_store(g, 80, -1)          // saved_current_arena = base
 
     return g
 

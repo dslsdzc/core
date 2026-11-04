@@ -524,6 +524,7 @@ EC_B_BORROW_MUT2    : int = 13003 // B003  Two mutable borrows
 EC_B_USE_WHILE_BORROWED : int = 13004 // B004  Use while borrowed
 EC_B_ESCAPE         : int = 13010 // B010  Reference escapes function
 EC_B_LIFETIME       : int = 13011 // B011  Lifetime too short
+EC_B_PERMISSION     : int = 13012 // B012  Byte permission violation
 
 // R0xx; Runtime
 EC_R_DIV_ZERO     : int = 14001 // R001  Division by zero
@@ -647,6 +648,8 @@ IR_APPROX : int = 51  //无操作数注解：apx 变量声明处（语义许可�
 IR_PTR_OF : int = 52  // dest=same int var, s1=same string var; view/convert address to mathematical int
 IR_STR_OF : int = 53  // dest=same string var, s1=same int var; view/convert mathematical int to raw address
 IR_MATCH : int = 54   // src1=scrutinee var, src2=CASE table start, src3=case count; multi-way dispatch
+IR_ALLOC_AT : int = 55 // dest=pointer, s1=fixed address, s2=size bytes, s3=align bytes, tk=element type
+IR_ARENA_CLEAR : int = 56 // s1=arena var; clear cursors/classes/extents, keep arena live
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1

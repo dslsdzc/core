@@ -202,12 +202,12 @@ effect_equiv(a, b) -> bool | unknown
   - REG 记录区域嵌套和条目范围。
 - 区域是图绑定的字节域，不是词法作用域；arena 使用 bump 分配。
 - 区域支持 split、merge、share 和 outlives。
-- 指针安全由 PointerAnalysis、RegionCheck 和 ProvenanceVerify 三个 pass 负责。
+- 指针安全由 PointerAnalysis、RegionCheck、BytePermission 和 ProvenanceVerify 四个 pass 负责。
 - 字节权限只有两个独立位：`readable` 和 `writable`。
 - 权限状态是 `none`、read-only、write-only、read-write；只允许下降。
 - 可执行属性不是字节权限；可执行代码必须可读。
 - `Nonempty`/`Empty` 归 ENT/REG；`Freeable` 归区域所有权；`shared`/`volatile` 归区域、effect 或 HIT。
-- 当前实现差距包括参数逃逸、流不敏感 points-to、byte permission 和 split/merge/share。
+- 当前实现差距包括流不敏感 points-to、字节权限的持久化/运行期表示和 split/merge/share。
 
 ## 未定义行为
 

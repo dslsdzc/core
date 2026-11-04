@@ -583,7 +583,7 @@ class TypeChecker:
     # --------------------------------------------------------------
     def _infer_call(self, call: Call) -> Type:
         # Handle runtime functions (defined in rt.s, no decl node)
-        rt_funcs = {'alloc', 'get_arg', 'syscall3', 'syscall4', 'fiber_init', 'fiber_switch',
+        rt_funcs = {'alloc', 'get_arg', 'syscall3', 'syscall4', 'syscall6', 'fiber_init', 'fiber_switch',
                     'load8', 'store8', 'r64', 'w64', 'str_len',
                     'load_str_ptr', 'store_str_ptr',
                     'g_set_curg', 'g_get_curg', 'm_start_workers'}

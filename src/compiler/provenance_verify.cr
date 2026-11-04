@@ -19,6 +19,7 @@ fn get_alloc_extent(alloc_seq: int) -> int:
     an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
     op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
     s1 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    s2 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S2)
     s3 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
@@ -26,6 +27,10 @@ fn get_alloc_extent(alloc_seq: int) -> int:
     if op == IR_ALLOC_ARRAY:
         // s1 is the semantic element count; one element occupies one IR cell.
         return s1
+    if op == IR_ALLOC_AT:
+        // s2 is the declared byte size. IR bounds are element cells; the v1
+        // placement surface is *int, so one cell is 8 bytes.
+        return s2 / 8
     if op == IR_ALLOC_STRUCT:
         // Field count is the struct's cell extent. An unknown struct name falls
         // back to a single cell, matching the scalar placeholder in the IR.
@@ -150,19 +155,17 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 ni = ni + 1
                 continue
 
-            pts := cell_load(g_pts, s1 * 8)
             off := cell_load(g_offsets, s1 * 8)
             runtime_targets : ., mut = 0
             runtime_size : ., mut = 0
             runtime_base : ., mut = -1
 
             // Check each potential allocation target in the points-to set
-            mask : int, mut = 1
             bi : ., mut = 0
             loop:
-                if bi >= 64:
+                if bi >= g_pa_alloc_count:
                     break
-                if (pts / mask) % 2 != 0:
+                if pa_pts_has(s1, bi) != 0:
                     alloc_extent := get_alloc_extent(bi)
                     if alloc_extent >= 0 && off >= 0 && span > 0:
                         if span > alloc_extent || off > alloc_extent - span:
@@ -186,7 +189,6 @@ fn provenance_verify_func(nstart: int, ncount: int):
                         // Unknown allocation information leaves s2 and s3 unset. The
                         // encoder keeps a null trap for s3 = 0.
 
-                mask = mask * 2
                 bi = bi + 1
 
             // A constant offset plus a known span can be proven statically. A

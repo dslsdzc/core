@@ -516,9 +516,10 @@ def test_ir_match_opcode_is_known_to_loader():
         _assert_load_rejected(bytes(d), tmp, "match_case_count_negative")
 
         # Smallest reachable proof that the gate is real in this fixture: the
-        # same byte patch with an opcode above the table is rejected.
+        # same byte patch with an opcode above the current table is rejected.
+        # IR_MATCH + 1 is IR_ALLOC_AT (55) and IR_ARENA_CLEAR is 56, so use 57.
         d = bytearray(data)
-        struct.pack_into("<I", d, nod_off + 4, IR_MATCH + 1)
+        struct.pack_into("<I", d, nod_off + 4, 57)
         _assert_load_rejected(bytes(d), tmp, "unknown_opcode")
 
 
