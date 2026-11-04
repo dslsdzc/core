@@ -342,6 +342,28 @@ def build_run(name: str, source: str, timeout: int = 60) -> bool:
     return True
 
 
+PI_LOCKS = """\
+import sched
+import chan
+
+fn work(n: int) -> int:
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(2)
+    if conc_sched_set_pi(1) != 0:
+        return 1
+    a := go work(1)
+    b := go work(2)
+    if chan_recv(a) + chan_recv(b) != 5:
+        return 2
+    if conc_sched_pi_enabled() != 1:
+        return 3
+    conc_sched_set_pi(0)
+    return 0
+"""
+
+
 def main() -> int:
     cases = [
         ("conc_sched_channel_arg", CHANNEL_ARG, 30),
@@ -357,6 +379,7 @@ def main() -> int:
         ("conc_sched_channel_status", CHANNEL_STATUS, 30),
         ("conc_sched_priority", PRIORITY, 30),
         ("conc_sched_state", STATE, 30),
+        ("conc_sched_pi_locks", PI_LOCKS, 60),
     ]
     passed = 0
     for name, source, timeout in cases:

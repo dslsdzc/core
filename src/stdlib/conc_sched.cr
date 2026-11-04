@@ -117,6 +117,11 @@ fn _conc_sched_alloc(size: int) -> string:
     // allocation itself here.
     if _conc_raw(g_conc_arena_lock) == 0:
         return arena_shared_alloc(size)
+    if g_conc_pi_locks != 0:
+        conc_pi_lock(g_conc_arena_lock)
+        p := arena_shared_alloc(size)
+        conc_pi_unlock(g_conc_arena_lock)
+        return p
     loop:
         if rt_atomic_load(g_conc_arena_lock, 0) == 0:
             if rt_atomic_cas(g_conc_arena_lock, 0, 0, 1) != 0:
@@ -622,6 +627,10 @@ fn _conc_queue_lock(m: int):
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         cell_store(g_conc_preempt_disable_m, cur * 8,
                    cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    if g_conc_pi_locks != 0:
+        w := _conc_ptr(_conc_addr(g_conc_queue_lock_m) + m * 8)
+        conc_pi_lock(w)
+        return
     loop:
         if rt_atomic_load(g_conc_queue_lock_m, m * 8) == 0:
             if rt_atomic_cas(g_conc_queue_lock_m, m * 8, 0, 1) != 0:
@@ -631,8 +640,12 @@ fn _conc_queue_lock(m: int):
 fn _conc_queue_unlock(m: int):
     if m < 0 || m >= 64:
         m = 0
-    if _conc_raw(g_conc_queue_lock_m) != 0:
-        rt_atomic_store(g_conc_queue_lock_m, m * 8, 0)
+    if g_conc_pi_locks != 0:
+        w := _conc_ptr(_conc_addr(g_conc_queue_lock_m) + m * 8)
+        conc_pi_unlock(w)
+    else:
+        if _conc_raw(g_conc_queue_lock_m) != 0:
+            rt_atomic_store(g_conc_queue_lock_m, m * 8, 0)
     cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         d := cell_load(g_conc_preempt_disable_m, cur * 8)
@@ -963,6 +976,9 @@ fn _conc_lock():
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         cell_store(g_conc_preempt_disable_m, cur * 8,
                    cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    if g_conc_pi_locks != 0:
+        conc_pi_lock(g_conc_lock)
+        return
     loop:
         if rt_atomic_load(g_conc_lock, 0) == 0:
             if rt_atomic_cas(g_conc_lock, 0, 0, 1) != 0:
@@ -970,7 +986,10 @@ fn _conc_lock():
         syscall3(24, 0, 0, 0)
 
 fn _conc_unlock():
-    rt_atomic_store(g_conc_lock, 0, 0)
+    if g_conc_pi_locks != 0:
+        conc_pi_unlock(g_conc_lock)
+    else:
+        rt_atomic_store(g_conc_lock, 0, 0)
     m := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         d := cell_load(g_conc_preempt_disable_m, m * 8)
@@ -982,6 +1001,9 @@ fn _conc_ch_lock():
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         cell_store(g_conc_preempt_disable_m, cur * 8,
                    cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    if g_conc_pi_locks != 0:
+        conc_pi_lock(g_conc_ch_lock)
+        return
     loop:
         if rt_atomic_load(g_conc_ch_lock, 0) == 0:
             if rt_atomic_cas(g_conc_ch_lock, 0, 0, 1) != 0:
@@ -989,8 +1011,11 @@ fn _conc_ch_lock():
         syscall3(24, 0, 0, 0)
 
 fn _conc_ch_unlock():
-    if _conc_raw(g_conc_ch_lock) != 0:
-        rt_atomic_store(g_conc_ch_lock, 0, 0)
+    if g_conc_pi_locks != 0:
+        conc_pi_unlock(g_conc_ch_lock)
+    else:
+        if _conc_raw(g_conc_ch_lock) != 0:
+            rt_atomic_store(g_conc_ch_lock, 0, 0)
     cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         d := cell_load(g_conc_preempt_disable_m, cur * 8)
@@ -1002,6 +1027,9 @@ fn _conc_region_lock():
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         cell_store(g_conc_preempt_disable_m, cur * 8,
                    cell_load(g_conc_preempt_disable_m, cur * 8) + 1)
+    if g_conc_pi_locks != 0:
+        conc_pi_lock(g_conc_region_lock)
+        return
     loop:
         if rt_atomic_load(g_conc_region_lock, 0) == 0:
             if rt_atomic_cas(g_conc_region_lock, 0, 0, 1) != 0:
@@ -1009,8 +1037,11 @@ fn _conc_region_lock():
         syscall3(24, 0, 0, 0)
 
 fn _conc_region_unlock():
-    if _conc_raw(g_conc_region_lock) != 0:
-        rt_atomic_store(g_conc_region_lock, 0, 0)
+    if g_conc_pi_locks != 0:
+        conc_pi_unlock(g_conc_region_lock)
+    else:
+        if _conc_raw(g_conc_region_lock) != 0:
+            rt_atomic_store(g_conc_region_lock, 0, 0)
     cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
         d := cell_load(g_conc_preempt_disable_m, cur * 8)
@@ -1038,6 +1069,19 @@ fn conc_preempt_depth() -> int, pub:
         return 0
     m := _conc_m()
     return cell_load(g_conc_preempt_disable_m, m * 8)
+
+// Opt-in PI futex mode for the runtime's internal locks. The kernel tracks the
+// owner and applies priority inheritance, which the spin path cannot do.
+g_conc_pi_locks : int, mut = 0
+
+fn conc_sched_set_pi(v: int) -> int, pub:
+    if v != 0 && v != 1:
+        return -1
+    g_conc_pi_locks = v
+    return 0
+
+fn conc_sched_pi_enabled() -> int, pub:
+    return g_conc_pi_locks
 
 fn conc_sched_set_m(n: int), pub:
     if n < 1:
