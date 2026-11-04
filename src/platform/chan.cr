@@ -1,11 +1,11 @@
 // Channel surface backed by the CP-4 conc runtime.
 //
 // chan_make/send/recv/close keep the existing source-level signatures, but the
-// storage and waiting protocol live in conc/conc_sched: a conc channel payload
+// storage and waiting protocol live in conc/conc_cpu: a conc channel payload
 // (magic, buf, cap, len, head, esize, owner region, epoch) plus per-channel
 // cooperative wait queues. send/recv block the current activation when the
 // channel is full/empty; close wakes all waiters.
-import conc_sched
+import conc_cpu
 
 fn chan_make(elemsize: int, cap: int) -> string, pub:
     return conc_chan_make(elemsize, cap)

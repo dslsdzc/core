@@ -166,13 +166,13 @@ g_conc_plan_parse_pos : int, mut = 0
 
 // ── Raw pointer helpers ───────────────────────────────────────────────────
 
-fn _conc_addr(s: string) -> int:
+fn _conc_addr(s: string) -> int, pub:
     v : ., mut = 0
     unsafe:
         v = @ptr_of(s)
     return v
 
-fn _conc_ptr(v: int) -> string:
+fn _conc_ptr(v: int) -> string, pub:
     p : ., mut = ""
     if v == 0:
         return p
@@ -183,7 +183,7 @@ fn _conc_ptr(v: int) -> string:
 // In a static ELF, @ptr_of("") is not zero; the empty string is a real rodata
 // object. Allocation failure therefore has to be detected by its zero length,
 // not only by a null pointer.
-fn _conc_is_null(p: string) -> int:
+fn _conc_is_null(p: string) -> int, pub:
     if _conc_addr(p) == 0:
         return 1
     if str_len(p) <= 0:
@@ -1985,7 +1985,7 @@ fn conc_plan_validate(plan: int) -> int, pub:
         return 0
     return 1
 
-fn _conc_num_str(n: int) -> string:
+fn _conc_num_str(n: int) -> string, pub:
     if n == 0:
         return "0"
     buf := alloc(24)

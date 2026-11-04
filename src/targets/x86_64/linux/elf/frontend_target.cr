@@ -21,7 +21,7 @@ fn target_container_name() -> string:
     return "elf"
 
 fn target_import_root_count() -> int:
-    return 10
+    return 11
 
 // Return a search root with its trailing slash. The source directory is
 // handled separately by module.cr because it is project-relative.
@@ -46,6 +46,8 @@ fn target_import_root(i: int) -> string:
         return "src/lattice/"
     if i == 9:
         return "src/targets/x86_64/linux/elf/"
+    if i == 10:
+        return "src/platform/"
     return ""
 
 fn target_so_index_path(home_dir: string, fs_path: string) -> string:

@@ -3,7 +3,7 @@
 // CP-6 retired the legacy 0A G queues and goroutine wrapper. `sched_init` /
 // `sched_init_n` now configure the conc scheduler, and workers delegate to
 // conc_worker_run. The legacy G data structures are gone.
-import conc_sched
+import conc_cpu
 import chan
 import arena
 
@@ -26,7 +26,7 @@ fn sched_init_n(n: int), pub:
         n = 1
     // Reserve one extra M partition for shared runtime metadata (scheduler
     // arrays, channel regions). Worker homes stay in 0..n-1.
-    arena_init_m(g_arena_pool_limit, 1048576, n + 1)
+    arena_init_m(arena_pool_limit(), 1048576, n + 1)
     conc_sched_set_m(n)
     conc_sched_init()
 

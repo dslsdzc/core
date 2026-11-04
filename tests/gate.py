@@ -65,7 +65,7 @@ def select_changed(files: list[str]) -> list[str]:
             name = Path(p).name
             if (TESTS / name).exists():
                 picked.append(name)
-        if "conc_sched" in p or "src/stdlib/sched.cr" in p or "src/stdlib/chan.cr" in p or p.endswith("src/stdlib/conc.cr"):
+        if "conc_sched" in p or "conc_cpu" in p or "src/stdlib/sched.cr" in p or "src/stdlib/chan.cr" in p or p.endswith("src/stdlib/conc.cr"):
             picked.extend(CONC)
         if "ir_gen" in p or "conc_plan_emit" in p:
             picked.extend(["test_conc_autopar.py", "test_conc_plan.py",

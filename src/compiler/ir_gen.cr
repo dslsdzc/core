@@ -3828,7 +3828,7 @@ fn gen_expr(node: int) -> int:
                 return arr_var
             // Plan-emitter marker: one call for the whole range. The default
             // runtime still executes the per-index conc_go loop below. Only
-            // conc programs link conc_sched, so ordinary range-go code stays
+            // conc programs link conc_cpu, so ordinary range-go code stays
             // exactly as before.
             if g_program_has_conc == 0:
                 conc_go_ni := str_intern("conc_go")
@@ -7796,13 +7796,13 @@ fn ccr_set_raw_mode_from_source():
     g_ccr_emit_raw_int = 0
     g_program_has_arena = ccr_source_has_marker("fn arena_init")
     g_program_has_conc = 0
-    // The tick lives in conc_sched; `import conc` alone only brings the
+    // The tick lives in conc_cpu; `import conc` alone only brings the
     // plan/MessageRef substrate and does not link the scheduler.
     if ccr_source_has_marker("import sched") != 0:
         g_program_has_conc = 1
     if ccr_source_has_marker("import chan") != 0:
         g_program_has_conc = 1
-    if ccr_source_has_marker("import conc_sched") != 0:
+    if ccr_source_has_marker("import conc_cpu") != 0:
         g_program_has_conc = 1
     if ccr_source_has_marker("fn parse_expr") != 0:
         g_ccr_emit_raw_int = 1

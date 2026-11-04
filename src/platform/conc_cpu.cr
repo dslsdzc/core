@@ -454,7 +454,7 @@ fn conc_runtime_slots() -> int, pub:
     return g_conc_m_count
 
 fn conc_runtime_memory() -> int, pub:
-    return g_arena_pool_limit
+    return arena_pool_limit()
 
 fn conc_plan_target_compatible(plan: int) -> int, pub:
     // Runtime probe: a plan is compatible when its declared target is cpu and
@@ -473,7 +473,8 @@ fn conc_plan_target_compatible(plan: int) -> int, pub:
     if slots > 0 && slots > g_conc_m_count:
         return 0
     mem := conc_plan_target_memory(plan)
-    if mem > 0 && g_arena_pool_limit > 0 && mem > g_arena_pool_limit:
+    lim := arena_pool_limit()
+    if mem > 0 && lim > 0 && mem > lim:
         return 0
     return 1
 

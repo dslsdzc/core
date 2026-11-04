@@ -68,6 +68,9 @@ g_arena_pool_slots : int, mut = 0
 g_segment_base : string, mut        // string[] — 1MB pool segments
 g_segment_count : int, mut = 0
 g_arena_pool_limit : int, mut = 1073741824
+
+fn arena_pool_limit() -> int, pub:
+    return g_arena_pool_limit
 g_segment_cap : int, mut = 0
 g_slot_next_cap : int, mut = 0
 g_class_base : string, mut          // int[] — class chunk absolute address, [arena * K + class]
