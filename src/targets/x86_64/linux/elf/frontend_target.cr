@@ -39,15 +39,15 @@ fn target_import_root(i: int) -> string:
     if i == 5:
         return "src/os/linux/"
     if i == 6:
-        return "src/compiler/"
+        return "src/os/linux/runtime/"
     if i == 7:
-        return "src/arch/hit/"
+        return "src/compiler/"
     if i == 8:
-        return "src/lattice/"
+        return "src/arch/hit/"
     if i == 9:
-        return "src/targets/x86_64/linux/elf/"
+        return "src/lattice/"
     if i == 10:
-        return "src/platform/"
+        return "src/targets/x86_64/linux/elf/"
     return ""
 
 fn target_so_index_path(home_dir: string, fs_path: string) -> string:

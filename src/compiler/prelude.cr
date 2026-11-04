@@ -73,7 +73,7 @@ fn prelude_builtin_visible_to_current_lib(vis: int) -> int:
     // the standard library or the compiler may name it.
     if g_cur_lib < 0:
         return 1
-    if g_cur_lib == lib_find("@std") || g_cur_lib == lib_find("@core") || g_cur_lib == lib_find("@platform"):
+    if g_cur_lib == lib_find("@std") || g_cur_lib == lib_find("@core") || g_cur_lib == lib_find("@os"):
         return 1
     return 0
 
