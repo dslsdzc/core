@@ -7814,6 +7814,10 @@ fn ccr_set_raw_mode_from_source():
     // to corearch so both sides agree before code generation.
     g_ccr_emit_raw_int = 0
     g_program_has_arena = ccr_source_has_marker("fn arena_init")
+    if g_program_has_arena != 0:
+        // The arena allocator speaks the SYSTEM raw-word ABI: syscall6 returns
+        // a machine address that is immediately viewed through @str_of.
+        g_ccr_emit_raw_int = 1
     g_program_has_conc = 0
     // The tick lives in conc_cpu; `import conc` alone only brings the
     // plan/MessageRef substrate and does not link the scheduler.
