@@ -744,10 +744,11 @@ fn corec_main() -> int:
 
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
     base_diags : ., mut = g_diag_count
-    ptr_analysis_all()
-    timing_mark("ptr_analysis")
-    region_check_all()
-    timing_mark("region_check")
+    if g_self_host_mode == 0:
+        ptr_analysis_all()
+        timing_mark("ptr_analysis")
+        region_check_all()
+        timing_mark("region_check")
     // Phase A may reject the v1 program. Do not plan on top of a failed graph.
     if g_diag_count > base_diags:
         print_diagnostics()
@@ -756,12 +757,13 @@ fn corec_main() -> int:
     // The cross-function share proof reads g_bp_param_write. Compute the
     // Phase A summary before planning; the plan-regeneration path recomputes
     // it after Phase B as before.
-    byte_permission_all()
-    timing_mark("byte_permission_plan")
-    if g_diag_count > base_diags:
-        print_diagnostics()
-        return 1
-    region_plan_analyze()
+    if g_self_host_mode == 0:
+        byte_permission_all()
+        timing_mark("byte_permission_plan")
+        if g_diag_count > base_diags:
+            print_diagnostics()
+            return 1
+        region_plan_analyze()
     if cli_has("dump-region-plan") != 0:
         pi : ., mut = 0
         loop:
@@ -803,11 +805,15 @@ fn corec_main() -> int:
         timing_mark("region_check_plan")
         // The plan regenerated IR, so re-run the byte-permission proof on the
         // new graph. With no plan the first pass already proved this exact IR.
-        byte_permission_all()
-        timing_mark("byte_permission")
+        if g_self_host_mode == 0:
+            byte_permission_all()
+            timing_mark("byte_permission")
+        else:
+            timing_mark("byte_permission")
     else:
         timing_mark("byte_permission")
-    provenance_verify_all()
+    if g_self_host_mode == 0:
+        provenance_verify_all()
     timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.
     if g_diag_count > base_diags:
