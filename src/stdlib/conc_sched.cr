@@ -57,6 +57,10 @@ g_conc_free_cap : int, mut = 0
 // scheduler lock. The global lock is only used for table growth/new ids.
 g_conc_free_lock : string, mut
 g_conc_spawn_rr_buf : string, mut
+// New activation ids are issued atomically; only table growth/install takes
+// this lock. This removes the global scheduler lock from the spawn path.
+g_conc_table_lock : string, mut
+g_conc_act_id_buf : string, mut
 g_conc_quantum : int, mut = 2000
 g_conc_quantum_m : string, mut
 g_conc_quantum_cfg_m : string, mut
@@ -941,12 +945,24 @@ fn _conc_acts_grow():
     nc : ., mut = g_conc_act_cap * 2
     if nc < 16:
         nc = 16
+    loop:
+        if nc >= g_conc_act_count:
+            break
+        nc = nc * 2
     nb := _conc_sched_alloc(nc * 8)
+    // Clear new slots explicitly: alloc is not guaranteed to return zeros.
     i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        cell_store(nb, i * 8, 0)
+        i = i + 1
+    i = 0
     loop:
         if i >= g_conc_act_count:
             break
-        store_str_ptr(nb, i * 8, _conc_act_at(i))
+        if i < g_conc_act_cap:
+            store_str_ptr(nb, i * 8, _conc_act_at(i))
         i = i + 1
     g_conc_acts = nb
     g_conc_act_cap = nc
@@ -1156,6 +1172,10 @@ fn conc_sched_init():
     cell_store(g_conc_free_lock, 0, 0)
     g_conc_spawn_rr_buf = _conc_sched_alloc(8)
     cell_store(g_conc_spawn_rr_buf, 0, 0)
+    g_conc_table_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_table_lock, 0, 0)
+    g_conc_act_id_buf = _conc_sched_alloc(8)
+    cell_store(g_conc_act_id_buf, 0, 0)
     g_conc_quantum_m = _conc_sched_alloc(64 * 8)
     g_conc_quantum_cfg_m = _conc_sched_alloc(64 * 8)
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
@@ -1204,6 +1224,26 @@ fn _conc_free_lock():
 fn _conc_free_unlock():
     if _conc_raw(g_conc_free_lock) != 0:
         rt_atomic_store(g_conc_free_lock, 0, 0)
+
+fn _conc_table_lock():
+    if _conc_raw(g_conc_table_lock) == 0:
+        return
+    if g_conc_pi_locks != 0:
+        conc_pi_lock(g_conc_table_lock)
+        return
+    loop:
+        if rt_atomic_load(g_conc_table_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_table_lock, 0, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_table_unlock():
+    if _conc_raw(g_conc_table_lock) == 0:
+        return
+    if g_conc_pi_locks != 0:
+        conc_pi_unlock(g_conc_table_lock)
+    else:
+        rt_atomic_store(g_conc_table_lock, 0, 0)
 
 fn _conc_free_push(id: int):
     if _conc_raw(g_conc_free) == 0:
@@ -1272,18 +1312,25 @@ fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, y
     store_str_ptr(g_conc_acts, id * 8, a)
 
 fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
-    // Caller holds the global scheduler lock. Only new ids/table growth take
-    // that lock; free-list reuse is handled by _conc_spawn_common.
+    // New ids are issued atomically; the table lock only covers growth and the
+    // control-block install. Free-list reuse never reaches here.
+    id : ., mut = 0
+    if _conc_raw(g_conc_act_id_buf) != 0:
+        id = rt_atomic_fetch_add(g_conc_act_id_buf, 0, 1)
+    else:
+        id = g_conc_act_count
+    _conc_table_lock()
+    if id + 1 > g_conc_act_count:
+        g_conc_act_count = id + 1
     _conc_acts_grow()
-    id : ., mut = g_conc_act_count
-    g_conc_act_count = id + 1
     a : ., mut = _conc_act_at(id)
     if _conc_raw(a) == 0:
         a = arena_shared_alloc(CONC_ACT_SIZE)
         if _conc_word(a) == 0:
-            g_conc_act_count = id
+            _conc_table_unlock()
             return -1
     _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority)
+    _conc_table_unlock()
     return id
 
 fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
@@ -1296,9 +1343,7 @@ fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string,
         else:
             id = -1
     if id < 0:
-        _conc_lock()
         id = _conc_act_new(entry, arg, result_ch, yield_ch, token, priority)
-        _conc_unlock()
     if id >= 0:
         g_conc_spawn_count = g_conc_spawn_count + 1
         _conc_ready_push(id)
@@ -1374,18 +1419,14 @@ fn conc_schedule() -> int, pub:
                 aidp := arena_new()
                 if aidp < 0:
                     cell_store(a, 8, CONC_ACT_DEAD)
-                    _conc_lock()
                     _conc_free_push(id)
-                    _conc_unlock()
                     continue
                 stack := alloc(CONC_SCHED_STACK)
                 arena_set_current_unchecked(saved)
                 if _conc_word(stack) == 0:
                     arena_reset(aidp)
                     cell_store(a, 8, CONC_ACT_DEAD)
-                    _conc_lock()
                     _conc_free_push(id)
-                    _conc_unlock()
                     continue
                 sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
                 cell_store(a, 16, sp)
@@ -1398,7 +1439,9 @@ fn conc_schedule() -> int, pub:
             arena_set_current_unchecked(cell_load(a, 64))
             fiber_switch(_conc_ptr_addr(_conc_sched_sp_cell()), cell_load(a, 16))
             arena_set_current_unchecked(saved)
-            _conc_lock()
+            // The activation is no longer in any ready queue. State, arena
+            // reset, per-M current slot, and the free-list (own lock) are all
+            // owned by this M, so the global scheduler lock is not needed here.
             st := cell_load(a, 8)
             root := cell_load(a, 96)
             if st == CONC_ACT_DEAD:
@@ -1412,7 +1455,6 @@ fn conc_schedule() -> int, pub:
                     rt_atomic_store(g_conc_yield_claim_m, _conc_m() * 8, 0)
                     cell_store(a, 8, CONC_ACT_RUNNABLE)
             _conc_set_cur(-1)
-            _conc_unlock()
     else:
         a := _conc_act_at(_conc_cur_id())
         if _conc_word(a) == 0:
@@ -1665,6 +1707,88 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
                 total = total + conc_sched_recv_int(cell_load(handles, i * 8))
                 if g_conc_plan_cancel != 0:
                     return CONC_RESULT_CANCELLED
+        i = i + 1
+    _conc_plan_measure_wait(plan, wait_t0)
+    return total
+
+fn conc_plan_run_all(plan: int, channels: string) -> int, pub:
+    // Dataflow mode: spawn every body at once and let the channel operations
+    // themselves provide SEND/RECV ordering. JOIN/SPAWN edges are not needed;
+    // a body that consumes a channel simply blocks until the producer sends.
+    if g_conc_plan_cancel != 0:
+        return CONC_RESULT_CANCELLED
+    if conc_plan_validate(plan) == 0:
+        return -1
+    if conc_plan_apply_layouts(plan) < 0:
+        return -1
+    if _conc_is_null(channels) != 0:
+        return -1
+    n := conc_plan_body_count(plan)
+    if n <= 0:
+        return -1
+    wait_t0 := _conc_now_ms()
+    hs := alloc(n * 8)
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        cell_store(hs, i * 8, -1)
+        i = i + 1
+    total : ., mut = 0
+    b : ., mut = 0
+    loop:
+        if b >= n:
+            break
+        if g_conc_plan_cancel != 0:
+            return CONC_RESULT_CANCELLED
+        kind := conc_plan_body_kind(plan, b)
+        if kind == CONC_BODY_DATA_PARALLEL:
+            rn := conc_plan_range_count(plan)
+            ri : ., mut = 0
+            loop:
+                if ri >= rn:
+                    break
+                if conc_plan_range_body(plan, ri) == b:
+                    start := conc_plan_range_start(plan, ri)
+                    cnt := conc_plan_range_len(plan, ri)
+                    if cnt > 0:
+                        out := alloc(cnt * 8)
+                        if conc_run_range(plan, b, start, start + cnt, out) != 0:
+                            return -1
+                        j : ., mut = 0
+                        loop:
+                            if j >= cnt:
+                                break
+                            total = total + cell_load(out, j * 8)
+                            j = j + 1
+                ri = ri + 1
+        else:
+            if kind != CONC_BODY_TASK && kind != CONC_BODY_PIPELINE:
+                return -1
+            arg : ., mut = 0
+            ch := conc_plan_param_channel(plan, b, 0)
+            if ch >= 0:
+                handle := load_str_ptr(channels, ch * 8)
+                if _conc_is_null(handle) != 0:
+                    return -1
+                unsafe:
+                    arg = @ptr_of(handle)
+            entry := conc_plan_body_entry(plan, b)
+            if entry <= 0:
+                return -1
+            h := conc_go(entry, arg)
+            if _conc_word(h) == 0:
+                return -1
+            cell_store(hs, b * 8, h)
+        b = b + 1
+    i = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(hs, i * 8) >= 0:
+            total = total + conc_sched_recv_int(cell_load(hs, i * 8))
+            if g_conc_plan_cancel != 0:
+                return CONC_RESULT_CANCELLED
         i = i + 1
     _conc_plan_measure_wait(plan, wait_t0)
     return total

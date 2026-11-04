@@ -710,6 +710,14 @@ fn main() -> int:
         return 23
     if str_len(conc_mapping_plan_export(0)) < 10:
         return 24
+    if conc_mapping_plan_choose_slot(0, 0) != CONC_SLOT_CPU_THREAD:
+        return 25
+    if conc_mapping_plan_choose_space(0, 0) != CONC_SPACE_DEVICE:
+        return 26
+    if conc_mapping_plan_apply(0) != 1:
+        return 27
+    if conc_mapping_plan_applied(0) != 1:
+        return 28
     bad := conc_target_profile_load("v 1\\nslot THREAD 1 64 1\\nspace HOST 1024\\nsched 1\\n")
     if bad < 0:
         return 19
@@ -742,6 +750,34 @@ fn main() -> int:
         return 3
     if conc_plan_budget_value(plan, 0) < 0:
         return 4
+    return 0
+"""
+
+
+RUN_ALL = """\
+import conc
+import sched
+
+fn f0() -> int:
+    return 3
+
+fn f1() -> int:
+    return 4
+
+fn main() -> int:
+    sched_init()
+    tbl := alloc(16)
+    cell_store(tbl, 0, @addr(f0))
+    cell_store(tbl, 8, @addr(f1))
+    text := "v 2\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 0\\n"
+    plan := conc_plan_load(text, tbl)
+    if plan < 0:
+        return 1
+    chs := alloc(8)
+    cell_store(chs, 0, 0)
+    r := conc_plan_run_all(plan, chs)
+    if r != 7:
+        return r
     return 0
 """
 
@@ -928,6 +964,7 @@ def main() -> int:
         ("parallel_body_plan_run", PAR_BODY_RUN, 60, 0),
         ("wait_budget_writeback", WAIT_RUN, 60, 0),
         ("profile_mapping_plan", PROFILE_LOAD, 60, 0),
+        ("dataflow_run_all", RUN_ALL, 60, 0),
     ]
     ok = True
     for name, source, timeout, expect in cases:

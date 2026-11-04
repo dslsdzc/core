@@ -136,6 +136,25 @@ fn main() -> int:
     return 0
 """
 
+GLOBAL_STENCIL = """\
+import sched
+import chan
+
+g : [int;6] = [1,2,3,4,5,6]
+
+fn stencil(i: int) -> int:
+    return g[i-1] + g[i] + g[i+1]
+
+fn main() -> int:
+    sched_init()
+    out := alloc(8 * 8)
+    for i in 1..5:
+        out[i] = stencil(i)
+    if out[1] + out[2] + out[3] + out[4] != 42:
+        return 1
+    return 0
+"""
+
 SERIAL_FALLBACK = """\
 import sched
 import chan
@@ -216,6 +235,7 @@ def main() -> int:
     ok = build_run("autopar_nested_call", NESTED_CALL, 0) and ok
     ok = build_run("autopar_mul_reduction", MUL_REDUCTION, 0) and ok
     ok = build_run("autopar_sub_reduction", SUB_REDUCTION, 0) and ok
+    ok = build_run("autopar_global_stencil", GLOBAL_STENCIL, 0) and ok
     ok = build_run("autopar_serial_fallback", SERIAL_FALLBACK, 0) and ok
     n = ir_conc_go_count(AUTO_PAR, "autopar_pure")
     rn = ir_conc_go_count(AUTO_REDUCTION, "autopar_reduction")
@@ -223,6 +243,7 @@ def main() -> int:
     nn = ir_conc_go_count(NESTED_CALL, "autopar_nested")
     mn = ir_conc_go_count(MUL_REDUCTION, "autopar_mul")
     sn = ir_conc_go_count(SUB_REDUCTION, "autopar_sub")
+    stn = ir_conc_go_count(GLOBAL_STENCIL, "autopar_stencil")
     m = ir_conc_go_count(SERIAL_FALLBACK, "autopar_serial")
     if n < 1:
         print(f"FAIL auto_par_ir: main conc_go count={n}, expected >=1")
@@ -254,12 +275,17 @@ def main() -> int:
         ok = False
     else:
         print(f"PASS sub_reduction_ir (main conc_go={sn})")
+    if stn < 1:
+        print(f"FAIL stencil_ir: main conc_go count={stn}, expected >=1")
+        ok = False
+    else:
+        print(f"PASS stencil_ir (main conc_go={stn})")
     if m != 0:
         print(f"FAIL serial_fallback_ir: main conc_go count={m}, expected 0")
         ok = False
     else:
         print("PASS serial_fallback_ir (no conc_go in main)")
-    total = 15
+    total = 17
     print(f"{total if ok else 0}/{total} passed")
     return 0 if ok else 1
 

@@ -2608,7 +2608,75 @@ fn conc_mapping_plan_explain(id: int) -> string, pub:
     out = out + " legal=" + _conc_num_str(conc_mapping_plan_validate(id))
     out = out + " budgets=" + _conc_num_str(conc_mapping_plan_budget_ok(id))
     out = out + " certs=" + _conc_num_str(conc_mapping_plan_cert_ok(id))
+    out = out + " applied=" + _conc_num_str(conc_mapping_plan_applied(id))
     return out
+
+fn conc_mapping_plan_choose_slot(id: int, body: int) -> int, pub:
+    // Concrete mapping decision: TASK/PIPE prefer a THREAD slot; PAR prefers a
+    // FIBER slot. Missing kinds make the mapping illegal instead of silently
+    // falling back to another execution model.
+    if _conc_mapping_valid(id) == 0:
+        return -1
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    plan := cell_load(p, 0)
+    prof := cell_load(p, 8)
+    kind := conc_plan_body_kind(plan, body)
+    if kind < 0:
+        return -1
+    first : ., mut = CONC_SLOT_CPU_FIBER
+    second : ., mut = CONC_SLOT_CPU_THREAD
+    if kind != CONC_BODY_DATA_PARALLEL:
+        first = CONC_SLOT_CPU_THREAD
+        second = CONC_SLOT_CPU_FIBER
+    if _conc_profile_slot_max_for(prof, first) >= 0:
+        return first
+    if _conc_profile_slot_max_for(prof, second) >= 0:
+        return second
+    return -1
+
+fn conc_mapping_plan_choose_space(id: int, space_i: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return -1
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    plan := cell_load(p, 0)
+    prof := cell_load(p, 8)
+    kind := conc_plan_space_kind(plan, space_i)
+    if kind < 0:
+        return -1
+    if _conc_profile_space_cap_for(prof, kind) >= 0:
+        return kind
+    return -1
+
+fn conc_mapping_plan_apply(id: int) -> int, pub:
+    // Materialize the mapping decisions and reject any body/space that the
+    // target profile cannot host.
+    if _conc_mapping_valid(id) == 0:
+        return 0
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    plan := cell_load(p, 0)
+    n := conc_plan_body_count(plan)
+    b : ., mut = 0
+    loop:
+        if b >= n:
+            break
+        if conc_mapping_plan_choose_slot(id, b) < 0:
+            return 0
+        b = b + 1
+    nsp := conc_plan_space_count(plan)
+    s : ., mut = 0
+    loop:
+        if s >= nsp:
+            break
+        if conc_mapping_plan_choose_space(id, s) < 0:
+            return 0
+        s = s + 1
+    cell_store(p, 16, 1)
+    return 1
+
+fn conc_mapping_plan_applied(id: int) -> int, pub:
+    if _conc_mapping_valid(id) == 0:
+        return 0
+    return cell_load(load_str_ptr(g_conc_mappings, id * 8), 16)
 
 fn conc_mapping_plan_export(id: int) -> string, pub:
     if _conc_mapping_valid(id) == 0:

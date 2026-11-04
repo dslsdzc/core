@@ -464,6 +464,7 @@ fn corec_main() -> int:
         if run_rc != 0:
             return 1
         ir_diag_base_run := g_diag_count
+        g_interp_mode = 1
         ir_gen_all()
         if g_diag_count > ir_diag_base_run:
             print_diagnostics()
@@ -471,7 +472,9 @@ fn corec_main() -> int:
         // The interpreter consumes the wire CASE table. Derive it from the
         // semantic model exactly as the .ccr path does before executing.
         lower_to_ccr()
-        return ir_interpret()
+        rc_interp := ir_interpret()
+        g_interp_mode = 0
+        return rc_interp
 
     // === clean-cache: delete incremental compilation cache ===
     if cli_eq(cmd, "clean-cache"):

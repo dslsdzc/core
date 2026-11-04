@@ -3813,6 +3813,19 @@ fn gen_expr(node: int) -> int:
             func_ni : ., mut = -1
             if ast_kind(func_node) == EXPR_IDENT:
                 func_ni = ast_int_val(func_node)
+            if g_interp_mode != 0 && func_ni >= 0:
+                // Interpreter serial fallback: no conc scheduler in `run`.
+                fi0 : ., mut = 0
+                loop:
+                    if fi0 >= range_count:
+                        break
+                    val0 := new_ir_var("go_val", TI_INT)
+                    emit(IR_CONST, val0, ast_a(range_node) + fi0, 0, 0, TI_INT)
+                    res0 := new_ir_var("go_res", TI_INT)
+                    emit(IR_CALL, res0, val0, 1, func_ni, TI_INT)
+                    emit(IR_STORE_INDEX, -1, arr_var, res0, fi0, TI_INT)
+                    fi0 = fi0 + 1
+                return arr_var
             // Plan-emitter marker: one call for the whole range. The default
             // runtime still executes the per-index conc_go loop below. Only
             // conc programs link conc_sched, so ordinary range-go code stays
@@ -4463,6 +4476,14 @@ fn gen_expr(node: int) -> int:
             lazy_def_add(dest, func_ni, call_ti, arg0, ac)
             return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
+        // A long syscall cannot be switched inside the kernel. Emit a tick at
+        // the return edge so a pending preemption is consumed immediately
+        // after the syscall instead of waiting for the next backedge.
+        if g_emit_preempt_ticks != 0 && func_ni >= 0:
+            bname := istr_get(func_ni)
+            if str_eq(bname, "syscall3") != 0 || str_eq(bname, "syscall4") != 0 || str_eq(bname, "syscall6") != 0:
+                emit_preempt_tick()
+                g_emit_since_tick = 0
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
         // the row on the call result lets a later match recover the payload form
         // (bare scaled vs boxed Some) without guessing from the IR value width.
@@ -6249,6 +6270,34 @@ fn is_arena_infra_name(name_idx: int) -> int:
     return 0
 
 g_par_arith_depth : int, mut = 0
+// The interpreter has no conc runtime. In `corec run` mode, range-go lowers
+// to a serial call loop so the interpreter and ELF see the same values.
+g_interp_mode : int, mut = 0
+// Name index of the array written by the auto-PAR loop (-1 = none/reduction,
+// -2 = unknown base). Read-only global array captures are allowed only when
+// they cannot alias this write target.
+g_par_write_ni : int, mut = -1
+
+fn _par_index(node: int, param_ni: int) -> int:
+    // Read index for a captured array: param, param +/- const, or a literal.
+    if node < 0:
+        return 0
+    k := ast_kind(node)
+    if k == EXPR_INT:
+        return 1
+    if k == EXPR_IDENT:
+        return ast_int_val(node) == param_ni
+    if k == EXPR_BINARY:
+        op := ast_c(node)
+        if op != OP_ADD && op != OP_SUB:
+            return 0
+        l := ast_a(node)
+        r := ast_b(node)
+        if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == param_ni:
+            return ast_kind(r) == EXPR_INT
+        if op == OP_ADD && ast_kind(r) == EXPR_IDENT && ast_int_val(r) == param_ni:
+            return ast_kind(l) == EXPR_INT
+    return 0
 
 fn _par_arith_call(node: int, param_ni: int) -> int:
     // A call is pure for auto-PAR only when it is a one-int-parameter user
@@ -6314,6 +6363,27 @@ fn _par_arith(node: int, param_ni: int) -> int:
         if ast_c(node) == UOP_NEG:
             return _par_arith(ast_a(node), param_ni)
         return 0
+    if k == EXPR_INDEX:
+        // Read-only global array capture (stencil): the base must be a global
+        // array/slice and must not be the array this loop writes. The index
+        // may be param, param +/- const, or a literal.
+        if g_par_write_ni == -2:
+            return 0
+        base := ast_a(node)
+        if ast_kind(base) != EXPR_IDENT:
+            return 0
+        bni := ast_int_val(base)
+        if bni == g_par_write_ni:
+            return 0
+        si := find_gsym(bni)
+        if si < 0:
+            return 0
+        if sym_kind(si) != SYM_GLOBAL:
+            return 0
+        tk := get_type_kind(sym_type(si))
+        if tk != TYP_ARRAY && tk != TYP_SLICE:
+            return 0
+        return _par_index(ast_b(node), param_ni)
     if k == EXPR_CALL:
         if g_par_arith_depth >= 8:
             return 0
@@ -6324,6 +6394,8 @@ fn _par_arith(node: int, param_ni: int) -> int:
     return 0
 
 fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
+    if g_interp_mode != 0:
+        return 0
     // Recognize `for i in <literal range>: out[i] = f(i)` where f is a
     // side-effect-free integer arithmetic function. This is the automatic
     // DATA_PARALLEL slice; anything else keeps the serial loop.
@@ -6344,6 +6416,13 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
         return 0
     target := ast_a(stmt)
     value : ., mut = ast_b(stmt)
+    g_par_write_ni = -1
+    if ast_kind(target) == EXPR_INDEX:
+        ob := ast_a(target)
+        if ast_kind(ob) == EXPR_IDENT:
+            g_par_write_ni = ast_int_val(ob)
+        else:
+            g_par_write_ni = -2
     mode : ., mut = 0
     red_op : ., mut = OP_ADD
     if ast_kind(target) == EXPR_INDEX:
@@ -7272,6 +7351,8 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_live_seg_cap"))
     reg_one_global(str_intern("g_ctiming_last_ms"))
     reg_one_global(str_intern("g_par_arith_depth"))
+    reg_one_global(str_intern("g_interp_mode"))
+    reg_one_global(str_intern("g_par_write_ni"))
     reg_one_global(str_intern("g_glob_cap"))
     reg_one_global(str_intern("g_glob_rows"))
     reg_one_global(str_intern("g_glob_first_any"))
