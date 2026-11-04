@@ -2378,6 +2378,61 @@ fn conc_target_profile_scheduling(id: int) -> int, pub:
         return -1
     return cell_load(_conc_profile_at(id), 56)
 
+fn _conc_profile_slot_name(kind: int) -> string:
+    if kind == CONC_SLOT_CPU_THREAD:
+        return "THREAD"
+    if kind == CONC_SLOT_CPU_FIBER:
+        return "FIBER"
+    return "UNKNOWN"
+
+fn _conc_profile_space_name(kind: int) -> string:
+    if kind == CONC_SPACE_HOST:
+        return "HOST"
+    if kind == CONC_SPACE_DEVICE:
+        return "DEVICE"
+    if kind == CONC_SPACE_REMOTE:
+        return "REMOTE"
+    return "UNKNOWN"
+
+fn conc_target_profile_export(id: int) -> string, pub:
+    // Text round-trip of a profile, suitable for a deployment file.
+    if _conc_profile_valid(id) == 0:
+        return ""
+    p := _conc_profile_at(id)
+    out : ., mut = "v " + _conc_num_str(cell_load(p, 0)) + "\n"
+    ns := cell_load(p, 8)
+    sbase := load_str_ptr(p, 16)
+    si : ., mut = 0
+    loop:
+        if si >= ns:
+            break
+        out = out + "slot " + _conc_profile_slot_name(cell_load(sbase, si * 32))
+        out = out + " " + _conc_num_str(cell_load(sbase, si * 32 + 8))
+        out = out + " " + _conc_num_str(cell_load(sbase, si * 32 + 16))
+        out = out + " " + _conc_num_str(cell_load(sbase, si * 32 + 24)) + "\n"
+        si = si + 1
+    nsp := cell_load(p, 24)
+    spbase := load_str_ptr(p, 32)
+    spi : ., mut = 0
+    loop:
+        if spi >= nsp:
+            break
+        out = out + "space " + _conc_profile_space_name(cell_load(spbase, spi * 24))
+        out = out + " " + _conc_num_str(cell_load(spbase, spi * 24 + 8)) + "\n"
+        spi = spi + 1
+    nx := cell_load(p, 40)
+    xbase := load_str_ptr(p, 48)
+    xi : ., mut = 0
+    loop:
+        if xi >= nx:
+            break
+        out = out + "xfer " + _conc_profile_space_name(cell_load(xbase, xi * 24))
+        out = out + " " + _conc_profile_space_name(cell_load(xbase, xi * 24 + 8))
+        out = out + " " + _conc_num_str(cell_load(xbase, xi * 24 + 16)) + "\n"
+        xi = xi + 1
+    out = out + "sched " + _conc_num_str(cell_load(p, 56)) + "\n"
+    return out
+
 fn _conc_profile_slot_max_for(profile: int, kind: int) -> int:
     p := _conc_profile_at(profile)
     n := cell_load(p, 8)
@@ -2554,6 +2609,12 @@ fn conc_mapping_plan_explain(id: int) -> string, pub:
     out = out + " budgets=" + _conc_num_str(conc_mapping_plan_budget_ok(id))
     out = out + " certs=" + _conc_num_str(conc_mapping_plan_cert_ok(id))
     return out
+
+fn conc_mapping_plan_export(id: int) -> string, pub:
+    if _conc_mapping_valid(id) == 0:
+        return ""
+    p := load_str_ptr(g_conc_mappings, id * 8)
+    return "mapping " + _conc_num_str(cell_load(p, 0)) + " " + _conc_num_str(cell_load(p, 8)) + "\n"
 
 fn conc_plan_add_range(plan: int, body: int, start: int, count: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:

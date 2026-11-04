@@ -53,6 +53,10 @@ g_conc_ch_cap : int, mut = 0
 g_conc_free : string, mut
 g_conc_free_count : int, mut = 0
 g_conc_free_cap : int, mut = 0
+// Dedicated free-list lock: spawn/free reuse no longer takes the global
+// scheduler lock. The global lock is only used for table growth/new ids.
+g_conc_free_lock : string, mut
+g_conc_spawn_rr_buf : string, mut
 g_conc_quantum : int, mut = 2000
 g_conc_quantum_m : string, mut
 g_conc_quantum_cfg_m : string, mut
@@ -1104,6 +1108,10 @@ fn conc_sched_init():
     g_conc_ch_cap = 16
     g_conc_free = _conc_sched_alloc(64 * 8)
     g_conc_free_cap = 64
+    g_conc_free_lock = _conc_sched_alloc(8)
+    cell_store(g_conc_free_lock, 0, 0)
+    g_conc_spawn_rr_buf = _conc_sched_alloc(8)
+    cell_store(g_conc_spawn_rr_buf, 0, 0)
     g_conc_quantum_m = _conc_sched_alloc(64 * 8)
     g_conc_quantum_cfg_m = _conc_sched_alloc(64 * 8)
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
@@ -1140,7 +1148,23 @@ fn conc_sched_init():
         iq = iq + 1
     g_conc_inited = 1
 
+fn _conc_free_lock():
+    if _conc_raw(g_conc_free_lock) == 0:
+        return
+    loop:
+        if rt_atomic_load(g_conc_free_lock, 0) == 0:
+            if rt_atomic_cas(g_conc_free_lock, 0, 0, 1) != 0:
+                return
+        syscall3(24, 0, 0, 0)
+
+fn _conc_free_unlock():
+    if _conc_raw(g_conc_free_lock) != 0:
+        rt_atomic_store(g_conc_free_lock, 0, 0)
+
 fn _conc_free_push(id: int):
+    if _conc_raw(g_conc_free) == 0:
+        return
+    _conc_free_lock()
     if g_conc_free_count >= g_conc_free_cap:
         nc : ., mut = g_conc_free_cap * 2
         if nc < 64:
@@ -1156,36 +1180,31 @@ fn _conc_free_push(id: int):
         g_conc_free_cap = nc
     cell_store(g_conc_free, g_conc_free_count * 8, id)
     g_conc_free_count = g_conc_free_count + 1
+    _conc_free_unlock()
 
 fn _conc_free_pop() -> int:
+    if _conc_raw(g_conc_free) == 0:
+        return -1
+    _conc_free_lock()
     if g_conc_free_count <= 0:
+        _conc_free_unlock()
         return -1
     g_conc_free_count = g_conc_free_count - 1
-    return cell_load(g_conc_free, g_conc_free_count * 8)
+    id := cell_load(g_conc_free, g_conc_free_count * 8)
+    _conc_free_unlock()
+    return id
 
-fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
-    conc_sched_init()
-    _conc_acts_grow()
-    id : ., mut = _conc_free_pop()
-    if id < 0:
-        id = g_conc_act_count
-        g_conc_act_count = id + 1
+fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int):
     slots : ., mut = g_conc_slots
     if slots < 1:
         slots = 1
-    slot := g_conc_spawn_rr % (g_conc_m_count * slots)
+    if slots > 64:
+        slots = 64
+    rr : ., mut = 0
+    if _conc_raw(g_conc_spawn_rr_buf) != 0:
+        rr = rt_atomic_fetch_add(g_conc_spawn_rr_buf, 0, 1)
+    slot := rr % (g_conc_m_count * slots)
     home : ., mut = slot % g_conc_m_count
-    g_conc_spawn_rr = g_conc_spawn_rr + 1
-    // Control blocks live in the shared partition and are reused through the
-    // free list. Stacks and activation arenas are created lazily by the home
-    // M on first run (conc_schedule), so a spawner never touches another M's
-    // slot pools and every M allocates only in its own partition.
-    a : ., mut = _conc_act_at(id)
-    if _conc_raw(a) == 0:
-        a = arena_shared_alloc(CONC_ACT_SIZE)
-        if _conc_word(a) == 0:
-            g_conc_act_count = id
-            return -1
     cell_store(a, 0, id)
     cell_store(a, 8, CONC_ACT_RUNNABLE)
     cell_store(a, 16, 0)
@@ -1207,6 +1226,38 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, toke
     cell_store(a, 144, priority)
     cell_store(a, 152, -1)   // ready-queue prev link (doubly linked)
     store_str_ptr(g_conc_acts, id * 8, a)
+
+fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
+    // Caller holds the global scheduler lock. Only new ids/table growth take
+    // that lock; free-list reuse is handled by _conc_spawn_common.
+    _conc_acts_grow()
+    id : ., mut = g_conc_act_count
+    g_conc_act_count = id + 1
+    a : ., mut = _conc_act_at(id)
+    if _conc_raw(a) == 0:
+        a = arena_shared_alloc(CONC_ACT_SIZE)
+        if _conc_word(a) == 0:
+            g_conc_act_count = id
+            return -1
+    _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority)
+    return id
+
+fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int) -> int:
+    conc_sched_init()
+    id : ., mut = _conc_free_pop()
+    if id >= 0:
+        a := _conc_act_at(id)
+        if _conc_raw(a) != 0:
+            _conc_act_init(id, a, entry, arg, result_ch, yield_ch, token, priority)
+        else:
+            id = -1
+    if id < 0:
+        _conc_lock()
+        id = _conc_act_new(entry, arg, result_ch, yield_ch, token, priority)
+        _conc_unlock()
+    if id >= 0:
+        g_conc_spawn_count = g_conc_spawn_count + 1
+        _conc_ready_push(id)
     return id
 
 fn _conc_raw(s: string) -> int:
@@ -1226,47 +1277,19 @@ fn _conc_word(s: string) -> int:
     return v
 
 fn conc_spawn(entry: int, arg: int, result_ch: string) -> int, pub:
-    conc_sched_init()
-    _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, "", -1, 0)
-    _conc_unlock()
-    if id >= 0:
-        g_conc_spawn_count = g_conc_spawn_count + 1
-        _conc_ready_push(id)
-    return id
+    return _conc_spawn_common(entry, arg, result_ch, "", -1, 0)
 
 fn conc_spawn_priority(entry: int, arg: int, result_ch: string,
                       priority: int) -> int, pub:
-    conc_sched_init()
-    _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, "", -1, priority)
-    _conc_unlock()
-    if id >= 0:
-        g_conc_spawn_count = g_conc_spawn_count + 1
-        _conc_ready_push(id)
-    return id
+    return _conc_spawn_common(entry, arg, result_ch, "", -1, priority)
 
 fn conc_spawn_flow(entry: int, arg: int, result_ch: string,
                    yield_ch: string) -> int, pub:
-    conc_sched_init()
-    _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, yield_ch, -1, 0)
-    _conc_unlock()
-    if id >= 0:
-        g_conc_spawn_count = g_conc_spawn_count + 1
-        _conc_ready_push(id)
-    return id
+    return _conc_spawn_common(entry, arg, result_ch, yield_ch, -1, 0)
 
 fn conc_spawn_flow_token(entry: int, arg: int, result_ch: string,
                         yield_ch: string, token: int) -> int, pub:
-    conc_sched_init()
-    _conc_lock()
-    id := _conc_act_new(entry, arg, result_ch, yield_ch, token, 0)
-    _conc_unlock()
-    if id >= 0:
-        g_conc_spawn_count = g_conc_spawn_count + 1
-        _conc_ready_push(id)
-    return id
+    return _conc_spawn_common(entry, arg, result_ch, yield_ch, token, 0)
 
 fn conc_sched_curg() -> int, pub:
     return _conc_cur_id()

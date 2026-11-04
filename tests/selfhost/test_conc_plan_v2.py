@@ -700,6 +700,16 @@ fn main() -> int:
         return 17
     if str_len(conc_mapping_plan_explain(0)) < 20:
         return 18
+    pex := conc_target_profile_export(prof)
+    if str_len(pex) < 20:
+        return 21
+    prof2 := conc_target_profile_load(pex)
+    if prof2 < 0:
+        return 22
+    if conc_target_profile_slot_count(prof2) != 2:
+        return 23
+    if str_len(conc_mapping_plan_export(0)) < 10:
+        return 24
     bad := conc_target_profile_load("v 1\\nslot THREAD 1 64 1\\nspace HOST 1024\\nsched 1\\n")
     if bad < 0:
         return 19
