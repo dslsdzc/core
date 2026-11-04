@@ -411,7 +411,7 @@ fn pa_count_allocs() -> int:
     loop:
         if fi >= g_ir_func_count:
             break
-        if ir_func_reachable(fi) == 0:
+        if ir_func_analyze(fi) == 0:
             fi = fi + 1
             continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
@@ -471,7 +471,7 @@ fn ptr_analysis_all():
         // universe. Analyzing them here would discover allocation nodes that
         // the pre-scan never counted, and the pre-scan's allocation IDs would
         // never reach them.
-        if ir_func_reachable(fi) == 0:
+        if ir_func_analyze(fi) == 0:
             fi = fi + 1
             continue
         nstart := cell_load(g_df_func_node_start, fi * 8)

@@ -6621,14 +6621,6 @@ fn ir_dce_reachable():
         if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), "main") != 0:
             has_main = 1
             cell_store(reachable, i * 8, 1)
-        else:
-            // User code is a root even when nothing calls it: diagnostics in
-            // an uncalled function are still part of the program's contract.
-            // The DCE shortcut exists for unused imported stdlib bodies, not
-            // for the user's own graph.
-            own := func_owner(i)
-            if own >= 0 && lib_kind(own) == LIB_KIND_USER:
-                cell_store(reachable, i * 8, 1)
         i = i + 1
     if has_main == 0:
         return
@@ -6683,6 +6675,20 @@ fn ir_func_reachable(fi: int) -> int:
     if str_len(g_ir_func_reachable) <= 0:
         return 1
     return cell_load(g_ir_func_reachable, fi * 8)
+
+// Analysis universe: reachable functions plus every user-owned function. An
+// uncalled user function is still part of the program's diagnostic contract,
+// but it must not enter the emitted .ccr/ELF (that would be dead code); DCE
+// keeps using ir_func_reachable.
+fn ir_func_analyze(fi: int) -> int:
+    if ir_func_reachable(fi) != 0:
+        return 1
+    if fi < 0 || fi >= g_ir_func_count:
+        return 0
+    own := func_owner(fi)
+    if own >= 0 && lib_kind(own) == LIB_KIND_USER:
+        return 1
+    return 0
 
 fn emit_preempt_tick():
     if g_emit_preempt_ticks == 0:
