@@ -19,7 +19,11 @@
 fn emit_tls_init(buf: string, pos: int) -> int:
     cp : ., mut = pos
     g_start_tls_patch_pos = cp + 3
-    cp = cp + e2_lr(buf, cp, 6)             // lea rsi, [rip+disp32]
+    // arch_prctl(ARCH_SET_FS, addr) takes the address in rsi. e2_lr always
+    // targets r10, so it cannot be used here: doing so left rsi holding the
+    // initial argv pointer and set FS to the process stack. The four fs:
+    // stores below then overwrote argc/argv (fs:0 clobbered argv[0]).
+    cp = cp + e2_lrb_reg(buf, cp, 6)        // lea rsi, [rip+disp32]
     e2_w8(buf, cp, 191)                     // mov edi, imm32
     cp = cp + 1
     cp = cp + e2_w32(buf, cp, 0x1002)       // ARCH_SET_FS

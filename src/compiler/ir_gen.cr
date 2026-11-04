@@ -6959,8 +6959,18 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_cir_rec_cap"))
     reg_one_global(str_intern("g_cir_rec_base"))
     reg_one_global(str_intern("g_cir_skip_journal"))
+    // Bootstrap mode is read by prelude_builtin_init at runtime. It lives in
+    // prelude.cr, which the parser's file-scope discovery misses, so without
+    // this registration the assignment is dropped in Core-built compilers and
+    // raw ABI names stay invisible (corec2 cannot rebuild the self-host source).
+    reg_one_global(str_intern("g_self_host_mode"))
     // Runtime globals needed by emit_alloc_body and emit_start.
     // These MUST exist in BSS for every program, even without rt.cr included.
+    // g_rt_argc/g_rt_argv_ptr feed the _start argv save and the inline
+    // get_arg builtin; if they are not registered, get_arg falls through to a
+    // nonexistent call and returns -1.
+    reg_one_global(str_intern("g_rt_argc"))
+    reg_one_global(str_intern("g_rt_argv_ptr"))
     reg_one_global(str_intern("g_heap_ptr"))
     reg_one_global(str_intern("g_heap_end"))
     reg_one_global(str_intern("g_current_arena"))

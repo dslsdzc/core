@@ -31,7 +31,10 @@ import type_engine
 import ccr_io
 import ent_kernel
 // The backend rebuilds the linear schedule after loading through
-// build_linear_schedule in regalloc.cr.
+// build_linear_schedule in regalloc.cr. regalloc.cr constructs its CAG
+// allocator (cag_new/CAG_REG_CALLEE), so the lattice kernel must be imported
+// first; the concatenated native manifest already orders it that way.
+import regalloc_cag
 import regalloc
 import sizes
 import int_rep
