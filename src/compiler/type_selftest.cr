@@ -2352,6 +2352,8 @@ fn type_selftest_run() -> int:
     sh_tk_split(IR_STORE_PTR, 4)
     t5s_d4t := g_sh_slot_term
     t5s_d4a := g_sh_slot_aux
+    // No-type width code: keep the explicit -1 in the auxiliary slot.
+    sh_tk_split(IR_STORE_PTR, -1)
     t5s_spt := g_sh_slot_term
     t5s_spa := g_sh_slot_aux
     total = total + 1

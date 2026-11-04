@@ -323,7 +323,7 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     if arena_size < 131072:
         arena_size = 131072
     prev := rt_current_arena()
-    rt_set_current_arena(-1)
+    arena_set_current(-1)
     g_arena_scalars_ready = 0
     g_arena_shared_arena = -1
     g_arena_scalars = alloc(64)
@@ -444,7 +444,7 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     g_arena_count = total
     g_arena_scalars_ready = 1
     rt_set_arena_suspend(0)
-    rt_set_current_arena(prev)
+    arena_set_current(prev)
 
 fn arena_init(pool_size: int, arena_size: int), pub:
     arena_init_m(pool_size, arena_size, 1)
@@ -630,9 +630,9 @@ fn arena_reset(ai: int), pub:
     cell_store(g_arena_free_list_m, m * 8, ai)
 
     if parent >= 0:
-        rt_set_current_arena(parent)
+        arena_set_current(parent)
     else:
-        rt_set_current_arena(-1)
+        arena_set_current(-1)
     rt_set_arena_suspend(0)
 
 // Early clear (V2.1): reset the current slot's cursor, size-class metadata and

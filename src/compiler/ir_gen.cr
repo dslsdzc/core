@@ -6319,7 +6319,7 @@ fn _par_arith_call(node: int, param_ni: int) -> int:
     fn_node := ast_a(node)
     if ast_kind(fn_node) != EXPR_IDENT:
         return 0
-    arg := ast_b(node)
+    arg : ., mut = ast_b(node)
     if ast_kind(arg) == EXPR_ARG:
         arg = ast_a(arg)
     if ast_kind(arg) != EXPR_IDENT || ast_int_val(arg) != param_ni:

@@ -62,10 +62,11 @@ run_suite() {
     ./build/corec clean-cache >/dev/null 2>&1
     echo "suite: $f"
     case "$f" in
-      # Scheduler/channel corpora are the SYSTEM raw-word ABI (G/channel cells
-      # mix pointers and ints in int slots). Compile them raw; ordinary user
-      # programs keep tagged big-int semantics.
-      */chan_test.cr|*/conc_test.cr|*/go_*.cr)
+      # Scheduler/channel/arena corpora are the SYSTEM raw-word ABI (G/channel
+      # cells mix pointers and ints in int slots; arena syscalls return raw
+      # addresses). Compile them raw; ordinary user programs keep tagged
+      # big-int semantics.
+      */chan_test.cr|*/conc_test.cr|*/go_*.cr|*/arena_*.cr)
         ./build/corec ccr "$f" -o /tmp/core_suite_bin.ccr
         ./build/corearch --raw-int --elf /tmp/core_suite_bin.ccr -o /tmp/core_suite_bin
         ;;
@@ -413,6 +414,10 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_alloc_llvm_parity.py
     python3 tests/selfhost/test_arena_interp.py
     python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/chan_recv (raw-int scheduler build)
+    # Per-thread TLS state and atomic runtime primitives.
+    python3 tests/selfhost/test_rt_tls.py
+    # Stub register allocator contract (corec selftest-stub-regalloc).
+    python3 tests/selfhost/test_stub_regalloc.py
     # BigInt machine-word and FFI boundary: rawbuf byte access, cell_store
     # word-range traps, and the --link --static layout (user code keeps its
     # original offset so BigInt BSS references stay valid).
