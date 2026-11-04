@@ -454,6 +454,7 @@ fn so_materialize(side_i: int) -> int:
     sym_set_owner(si, lib_lookup_path(g_source_name))
     sym_set_pub(si, 1)
     g_sym_count = si + 1
+    sym_name_map_insert(si)
     return si
 
 fn import_push(sm_id: int):

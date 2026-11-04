@@ -728,7 +728,12 @@ fn push_scope():
 fn pop_scope():
     if g_scope_depth > 0:
         g_scope_depth = g_scope_depth - 1
-        g_sym_count = cell_load(g_scope_bounds, g_scope_depth * 8)
+        nc := cell_load(g_scope_bounds, g_scope_depth * 8)
+        // Remove the popped entries from the name chains before their slots can
+        // be reused. Without this a second insert at the same index would link
+        // the index to itself.
+        sym_name_map_pop_to(nc)
+        g_sym_count = nc
 
 fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     grow_syms(g_sym_count + 1)
@@ -745,6 +750,7 @@ fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     // their declared mut tag.
     sym_set_mut(g_sym_count, 1)
     g_sym_count = g_sym_count + 1
+    sym_name_map_insert(g_sym_count - 1)
 
 fn def_decl_fn_sym(name_idx: int, ti: int, node: int):
     def_sym(name_idx, SYM_FN, ti, node)
@@ -829,7 +835,85 @@ fn register_pub_export(name_ni: int, node: int):
     if lid >= 0:
         lib_export_add(lid, name_ni, SYM_FN, node)
 
-fn find_sym(name_idx: int) -> int:
+// ── symbol name index ──
+// Identifiers are resolved through find_sym/find_gsym on every expression.
+// The old implementation scanned g_syms from the end for every lookup. The
+// chain below stores live symbol indices newest-first, so the common case only
+// walks the handful of declarations sharing one name. Dead scope entries stay
+// in the chain but are skipped by the `i < g_sym_count` + name check; a reused
+// slot is filtered by the same name check.
+g_sym_name_last : string, mut
+g_sym_name_cap : int, mut
+g_sym_next : string, mut
+g_sym_next_cap : int, mut
+
+fn sym_name_map_reset():
+    g_sym_name_last = ""
+    g_sym_name_cap = 0
+    g_sym_next = ""
+    g_sym_next_cap = 0
+
+fn sym_name_map_ensure_name(need: int):
+    cap : ., mut = g_sym_name_cap
+    if cap >= need:
+        return
+    if cap < 64:
+        cap = 64
+    loop:
+        if cap >= need:
+            break
+        cap = cap * 2
+    a := alloc(cap * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -1)
+        i = i + 1
+    if g_sym_name_cap > 0:
+        cell_copy(g_sym_name_last, g_sym_name_cap * 8, a)
+    g_sym_name_last = a
+    g_sym_name_cap = cap
+
+fn sym_name_map_ensure_next(need: int):
+    cap : ., mut = g_sym_next_cap
+    if cap >= need:
+        return
+    if cap < 64:
+        cap = 64
+    loop:
+        if cap >= need:
+            break
+        cap = cap * 2
+    a := alloc(cap * 8)
+    if g_sym_next_cap > 0:
+        cell_copy(g_sym_next, g_sym_next_cap * 8, a)
+    g_sym_next = a
+    g_sym_next_cap = cap
+
+fn sym_name_map_insert(si: int):
+    if si < 0 || si >= g_sym_count:
+        return
+    ni := sym_name(si)
+    if ni < 0:
+        return
+    sym_name_map_ensure_name(ni + 1)
+    sym_name_map_ensure_next(si + 1)
+    cell_store(g_sym_next, si * 8, cell_load(g_sym_name_last, ni * 8))
+    cell_store(g_sym_name_last, ni * 8, si)
+
+fn sym_name_map_pop_to(new_count: int):
+    i : ., mut = g_sym_count - 1
+    loop:
+        if i < new_count:
+            break
+        ni := sym_name(i)
+        if ni >= 0 && ni < g_sym_name_cap:
+            if cell_load(g_sym_name_last, ni * 8) == i:
+                cell_store(g_sym_name_last, ni * 8, cell_load(g_sym_next, i * 8))
+        i = i - 1
+
+fn find_sym_linear(name_idx: int) -> int:
     // Lexical names always win. Top-level declarations then prefer the current
     // library's own declaration over an imported pub declaration of the same
     // name, independent of registration order.
@@ -857,7 +941,7 @@ fn find_sym(name_idx: int) -> int:
         i = i - 1
     return -1
 
-fn find_gsym(name_idx: int) -> int:
+fn find_gsym_linear(name_idx: int) -> int:
     // Prefer the current library's declaration. Without this, a user global or
     // type with the same name as a pub stdlib declaration resolves to the
     // stdlib one purely because it was registered later.
@@ -881,6 +965,63 @@ fn find_gsym(name_idx: int) -> int:
     // 同名 `.cr` 声明优先，外部目录里的文件不得改写用户源码声明的含义。
     // 主表和侧表都查不到时返回 -1，由调用点报 Undefined。绝不在此放行，否则报错失败
     // 会退化为值错误且不报错。
+    ssi := find_so_side(name_idx)
+    if ssi < 0:
+        return -1
+    return so_materialize(ssi)
+
+fn find_sym(name_idx: int) -> int:
+    if name_idx < 0:
+        return -1
+    if g_sym_name_cap == 0 || name_idx >= g_sym_name_cap:
+        return find_sym_linear(name_idx)
+    i : ., mut = cell_load(g_sym_name_last, name_idx * 8)
+    loop:
+        if i < 0:
+            break
+        if i < g_sym_count && sym_name(i) == name_idx:
+            k := sym_kind(i)
+            if (k == SYM_LOCAL || k == SYM_PARAM) && sym_visible(i) != 0:
+                return i
+        i = cell_load(g_sym_next, i * 8)
+    if g_cur_lib >= 0:
+        i = cell_load(g_sym_name_last, name_idx * 8)
+        loop:
+            if i < 0:
+                break
+            if i < g_sym_count && sym_name(i) == name_idx && sym_kind(i) != SYM_LOCAL && sym_kind(i) != SYM_PARAM && sym_owner_field(i) == g_cur_lib && sym_visible(i) != 0:
+                return i
+            i = cell_load(g_sym_next, i * 8)
+    i = cell_load(g_sym_name_last, name_idx * 8)
+    loop:
+        if i < 0:
+            return -1
+        if i < g_sym_count && sym_name(i) == name_idx && sym_visible(i) != 0:
+            return i
+        i = cell_load(g_sym_next, i * 8)
+    return -1
+
+fn find_gsym(name_idx: int) -> int:
+    if name_idx < 0:
+        return -1
+    if g_sym_name_cap == 0 || name_idx >= g_sym_name_cap:
+        return find_gsym_linear(name_idx)
+    if g_cur_lib >= 0:
+        ci : ., mut = cell_load(g_sym_name_last, name_idx * 8)
+        loop:
+            if ci < 0:
+                break
+            if ci < g_sym_count && sym_name(ci) == name_idx && sym_kind(ci) != SYM_LOCAL && sym_kind(ci) != SYM_PARAM && sym_owner_field(ci) == g_cur_lib && sym_visible(ci) != 0:
+                return ci
+            ci = cell_load(g_sym_next, ci * 8)
+    gi : ., mut = cell_load(g_sym_name_last, name_idx * 8)
+    loop:
+        if gi < 0:
+            break
+        if gi < g_sym_count && sym_name(gi) == name_idx && sym_kind(gi) != SYM_LOCAL && sym_kind(gi) != SYM_PARAM && sym_visible(gi) != 0:
+            return gi
+        gi = cell_load(g_sym_next, gi * 8)
+    // Side-table fallback for .so symbols, same policy as the old linear path.
     ssi := find_so_side(name_idx)
     if ssi < 0:
         return -1
@@ -2458,7 +2599,110 @@ fn is_func_generic(fi: int, name_idx: int) -> bool:
         gi = gi + 1
     return false
 
-fn find_func(name_idx: int) -> int:
+// ── function name index ──
+// find_func is called once per call site and once per IR_CALL during purity
+// and state-chain replay. The old implementation scanned the whole g_funcs
+// table on every lookup (O(calls * functions)). These three direct-index maps
+// keep the common case O(1): name -> first function, link name -> first
+// function, and (library, name) -> first function. The maps are filled in
+// ascending function order, so the stored index is the same first match the
+// linear scan would return. Collisions and visibility changes fall back to the
+// linear scan, preserving the old semantics exactly.
+g_func_name_first : string, mut
+g_func_link_first : string, mut
+g_func_lib_first : string, mut
+g_func_name_cap : int, mut
+g_func_lib_rows : int, mut
+g_func_name_indexed : int, mut
+
+fn func_name_map_reset():
+    g_func_name_first = ""
+    g_func_link_first = ""
+    g_func_lib_first = ""
+    g_func_name_cap = 0
+    g_func_lib_rows = 0
+    g_func_name_indexed = 0
+
+fn func_name_map_alloc(need_cap: int, need_rows: int):
+    cap : ., mut = g_func_name_cap
+    if cap < 64:
+        cap = 64
+    loop:
+        if cap >= need_cap:
+            break
+        cap = cap * 2
+    rows : ., mut = g_func_lib_rows
+    if rows < need_rows:
+        rows = need_rows
+    if rows < 1:
+        rows = 1
+    if cap == g_func_name_cap && rows == g_func_lib_rows && g_func_name_cap > 0:
+        return
+    a := alloc(cap * 8)
+    b := alloc(cap * 8)
+    c := alloc(cap * rows * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -1)
+        cell_store(b, i * 8, -1)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= cap * rows:
+            break
+        cell_store(c, i * 8, -1)
+        i = i + 1
+    g_func_name_first = a
+    g_func_link_first = b
+    g_func_lib_first = c
+    g_func_name_cap = cap
+    g_func_lib_rows = rows
+    g_func_name_indexed = 0
+
+fn func_name_map_insert(fi: int):
+    if fi < 0 || fi >= g_func_count:
+        return
+    ni := fi_name(fi)
+    if ni >= 0 && ni < g_func_name_cap:
+        if cell_load(g_func_name_first, ni * 8) < 0:
+            cell_store(g_func_name_first, ni * 8, fi)
+    ln := func_link(fi)
+    if ln >= 0 && ln < g_func_name_cap:
+        if cell_load(g_func_link_first, ln * 8) < 0:
+            cell_store(g_func_link_first, ln * 8, fi)
+    ow := func_owner(fi)
+    if ow >= 0 && ow < g_func_lib_rows && ni >= 0 && ni < g_func_name_cap:
+        slot := ow * g_func_name_cap + ni
+        if cell_load(g_func_lib_first, slot * 8) < 0:
+            cell_store(g_func_lib_first, slot * 8, fi)
+
+fn func_name_map_sync():
+    if g_func_count <= 0:
+        return
+    if g_func_name_cap == 0:
+        func_name_map_alloc(g_str_count, g_lib_count + 1)
+    if g_str_count > g_func_name_cap || g_lib_count + 1 > g_func_lib_rows:
+        func_name_map_alloc(g_str_count, g_lib_count + 1)
+    i : ., mut = g_func_name_indexed
+    loop:
+        if i >= g_func_count:
+            break
+        ni := fi_name(i)
+        ln := func_link(i)
+        need : ., mut = ni
+        if ln > need:
+            need = ln
+        if need >= g_func_name_cap:
+            func_name_map_alloc(need + 1, g_lib_count + 1)
+            i = 0
+            continue
+        func_name_map_insert(i)
+        i = i + 1
+    g_func_name_indexed = g_func_count
+
+fn find_func_linear(name_idx: int) -> int:
     if g_cur_lib >= 0:
         i : ., mut = 0
         loop:
@@ -2482,6 +2726,26 @@ fn find_func(name_idx: int) -> int:
             return i
         i = i + 1
     return -1
+
+fn find_func(name_idx: int) -> int:
+    if name_idx < 0:
+        return -1
+    func_name_map_sync()
+    if name_idx < g_func_name_cap:
+        if g_cur_lib >= 0 && g_cur_lib < g_func_lib_rows:
+            cand := cell_load(g_func_lib_first, (g_cur_lib * g_func_name_cap + name_idx) * 8)
+            if cand >= 0:
+                if fi_name(cand) == name_idx && func_visible(cand) != 0 && func_owner(cand) == g_cur_lib:
+                    return cand
+        cand2 := cell_load(g_func_name_first, name_idx * 8)
+        if cand2 >= 0:
+            if fi_name(cand2) == name_idx && func_visible(cand2) != 0:
+                return cand2
+        lcand := cell_load(g_func_link_first, name_idx * 8)
+        if lcand >= 0:
+            if func_link(lcand) == name_idx:
+                return lcand
+    return find_func_linear(name_idx)
 
 // Unfiltered lookup for diagnostics: a method-table hit must be able to ask
 // "does this method exist but belong to another library without pub?".
@@ -5987,6 +6251,7 @@ fn check_all():
     // after g_sym_count is reset, on the first lookup during checking. There is no
     // fixed-size preserve buffer, so a large symbol table cannot overflow a fixed
     // alloc(128 * 8).
+    sym_name_map_reset()
     g_sym_count = 0
     // Unknown requester during declaration collection: visibility filtering
     // starts when a function body is checked and g_cur_lib is resolved.
@@ -6006,8 +6271,12 @@ fn check_all():
     g_dyn_type_sets = ""
 
     // First pass: collect declarations
+    func_name_map_reset()
     collect_decls()
     assign_unique_func_links()
+    // assign_unique_func_links rewrites link names; drop the maps so the next
+    // lookup rebuilds them from the final links.
+    func_name_map_reset()
     remap_impl_pairs()
     check_impl_visibility()
     check_impl_coherence()
@@ -6037,6 +6306,7 @@ fn check_all():
             sym_set_type(si2, ti2)
             sym_set_node(si2, -1)
             g_sym_count = si2 + 1
+            sym_name_map_insert(si2)
         ri2 = ri2 + 1
 
     // Second pass: check function bodies
@@ -6323,12 +6593,50 @@ fn compute_all_purity():
         cell_store(callee, z * 8, -1)
         z = z + 1
 
+    // IR index -> source FuncInfo index. The fixed-point and unsafe-region
+    // passes used to call src_func_of_ir per item, which rescanned g_funcs from
+    // zero (O(functions^2)). Fill the reverse map once in source order.
+    src_of_ir := alloc(g_ir_func_count * 8)
+    z = 0
+    loop:
+        if z >= g_ir_func_count:
+            break
+        cell_store(src_of_ir, z * 8, -1)
+        z = z + 1
+    sfi_n : ., mut = 0
+    gfi : ., mut = 0
+    loop:
+        if gfi >= g_func_count:
+            break
+        if fi_generic_count(gfi) == 0:
+            if sfi_n < g_ir_func_count:
+                cell_store(src_of_ir, sfi_n * 8, gfi)
+            sfi_n = sfi_n + 1
+        gfi = gfi + 1
+    // Global-var membership set: the store-target check used to scan every
+    // global for every IR_STORE (O(stores * globals)).
+    is_gvar := alloc(g_ir_var_count * 8)
+    z = 0
+    loop:
+        if z >= g_ir_var_count:
+            break
+        cell_store(is_gvar, z * 8, 0)
+        z = z + 1
+    z = 0
+    loop:
+        if z >= g_ir_global_count:
+            break
+        gvv := cell_load(g_ir_globals, z * 24 + 8)
+        if gvv >= 0 && gvv < g_ir_var_count:
+            cell_store(is_gvar, gvv * 8, 1)
+        z = z + 1
+
     // ── 1) 逐 IR 函数扫体：局部效应位 + 调用边解析 ──
     irf : ., mut = 0
     loop:
         if irf >= g_ir_func_count:
             break
-        sfi := src_func_of_ir(irf)
+        sfi := cell_load(src_of_ir, irf * 8)
         map_ok : ., mut = 1
         if sfi < 0:
             map_ok = 0
@@ -6354,7 +6662,7 @@ fn compute_all_purity():
                 // stores remain impure; array/field/pointer stores stay in
                 // purity_op_effect because they may alias external memory.
                 dst := iri_s1(ii)
-                if dst >= 0 && purity_is_global_var(dst) != 0:
+                if dst >= 0 && dst < g_ir_var_count && cell_load(is_gvar, dst * 8) != 0:
                     cell_store(local, sfi * 8, 1)
             else if purity_op_effect(op) != 0:
                 cell_store(local, sfi * 8, 1)
@@ -6383,7 +6691,7 @@ fn compute_all_purity():
         if cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
             uf := df_func_of_node(cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART))
             if uf >= 0:
-                usf := src_func_of_ir(uf)
+                usf := cell_load(src_of_ir, uf * 8)
                 if usf >= 0:
                     cell_store(local, usf * 8, 1)
         si = si + 1
@@ -6398,7 +6706,7 @@ fn compute_all_purity():
         loop:
             if irf >= g_ir_func_count:
                 break
-            sf := src_func_of_ir(irf)
+            sf := cell_load(src_of_ir, irf * 8)
             if sf >= 0:
                 if cell_load(local, sf * 8) == 0:
                     if cell_load(pure, sf * 8) == 0:

@@ -51,26 +51,62 @@ fn grow_live_ranges(needed: int):
     g_ir_live_ranges = nb
     g_live_range_cap = nc
 
-fn live_range_slot(func_i: int, var_i: int) -> int:
-    // 函数内 var 索引 = var_i − var_start[func_i]；func_i 段起始 = 前缀 var_count 累计
-    off : ., mut = 0
-    fi : ., mut = 0
+// Per-function segment start in the live-range table. live_range_slot used to
+// recompute this by scanning var_count[0..func_i) on every call; compute_entries
+// and the register allocator call it once per definition/use, making that scan
+// quadratic in the function count. compute_live_ranges fills this prefix while
+// it already walks the functions in order.
+g_live_seg_start : string, mut
+g_live_seg_count : int, mut
+g_live_seg_cap : int, mut
+
+fn grow_live_seg_start(needed: int):
+    if needed <= g_live_seg_cap:
+        return
+    nc : ., mut = g_live_seg_cap * 2
+    if nc < 64:
+        nc = 64
     loop:
-        if fi >= func_i:
+        if nc >= needed:
             break
-        off = off + cell_load(g_ir_func_var_count, fi * 8)
-        fi = fi + 1
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    if g_live_seg_cap > 0:
+        cell_copy(g_live_seg_start, g_live_seg_cap * 8, nb)
+    g_live_seg_start = nb
+    g_live_seg_cap = nc
+
+fn live_range_slot(func_i: int, var_i: int) -> int:
+    // 函数内 var 索引 = var_i − var_start[func_i]；段起始来自前缀表。
+    if func_i < 0 || func_i >= g_ir_func_count:
+        return -1
+    off : ., mut = 0
+    if func_i < g_live_seg_count:
+        off = cell_load(g_live_seg_start, func_i * 8)
+    else:
+        fi : ., mut = 0
+        loop:
+            if fi >= func_i:
+                break
+            off = off + cell_load(g_ir_func_var_count, fi * 8)
+            fi = fi + 1
     return (off + (var_i - cell_load(g_ir_func_var_start, func_i * 8))) * 16
 
 fn live_first(func_i: int, var_i: int) -> int:
     if func_i < 0 || var_i < 0:
         return -1
-    return cell_load(g_ir_live_ranges, live_range_slot(func_i, var_i))
+    slot := live_range_slot(func_i, var_i)
+    if slot < 0:
+        return -1
+    return cell_load(g_ir_live_ranges, slot)
 
 fn live_last(func_i: int, var_i: int) -> int:
     if func_i < 0 || var_i < 0:
         return -1
-    return cell_load(g_ir_live_ranges, live_range_slot(func_i, var_i) + 8)
+    slot := live_range_slot(func_i, var_i)
+    if slot < 0:
+        return -1
+    return cell_load(g_ir_live_ranges, slot + 8)
 
 // Build g_ir_live_ranges. Scan each function's nodes through nod_*. If dest, s1,
 // or s2 falls in [vs, vs+vc), extend [first_ref, last_ref]: first sight sets
@@ -97,6 +133,8 @@ fn compute_live_ranges():
     // matching live_range_slot. g_ir_func_instr_start/count hold NOD node
     // coordinates, and the window is [start, start+count). All node fields are read
     // through the nod_* object accessors.
+    grow_live_seg_start(g_ir_func_count)
+    g_live_seg_count = g_ir_func_count
     seg : ., mut = 0
     fi = 0
     loop:
@@ -106,6 +144,7 @@ fn compute_live_ranges():
         ist := cell_load(g_ir_func_instr_start, fi * 8)
         vc := cell_load(g_ir_func_var_count, fi * 8)
         vs := cell_load(g_ir_func_var_start, fi * 8)
+        cell_store(g_live_seg_start, fi * 8, seg)
         if vc > 0:
             ii : ., mut = 0
             loop:

@@ -964,7 +964,70 @@ fn rc_rd_defs_max(var: int, use_ni: int, lo: int, depth: int) -> int:
 // their arguments. Masks use two 32-bit cells so all 64 legal parameters are
 // representable without touching signed bit 63.
 
+// IR function name index. rc_func_by_name is used by the DCE worklist and by
+// the region passes; without this map every IR_CALL lookup rescanned all IR
+// functions (O(calls * functions)).
+g_rc_func_map : string, mut
+g_rc_func_cap : int, mut
+g_rc_func_indexed : int, mut
+
+fn rc_func_map_reset():
+    g_rc_func_map = ""
+    g_rc_func_cap = 0
+    g_rc_func_indexed = 0
+
+fn rc_func_map_alloc(need: int):
+    cap : ., mut = g_rc_func_cap
+    if cap < 64:
+        cap = 64
+    loop:
+        if cap >= need:
+            break
+        cap = cap * 2
+    if cap == g_rc_func_cap && g_rc_func_cap > 0:
+        return
+    a := alloc(cap * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -1)
+        i = i + 1
+    g_rc_func_map = a
+    g_rc_func_cap = cap
+    g_rc_func_indexed = 0
+
+fn rc_func_map_sync():
+    if g_ir_func_count <= 0:
+        return
+    if g_rc_func_cap == 0:
+        rc_func_map_alloc(g_str_count)
+    if g_str_count > g_rc_func_cap:
+        rc_func_map_alloc(g_str_count)
+    i : ., mut = g_rc_func_indexed
+    loop:
+        if i >= g_ir_func_count:
+            break
+        ni := cell_load(g_ir_func_name_idx, i * 8)
+        if ni >= g_rc_func_cap:
+            rc_func_map_alloc(ni + 1)
+            i = 0
+            continue
+        if cell_load(g_rc_func_map, ni * 8) < 0:
+            cell_store(g_rc_func_map, ni * 8, i)
+        i = i + 1
+    g_rc_func_indexed = g_ir_func_count
+
 fn rc_func_by_name(name_ni: int) -> int:
+    if name_ni < 0:
+        return -1
+    rc_func_map_sync()
+    if name_ni < g_rc_func_cap:
+        cand := cell_load(g_rc_func_map, name_ni * 8)
+        if cand >= 0:
+            if cell_load(g_ir_func_name_idx, cand * 8) == name_ni:
+                return cand
+    // Collision fallback: keep the exact first-match semantics.
     i : ., mut = 0
     loop:
         if i >= g_ir_func_count:

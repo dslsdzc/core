@@ -580,6 +580,12 @@ fn corec_main() -> int:
     // from a cold build, so optional programs disable the cache.
     if g_optrep_on != 0:
         cache_enabled = 0
+    // The self-host concat is one huge user source. Its cache key is
+    // source_path::name, so every function is a miss on a clean tree and a
+    // full-table load on a warm tree; both are slower than regenerating the
+    // IR. The bootstrap chain does not need incremental caching.
+    if g_self_host_mode != 0:
+        cache_enabled = 0
     // Hidden mutation hook: skip intern-journal replay on load to reproduce the
     // original defect. Real builds never set it.
     if cli_has("inject-cir-skip-journal") != 0:
@@ -597,6 +603,16 @@ fn corec_main() -> int:
             fi = fi + 1
             continue
 
+        if cli_has("timing") != 0 && fi % 250 == 0:
+            print("[irprog] func ")
+            print(int_str(fi))
+            print(" instr ")
+            print(int_str(g_ir_instr_count))
+            print(" vars ")
+            print(int_str(g_ir_var_count))
+            print(" t ")
+            print(int_str(timing_now_ms()))
+            println("")
         // DFG metadata uses the compact IR function index. Source FuncInfo
         // indices diverge as soon as a generic function is skipped.
         ir_func_idx := g_ir_func_count

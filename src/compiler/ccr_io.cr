@@ -158,6 +158,32 @@ ESZ_VARDECL_DISK : int = 8
 // per-var ordinal is derivable from group order); disk record != memory record.
 // CCR_V10_ENT_DISK = 24.
 
+// Local sub-phase timing for save_ccr. ccr_io.cr is also linked into
+// corearch, so this cannot call main.cr's timing_mark. This keeps its own
+// timestamp so the outer save_ccr timing_mark still reports the phase total.
+g_ctiming_last_ms : int, mut
+
+fn ccr_timing_now_ms() -> int:
+    ts := alloc(16)
+    cell_store(ts, 0, 0)
+    cell_store(ts, 8, 0)
+    r := syscall3(228, 1, ts, 0)
+    if r < 0:
+        return 0
+    return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
+fn ccr_timing(name: string):
+    if cli_has("timing") != 0:
+        now := ccr_timing_now_ms()
+        if g_ctiming_last_ms == 0:
+            g_ctiming_last_ms = now
+        print("[ctiming] ")
+        print(name)
+        print(" ")
+        print(int_str(now - g_ctiming_last_ms))
+        println("ms")
+        g_ctiming_last_ms = now
+
 fn bw_byte(val: int, shift: int) -> int:
     if shift == 0:
         return val % 256
@@ -852,6 +878,35 @@ fn ccr_ent_flags(e: int) -> int:
 // in ent_kernel.cr, shared by both concat builds. The corearch loader calls the
 // same kernel functions.
 
+// Entry blocks are [def>=0 entries in ascending def order] followed by the
+// def=-1 existence entries. Region writers use these bounds instead of scanning
+// the whole block per nested region (O(regions * entries)).
+fn ccr_entry_def_ge(base: int, count: int, key: int) -> int:
+    lo : ., mut = 0
+    hi : ., mut = count
+    loop:
+        if lo >= hi:
+            break
+        mid := (lo + hi) / 2
+        if ccr_ent_def(base + mid) < key:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+fn ccr_entry_neg_start(base: int, count: int) -> int:
+    lo : ., mut = 0
+    hi : ., mut = count
+    loop:
+        if lo >= hi:
+            break
+        mid := (lo + hi) / 2
+        if ccr_ent_def(base + mid) >= 0:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
 // 函数条目块 [es, es+ec) 内 var 的 def=-1 条目 id（SYM func param_ents 回填
 // 用，参数入参条目 = 该参数 def=-1 条目；被重定值/从未引用 -> 无 = -1；
 // def=-1 补丁每 var 至多一条）。写侧检查：返回 id 恒 >= es 且在块内。
@@ -907,6 +962,7 @@ fn save_ccr(path: string) -> int:
     // writer never emits a file the loader would reject.
     if ccr_validate_cases() == 0:
         return -1
+    ccr_timing("validate")
 
     // ENT data is computed first. The corec writer calls compute_live_ranges(),
     // which calls compute_entries per function and fills the in-memory 24B
@@ -918,7 +974,9 @@ fn save_ccr(path: string) -> int:
     // Before compute, populate the NOD object mirror from g_ir_instrs. The loader
     // builds the same mirror, so ENT bytes match the loader's view.
     populate_nod_objects()
+    ccr_timing("nod_mirror")
     compute_live_ranges()
+    ccr_timing("live_ranges")
 
     // EDG content is collected first because NOD adjacency and segment sizes
     // depend on it. g_df_edges is an in-memory head-inserted list; walking nodes
@@ -933,8 +991,10 @@ fn save_ccr(path: string) -> int:
     if edge_total > 0:
         edge_buf = alloc(edge_total * 8)
         ccr_fill_edge_buf(edge_buf, edge_offs)
+    ccr_timing("edges")
 
     tsz := calc_ccr_size(edge_total)
+    ccr_timing("size_calc")
     buf := alloc(tsz)
     pos : ., mut = 0
 
@@ -961,6 +1021,7 @@ fn save_ccr(path: string) -> int:
     s_reg := ccr_reg_seg_size()
     s_edg := ccr_edg_seg_size(edge_total)
     s_case := ccr_case_seg_size()
+    ccr_timing("seg_sizes")
 
     // Seg table（9 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..9）
     o_str : ., mut = 16 + CCR_V10_SEG_COUNT * 12
@@ -1009,6 +1070,7 @@ fn save_ccr(path: string) -> int:
     buf_write_u32(buf, pos + 4, o_case)
     buf_write_u32(buf, pos + 8, s_case)
     pos = pos + 12
+    ccr_timing("header")
 
     // === STR: strings ===
     buf_write_u32(buf, pos, g_str_count)
@@ -1029,6 +1091,7 @@ fn save_ccr(path: string) -> int:
             ci = ci + 1
         si = si + 1
 
+    ccr_timing("str")
     // === TYPE(2): copy the prepared segment buffer. Content is built by
     // corec-only ccr_types.cr ccr_type_prepare_save; this file only copies it.
     // 缓冲含首字段 row_count，因此大小 == ccr_type_seg_size()（同一来源）。空缓冲 =
@@ -1044,6 +1107,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 1
         ct = ct + 1
 
+    ccr_timing("type")
     // === IFACE(3): copy the prepared segment buffer. Content is built by
     // corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr;
     // this file only copies it.
@@ -1059,6 +1123,7 @@ fn save_ccr(path: string) -> int:
         cell_store_byte(buf, pos, cell_load_byte(g_ccr_iface_seg, ict))
         pos = pos + 1
         ict = ict + 1
+    ccr_timing("iface")
 
     // === SYM: globals（16B each: name u32, type u32, init_val i64）===
     // The global record stores type, not var_idx: var_idx always equals the row
@@ -1236,6 +1301,7 @@ fn save_ccr(path: string) -> int:
     buf_write_u32(buf, pos, 0)
     pos = pos + 4
 
+    ccr_timing("sym")
     // === NOD: instructions ===
     // 40B each. NOD id is file order and equals global instruction order. Each
     // record has the eight semantic fields plus first_edge and edge_count for the
@@ -1292,6 +1358,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4 // edge_count
         ii = ii + 1
 
+    ccr_timing("nod")
     // === ENT: entries（24B each；内存闭区间 -> 盘上：version 组内序数、live_end+1 半开）===
     // 版本序数：每 var 一张计数槽（var 全局槽 id 唯一属一个函数，组内序 = 全局序）
     buf_write_u32(buf, pos, g_entry_count)
@@ -1328,6 +1395,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4     // flags（ENT 记录到此结束；home 不在 v10 盘面）
         ej = ej + 1
 
+    ccr_timing("ent")
     // === REG: regions ===
     // 24B each: {kind, parent, enter_nod, exit_nod, first_ent, last_ent}.
     // nstart and ncount are not stored; they derive from enter and exit. A region
@@ -1339,6 +1407,7 @@ fn save_ccr(path: string) -> int:
     buf_write_u32(buf, pos, g_sg_count)
     pos = pos + 4
     rfunc : ., mut = -1  // 当前根 region 的函数号（记录顺序 = 压栈序）
+    cur_def_hi : ., mut = 0  // 当前函数条目块中 def>=0 前缀长度
     si2 : ., mut = 0
     loop:
         if si2 >= g_sg_count:
@@ -1366,21 +1435,34 @@ fn save_ccr(path: string) -> int:
         bes := cell_load(g_ir_func_entry_start, rfunc * 8)
         bec := cell_load(g_ir_func_entry_count, rfunc * 8)
         if sk2 == SG_FUNC:
+            cur_def_hi = ccr_entry_neg_start(bes, bec)
             if bec > 0:
                 fe2 = bes
                 le2 = bes + bec - 1
         else:
-            kk : ., mut = 0
-            loop:
-                if kk >= bec:
-                    break
-                eid2 := bes + kk
-                ed2 := ccr_ent_def(eid2)
-                if ed2 >= sen && ed2 < sex:
-                    if fe2 < 0:
-                        fe2 = eid2
-                    le2 = eid2
-                kk = kk + 1
+            // def>=0 entries are sorted by def; the def=-1 tail never belongs
+            // to a nested region (sen >= 0). Binary-search the definition
+            // prefix instead of rescanning the whole block per region.
+            if sen < 0:
+                kk : ., mut = 0
+                loop:
+                    if kk >= bec:
+                        break
+                    eid2 := bes + kk
+                    ed2 := ccr_ent_def(eid2)
+                    if ed2 >= sen && ed2 < sex:
+                        if fe2 < 0:
+                            fe2 = eid2
+                        le2 = eid2
+                    kk = kk + 1
+            else:
+                first := ccr_entry_def_ge(bes, cur_def_hi, sen)
+                if first < cur_def_hi:
+                    if ccr_ent_def(bes + first) < sex:
+                        last := ccr_entry_def_ge(bes, cur_def_hi, sex) - 1
+                        if last >= first:
+                            fe2 = bes + first
+                            le2 = bes + last
         if sk2 == SG_FUNC:
             // 根 region span = 函数指令范围（REG = 文件里函数边界的唯一真源，
             // 与 func 表一致性校验，失配 = 内部状态漂移）
@@ -1402,6 +1484,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4
         si2 = si2 + 1
 
+    ccr_timing("reg")
     // === EDG: edges ===
     // 8B each: {to_nod u32, kind u32}. The source node is implicit: node i's
     // outgoing edges are the contiguous range [first_edge, first_edge+edge_count).
@@ -1420,6 +1503,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4   // kind
         ei3 = ei3 + 1
 
+    ccr_timing("edg")
     // === CASE: 24B records from g_ccr_case. CASE is last because targets may
     // reference every NOD label and string cases may reference every STR entry.
     buf_write_u32(buf, pos, g_ccr_case_count)
@@ -1452,8 +1536,10 @@ fn save_ccr(path: string) -> int:
     if fd < 0:
         return -1
     written : ., mut = 0
+    ccr_timing("case")
     written = syscall3(1, fd, buf, tsz)  // write(fd, buf, tsz)
     r2 := syscall3(3, fd, 0, 0)  // close(fd)
+    ccr_timing("write")
     if written != tsz:
         return -1
     return 0

@@ -678,12 +678,98 @@ fn struct_row_field_ti(si: int, fi: int) -> int:
 // 全局槽声明类型（-1 = 非全局/无类型节点）
 // Does this global declaration belong to the library currently being
 // generated? g_cur_lib < 0 keeps the legacy name-only behaviour.
+// ── global declaration index ──
+// reg_one_global used to rescan g_global_lets and g_ir_globals for every
+// declared global (owner, dex tag, initializer, duplicate check), which is
+// O(globals^2). These direct-index maps and per-row back-links make the common
+// case O(1); the old loops remain as fallbacks for names interned after the map
+// was built (the hardcoded compiler globals).
+g_glob_cap : int, mut
+g_glob_rows : int, mut
+g_glob_first_any : string, mut
+g_glob_last_any : string, mut
+g_glob_first_lib : string, mut
+g_glob_last_lib : string, mut
+g_glob_prev_any : string, mut
+g_glob_prev_lib : string, mut
+g_reg_global_seen : string, mut
+g_glob_init_ok : int, mut
+
+fn glob_map_build():
+    cap : ., mut = 64
+    if g_str_count > cap:
+        cap = g_str_count
+    rows : ., mut = g_lib_count + 2
+    if rows < 2:
+        rows = 2
+    fa := alloc(cap * 8)
+    la := alloc(cap * 8)
+    fl := alloc(cap * rows * 8)
+    ll := alloc(cap * rows * 8)
+    pa := alloc((g_global_let_count + 1) * 8)
+    pl := alloc((g_global_let_count + 1) * 8)
+    seen := alloc(cap * rows * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(fa, i * 8, -1)
+        cell_store(la, i * 8, -1)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= cap * rows:
+            break
+        cell_store(fl, i * 8, -1)
+        cell_store(ll, i * 8, -1)
+        cell_store(seen, i * 8, 0)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_global_let_count:
+            break
+        node := cell_load(g_global_lets, i * 8)
+        ni := ast_a(node)
+        ow := lib_of_node(node)
+        row : ., mut = 0
+        if ow >= 0:
+            row = ow + 1
+        if ni >= 0 && ni < cap:
+            cell_store(pa, i * 8, cell_load(la, ni * 8))
+            if cell_load(fa, ni * 8) < 0:
+                cell_store(fa, ni * 8, i)
+            cell_store(la, ni * 8, i)
+            slot := row * cap + ni
+            cell_store(pl, i * 8, cell_load(ll, slot * 8))
+            if cell_load(fl, slot * 8) < 0:
+                cell_store(fl, slot * 8, i)
+            cell_store(ll, slot * 8, i)
+        else:
+            cell_store(pa, i * 8, -1)
+            cell_store(pl, i * 8, -1)
+        i = i + 1
+    g_glob_first_any = fa
+    g_glob_last_any = la
+    g_glob_first_lib = fl
+    g_glob_last_lib = ll
+    g_glob_prev_any = pa
+    g_glob_prev_lib = pl
+    g_reg_global_seen = seen
+    g_glob_cap = cap
+    g_glob_rows = rows
+
 fn global_decl_in_ctx(lnode: int) -> bool:
     if g_cur_lib < 0:
         return true
     return lib_of_node(lnode) == g_cur_lib
 
 fn global_decl_owner(name_ni: int) -> int:
+    if name_ni >= 0 && name_ni < g_glob_cap:
+        idx := cell_load(g_glob_first_any, name_ni * 8)
+        if idx < 0:
+            return -1
+        return lib_of_node(cell_load(g_global_lets, idx * 8))
+    // Fallback for names interned after the map was built.
     gi : ., mut = 0
     loop:
         if gi >= g_global_let_count:
@@ -695,6 +781,23 @@ fn global_decl_owner(name_ni: int) -> int:
     return -1
 
 fn global_decl_ti(name_ni: int) -> int:
+    if name_ni >= 0 && name_ni < g_glob_cap:
+        if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+            slot := (g_cur_lib + 1) * g_glob_cap + name_ni
+            idx := cell_load(g_glob_first_lib, slot * 8)
+            if idx >= 0:
+                tn := ast_b(cell_load(g_global_lets, idx * 8))
+                if tn >= 0:
+                    return res_type_node(tn)
+                return -1
+        idx2 := cell_load(g_glob_first_any, name_ni * 8)
+        if idx2 >= 0:
+            tn2 := ast_b(cell_load(g_global_lets, idx2 * 8))
+            if tn2 >= 0:
+                return res_type_node(tn2)
+            return -1
+        return -1
+    // Fallback for names interned after the map was built.
     gi : ., mut = 0
     loop:
         if gi >= g_global_let_count:
@@ -6341,6 +6444,8 @@ fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
     return 1
 
 fn ir_dce_reachable():
+    // IR function indices are rebuilt for every compilation in this process.
+    rc_func_map_reset()
     g_ir_func_reachable = ""
     // Remove unreachable functions from the analysis/lowering graph. Imported
     // stdlib modules contain large functions that a small program never calls;
@@ -6638,48 +6743,71 @@ fn ir_gen_func(fi: int):
 // NB: applies to mutable AND immutable lets (mut/const init values both
 // need to be written at startup — unlike find_global_const_node which
 // only folds immutable constants at compile time).
+fn global_init_node_val(node: int) -> int:
+    g_glob_init_ok = 0
+    value_node := ast_c(node)
+    if value_node >= 0:
+        vk := ast_kind(value_node)
+        if vk == EXPR_INT || vk == EXPR_BOOL || vk == EXPR_DEX:
+            // dex 全局常量：定点缩放整数（精确形式初始值；apx 位模式由
+            // reg_one_global 从节点 a 取，见该函数）
+            g_glob_init_ok = 1
+            return ast_int_val(value_node)
+        if vk == EXPR_UNARY && ast_c(value_node) == UOP_NEG:
+            inner := ast_a(value_node)
+            if ast_kind(inner) == EXPR_INT || ast_kind(inner) == EXPR_BOOL || ast_kind(inner) == EXPR_DEX:
+                g_glob_init_ok = 1
+                return 0 - ast_int_val(inner)
+    return 0
+
 fn global_init_val(name_idx: int) -> int:
     if g_arena_pool_limit_cfg > 0 && str_eq(istr_get(name_idx), "g_arena_pool_limit") != 0:
         return g_arena_pool_limit_cfg
-    i : ., mut = g_global_let_count - 1
-    loop:
-        if i < 0:
-            break
-        node := cell_load(g_global_lets, i * 8)
-        if ast_a(node) == name_idx && global_decl_in_ctx(node):
-            value_node := ast_c(node)
-            if value_node >= 0:
-                vk := ast_kind(value_node)
-                if vk == EXPR_INT || vk == EXPR_BOOL:
-                    return ast_int_val(value_node)
-                if vk == EXPR_DEX:
-                    // dex 全局常量：定点缩放整数（精确形式初始值；apx 位模式由
-                    // reg_one_global 从节点 a 取，见该函数）
-                    return ast_int_val(value_node)
-                if vk == EXPR_UNARY && ast_c(value_node) == UOP_NEG:
-                    inner := ast_a(value_node)
-                    if ast_kind(inner) == EXPR_INT || ast_kind(inner) == EXPR_BOOL:
-                        return 0 - ast_int_val(inner)
-                    if ast_kind(inner) == EXPR_DEX:
-                        return 0 - ast_int_val(inner)
-        i = i - 1
-    if g_cur_lib >= 0:
-        i = g_global_let_count - 1
+    if name_idx >= 0 && name_idx < g_glob_cap:
+        if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+            i : ., mut = cell_load(g_glob_last_lib, ((g_cur_lib + 1) * g_glob_cap + name_idx) * 8)
+            loop:
+                if i < 0:
+                    break
+                node := cell_load(g_global_lets, i * 8)
+                if ast_a(node) == name_idx:
+                    v := global_init_node_val(node)
+                    if g_glob_init_ok != 0:
+                        return v
+                i = cell_load(g_glob_prev_lib, i * 8)
+        i2 : ., mut = cell_load(g_glob_last_any, name_idx * 8)
         loop:
-            if i < 0:
+            if i2 < 0:
                 break
-            node2 := cell_load(g_global_lets, i * 8)
+            node2 := cell_load(g_global_lets, i2 * 8)
             if ast_a(node2) == name_idx:
-                value_node2 := ast_c(node2)
-                if value_node2 >= 0:
-                    vk2 := ast_kind(value_node2)
-                    if vk2 == EXPR_INT || vk2 == EXPR_BOOL || vk2 == EXPR_DEX:
-                        return ast_int_val(value_node2)
-                    if vk2 == EXPR_UNARY && ast_c(value_node2) == UOP_NEG:
-                        inner2 := ast_a(value_node2)
-                        if ast_kind(inner2) == EXPR_INT || ast_kind(inner2) == EXPR_BOOL || ast_kind(inner2) == EXPR_DEX:
-                            return 0 - ast_int_val(inner2)
-            i = i - 1
+                v2 := global_init_node_val(node2)
+                if g_glob_init_ok != 0:
+                    return v2
+            i2 = cell_load(g_glob_prev_any, i2 * 8)
+        return 0
+    // Fallback for names interned after the map was built.
+    i3 : ., mut = g_global_let_count - 1
+    loop:
+        if i3 < 0:
+            break
+        node3 := cell_load(g_global_lets, i3 * 8)
+        if ast_a(node3) == name_idx && global_decl_in_ctx(node3):
+            v3 := global_init_node_val(node3)
+            if g_glob_init_ok != 0:
+                return v3
+        i3 = i3 - 1
+    if g_cur_lib >= 0:
+        i3 = g_global_let_count - 1
+        loop:
+            if i3 < 0:
+                break
+            node4 := cell_load(g_global_lets, i3 * 8)
+            if ast_a(node4) == name_idx:
+                v4 := global_init_node_val(node4)
+                if g_glob_init_ok != 0:
+                    return v4
+            i3 = i3 - 1
     return 0
 
 // 类型节点 -> `[T; N]` 的元素数 N（`[T]` 切片 = 0）；非聚合 = -1。
@@ -6749,8 +6877,76 @@ fn global_needs_runtime_init(name_idx: int) -> int:
         i = i - 1
     return 0
 
+// ── global var index ──
+// Every global identifier emission used to scan g_ir_globals (O(refs *
+// globals)). The maps store the first matching var id in declaration order;
+// -2 means "no entry" so a legitimate -1 var id is still distinguishable.
+g_gvar_name_first : string, mut
+g_gvar_lib_first : string, mut
+g_gvar_map_cap : int, mut
+g_gvar_rows : int, mut
+g_gvar_seen : int, mut
+
+fn gvar_map_build():
+    // Use the integer capacity as the built flag. The bootstrap-built corec
+    // leaves uninitialized string globals at 0, so reading g_gvar_name_first
+    // here would dereference null before the first allocation.
+    if g_gvar_seen == g_ir_global_count && g_gvar_map_cap > 0:
+        return
+    cap : ., mut = 64
+    if g_str_count > cap:
+        cap = g_str_count
+    rows : ., mut = g_lib_count + 1
+    if rows < 1:
+        rows = 1
+    a := alloc(cap * 8)
+    b := alloc(cap * rows * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -2)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= cap * rows:
+            break
+        cell_store(b, i * 8, -2)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_ir_global_count:
+            break
+        ni := cell_load(g_ir_globals, i * 24)
+        gv := cell_load(g_ir_globals, i * 24 + 8)
+        if ni >= 0 && ni < cap:
+            if cell_load(a, ni * 8) == -2:
+                cell_store(a, ni * 8, gv)
+            ow := cell_load(g_ir_global_lib, i * 8)
+            if ow >= 0 && ow < rows:
+                slot := ow * cap + ni
+                if cell_load(b, slot * 8) == -2:
+                    cell_store(b, slot * 8, gv)
+        i = i + 1
+    g_gvar_name_first = a
+    g_gvar_lib_first = b
+    g_gvar_map_cap = cap
+    g_gvar_rows = rows
+    g_gvar_seen = g_ir_global_count
+
 // 按 name_idx 查已注册的全局 IR var（未注册 = -1）。
 fn global_var_of(name_idx: int) -> int:
+    if name_idx < 0:
+        return -1
+    gvar_map_build()
+    if name_idx < g_gvar_map_cap:
+        if g_cur_lib >= 0 && g_cur_lib < g_gvar_rows:
+            cand := cell_load(g_gvar_lib_first, (g_cur_lib * g_gvar_map_cap + name_idx) * 8)
+            if cand != -2:
+                return cand
+        cand2 := cell_load(g_gvar_name_first, name_idx * 8)
+        if cand2 != -2:
+            return cand2
     gi : ., mut = 0
     loop:
         if gi >= g_ir_global_count:
@@ -6868,65 +7064,90 @@ fn reg_one_global(name_idx: int):
     if decl_owner >= 0:
         g_cur_lib = decl_owner
     found : ., mut = 0
-    gi : ., mut = 0
-    loop:
-        if gi >= g_ir_global_count:
-            break
-        if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
-            found = 1
-            break
-        gi = gi + 1
+    if name_idx >= 0 && name_idx < g_glob_cap:
+        row : ., mut = 0
+        if g_cur_lib >= 0:
+            row = g_cur_lib + 1
+        if row < g_glob_rows:
+            slot := row * g_glob_cap + name_idx
+            if cell_load(g_reg_global_seen, slot * 8) != 0:
+                found = 1
+    else:
+        gi : ., mut = 0
+        loop:
+            if gi >= g_ir_global_count:
+                break
+            if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
+                found = 1
+                break
+            gi = gi + 1
     if found == 0:
         name := istr_get(name_idx)
         // dex 全局变量：精确（TI_DEX_S，缩放整数初始值）或
         // apx（TI_DEX，binary64 位模式初始值），按声明 LET 的类型节点与 apx 位
         gtype : ., mut = TI_INT
         is_dex_global : ., mut = 0
-        gli : ., mut = 0
-        loop:
-            if gli >= g_global_let_count:
-                break
-            lnode := cell_load(g_global_lets, gli * 8)
-            if ast_a(lnode) == name_idx && global_decl_in_ctx(lnode):
-                ltn := ast_b(lnode)
-                if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
-                    if ast_int_val(lnode) != 0:
-                        gtype = TI_DEX
-                    else:
-                        gtype = TI_DEX_S
-                    is_dex_global = 1
-                else if ltn >= 0 && dex_opt_type_node(ltn) != 0:
-                    // A dex? global slot uses the scaled form. is_dex_global stays 0
-                    // because its only consumer handles apx bit-pattern globals.
+        lnode : ., mut = -1
+        if name_idx >= 0 && name_idx < g_glob_cap:
+            if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+                idx := cell_load(g_glob_first_lib, ((g_cur_lib + 1) * g_glob_cap + name_idx) * 8)
+                if idx >= 0:
+                    lnode = cell_load(g_global_lets, idx * 8)
+            else:
+                idx2 := cell_load(g_glob_first_any, name_idx * 8)
+                if idx2 >= 0:
+                    lnode = cell_load(g_global_lets, idx2 * 8)
+        else:
+            gli : ., mut = 0
+            loop:
+                if gli >= g_global_let_count:
+                    break
+                cand := cell_load(g_global_lets, gli * 8)
+                if ast_a(cand) == name_idx && global_decl_in_ctx(cand):
+                    lnode = cand
+                    break
+                gli = gli + 1
+        if lnode >= 0:
+            ltn := ast_b(lnode)
+            if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
+                if ast_int_val(lnode) != 0:
+                    gtype = TI_DEX
+                else:
                     gtype = TI_DEX_S
-                break
-            gli = gli + 1
+                is_dex_global = 1
+            else if ltn >= 0 && dex_opt_type_node(ltn) != 0:
+                // A dex? global slot uses the scaled form. is_dex_global stays 0
+                // because its only consumer handles apx bit-pattern globals.
+                gtype = TI_DEX_S
         gvar := new_ir_var(name, gtype)
         grow_ir_globals(g_ir_global_count + 1)
         cell_store(g_ir_globals, g_ir_global_count * 24, name_idx)
         cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
         // Const initializer — emitted by the ELF backend's _init_globals.
-        iv : int, mut = global_init_val(name_idx)
-        if is_dex_global != 0 && gtype == TI_DEX:
+        iv : ., mut = global_init_val(name_idx)
+        if is_dex_global != 0 && gtype == TI_DEX && lnode >= 0:
             // apx 全局：初始值为 binary64 位模式（缩放值 -> bits 从节点 a 取）
-            i2 : ., mut = 0
-            loop:
-                if i2 >= g_global_let_count:
-                    break
-                lnode2 := cell_load(g_global_lets, i2 * 8)
-                if ast_a(lnode2) == name_idx && global_decl_in_ctx(lnode2):
-                    vn := ast_c(lnode2)
-                    if vn >= 0 && ast_kind(vn) == EXPR_DEX:
-                        iv = ast_a(vn)
-                    break
-                i2 = i2 + 1
+            vn := ast_c(lnode)
+            if vn >= 0 && ast_kind(vn) == EXPR_DEX:
+                iv = ast_a(vn)
         cell_store(g_ir_globals, g_ir_global_count * 24 + 16, iv)
         cell_store(g_ir_global_lib, g_ir_global_count * 8, g_cur_lib)
+        if name_idx >= 0 && name_idx < g_glob_cap:
+            row2 : ., mut = 0
+            if g_cur_lib >= 0:
+                row2 = g_cur_lib + 1
+            if row2 < g_glob_rows:
+                cell_store(g_reg_global_seen, (row2 * g_glob_cap + name_idx) * 8, 1)
         g_ir_global_count = g_ir_global_count + 1
     g_cur_lib = saved_lib
 
 fn ir_gen_globals():
     ccr_set_raw_mode_from_source()
+    // Build the declaration index before reg_one_global starts consulting it.
+    glob_map_build()
+    // Force the global-var map to rebuild for this compilation; the table is
+    // regenerated even when the count happens to match the previous run.
+    g_gvar_seen = -1
     saved_lib := g_cur_lib
     // The parser records only file-scope declarations in g_global_lets.
     // Do not scan every EXPR_LET here: that also includes function locals.
@@ -6964,6 +7185,41 @@ fn ir_gen_globals():
     // this registration the assignment is dropped in Core-built compilers and
     // raw ABI names stay invisible (corec2 cannot rebuild the self-host source).
     reg_one_global(str_intern("g_self_host_mode"))
+    // checker.cr's function-name index. Same file-scope discovery caveat:
+    // without registration the side tables are never written in a Core-built
+    // compiler and find_func falls back to the O(calls * functions) scan.
+    reg_one_global(str_intern("g_func_name_first"))
+    reg_one_global(str_intern("g_func_link_first"))
+    reg_one_global(str_intern("g_func_lib_first"))
+    reg_one_global(str_intern("g_func_name_cap"))
+    reg_one_global(str_intern("g_func_lib_rows"))
+    reg_one_global(str_intern("g_func_name_indexed"))
+    reg_one_global(str_intern("g_rc_func_map"))
+    reg_one_global(str_intern("g_rc_func_cap"))
+    reg_one_global(str_intern("g_rc_func_indexed"))
+    reg_one_global(str_intern("g_sym_name_last"))
+    reg_one_global(str_intern("g_sym_name_cap"))
+    reg_one_global(str_intern("g_sym_next"))
+    reg_one_global(str_intern("g_sym_next_cap"))
+    reg_one_global(str_intern("g_gvar_name_first"))
+    reg_one_global(str_intern("g_gvar_lib_first"))
+    reg_one_global(str_intern("g_gvar_map_cap"))
+    reg_one_global(str_intern("g_gvar_rows"))
+    reg_one_global(str_intern("g_gvar_seen"))
+    reg_one_global(str_intern("g_live_seg_start"))
+    reg_one_global(str_intern("g_live_seg_count"))
+    reg_one_global(str_intern("g_live_seg_cap"))
+    reg_one_global(str_intern("g_ctiming_last_ms"))
+    reg_one_global(str_intern("g_glob_cap"))
+    reg_one_global(str_intern("g_glob_rows"))
+    reg_one_global(str_intern("g_glob_first_any"))
+    reg_one_global(str_intern("g_glob_last_any"))
+    reg_one_global(str_intern("g_glob_first_lib"))
+    reg_one_global(str_intern("g_glob_last_lib"))
+    reg_one_global(str_intern("g_glob_prev_any"))
+    reg_one_global(str_intern("g_glob_prev_lib"))
+    reg_one_global(str_intern("g_reg_global_seen"))
+    reg_one_global(str_intern("g_glob_init_ok"))
     // Runtime globals needed by emit_alloc_body and emit_start.
     // These MUST exist in BSS for every program, even without rt.cr included.
     // g_rt_argc/g_rt_argv_ptr feed the _start argv save and the inline
