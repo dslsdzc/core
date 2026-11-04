@@ -9,7 +9,7 @@ import conc
 import arena
 
 CONC_SCHED_STACK : int = 16384
-CONC_ACT_SIZE : int = 152
+CONC_ACT_SIZE : int = 160
 CONC_ACT_RUNNABLE : int = 0
 CONC_ACT_RUNNING : int = 1
 CONC_ACT_WAITING : int = 2
@@ -81,6 +81,10 @@ g_conc_preempt_direct_count : int, mut = 0
 g_conc_preempt_tick_count : int, mut = 0
 g_conc_send_count : int, mut = 0
 g_conc_recv_count : int, mut = 0
+// Atomic counters: sends/recvs happen on different Ms, so plain int
+// increments lose updates and make metrics tests nondeterministic.
+g_conc_metric_send : string, mut
+g_conc_metric_recv : string, mut
 g_conc_close_count : int, mut = 0
 g_conc_wait_count : int, mut = 0
 g_conc_wait_ms_total : int, mut = 0
@@ -326,10 +330,14 @@ fn conc_timer_count() -> int, pub:
     return n
 
 fn conc_send_count() -> int, pub:
-    return g_conc_send_count
+    if _conc_raw(g_conc_metric_send) == 0:
+        return 0
+    return rt_atomic_load(g_conc_metric_send, 0)
 
 fn conc_recv_count() -> int, pub:
-    return g_conc_recv_count
+    if _conc_raw(g_conc_metric_recv) == 0:
+        return 0
+    return rt_atomic_load(g_conc_metric_recv, 0)
 
 fn conc_close_count() -> int, pub:
     return g_conc_close_count
@@ -358,6 +366,10 @@ fn conc_metrics_reset() -> int, pub:
     g_conc_preempt_tick_count = 0
     g_conc_send_count = 0
     g_conc_recv_count = 0
+    if _conc_raw(g_conc_metric_send) != 0:
+        rt_atomic_store(g_conc_metric_send, 0, 0)
+    if _conc_raw(g_conc_metric_recv) != 0:
+        rt_atomic_store(g_conc_metric_recv, 0, 0)
     g_conc_close_count = 0
     g_conc_wait_count = 0
     g_conc_wait_ms_total = 0
@@ -377,8 +389,8 @@ fn conc_metrics_explain() -> string, pub:
     out = out + " sig=" + _conc_num_str(g_conc_preempt_signal_count)
     out = out + " direct=" + _conc_num_str(g_conc_preempt_direct_count)
     out = out + " tick=" + _conc_num_str(g_conc_preempt_tick_count)
-    out = out + " send=" + _conc_num_str(g_conc_send_count)
-    out = out + " recv=" + _conc_num_str(g_conc_recv_count)
+    out = out + " send=" + _conc_num_str(conc_send_count())
+    out = out + " recv=" + _conc_num_str(conc_recv_count())
     out = out + " close=" + _conc_num_str(g_conc_close_count)
     out = out + " waits=" + _conc_num_str(g_conc_wait_count)
     out = out + " wait_ms=" + _conc_num_str(g_conc_wait_ms_total)
@@ -574,7 +586,7 @@ fn conc_park(m: int):
         loop:
             if vs >= slots:
                 break
-            if _conc_queue_has_slot(victim + vs * mc, 1) != 0:
+            if _conc_queue_has_slot(victim + vs * mc, 0) != 0:
                 found = 1
                 break
             vs = vs + 1
@@ -634,6 +646,7 @@ fn _conc_queue_append(slot: int, id: int):
     cell_store(a, 120, 1)
     cell_store(a, 88, -1)
     tail := cell_load(g_conc_ready_tail_s, slot * 8)
+    cell_store(a, 152, tail)
     if tail < 0:
         cell_store(g_conc_ready_head_s, slot * 8, id)
     else:
@@ -652,14 +665,19 @@ fn _conc_queue_append_front(slot: int, id: int):
     cell_store(a, 120, 1)
     head := cell_load(g_conc_ready_head_s, slot * 8)
     cell_store(a, 88, head)
+    cell_store(a, 152, -1)
+    if head >= 0:
+        ha := _conc_act_at(head)
+        if _conc_word(ha) != 0:
+            cell_store(ha, 152, id)
     cell_store(g_conc_ready_head_s, slot * 8, id)
     if head < 0:
         cell_store(g_conc_ready_tail_s, slot * 8, id)
 
 fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
     // Caller holds the owning M's queue lock. Skips YIELDING entries (their
-    // yielding stack is still live) and, for stealing, started activations
-    // (they are pinned to their home M).
+    // yielding stack is still live) and, when unstarted_only is set, started
+    // activations. A runnable yielded activation can be taken and re-homed.
     head := cell_load(g_conc_ready_head_s, slot * 8)
     prev : ., mut = -1
     cur : ., mut = head
@@ -690,11 +708,16 @@ fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
                 pa := _conc_act_at(prev)
                 if _conc_word(pa) != 0:
                     cell_store(pa, 88, nxt)
+            if nxt >= 0:
+                na := _conc_act_at(nxt)
+                if _conc_word(na) != 0:
+                    cell_store(na, 152, prev)
             if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
                 cell_store(g_conc_ready_tail_s, slot * 8, prev)
             if _conc_word(a) != 0:
                 cell_store(a, 120, 0)
                 cell_store(a, 88, -1)
+                cell_store(a, 152, -1)
             return cur
         if _conc_word(a) == 0:
             // Drop a dead table entry from the queue.
@@ -704,6 +727,10 @@ fn _conc_queue_pop_slot(slot: int, unstarted_only: int) -> int:
                 pa := _conc_act_at(prev)
                 if _conc_word(pa) != 0:
                     cell_store(pa, 88, nxt)
+            if nxt >= 0:
+                na := _conc_act_at(nxt)
+                if _conc_word(na) != 0:
+                    cell_store(na, 152, prev)
             if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
                 cell_store(g_conc_ready_tail_s, slot * 8, prev)
             cur = nxt
@@ -734,6 +761,64 @@ fn _conc_queue_has_slot(slot: int, unstarted_only: int) -> int:
         else:
             cur = -1
     return 0
+
+fn _conc_queue_steal_tail_slot(slot: int, unstarted_only: int) -> int:
+    // Caller holds the owning M's queue lock. Doubly linked, so the common
+    // case takes the tail in O(1); only YIELDING/dead entries walk backward.
+    cur : ., mut = cell_load(g_conc_ready_tail_s, slot * 8)
+    qlim : ., mut = 0
+    loop:
+        if cur < 0:
+            return -1
+        qlim = qlim + 1
+        if qlim > 100000:
+            msg : ., mut = "QCYCLE steal slot=" + _conc_num_str(slot)
+            msg = msg + " cur=" + _conc_num_str(cur) + "\n"
+            syscall3(1, 2, msg, str_len(msg))
+            syscall3(60, 77, 0, 0)
+        a := _conc_act_at(cur)
+        prv := cell_load(a, 152)
+        nxt := cell_load(a, 88)
+        take : ., mut = 0
+        if _conc_word(a) != 0:
+            st := cell_load(a, 8)
+            if st == CONC_ACT_RUNNABLE:
+                if unstarted_only == 0 || cell_load(a, 64) < 0:
+                    take = 1
+        if take != 0:
+            if prv < 0:
+                cell_store(g_conc_ready_head_s, slot * 8, nxt)
+            else:
+                pa := _conc_act_at(prv)
+                if _conc_word(pa) != 0:
+                    cell_store(pa, 88, nxt)
+            if nxt >= 0:
+                na := _conc_act_at(nxt)
+                if _conc_word(na) != 0:
+                    cell_store(na, 152, prv)
+            if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
+                cell_store(g_conc_ready_tail_s, slot * 8, prv)
+            if _conc_word(a) != 0:
+                cell_store(a, 120, 0)
+                cell_store(a, 88, -1)
+                cell_store(a, 152, -1)
+            return cur
+        if _conc_word(a) == 0:
+            // Drop a dead table entry; continue from its predecessor.
+            if prv < 0:
+                cell_store(g_conc_ready_head_s, slot * 8, nxt)
+            else:
+                pa := _conc_act_at(prv)
+                if _conc_word(pa) != 0:
+                    cell_store(pa, 88, nxt)
+            if nxt >= 0:
+                na := _conc_act_at(nxt)
+                if _conc_word(na) != 0:
+                    cell_store(na, 152, prv)
+            if cell_load(g_conc_ready_tail_s, slot * 8) == cur:
+                cell_store(g_conc_ready_tail_s, slot * 8, prv)
+        cur = prv
+    return -1
 
 fn _conc_ready_push(id: int):
     g_conc_ready_push_count = g_conc_ready_push_count + 1
@@ -788,9 +873,10 @@ fn _conc_ready_pop() -> int:
             return id
         k = k + 1
     _conc_queue_unlock(m)
-    // Work stealing: take an unstarted activation from another M and re-home
-    // it here, so its lazy arena/stack is created by the new owner. Started
-    // activations stay pinned to their home M.
+    // Work stealing: re-home a runnable activation from another M. Unstarted
+    // activations get their lazy arena/stack from the thief. Started-but-
+    // yielded activations keep their saved fiber stack/arena; only the home M
+    // and slot move, so the next resume runs on this thread.
     mc : ., mut = g_conc_m_count
     if mc > 64:
         mc = 64
@@ -811,7 +897,7 @@ fn _conc_ready_pop() -> int:
             if vs >= slots:
                 break
             vslot := victim + vs * mc
-            id2 := _conc_queue_pop_slot(vslot, 1)
+            id2 := _conc_queue_steal_tail_slot(vslot, 0)
             if id2 >= 0:
                 stolen = id2
                 break
@@ -1021,6 +1107,10 @@ fn conc_sched_init():
     g_conc_quantum_m = _conc_sched_alloc(64 * 8)
     g_conc_quantum_cfg_m = _conc_sched_alloc(64 * 8)
     g_conc_seq_m = _conc_sched_alloc(64 * 8)
+    g_conc_metric_send = _conc_sched_alloc(8)
+    g_conc_metric_recv = _conc_sched_alloc(8)
+    cell_store(g_conc_metric_send, 0, 0)
+    cell_store(g_conc_metric_recv, 0, 0)
     g_conc_timespec = _conc_sched_alloc(16)
     g_conc_sig_ts = _conc_sched_alloc(16)
     g_conc_now_ts_m = _conc_sched_alloc(64 * 16)
@@ -1115,6 +1205,7 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, toke
     cell_store(a, 128, slot)
     cell_store(a, 136, token)
     cell_store(a, 144, priority)
+    cell_store(a, 152, -1)   // ready-queue prev link (doubly linked)
     store_str_ptr(g_conc_acts, id * 8, a)
     return id
 
@@ -2414,7 +2505,8 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     return _conc_global_channel(elemsize, cap)
 
 fn conc_sched_send_int(ch: string, val: int) -> int, pub:
-    g_conc_send_count = g_conc_send_count + 1
+    if _conc_raw(g_conc_metric_send) != 0:
+        rt_atomic_fetch_add(g_conc_metric_send, 0, 1)
     conc_sched_init()
     loop:
         _conc_ch_lock()
@@ -2488,7 +2580,8 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
         _conc_wait_record(t0)
 
 fn conc_sched_recv_int(ch: string) -> int, pub:
-    g_conc_recv_count = g_conc_recv_count + 1
+    if _conc_raw(g_conc_metric_recv) != 0:
+        rt_atomic_fetch_add(g_conc_metric_recv, 0, 1)
     conc_sched_init()
     loop:
         _conc_ch_lock()

@@ -181,6 +181,29 @@ fn main() -> int:
     return 0
 """
 
+STARTED_STEAL = """\
+import sched
+import chan
+
+fn yielder(n: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 1000:
+            break
+        conc_yield()
+        i = i + 1
+    return n + 1
+
+fn main() -> int:
+    sched_init_n(4)
+    ch := go yielder(41)
+    if chan_recv(ch) != 42:
+        return 1
+    if conc_steal_count() <= 0:
+        return 2
+    return 0
+"""
+
 METRICS = """\
 import sched
 import chan
@@ -297,6 +320,7 @@ def main() -> int:
         ("cross_m_pingpong", CROSS_M_PINGPONG, 60),
         ("metrics", METRICS, 90),
         ("work_steal", WORK_STEAL, 120),
+        ("started_steal", STARTED_STEAL, 120),
         ("spawn_stress", SPAWN_STRESS, 120),
     ]
     ok = True
