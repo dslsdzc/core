@@ -288,6 +288,12 @@ fn bp_def_state(def_node: int, var: int, depth: int) -> int:
 fn bp_value_state_at(var: int, at_node: int, depth: int) -> int:
     if var < 0 || var >= g_ir_var_count || depth > RC_MAX_DEPTH:
         return BP_RW
+    // Read-only strings are the only BP_READ source: string constants and the
+    // string fixed point. A non-string value has no string provenance, so its
+    // reaching definitions cannot change the answer. Keep the conservative
+    // default (writable) and skip the dataflow for scalar-heavy functions.
+    if bp_var_is_string(var) == 0:
+        return BP_RW
     if rc_rd_any(var, at_node) != 0:
         base := rc_rd_collect(var, at_node, depth)
         dc := g_rc_rd_def_count
@@ -544,6 +550,9 @@ fn bp_check_call(ni: int, first_arg: int, argc: int, fn_ni: int,
         j = j + 1
 
 fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
+    t0 : ., mut = 0
+    if cli_has("timing") != 0:
+        t0 = timing_now_ms()
     rc_ctl_prepare(nstart, ncount)
     bp_reset_last_store(vstart, vcount)
     ni : ., mut = nstart
@@ -619,6 +628,14 @@ fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
                 bp_check_call(ni, s1, s2, s3, nstart, fi)
 
         ni = ni + 1
+    if t0 > 0:
+        d := timing_now_ms() - t0
+        if d >= 10:
+            print("[bp] ")
+            print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
+            print(" ")
+            print(int_str(d))
+            println("ms")
 
 fn byte_permission_all():
     if g_pa_alloc_count > 0:
@@ -683,15 +700,30 @@ fn byte_permission_all():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_analyze(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
         rc_ctl_prepare(nstart, ncount)
+        tfi : ., mut = 0
+        if cli_has("timing") != 0:
+            tfi = timing_now_ms()
         bp_init_var_range(vstart, vcount)
         bp_infer_strings(nstart, ncount, vstart, vcount)
         bp_alias_compute(fi)
+        if tfi > 0:
+            dfi := timing_now_ms() - tfi
+            if dfi >= 10:
+                print("[bpa] ")
+                print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
+                print(" ")
+                print(int_str(dfi))
+                println("ms")
         fi = fi + 1
+    timing_mark("bp_init")
 
     changed : ., mut = 1
     rounds : ., mut = 0
@@ -707,14 +739,19 @@ fn byte_permission_all():
             if bp_summary_func(fi) != 0:
                 changed = 1
             fi = fi + 1
+    timing_mark("bp_summary")
 
     fi = 0
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_analyze(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)
         vcount := cell_load(g_ir_func_var_count, fi * 8)
         bp_check_func(nstart, ncount, vstart, vcount, fi)
         fi = fi + 1
+    timing_mark("bp_check_done")

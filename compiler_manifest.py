@@ -59,6 +59,8 @@ COREC_FILES = [
     'src/compiler/ext_mgr.cr',
     'src/compiler/ext_safety.cr',
     'src/compiler/ir_gen.cr',
+    # CP-2：限制性子集 plan emitter。只读 IR 表，不改变默认 lowering。
+    'src/compiler/conc_plan_emit.cr',
     # R2 P3 Task 5：自 backend_support_files 迁入（原因与 corearch 零引用证据见该段注）。
     # 位置 = ir_gen 之后（函数跨文件可见与顺序无关；本文件的自有全局只在本文件使用）。
     'src/compiler/monomorph.cr',
@@ -74,9 +76,10 @@ COREC_FILES = [
     'src/stdlib/toml.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',
-    'src/stdlib/goroutine.cr',
-    'src/stdlib/chan.cr',
-    'src/stdlib/sched.cr',
+    'src/stdlib/conc.cr',
+    'src/os/linux/runtime/conc_cpu.cr',
+    'src/os/linux/runtime/chan.cr',
+    'src/os/linux/runtime/sched.cr',
     'src/compiler/project.cr',
     'src/stdlib/os.cr',
     'src/compiler/interp.cr',

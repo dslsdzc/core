@@ -52,3 +52,30 @@ fn sys_syscall4_stub(buf: string, pos: int, cp: int, d: int) -> int:
     if d >= 0:
         cp = cp + e2_store_ret(buf, pos+cp, d)
     return cp
+
+// syscall6(num, a, b, c, arg4, arg5, arg6): two extra register arguments.
+// At callee entry SysV has num..arg3 in rdi/rsi/rdx/rcx, arg4/arg5 in r8/r9,
+// and arg6 at [rsp+8]. Map to Linux: rax/rdi/rsi/rdx/r10/r8/r9.
+fn sys_syscall6_stub(buf: string, pos: int, cp: int, d: int) -> int:
+    cp = cp + e2_mov(buf, pos+cp, 0, 7)    // rax = num
+    cp = cp + e2_mov(buf, pos+cp, 7, 6)    // rdi = a
+    cp = cp + e2_mov(buf, pos+cp, 6, 2)    // rsi = b
+    cp = cp + e2_mov(buf, pos+cp, 2, 1)    // rdx = c
+    cp = cp + e2_mov(buf, pos+cp, 10, 8)   // r10 = arg4
+    cp = cp + e2_mov(buf, pos+cp, 8, 9)    // r8 = arg5
+    // Inline stub (no return address on this frame): arg6 is at [rsp].
+    // mov r9, [rsp]: 4C 8B 0C 24
+    e2_w8(buf, pos+cp, 76)
+    cp = cp + 1
+    e2_w8(buf, pos+cp, 139)
+    cp = cp + 1
+    e2_w8(buf, pos+cp, 12)
+    cp = cp + 1
+    e2_w8(buf, pos+cp, 36)
+    cp = cp + 1
+    e2_w8(buf, pos+cp, 15)
+    e2_w8(buf, pos+cp+1, 5)
+    cp = cp + 2
+    if d >= 0:
+        cp = cp + e2_store_ret(buf, pos+cp, d)
+    return cp

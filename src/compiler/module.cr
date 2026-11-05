@@ -454,6 +454,7 @@ fn so_materialize(side_i: int) -> int:
     sym_set_owner(si, lib_lookup_path(g_source_name))
     sym_set_pub(si, 1)
     g_sym_count = si + 1
+    sym_name_map_insert(si)
     return si
 
 fn import_push(sm_id: int):
@@ -648,9 +649,21 @@ fn res_imports():
 
     // Manifests contribute import edges only; they are never parsed as code.
     import_scan_ancestors(g_source_dir)
-    sic := load_imports("src/stdlib/")
-    if str_len(sic) > 0:
-        import_scan_text("src/stdlib/_import.cr", sic)
+    // CORE_SELF_HOST builds compile build/corec_self.cr, a concatenation that
+    // already embeds src/stdlib/fmt.cr. Importing the stdlib manifest here
+    // would register a second copy of fmt under @std, mangle every colliding
+    // name (str_len@@user, str_len@@std, ...), and leave the compiler's direct
+    // IR calls (which carry plain names) unresolved at ELF link time. Keep the
+    // skip scoped to that bootstrap input: ordinary programs compiled with the
+    // env var set still import fmt normally.
+    src_is_selfhost_concat : ., mut = 0
+    if str_eq(get_env("CORE_SELF_HOST"), "1") != 0:
+        if str_eq(basename(g_source_path), "corec_self.cr") != 0:
+            src_is_selfhost_concat = 1
+    if src_is_selfhost_concat == 0:
+        sic := load_imports("src/stdlib/")
+        if str_len(sic) > 0:
+            import_scan_text("src/stdlib/_import.cr", sic)
 
     // The static runtime is a real file but not an import module. Scan its
     // edges before the main file, matching the old prepended order.

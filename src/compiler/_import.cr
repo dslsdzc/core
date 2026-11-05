@@ -45,6 +45,7 @@ import stub_regalloc
 import stub_regalloc_selftest
 import diag
 import ir_gen
+import conc_plan_emit
 import dataflow
 import ccr_lower
 import ccr_io

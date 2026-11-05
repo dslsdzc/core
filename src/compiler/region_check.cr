@@ -964,7 +964,70 @@ fn rc_rd_defs_max(var: int, use_ni: int, lo: int, depth: int) -> int:
 // their arguments. Masks use two 32-bit cells so all 64 legal parameters are
 // representable without touching signed bit 63.
 
+// IR function name index. rc_func_by_name is used by the DCE worklist and by
+// the region passes; without this map every IR_CALL lookup rescanned all IR
+// functions (O(calls * functions)).
+g_rc_func_map : string, mut
+g_rc_func_cap : int, mut
+g_rc_func_indexed : int, mut
+
+fn rc_func_map_reset():
+    g_rc_func_map = ""
+    g_rc_func_cap = 0
+    g_rc_func_indexed = 0
+
+fn rc_func_map_alloc(need: int):
+    cap : ., mut = g_rc_func_cap
+    if cap < 64:
+        cap = 64
+    loop:
+        if cap >= need:
+            break
+        cap = cap * 2
+    if cap == g_rc_func_cap && g_rc_func_cap > 0:
+        return
+    a := alloc(cap * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -1)
+        i = i + 1
+    g_rc_func_map = a
+    g_rc_func_cap = cap
+    g_rc_func_indexed = 0
+
+fn rc_func_map_sync():
+    if g_ir_func_count <= 0:
+        return
+    if g_rc_func_cap == 0:
+        rc_func_map_alloc(g_str_count)
+    if g_str_count > g_rc_func_cap:
+        rc_func_map_alloc(g_str_count)
+    i : ., mut = g_rc_func_indexed
+    loop:
+        if i >= g_ir_func_count:
+            break
+        ni := cell_load(g_ir_func_name_idx, i * 8)
+        if ni >= g_rc_func_cap:
+            rc_func_map_alloc(ni + 1)
+            i = 0
+            continue
+        if cell_load(g_rc_func_map, ni * 8) < 0:
+            cell_store(g_rc_func_map, ni * 8, i)
+        i = i + 1
+    g_rc_func_indexed = g_ir_func_count
+
 fn rc_func_by_name(name_ni: int) -> int:
+    if name_ni < 0:
+        return -1
+    rc_func_map_sync()
+    if name_ni < g_rc_func_cap:
+        cand := cell_load(g_rc_func_map, name_ni * 8)
+        if cand >= 0:
+            if cell_load(g_ir_func_name_idx, cand * 8) == name_ni:
+                return cand
+    // Collision fallback: keep the exact first-match semantics.
     i : ., mut = 0
     loop:
         if i >= g_ir_func_count:
@@ -2030,14 +2093,43 @@ fn rc_store_outlives(ptr_var: int, val_var: int, use_ni: int, lo: int) -> int:
 // before the destination. Both cases report EC_B_LIFETIME; the messages keep
 // the two causes distinguishable.
 fn rc_store_value_is_pointer(val: int) -> int:
-    if val < 0:
+    cur : ., mut = val
+    depth : ., mut = 0
+    loop:
+        if cur < 0 || depth > RC_MAX_DEPTH:
+            return 0
+        // A deferred pure call is stored through its _forced temporary; the
+        // value's provenance lives on the thunk source.
+        lazy := rc_lazy_source(cur)
+        if lazy >= 0:
+            cur = lazy
+            depth = depth + 1
+            continue
+        ti := irv_type(cur)
+        if ti >= 0 && (get_type_kind(ti) == TYP_PTR || get_type_kind(ti) == TYP_REF):
+            return 1
+        if pa_pts_empty(cur) == 0:
+            return 1
+        // Pointer analysis leaves call results empty (no summaries), so the
+        // type row is the only clue. A callee that aliases a parameter into
+        // its return can still carry a region-local pointer.
+        prod := cell_load(g_df_var_producer, cur * 8)
+        if prod >= 0:
+            op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+            if op == IR_CALL:
+                s3 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+                callee := rc_func_by_name(s3)
+                if callee < 0:
+                    return 1
+                pc := cell_load(g_ir_func_param_count, callee * 8)
+                j : ., mut = 0
+                loop:
+                    if j >= pc || j >= 64:
+                        break
+                    if rc_mask_has(g_rc_ret_alias, callee * 2, j) != 0:
+                        return 1
+                    j = j + 1
         return 0
-    ti := irv_type(val)
-    if ti >= 0 && (get_type_kind(ti) == TYP_PTR || get_type_kind(ti) == TYP_REF):
-        return 1
-    if pa_pts_empty(val) == 0:
-        return 1
-    return 0
 
 fn rc_store_escape(ni: int, ptr_var: int, val_var: int, nstart: int):
     if rc_var_dead(val_var, ni) != 0:
@@ -2096,12 +2188,15 @@ fn region_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int
         if op == IR_STORE_PTR:
             rc_store_escape(ni, s1, s2, nstart)
 
-        // Direct global assignment of a region-local pointer.
+        // Direct global assignment of a region-local pointer. Scalar stores
+        // cannot carry region provenance; skip the reaching-def dataflow for
+        // them (large generated functions otherwise compute it per value).
         if op == IR_STORE && s1 >= 0 && s2 >= 0 && rc_is_global_var(s1) != 0:
-            if rc_value_has_release(s2, ni, nstart, 0) != 0:
-                check_error(EC_B_LIFETIME,
-                    "store escape: global outlives the stored allocation",
-                    0, 0)
+            if rc_store_value_is_pointer(s2) != 0:
+                if rc_value_has_release(s2, ni, nstart, 0) != 0:
+                    check_error(EC_B_LIFETIME,
+                        "store escape: global outlives the stored allocation",
+                        0, 0)
 
         // Element/field stores go through a base object instead of IR_STORE_PTR.
         if op == IR_STORE_INDEX && s1 >= 0 && s2 >= 0:
@@ -2170,6 +2265,9 @@ fn region_check_all():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_analyze(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         vstart := cell_load(g_ir_func_var_start, fi * 8)

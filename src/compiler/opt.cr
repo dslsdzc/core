@@ -265,6 +265,9 @@ fn pass_cse():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         ic := cell_load(g_ir_func_instr_count, fi * 8)
         ist := cell_load(g_ir_func_instr_start, fi * 8)
         if ic <= 0:

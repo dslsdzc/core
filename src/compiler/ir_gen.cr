@@ -7,6 +7,10 @@
 // Subgraph-level arena tracking for compile-time size estimation
 g_no_auto_arena : int, mut = 0    // 1 while generating arena infrastructure
 g_program_has_arena : int, mut = 0 // 1 when the program imports the arena library
+g_program_has_conc : int, mut = 0  // 1 when the program imports sched/chan/conc
+g_emit_preempt_ticks : int, mut = 0 // 1 while generating user concurrent code
+g_emit_since_tick : int, mut = 0    // IR instructions since the last safe-point tick
+g_cur_flow : int, mut = 0           // 1 while generating a function that contains yield
 g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
 g_sg_alloc_unknown : string, mut  // per-sg: 1 when a size is unknown
 g_sg_alloc_cap   : int, mut
@@ -674,12 +678,98 @@ fn struct_row_field_ti(si: int, fi: int) -> int:
 // 全局槽声明类型（-1 = 非全局/无类型节点）
 // Does this global declaration belong to the library currently being
 // generated? g_cur_lib < 0 keeps the legacy name-only behaviour.
+// ── global declaration index ──
+// reg_one_global used to rescan g_global_lets and g_ir_globals for every
+// declared global (owner, dex tag, initializer, duplicate check), which is
+// O(globals^2). These direct-index maps and per-row back-links make the common
+// case O(1); the old loops remain as fallbacks for names interned after the map
+// was built (the hardcoded compiler globals).
+g_glob_cap : int, mut
+g_glob_rows : int, mut
+g_glob_first_any : string, mut
+g_glob_last_any : string, mut
+g_glob_first_lib : string, mut
+g_glob_last_lib : string, mut
+g_glob_prev_any : string, mut
+g_glob_prev_lib : string, mut
+g_reg_global_seen : string, mut
+g_glob_init_ok : int, mut
+
+fn glob_map_build():
+    cap : ., mut = 64
+    if g_str_count > cap:
+        cap = g_str_count
+    rows : ., mut = g_lib_count + 2
+    if rows < 2:
+        rows = 2
+    fa := alloc(cap * 8)
+    la := alloc(cap * 8)
+    fl := alloc(cap * rows * 8)
+    ll := alloc(cap * rows * 8)
+    pa := alloc((g_global_let_count + 1) * 8)
+    pl := alloc((g_global_let_count + 1) * 8)
+    seen := alloc(cap * rows * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(fa, i * 8, -1)
+        cell_store(la, i * 8, -1)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= cap * rows:
+            break
+        cell_store(fl, i * 8, -1)
+        cell_store(ll, i * 8, -1)
+        cell_store(seen, i * 8, 0)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_global_let_count:
+            break
+        node := cell_load(g_global_lets, i * 8)
+        ni := ast_a(node)
+        ow := lib_of_node(node)
+        row : ., mut = 0
+        if ow >= 0:
+            row = ow + 1
+        if ni >= 0 && ni < cap:
+            cell_store(pa, i * 8, cell_load(la, ni * 8))
+            if cell_load(fa, ni * 8) < 0:
+                cell_store(fa, ni * 8, i)
+            cell_store(la, ni * 8, i)
+            slot := row * cap + ni
+            cell_store(pl, i * 8, cell_load(ll, slot * 8))
+            if cell_load(fl, slot * 8) < 0:
+                cell_store(fl, slot * 8, i)
+            cell_store(ll, slot * 8, i)
+        else:
+            cell_store(pa, i * 8, -1)
+            cell_store(pl, i * 8, -1)
+        i = i + 1
+    g_glob_first_any = fa
+    g_glob_last_any = la
+    g_glob_first_lib = fl
+    g_glob_last_lib = ll
+    g_glob_prev_any = pa
+    g_glob_prev_lib = pl
+    g_reg_global_seen = seen
+    g_glob_cap = cap
+    g_glob_rows = rows
+
 fn global_decl_in_ctx(lnode: int) -> bool:
     if g_cur_lib < 0:
         return true
     return lib_of_node(lnode) == g_cur_lib
 
 fn global_decl_owner(name_ni: int) -> int:
+    if name_ni >= 0 && name_ni < g_glob_cap:
+        idx := cell_load(g_glob_first_any, name_ni * 8)
+        if idx < 0:
+            return -1
+        return lib_of_node(cell_load(g_global_lets, idx * 8))
+    // Fallback for names interned after the map was built.
     gi : ., mut = 0
     loop:
         if gi >= g_global_let_count:
@@ -691,6 +781,23 @@ fn global_decl_owner(name_ni: int) -> int:
     return -1
 
 fn global_decl_ti(name_ni: int) -> int:
+    if name_ni >= 0 && name_ni < g_glob_cap:
+        if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+            slot := (g_cur_lib + 1) * g_glob_cap + name_ni
+            idx := cell_load(g_glob_first_lib, slot * 8)
+            if idx >= 0:
+                tn := ast_b(cell_load(g_global_lets, idx * 8))
+                if tn >= 0:
+                    return res_type_node(tn)
+                return -1
+        idx2 := cell_load(g_glob_first_any, name_ni * 8)
+        if idx2 >= 0:
+            tn2 := ast_b(cell_load(g_global_lets, idx2 * 8))
+            if tn2 >= 0:
+                return res_type_node(tn2)
+            return -1
+        return -1
+    // Fallback for names interned after the map was built.
     gi : ., mut = 0
     loop:
         if gi >= g_global_let_count:
@@ -1093,6 +1200,15 @@ fn opt_cmp_norm(node: int, var: int, out_absent: int, out_val: int):
     opt_cmp_extract_boxed(var, out_absent, out_val, zero)
 
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int):
+    // Compiler-inserted safe point: even a straight-line function with no
+    // backedges gets a tick every 512 IR instructions. Emitting it before the
+    // current instruction keeps IR and DF node order aligned.
+    if g_emit_preempt_ticks != 0:
+        g_emit_since_tick = g_emit_since_tick + 1
+        if g_emit_since_tick >= 512:
+            g_emit_since_tick = 0
+            emit(IR_CALL, -1, -1, 0, str_intern("conc_preempt_tick"), TI_UNIT)
+            g_emit_since_tick = 0
     // Build linear IR (.ccr) — consumed by x86-64 backend
     idx := g_ir_instr_count
     grow_ir_instrs(idx + 1)
@@ -3643,8 +3759,8 @@ fn gen_expr(node: int) -> int:
         body := ast_b(node)
         range_node := ast_data(node)  // 0 = single, EXPR_RANGE node = range go
         if range_node <= 0:
-            // Single go: emit call to sched_go(@addr(f), arg)
-            // sched_go creates a goroutine via g_new + sched_enqueue and returns a channel
+            // Single go: emit call to conc_go(@addr(f), arg)
+            // conc_go creates a conc activation on the CP-4 scheduler and returns a channel
             if ast_kind(body) == EXPR_CALL:
                 func_node := ast_a(body)
                 first_arg := ast_b(body)
@@ -3660,8 +3776,9 @@ fn gen_expr(node: int) -> int:
                     arg_var = force_if_thunk(arg_var)
                 // Function address via IR_FNADDR — the movabs placeholder is
                 // patched to the function's absolute VA at ELF link time
-                // (elf.cr Phase 3). goroutine_entry_wrapper reads it back
-                // from G+56 (saved_fn) and calls saved_fn(saved_arg).
+                // (elf.cr Phase 3). The conc activation wrapper reads it and
+                // calls entry(saved_arg); CP-4 no longer uses the old
+                // goroutine_entry_wrapper for the default single-go path.
                 fnaddr_var := new_ir_var("_go_fnaddr", TI_INT)
                 emit(IR_FNADDR, fnaddr_var, func_ni, 0, 0, 0)
                 // Create contiguous argument variables for the sched_go call:
@@ -3674,7 +3791,7 @@ fn gen_expr(node: int) -> int:
                 else:
                     emit(IR_CONST, packed1, 0, 0, 0, TI_INT)
                 dest := new_ir_var("_go_ch", TI_INT)
-                sched_go_ni := str_intern("sched_go")
+                sched_go_ni := str_intern("conc_go")
                 emit(IR_CALL, dest, packed0, 2, sched_go_ni, TI_INT)
                 return dest
             return gen_expr(body)
@@ -3683,27 +3800,104 @@ fn gen_expr(node: int) -> int:
         range_count := ast_b(range_node) - ast_a(range_node)
         if range_count <= 0:
             return -1
-        // Allocate results array
+        // Allocate results array and a temporary channel array.
         arr_var := new_ir_var("go_arr", TI_UNIT)
         track_alloc_array(range_count)
         emit(IR_ALLOC_ARRAY, arr_var, range_count, 0, 0, 0)
-        // Spawn each iteration
+        ch_arr := new_ir_var("go_chs", TI_UNIT)
+        track_alloc_array(range_count)
+        emit(IR_ALLOC_ARRAY, ch_arr, range_count, 0, 0, 0)
+        // Spawn each iteration through the conc runtime.
         if ast_kind(body) == EXPR_CALL:
             func_node := ast_a(body)
             func_ni : ., mut = -1
             if ast_kind(func_node) == EXPR_IDENT:
                 func_ni = ast_int_val(func_node)
-            // Extract the call arg that uses the iter variable
+            if g_interp_mode != 0 && func_ni >= 0:
+                // Interpreter serial fallback: no conc scheduler in `run`.
+                fi0 : ., mut = 0
+                loop:
+                    if fi0 >= range_count:
+                        break
+                    val0 := new_ir_var("go_val", TI_INT)
+                    emit(IR_CONST, val0, ast_a(range_node) + fi0, 0, 0, TI_INT)
+                    res0 := new_ir_var("go_res", TI_INT)
+                    emit(IR_CALL, res0, val0, 1, func_ni, TI_INT)
+                    emit(IR_STORE_INDEX, -1, arr_var, res0, fi0, TI_INT)
+                    fi0 = fi0 + 1
+                return arr_var
+            // Plan-emitter marker: one call for the whole range. The default
+            // runtime still executes the per-index conc_go loop below. Only
+            // conc programs link conc_cpu, so ordinary range-go code stays
+            // exactly as before.
+            if g_program_has_conc == 0:
+                conc_go_ni := str_intern("conc_go")
+                fi0 : ., mut = 0
+                loop:
+                    if fi0 >= range_count:
+                        break
+                    val0 := new_ir_var("go_val", TI_UNIT)
+                    emit(IR_CONST, val0, ast_a(range_node) + fi0, 0, 0, TI_INT)
+                    fn0 := new_ir_var("_go_fnaddr", TI_INT)
+                    emit(IR_FNADDR, fn0, func_ni, 0, 0, 0)
+                    p0 := new_ir_var("_go_fna", TI_INT)
+                    emit(IR_STORE, -1, p0, fn0, 0, 0)
+                    p1 := new_ir_var("_go_arg", TI_INT)
+                    emit(IR_STORE, -1, p1, val0, 0, 0)
+                    ch0 := new_ir_var("go_ch", TI_INT)
+                    emit(IR_CALL, ch0, p0, 2, conc_go_ni, TI_INT)
+                    emit(IR_STORE_INDEX, -1, ch_arr, ch0, fi0, 0)
+                    fi0 = fi0 + 1
+                fi1 : ., mut = 0
+                loop:
+                    if fi1 >= range_count:
+                        break
+                    chv0 := new_ir_var("go_chv", TI_INT)
+                    emit(IR_LOAD_INDEX, chv0, ch_arr, 0, fi1, 0)
+                    res0 := new_ir_var("go_res", TI_INT)
+                    emit(IR_CALL, res0, chv0, 1, str_intern("chan_recv"), TI_INT)
+                    emit(IR_STORE_INDEX, -1, arr_var, res0, fi1, TI_INT)
+                    fi1 = fi1 + 1
+                return arr_var
+            range_fnaddr := new_ir_var("_range_fnaddr", TI_INT)
+            emit(IR_FNADDR, range_fnaddr, func_ni, 0, 0, 0)
+            range_start := new_ir_var("_range_start", TI_INT)
+            emit(IR_CONST, range_start, ast_a(range_node), 0, 0, TI_INT)
+            range_len := new_ir_var("_range_len", TI_INT)
+            emit(IR_CONST, range_len, range_count, 0, 0, TI_INT)
+            mp0 := new_ir_var("_mark0", TI_INT)
+            emit(IR_STORE, -1, mp0, range_fnaddr, 0, 0)
+            mp1 := new_ir_var("_mark1", TI_INT)
+            emit(IR_STORE, -1, mp1, range_start, 0, 0)
+            mp2 := new_ir_var("_mark2", TI_INT)
+            emit(IR_STORE, -1, mp2, range_len, 0, 0)
+            emit(IR_CALL, -1, mp0, 3, str_intern("conc_plan_mark_range"), TI_UNIT)
+            conc_go_ni := str_intern("conc_go")
             fi : ., mut = 0
             loop:
                 if fi >= range_count:
                     break
-                // For each i, spawn with i as the iter var's value
                 val_var := new_ir_var("go_val", TI_UNIT)
                 emit(IR_CONST, val_var, ast_a(range_node) + fi, 0, 0, TI_INT)
-                dest2 := new_ir_var("go_fut", TI_UNIT)
-                emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1)
-                emit(IR_STORE_INDEX, -1, arr_var, dest2, fi, 0)
+                fnaddr_var := new_ir_var("_go_fnaddr", TI_INT)
+                emit(IR_FNADDR, fnaddr_var, func_ni, 0, 0, 0)
+                packed0 := new_ir_var("_go_fna", TI_INT)
+                emit(IR_STORE, -1, packed0, fnaddr_var, 0, 0)
+                packed1 := new_ir_var("_go_arg", TI_INT)
+                emit(IR_STORE, -1, packed1, val_var, 0, 0)
+                ch := new_ir_var("go_ch", TI_INT)
+                emit(IR_CALL, ch, packed0, 2, conc_go_ni, TI_INT)
+                emit(IR_STORE_INDEX, -1, ch_arr, ch, fi, 0)
+                fi = fi + 1
+            fi = 0
+            loop:
+                if fi >= range_count:
+                    break
+                chv := new_ir_var("go_chv", TI_INT)
+                emit(IR_LOAD_INDEX, chv, ch_arr, 0, fi, 0)
+                res := new_ir_var("go_res", TI_INT)
+                emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+                emit(IR_STORE_INDEX, -1, arr_var, res, fi, TI_INT)
                 fi = fi + 1
         return arr_var
 
@@ -4019,35 +4213,13 @@ fn gen_expr(node: int) -> int:
             bname := istr_get(func_ni)
             if str_eq(bname, "arena_current_unchecked") != 0 && ac == 0:
                 dest := new_ir_var("arena_current", TI_INT)
-                sv := global_var_of(str_intern("g_arena_scalars"))
-                if sv >= 0:
-                    z := new_ir_var("_arena_zero", TI_INT)
-                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
-                    a0 := new_ir_var("_arena_arg", TI_STR)
-                    emit(IR_STORE, -1, a0, sv, 0, 0)
-                    a1 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a1, z, 0, 0)
-                    emit(IR_CALL, dest, a0, 2, str_intern("cell_load"), TI_INT)
-                else:
-                    gv := global_var_of(str_intern("g_current_arena"))
-                    if gv >= 0:
-                        emit(IR_LOAD, dest, gv, 0, 0, TI_INT)
-                    else:
-                        emit(IR_CONST, dest, 0, 0, 0, TI_INT)
+                emit(IR_CALL, dest, -1, 0, str_intern("rt_current_arena"), TI_INT)
                 return dest
             if str_eq(bname, "arena_set_current_unchecked") != 0 && ac == 1:
                 av := cell_load(arg_vars, 0)
-                sv := global_var_of(str_intern("g_arena_scalars"))
-                if sv >= 0:
-                    z := new_ir_var("_arena_zero", TI_INT)
-                    emit(IR_CONST, z, 0, 0, 0, TI_INT)
-                    a0 := new_ir_var("_arena_arg", TI_STR)
-                    emit(IR_STORE, -1, a0, sv, 0, 0)
-                    a1 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a1, z, 0, 0)
-                    a2 := new_ir_var("_arena_arg", TI_INT)
-                    emit(IR_STORE, -1, a2, av, 0, 0)
-                    emit(IR_CALL, -1, a0, 3, str_intern("cell_store"), TI_INT)
+                a0 := new_ir_var("_arena_arg", TI_INT)
+                emit(IR_STORE, -1, a0, av, 0, 0)
+                emit(IR_CALL, -1, a0, 1, str_intern("rt_set_current_arena"), TI_UNIT)
                 gv := global_var_of(str_intern("g_current_arena"))
                 if gv >= 0:
                     emit(IR_STORE, -1, gv, av, 0, 0)
@@ -4290,8 +4462,19 @@ fn gen_expr(node: int) -> int:
         if g_plan_active != 0:
             mi := lazy_memo_index_of_ast(node)
             if mi >= 0:
-                if cell_load(g_lazy_memo_var, mi * 8) < 0:
-                    lazy_memo_site_begin(mi, first_arg_var, ac)
+                kind := cell_load(g_lazy_memo_kind, mi * 8)
+                if kind == 1:
+                    if cell_load(g_lazy_memo_var, mi * 8) < 0:
+                        lazy_memo_site_begin(mi, first_arg_var, ac)
+                else:
+                    // The loop-invariant memo was registered during Phase A
+                    // with Phase A variable ids. Phase B regenerates the IR
+                    // with new ids, so refresh the captured arguments here
+                    // rather than reusing stale ids (they may name unrelated
+                    // values in the new graph).
+                    arg0 := lazy_pack_args(first_arg_var, ac)
+                    cell_store(g_lazy_memo_arg0, mi * 8, arg0)
+                    cell_store(g_lazy_memo_argc, mi * 8, ac)
                 mv := cell_load(g_lazy_memo_var, mi * 8)
                 if mv >= 0:
                     return mv
@@ -4304,6 +4487,14 @@ fn gen_expr(node: int) -> int:
             lazy_def_add(dest, func_ni, call_ti, arg0, ac)
             return dest
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
+        // A long syscall cannot be switched inside the kernel. Emit a tick at
+        // the return edge so a pending preemption is consumed immediately
+        // after the syscall instead of waiting for the next backedge.
+        if g_emit_preempt_ticks != 0 && func_ni >= 0:
+            bname := istr_get(func_ni)
+            if str_eq(bname, "syscall3") != 0 || str_eq(bname, "syscall4") != 0 || str_eq(bname, "syscall6") != 0:
+                emit_preempt_tick()
+                g_emit_since_tick = 0
         // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
         // the row on the call result lets a later match recover the payload form
         // (bare scaled vs boxed Some) without guessing from the IR value width.
@@ -4379,10 +4570,10 @@ fn gen_expr(node: int) -> int:
             // Capture the parent arena before the child is created. Array and
             // struct copies may contain string leaves that need a parent-side
             // str_sub allocation.
-            gv := global_var_of(str_intern("g_current_arena"))
-            if gv >= 0:
-                merge_parent_var = new_ir_var("_merge_parent", TI_INT)
-                emit(IR_LOAD, merge_parent_var, gv, 0, 0, TI_INT)
+            // Read the per-thread current arena: multi-M schedulers switch
+            // arenas per activation, so the legacy global is shared and stale.
+            merge_parent_var = new_ir_var("_merge_parent", TI_INT)
+            emit(IR_CALL, merge_parent_var, -1, 0, str_intern("rt_current_arena"), TI_INT)
             if merge_kind == 3:
                 ms1 := region_plan_merge_str1_of(sg_idx)
                 ms2 := region_plan_merge_str2_of(sg_idx)
@@ -4559,6 +4750,7 @@ fn gen_expr(node: int) -> int:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)  // arena reused per iteration
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
@@ -4598,6 +4790,7 @@ fn gen_expr(node: int) -> int:
             iri_set_s1(arena_instr, peak)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
         emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
         sg_pop()  // close loop region (arena already reset above)
@@ -4609,6 +4802,8 @@ fn gen_expr(node: int) -> int:
         var_ni := ast_a(node)
         iter := ast_b(node)
         body := ast_c(node)
+        if _try_auto_par_for(var_ni, iter, body) != 0:
+            return -1
         start_var : ., mut = -1
         end_var : ., mut = -1
         is_seq : ., mut = 0
@@ -4739,6 +4934,7 @@ fn gen_expr(node: int) -> int:
         inc_var := new_ir_var("inc", TI_INT)
         emit(IR_BINARY, inc_var, ivar, one_var, OP_ADD, 0)
         emit(IR_STORE, -1, ivar, inc_var, 0, 0)
+        emit_preempt_tick()
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0)
         // Exit
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0)
@@ -5572,7 +5768,20 @@ fn gen_expr(node: int) -> int:
         if val_node >= 0:
             val_var = gen_expr(val_node)
             val_var = force_if_thunk(val_var)
+        if g_cur_flow != 0 && g_program_has_conc != 0:
+            // Coroutine flow: publish the yielded value to the driver and
+            // suspend. The fiber preserves arbitrary control flow/locals, so
+            // no AST/CPS splitting is needed.
+            if val_var < 0:
+                val_var = new_ir_var("yield_unit", TI_INT)
+                emit(IR_CONST, val_var, 0, 0, 0, TI_INT)
+            emit(IR_CALL, -1, val_var, 1, str_intern("conc_flow_yield"), TI_UNIT)
+            return -1
         emit(IR_YIELD, -1, val_var, 0, 0, 0)
+        // On the conc mapping a yield is a real activation switch point. The
+        // value move above stays for the flow/stream reading of yield.
+        if g_program_has_conc != 0:
+            emit(IR_CALL, -1, -1, 0, str_intern("conc_yield"), TI_UNIT)
         return -1  // yield suspends — no return value for caller
 
     if ast_kind(node) == EXPR_AWAIT:
@@ -6041,6 +6250,16 @@ fn gen_expr(node: int) -> int:
 
 fn is_arena_infra_name(name_idx: int) -> int:
     n := istr_get(name_idx)
+    if str_eq(n, "conc_preempt_tick") != 0:
+        return 1
+    if str_eq(n, "conc_plan_mark_range") != 0:
+        return 1
+    if str_eq(n, "conc_preempt_signal") != 0:
+        return 1
+    if str_eq(n, "_conc_futex_wait") != 0:
+        return 1
+    if str_eq(n, "_conc_futex_wake") != 0:
+        return 1
     if str_eq(n, "arena_init") != 0:
         return 1
     if str_eq(n, "arena_new") != 0:
@@ -6061,6 +6280,421 @@ fn is_arena_infra_name(name_idx: int) -> int:
         return 1
     return 0
 
+g_par_arith_depth : int, mut = 0
+// The interpreter has no conc runtime. In `corec run` mode, range-go lowers
+// to a serial call loop so the interpreter and ELF see the same values.
+g_interp_mode : int, mut = 0
+// Name index of the array written by the auto-PAR loop (-1 = none/reduction,
+// -2 = unknown base). Read-only global array captures are allowed only when
+// they cannot alias this write target.
+g_par_write_ni : int, mut = -1
+
+fn _par_index(node: int, param_ni: int) -> int:
+    // Read index for a captured array: param, param +/- const, or a literal.
+    if node < 0:
+        return 0
+    k := ast_kind(node)
+    if k == EXPR_INT:
+        return 1
+    if k == EXPR_IDENT:
+        return ast_int_val(node) == param_ni
+    if k == EXPR_BINARY:
+        op := ast_c(node)
+        if op != OP_ADD && op != OP_SUB:
+            return 0
+        l := ast_a(node)
+        r := ast_b(node)
+        if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == param_ni:
+            return ast_kind(r) == EXPR_INT
+        if op == OP_ADD && ast_kind(r) == EXPR_IDENT && ast_int_val(r) == param_ni:
+            return ast_kind(l) == EXPR_INT
+    return 0
+
+fn _par_arith_call(node: int, param_ni: int) -> int:
+    // A call is pure for auto-PAR only when it is a one-int-parameter user
+    // function whose body is itself a pure arithmetic return, and the call
+    // argument is the caller's parameter (so no substitution is needed).
+    if ast_c(node) != 1:
+        return 0
+    fn_node := ast_a(node)
+    if ast_kind(fn_node) != EXPR_IDENT:
+        return 0
+    arg : ., mut = ast_b(node)
+    if ast_kind(arg) == EXPR_ARG:
+        arg = ast_a(arg)
+    if ast_kind(arg) != EXPR_IDENT || ast_int_val(arg) != param_ni:
+        return 0
+    fi := find_func(ast_int_val(fn_node))
+    if fi < 0:
+        return 0
+    if fi_param_count(fi) != 1:
+        return 0
+    if fi_param_type(fi, 0) != TI_INT || fi_return_type(fi) != TI_INT:
+        return 0
+    fn_ast := fi_ast_node(fi)
+    if fn_ast < 0:
+        return 0
+    pnode := ast_b(fn_ast)
+    if ast_kind(pnode) != EXPR_PARAM:
+        return 0
+    callee_param := ast_a(pnode)
+    body : ., mut = ast_data(fn_ast)
+    if body >= 0 && ast_kind(body) == EXPR_BLOCK:
+        if ast_b(body) != 1:
+            return 0
+        body = cell_load(g_block_stmts, ast_a(body) * 8)
+    if body >= 0 && ast_kind(body) == EXPR_STMT:
+        body = ast_a(body)
+    if body < 0 || ast_kind(body) != EXPR_RETURN:
+        return 0
+    return _par_arith(ast_a(body), callee_param)
+
+fn _par_arith(node: int, param_ni: int) -> int:
+    // Conservative purity proof for auto-PAR: integer constants, the
+    // function's own single parameter, + - * / trees, unary negation, and
+    // nested calls to other pure arithmetic functions. No loads, stores,
+    // globals, or control flow.
+    if node < 0:
+        return 0
+    k := ast_kind(node)
+    if k == EXPR_INT:
+        return 1
+    if k == EXPR_IDENT:
+        if ast_int_val(node) == param_ni:
+            return 1
+        return 0
+    if k == EXPR_BINARY:
+        op := ast_c(node)
+        if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV:
+            if _par_arith(ast_a(node), param_ni) == 0:
+                return 0
+            return _par_arith(ast_b(node), param_ni)
+        return 0
+    if k == EXPR_UNARY:
+        if ast_c(node) == UOP_NEG:
+            return _par_arith(ast_a(node), param_ni)
+        return 0
+    if k == EXPR_INDEX:
+        // Read-only global array capture (stencil): the base must be a global
+        // array/slice and must not be the array this loop writes. The index
+        // may be param, param +/- const, or a literal.
+        if g_par_write_ni == -2:
+            return 0
+        base := ast_a(node)
+        if ast_kind(base) != EXPR_IDENT:
+            return 0
+        bni := ast_int_val(base)
+        if bni == g_par_write_ni:
+            return 0
+        si := find_gsym(bni)
+        if si < 0:
+            return 0
+        if sym_kind(si) != SYM_GLOBAL:
+            return 0
+        tk := get_type_kind(sym_type(si))
+        if tk != TYP_ARRAY && tk != TYP_SLICE:
+            return 0
+        return _par_index(ast_b(node), param_ni)
+    if k == EXPR_CALL:
+        if g_par_arith_depth >= 8:
+            return 0
+        g_par_arith_depth = g_par_arith_depth + 1
+        r := _par_arith_call(node, param_ni)
+        g_par_arith_depth = g_par_arith_depth - 1
+        return r
+    return 0
+
+fn _try_auto_par_for(var_ni: int, iter: int, body: int) -> int:
+    if g_interp_mode != 0:
+        return 0
+    // Recognize `for i in <literal range>: out[i] = f(i)` where f is a
+    // side-effect-free integer arithmetic function. This is the automatic
+    // DATA_PARALLEL slice; anything else keeps the serial loop.
+    if g_program_has_conc == 0:
+        return 0
+    if ast_kind(iter) != EXPR_RANGE:
+        return 0
+    if ast_kind(ast_a(iter)) != EXPR_INT || ast_kind(ast_b(iter)) != EXPR_INT:
+        return 0
+    stmt : ., mut = body
+    if ast_kind(stmt) == EXPR_BLOCK:
+        if ast_b(stmt) != 1:
+            return 0
+        stmt = cell_load(g_block_stmts, ast_a(stmt) * 8)
+    if ast_kind(stmt) == EXPR_STMT:
+        stmt = ast_a(stmt)
+    if ast_kind(stmt) != EXPR_ASSIGN:
+        return 0
+    target := ast_a(stmt)
+    value : ., mut = ast_b(stmt)
+    g_par_write_ni = -1
+    if ast_kind(target) == EXPR_INDEX:
+        ob := ast_a(target)
+        if ast_kind(ob) == EXPR_IDENT:
+            g_par_write_ni = ast_int_val(ob)
+        else:
+            g_par_write_ni = -2
+    mode : ., mut = 0
+    red_op : ., mut = OP_ADD
+    if ast_kind(target) == EXPR_INDEX:
+        mode = 1
+    else:
+        if ast_kind(target) == EXPR_IDENT:
+            // Reduction: acc = acc op f(i) or acc = f(i) op acc, with op in
+            // {+, *, -}. The parallel tasks only evaluate f(i); the
+            // accumulator is combined serially in iteration order, so integer
+            // overflow and subtraction order stay unchanged.
+            acc_ni := ast_int_val(target)
+            if ast_kind(value) == EXPR_BINARY:
+                ropp := ast_c(value)
+                if ropp == OP_ADD || ropp == OP_MUL || ropp == OP_SUB:
+                    l := ast_a(value)
+                    r := ast_b(value)
+                    call_node : ., mut = -1
+                    if ast_kind(l) == EXPR_IDENT && ast_int_val(l) == acc_ni:
+                        call_node = r
+                    else:
+                        if ast_kind(r) == EXPR_IDENT && ast_int_val(r) == acc_ni:
+                            call_node = l
+                            // acc = f(i) - acc is not a left-fold.
+                            if ropp == OP_SUB:
+                                call_node = -1
+                    if call_node >= 0 && ast_kind(call_node) == EXPR_CALL:
+                        av := find_local(acc_ni)
+                        if av >= 0:
+                            if irv_type(av) == TI_UNIT:
+                                irv_set_type(av, TI_INT)
+                            if irv_type(av) == TI_INT:
+                                mode = 2
+                                value = call_node
+                                red_op = ropp
+    if mode == 0:
+        return 0
+    if ast_kind(value) != EXPR_CALL:
+        return 0
+    reverse : ., mut = 0
+    if mode == 1:
+        idx := ast_b(target)
+        if ast_kind(idx) == EXPR_IDENT:
+            if ast_int_val(idx) != var_ni:
+                return 0
+        else:
+            // Reverse map: out[end - 1 - i] = f(i). This is still a
+            // bijection over [start, end), so writes cannot alias.
+            if ast_kind(idx) != EXPR_BINARY || ast_c(idx) != OP_SUB:
+                return 0
+            rr := ast_b(idx)
+            ll := ast_a(idx)
+            if ast_kind(rr) != EXPR_IDENT || ast_int_val(rr) != var_ni:
+                return 0
+            if ast_kind(ll) == EXPR_INT:
+                if ast_int_val(ll) != ast_int_val(ast_b(iter)) - 1:
+                    return 0
+                reverse = 1
+            else:
+                if ast_kind(ll) != EXPR_BINARY || ast_c(ll) != OP_SUB:
+                    return 0
+                if ast_kind(ast_a(ll)) != EXPR_INT || ast_kind(ast_b(ll)) != EXPR_INT:
+                    return 0
+                if ast_int_val(ast_b(ll)) != 1:
+                    return 0
+                if ast_int_val(ast_a(ll)) != ast_int_val(ast_b(iter)) - 1:
+                    return 0
+                reverse = 1
+    fn_node := ast_a(value)
+    if ast_kind(fn_node) != EXPR_IDENT:
+        return 0
+    func_ni := ast_int_val(fn_node)
+    if ast_c(value) != 1:
+        return 0
+    arg : ., mut = ast_b(value)
+    if ast_kind(arg) == EXPR_ARG:
+        arg = ast_a(arg)
+    if ast_kind(arg) != EXPR_IDENT || ast_int_val(arg) != var_ni:
+        return 0
+    fi := find_func(func_ni)
+    if fi < 0:
+        return 0
+    if fi_param_count(fi) != 1:
+        return 0
+    if fi_param_type(fi, 0) != TI_INT || fi_return_type(fi) != TI_INT:
+        return 0
+    fn_ast := fi_ast_node(fi)
+    if fn_ast < 0:
+        return 0
+    pnode := ast_b(fn_ast)
+    if ast_kind(pnode) != EXPR_PARAM:
+        return 0
+    param_ni := ast_a(pnode)
+    fbody : ., mut = ast_data(fn_ast)
+    if fbody >= 0 && ast_kind(fbody) == EXPR_BLOCK:
+        if ast_b(fbody) != 1:
+            return 0
+        fbody = cell_load(g_block_stmts, ast_a(fbody) * 8)
+    if fbody >= 0 && ast_kind(fbody) == EXPR_STMT:
+        fbody = ast_a(fbody)
+    if fbody < 0 || ast_kind(fbody) != EXPR_RETURN:
+        return 0
+    if _par_arith(ast_a(fbody), param_ni) == 0:
+        return 0
+    start_c := ast_int_val(ast_a(iter))
+    end_c := ast_int_val(ast_b(iter))
+    count := end_c - start_c
+    if start_c < 0 || count <= 0:
+        return 0
+    arr : ., mut = 0
+    if mode == 1:
+        arr = gen_expr(ast_a(target))
+    chs := new_ir_var("par_chs", TI_UNIT)
+    track_alloc_array(count)
+    emit(IR_ALLOC_ARRAY, chs, count, 0, 0, 0)
+    conc_go_ni := str_intern("conc_go")
+    k : ., mut = 0
+    loop:
+        if k >= count:
+            break
+        val := new_ir_var("par_val", TI_UNIT)
+        emit(IR_CONST, val, start_c + k, 0, 0, TI_INT)
+        faddr := new_ir_var("par_faddr", TI_INT)
+        emit(IR_FNADDR, faddr, func_ni, 0, 0, 0)
+        p0 := new_ir_var("par_a0", TI_INT)
+        emit(IR_STORE, -1, p0, faddr, 0, 0)
+        p1 := new_ir_var("par_a1", TI_INT)
+        emit(IR_STORE, -1, p1, val, 0, 0)
+        ch := new_ir_var("par_ch", TI_INT)
+        emit(IR_CALL, ch, p0, 2, conc_go_ni, TI_INT)
+        emit(IR_STORE_INDEX, -1, chs, ch, k, 0)
+        k = k + 1
+    k = 0
+    if mode == 2:
+        acc_var := find_local(ast_int_val(target))
+        loop:
+            if k >= count:
+                break
+            chv := new_ir_var("par_chv", TI_INT)
+            emit(IR_LOAD_INDEX, chv, chs, 0, k, 0)
+            res := new_ir_var("par_res", TI_INT)
+            emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+            sumv := new_ir_var("par_sum", TI_INT)
+            emit(IR_BINARY, sumv, acc_var, res, red_op, TI_INT)
+            emit(IR_STORE, -1, acc_var, sumv, 0, 0)
+            k = k + 1
+        return 1
+    loop:
+        if k >= count:
+            break
+        chv := new_ir_var("par_chv", TI_INT)
+        emit(IR_LOAD_INDEX, chv, chs, 0, k, 0)
+        res := new_ir_var("par_res", TI_INT)
+        emit(IR_CALL, res, chv, 1, str_intern("chan_recv"), TI_INT)
+        di : ., mut = start_c + k
+        if reverse != 0:
+            di = start_c + count - 1 - k
+        emit(IR_STORE_INDEX, -1, arr, res, di, TI_INT)
+        k = k + 1
+    return 1
+
+fn ir_dce_reachable():
+    // IR function indices are rebuilt for every compilation in this process.
+    rc_func_map_reset()
+    g_ir_func_reachable = ""
+    // Remove unreachable functions from the analysis/lowering graph. Imported
+    // stdlib modules contain large functions that a small program never calls;
+    // generating their IR is cheap, but region/byte-permission proofs are not.
+    // A function is a root if it is main, or if any IR_FNADDR names it. Calls
+    // from reachable functions mark their callees. IR function indices stay
+    // stable; unreachable bodies get zero node/instr/var counts.
+    if g_ir_func_count <= 0:
+        return
+    reachable := alloc(g_ir_func_count * 8)
+    i : ., mut = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        cell_store(reachable, i * 8, 0)
+        i = i + 1
+    has_main : ., mut = 0
+    i = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        if str_eq(istr_get(cell_load(g_ir_func_name_idx, i * 8)), "main") != 0:
+            has_main = 1
+            cell_store(reachable, i * 8, 1)
+        i = i + 1
+    if has_main == 0:
+        return
+    // Transitive closure over IR calls.
+    changed : ., mut = 1
+    loop:
+        if changed == 0:
+            break
+        changed = 0
+        i = 0
+        loop:
+            if i >= g_ir_func_count:
+                break
+            if cell_load(reachable, i * 8) != 0:
+                ni := cell_load(g_df_func_node_start, i * 8)
+                nc := cell_load(g_df_func_node_count, i * 8)
+                if ni >= 0 && nc > 0:
+                    j : ., mut = ni
+                    loop:
+                        if j >= ni + nc:
+                            break
+                        op := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_OPCODE)
+                        if op == IR_CALL:
+                            s3 := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S3)
+                            cfi := rc_func_by_name(s3)
+                            if cfi >= 0:
+                                if cell_load(reachable, cfi * 8) == 0:
+                                    cell_store(reachable, cfi * 8, 1)
+                                    changed = 1
+                        else:
+                            if op == IR_FNADDR:
+                                fn_ni := cell_load(g_df_nodes, j * ESZ_DFNODE + OFF_DF_S1)
+                                cfi := rc_func_by_name(fn_ni)
+                                if cfi >= 0:
+                                    if cell_load(reachable, cfi * 8) == 0:
+                                        cell_store(reachable, cfi * 8, 1)
+                                        changed = 1
+                        j = j + 1
+            i = i + 1
+    g_ir_func_reachable = alloc(g_ir_func_count * 8)
+    i = 0
+    loop:
+        if i >= g_ir_func_count:
+            break
+        cell_store(g_ir_func_reachable, i * 8, cell_load(reachable, i * 8))
+        i = i + 1
+    return
+
+fn ir_func_reachable(fi: int) -> int:
+    if fi < 0 || fi >= g_ir_func_count:
+        return 0
+    if str_len(g_ir_func_reachable) <= 0:
+        return 1
+    return cell_load(g_ir_func_reachable, fi * 8)
+
+// Analysis universe: reachable functions plus every user-owned function. An
+// uncalled user function is still part of the program's diagnostic contract,
+// but it must not enter the emitted .ccr/ELF (that would be dead code); DCE
+// keeps using ir_func_reachable.
+fn ir_func_analyze(fi: int) -> int:
+    if ir_func_reachable(fi) != 0:
+        return 1
+    if fi < 0 || fi >= g_ir_func_count:
+        return 0
+    own := func_owner(fi)
+    if own >= 0 && lib_kind(own) == LIB_KIND_USER:
+        return 1
+    return 0
+
+fn emit_preempt_tick():
+    if g_emit_preempt_ticks == 0:
+        return
+    emit(IR_CALL, -1, -1, 0, str_intern("conc_preempt_tick"), TI_UNIT)
+
 fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
@@ -6069,6 +6703,12 @@ fn ir_gen_func(fi: int):
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
     g_no_auto_arena = is_arena_infra_name(name_idx)
+    g_emit_preempt_ticks = 0
+    g_emit_since_tick = 0
+    if g_program_has_conc != 0:
+        owner := func_owner(fi)
+        if owner < 0 || lib_kind(owner) == LIB_KIND_USER:
+            g_emit_preempt_ticks = 1
     // main's automatic arena would be created before the user's arena_init
     // call and would share ids with the explicit arena. Arena programs use the
     // explicit arena instead.
@@ -6081,6 +6721,7 @@ fn ir_gen_func(fi: int):
     // bits->scaled 转换失效，仅在 dex 类型节点下标恰为 1 时碰巧生效）
     ret_ti := fi_return_type(fi)
     body := ast_data(fn_node)
+    g_cur_flow = scan_for_yield(body)
 
     // Record function metadata
     func_idx := g_ir_func_count
@@ -6236,6 +6877,7 @@ fn ir_gen_func(fi: int):
                 g_cur_ret_opt = 1
     if body >= 0:
         gen_expr(body)
+    g_cur_flow = 0
     g_cur_ret_ti = -1
     g_cur_ret_opt = 0
     g_cur_ret_dex_opt = 0
@@ -6266,48 +6908,71 @@ fn ir_gen_func(fi: int):
 // NB: applies to mutable AND immutable lets (mut/const init values both
 // need to be written at startup — unlike find_global_const_node which
 // only folds immutable constants at compile time).
+fn global_init_node_val(node: int) -> int:
+    g_glob_init_ok = 0
+    value_node := ast_c(node)
+    if value_node >= 0:
+        vk := ast_kind(value_node)
+        if vk == EXPR_INT || vk == EXPR_BOOL || vk == EXPR_DEX:
+            // dex 全局常量：定点缩放整数（精确形式初始值；apx 位模式由
+            // reg_one_global 从节点 a 取，见该函数）
+            g_glob_init_ok = 1
+            return ast_int_val(value_node)
+        if vk == EXPR_UNARY && ast_c(value_node) == UOP_NEG:
+            inner := ast_a(value_node)
+            if ast_kind(inner) == EXPR_INT || ast_kind(inner) == EXPR_BOOL || ast_kind(inner) == EXPR_DEX:
+                g_glob_init_ok = 1
+                return 0 - ast_int_val(inner)
+    return 0
+
 fn global_init_val(name_idx: int) -> int:
     if g_arena_pool_limit_cfg > 0 && str_eq(istr_get(name_idx), "g_arena_pool_limit") != 0:
         return g_arena_pool_limit_cfg
-    i : ., mut = g_global_let_count - 1
-    loop:
-        if i < 0:
-            break
-        node := cell_load(g_global_lets, i * 8)
-        if ast_a(node) == name_idx && global_decl_in_ctx(node):
-            value_node := ast_c(node)
-            if value_node >= 0:
-                vk := ast_kind(value_node)
-                if vk == EXPR_INT || vk == EXPR_BOOL:
-                    return ast_int_val(value_node)
-                if vk == EXPR_DEX:
-                    // dex 全局常量：定点缩放整数（精确形式初始值；apx 位模式由
-                    // reg_one_global 从节点 a 取，见该函数）
-                    return ast_int_val(value_node)
-                if vk == EXPR_UNARY && ast_c(value_node) == UOP_NEG:
-                    inner := ast_a(value_node)
-                    if ast_kind(inner) == EXPR_INT || ast_kind(inner) == EXPR_BOOL:
-                        return 0 - ast_int_val(inner)
-                    if ast_kind(inner) == EXPR_DEX:
-                        return 0 - ast_int_val(inner)
-        i = i - 1
-    if g_cur_lib >= 0:
-        i = g_global_let_count - 1
+    if name_idx >= 0 && name_idx < g_glob_cap:
+        if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+            i : ., mut = cell_load(g_glob_last_lib, ((g_cur_lib + 1) * g_glob_cap + name_idx) * 8)
+            loop:
+                if i < 0:
+                    break
+                node := cell_load(g_global_lets, i * 8)
+                if ast_a(node) == name_idx:
+                    v := global_init_node_val(node)
+                    if g_glob_init_ok != 0:
+                        return v
+                i = cell_load(g_glob_prev_lib, i * 8)
+        i2 : ., mut = cell_load(g_glob_last_any, name_idx * 8)
         loop:
-            if i < 0:
+            if i2 < 0:
                 break
-            node2 := cell_load(g_global_lets, i * 8)
+            node2 := cell_load(g_global_lets, i2 * 8)
             if ast_a(node2) == name_idx:
-                value_node2 := ast_c(node2)
-                if value_node2 >= 0:
-                    vk2 := ast_kind(value_node2)
-                    if vk2 == EXPR_INT || vk2 == EXPR_BOOL || vk2 == EXPR_DEX:
-                        return ast_int_val(value_node2)
-                    if vk2 == EXPR_UNARY && ast_c(value_node2) == UOP_NEG:
-                        inner2 := ast_a(value_node2)
-                        if ast_kind(inner2) == EXPR_INT || ast_kind(inner2) == EXPR_BOOL || ast_kind(inner2) == EXPR_DEX:
-                            return 0 - ast_int_val(inner2)
-            i = i - 1
+                v2 := global_init_node_val(node2)
+                if g_glob_init_ok != 0:
+                    return v2
+            i2 = cell_load(g_glob_prev_any, i2 * 8)
+        return 0
+    // Fallback for names interned after the map was built.
+    i3 : ., mut = g_global_let_count - 1
+    loop:
+        if i3 < 0:
+            break
+        node3 := cell_load(g_global_lets, i3 * 8)
+        if ast_a(node3) == name_idx && global_decl_in_ctx(node3):
+            v3 := global_init_node_val(node3)
+            if g_glob_init_ok != 0:
+                return v3
+        i3 = i3 - 1
+    if g_cur_lib >= 0:
+        i3 = g_global_let_count - 1
+        loop:
+            if i3 < 0:
+                break
+            node4 := cell_load(g_global_lets, i3 * 8)
+            if ast_a(node4) == name_idx:
+                v4 := global_init_node_val(node4)
+                if g_glob_init_ok != 0:
+                    return v4
+            i3 = i3 - 1
     return 0
 
 // 类型节点 -> `[T; N]` 的元素数 N（`[T]` 切片 = 0）；非聚合 = -1。
@@ -6377,8 +7042,76 @@ fn global_needs_runtime_init(name_idx: int) -> int:
         i = i - 1
     return 0
 
+// ── global var index ──
+// Every global identifier emission used to scan g_ir_globals (O(refs *
+// globals)). The maps store the first matching var id in declaration order;
+// -2 means "no entry" so a legitimate -1 var id is still distinguishable.
+g_gvar_name_first : string, mut
+g_gvar_lib_first : string, mut
+g_gvar_map_cap : int, mut
+g_gvar_rows : int, mut
+g_gvar_seen : int, mut
+
+fn gvar_map_build():
+    // Use the integer capacity as the built flag. The bootstrap-built corec
+    // leaves uninitialized string globals at 0, so reading g_gvar_name_first
+    // here would dereference null before the first allocation.
+    if g_gvar_seen == g_ir_global_count && g_gvar_map_cap > 0:
+        return
+    cap : ., mut = 64
+    if g_str_count > cap:
+        cap = g_str_count
+    rows : ., mut = g_lib_count + 1
+    if rows < 1:
+        rows = 1
+    a := alloc(cap * 8)
+    b := alloc(cap * rows * 8)
+    i : ., mut = 0
+    loop:
+        if i >= cap:
+            break
+        cell_store(a, i * 8, -2)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= cap * rows:
+            break
+        cell_store(b, i * 8, -2)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_ir_global_count:
+            break
+        ni := cell_load(g_ir_globals, i * 24)
+        gv := cell_load(g_ir_globals, i * 24 + 8)
+        if ni >= 0 && ni < cap:
+            if cell_load(a, ni * 8) == -2:
+                cell_store(a, ni * 8, gv)
+            ow := cell_load(g_ir_global_lib, i * 8)
+            if ow >= 0 && ow < rows:
+                slot := ow * cap + ni
+                if cell_load(b, slot * 8) == -2:
+                    cell_store(b, slot * 8, gv)
+        i = i + 1
+    g_gvar_name_first = a
+    g_gvar_lib_first = b
+    g_gvar_map_cap = cap
+    g_gvar_rows = rows
+    g_gvar_seen = g_ir_global_count
+
 // 按 name_idx 查已注册的全局 IR var（未注册 = -1）。
 fn global_var_of(name_idx: int) -> int:
+    if name_idx < 0:
+        return -1
+    gvar_map_build()
+    if name_idx < g_gvar_map_cap:
+        if g_cur_lib >= 0 && g_cur_lib < g_gvar_rows:
+            cand := cell_load(g_gvar_lib_first, (g_cur_lib * g_gvar_map_cap + name_idx) * 8)
+            if cand != -2:
+                return cand
+        cand2 := cell_load(g_gvar_name_first, name_idx * 8)
+        if cand2 != -2:
+            return cand2
     gi : ., mut = 0
     loop:
         if gi >= g_ir_global_count:
@@ -6496,65 +7229,90 @@ fn reg_one_global(name_idx: int):
     if decl_owner >= 0:
         g_cur_lib = decl_owner
     found : ., mut = 0
-    gi : ., mut = 0
-    loop:
-        if gi >= g_ir_global_count:
-            break
-        if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
-            found = 1
-            break
-        gi = gi + 1
+    if name_idx >= 0 && name_idx < g_glob_cap:
+        row : ., mut = 0
+        if g_cur_lib >= 0:
+            row = g_cur_lib + 1
+        if row < g_glob_rows:
+            slot := row * g_glob_cap + name_idx
+            if cell_load(g_reg_global_seen, slot * 8) != 0:
+                found = 1
+    else:
+        gi : ., mut = 0
+        loop:
+            if gi >= g_ir_global_count:
+                break
+            if cell_load(g_ir_globals, gi * 24) == name_idx && cell_load(g_ir_global_lib, gi * 8) == g_cur_lib:
+                found = 1
+                break
+            gi = gi + 1
     if found == 0:
         name := istr_get(name_idx)
         // dex 全局变量：精确（TI_DEX_S，缩放整数初始值）或
         // apx（TI_DEX，binary64 位模式初始值），按声明 LET 的类型节点与 apx 位
         gtype : ., mut = TI_INT
         is_dex_global : ., mut = 0
-        gli : ., mut = 0
-        loop:
-            if gli >= g_global_let_count:
-                break
-            lnode := cell_load(g_global_lets, gli * 8)
-            if ast_a(lnode) == name_idx && global_decl_in_ctx(lnode):
-                ltn := ast_b(lnode)
-                if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
-                    if ast_int_val(lnode) != 0:
-                        gtype = TI_DEX
-                    else:
-                        gtype = TI_DEX_S
-                    is_dex_global = 1
-                else if ltn >= 0 && dex_opt_type_node(ltn) != 0:
-                    // A dex? global slot uses the scaled form. is_dex_global stays 0
-                    // because its only consumer handles apx bit-pattern globals.
+        lnode : ., mut = -1
+        if name_idx >= 0 && name_idx < g_glob_cap:
+            if g_cur_lib >= 0 && g_cur_lib + 1 < g_glob_rows:
+                idx := cell_load(g_glob_first_lib, ((g_cur_lib + 1) * g_glob_cap + name_idx) * 8)
+                if idx >= 0:
+                    lnode = cell_load(g_global_lets, idx * 8)
+            else:
+                idx2 := cell_load(g_glob_first_any, name_idx * 8)
+                if idx2 >= 0:
+                    lnode = cell_load(g_global_lets, idx2 * 8)
+        else:
+            gli : ., mut = 0
+            loop:
+                if gli >= g_global_let_count:
+                    break
+                cand := cell_load(g_global_lets, gli * 8)
+                if ast_a(cand) == name_idx && global_decl_in_ctx(cand):
+                    lnode = cand
+                    break
+                gli = gli + 1
+        if lnode >= 0:
+            ltn := ast_b(lnode)
+            if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
+                if ast_int_val(lnode) != 0:
+                    gtype = TI_DEX
+                else:
                     gtype = TI_DEX_S
-                break
-            gli = gli + 1
+                is_dex_global = 1
+            else if ltn >= 0 && dex_opt_type_node(ltn) != 0:
+                // A dex? global slot uses the scaled form. is_dex_global stays 0
+                // because its only consumer handles apx bit-pattern globals.
+                gtype = TI_DEX_S
         gvar := new_ir_var(name, gtype)
         grow_ir_globals(g_ir_global_count + 1)
         cell_store(g_ir_globals, g_ir_global_count * 24, name_idx)
         cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
         // Const initializer — emitted by the ELF backend's _init_globals.
-        iv : int, mut = global_init_val(name_idx)
-        if is_dex_global != 0 && gtype == TI_DEX:
+        iv : ., mut = global_init_val(name_idx)
+        if is_dex_global != 0 && gtype == TI_DEX && lnode >= 0:
             // apx 全局：初始值为 binary64 位模式（缩放值 -> bits 从节点 a 取）
-            i2 : ., mut = 0
-            loop:
-                if i2 >= g_global_let_count:
-                    break
-                lnode2 := cell_load(g_global_lets, i2 * 8)
-                if ast_a(lnode2) == name_idx && global_decl_in_ctx(lnode2):
-                    vn := ast_c(lnode2)
-                    if vn >= 0 && ast_kind(vn) == EXPR_DEX:
-                        iv = ast_a(vn)
-                    break
-                i2 = i2 + 1
+            vn := ast_c(lnode)
+            if vn >= 0 && ast_kind(vn) == EXPR_DEX:
+                iv = ast_a(vn)
         cell_store(g_ir_globals, g_ir_global_count * 24 + 16, iv)
         cell_store(g_ir_global_lib, g_ir_global_count * 8, g_cur_lib)
+        if name_idx >= 0 && name_idx < g_glob_cap:
+            row2 : ., mut = 0
+            if g_cur_lib >= 0:
+                row2 = g_cur_lib + 1
+            if row2 < g_glob_rows:
+                cell_store(g_reg_global_seen, (row2 * g_glob_cap + name_idx) * 8, 1)
         g_ir_global_count = g_ir_global_count + 1
     g_cur_lib = saved_lib
 
 fn ir_gen_globals():
     ccr_set_raw_mode_from_source()
+    // Build the declaration index before reg_one_global starts consulting it.
+    glob_map_build()
+    // Force the global-var map to rebuild for this compilation; the table is
+    // regenerated even when the count happens to match the previous run.
+    g_gvar_seen = -1
     saved_lib := g_cur_lib
     // The parser records only file-scope declarations in g_global_lets.
     // Do not scan every EXPR_LET here: that also includes function locals.
@@ -6587,8 +7345,56 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_cir_rec_cap"))
     reg_one_global(str_intern("g_cir_rec_base"))
     reg_one_global(str_intern("g_cir_skip_journal"))
+    // Bootstrap mode is read by prelude_builtin_init at runtime. It lives in
+    // prelude.cr, which the parser's file-scope discovery misses, so without
+    // this registration the assignment is dropped in Core-built compilers and
+    // raw ABI names stay invisible (corec2 cannot rebuild the self-host source).
+    reg_one_global(str_intern("g_self_host_mode"))
+    // checker.cr's function-name index. Same file-scope discovery caveat:
+    // without registration the side tables are never written in a Core-built
+    // compiler and find_func falls back to the O(calls * functions) scan.
+    reg_one_global(str_intern("g_func_name_first"))
+    reg_one_global(str_intern("g_func_link_first"))
+    reg_one_global(str_intern("g_func_lib_first"))
+    reg_one_global(str_intern("g_func_name_cap"))
+    reg_one_global(str_intern("g_func_lib_rows"))
+    reg_one_global(str_intern("g_func_name_indexed"))
+    reg_one_global(str_intern("g_rc_func_map"))
+    reg_one_global(str_intern("g_rc_func_cap"))
+    reg_one_global(str_intern("g_rc_func_indexed"))
+    reg_one_global(str_intern("g_sym_name_last"))
+    reg_one_global(str_intern("g_sym_name_cap"))
+    reg_one_global(str_intern("g_sym_next"))
+    reg_one_global(str_intern("g_sym_next_cap"))
+    reg_one_global(str_intern("g_gvar_name_first"))
+    reg_one_global(str_intern("g_gvar_lib_first"))
+    reg_one_global(str_intern("g_gvar_map_cap"))
+    reg_one_global(str_intern("g_gvar_rows"))
+    reg_one_global(str_intern("g_gvar_seen"))
+    reg_one_global(str_intern("g_live_seg_start"))
+    reg_one_global(str_intern("g_live_seg_count"))
+    reg_one_global(str_intern("g_live_seg_cap"))
+    reg_one_global(str_intern("g_ctiming_last_ms"))
+    reg_one_global(str_intern("g_par_arith_depth"))
+    reg_one_global(str_intern("g_interp_mode"))
+    reg_one_global(str_intern("g_par_write_ni"))
+    reg_one_global(str_intern("g_glob_cap"))
+    reg_one_global(str_intern("g_glob_rows"))
+    reg_one_global(str_intern("g_glob_first_any"))
+    reg_one_global(str_intern("g_glob_last_any"))
+    reg_one_global(str_intern("g_glob_first_lib"))
+    reg_one_global(str_intern("g_glob_last_lib"))
+    reg_one_global(str_intern("g_glob_prev_any"))
+    reg_one_global(str_intern("g_glob_prev_lib"))
+    reg_one_global(str_intern("g_reg_global_seen"))
+    reg_one_global(str_intern("g_glob_init_ok"))
     // Runtime globals needed by emit_alloc_body and emit_start.
     // These MUST exist in BSS for every program, even without rt.cr included.
+    // g_rt_argc/g_rt_argv_ptr feed the _start argv save and the inline
+    // get_arg builtin; if they are not registered, get_arg falls through to a
+    // nonexistent call and returns -1.
+    reg_one_global(str_intern("g_rt_argc"))
+    reg_one_global(str_intern("g_rt_argv_ptr"))
     reg_one_global(str_intern("g_heap_ptr"))
     reg_one_global(str_intern("g_heap_end"))
     reg_one_global(str_intern("g_current_arena"))
@@ -7014,9 +7820,28 @@ fn ccr_set_raw_mode_from_source():
     // to corearch so both sides agree before code generation.
     g_ccr_emit_raw_int = 0
     g_program_has_arena = ccr_source_has_marker("fn arena_init")
+    if g_program_has_arena != 0:
+        // The arena allocator speaks the SYSTEM raw-word ABI: syscall6 returns
+        // a machine address that is immediately viewed through @str_of.
+        g_ccr_emit_raw_int = 1
+    g_program_has_conc = 0
+    // The tick lives in conc_cpu; `import conc` alone only brings the
+    // plan/MessageRef substrate and does not link the scheduler.
+    if ccr_source_has_marker("import sched") != 0:
+        g_program_has_conc = 1
+    if ccr_source_has_marker("import chan") != 0:
+        g_program_has_conc = 1
+    if ccr_source_has_marker("import conc_cpu") != 0:
+        g_program_has_conc = 1
     if ccr_source_has_marker("fn parse_expr") != 0:
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("fn corearch_main") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import sched") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import chan") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import conc") != 0:
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("import cli") != 0:
         // The CLI word-table layer intentionally stores raw string pointers via

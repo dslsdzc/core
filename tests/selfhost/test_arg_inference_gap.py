@@ -238,6 +238,7 @@ def test_leg_e_range_go_iter_var():
     背景：本条 = **修实参推断顺带暴露的 checker `go` 绑定缺口**（`parser.cr:617` 只记名、
     `checker.cr:2981-3000` 原先不 bind）—— 这是本次**第二个**顺带修复的既有缺陷。"""
     e1 = """
+import sched
 fn square(x: int) -> int:
     return x * x
 fn main() -> int:
@@ -252,6 +253,7 @@ fn main() -> int:
     return i
 """
     e3 = """
+import sched
 fn square(x: int) -> int:
     return x * x
 fn main() -> int:

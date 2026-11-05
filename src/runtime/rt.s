@@ -16,10 +16,15 @@ heap_start:
     .space 1024 * 1024 * 1024
 heap_end:
 .balign 8
-current_g: .space 8  # current goroutine pointer (set via g_set_curg)
+current_g: .space 8  # legacy slot; current G now lives in %fs:0
+main_tls:
+    .space 32        # +0 current_g, +8 m_idx, +16 current_arena, +24 arena_suspend
 
 .section .data
 heap_ptr: .quad 0
+# Current end of the active bump region. Starts at the static heap_end label and
+# is replaced by mmap-backed regions when the static 1 GiB arena is exhausted.
+heap_limit: .quad heap_end
 empty_str_hdr: .quad 1
 empty_str: .byte 0
 .balign 8
@@ -44,6 +49,20 @@ _start:
     lea rax, [rip + rt_argv]
     mov [rax], rsi
 
+    # Per-thread runtime state: %fs base -> main_tls.
+    lea rsi, [rip + main_tls]
+    mov edi, 0x1002          # ARCH_SET_FS
+    mov eax, 158             # arch_prctl
+    syscall
+    mov rax, -1
+    mov qword ptr fs:[0], rax
+    xor eax, eax
+    mov qword ptr fs:[8], rax
+    mov rax, -1
+    mov qword ptr fs:[16], rax
+    xor eax, eax
+    mov qword ptr fs:[24], rax
+
     # Initialize bump allocator heap pointer
     lea rax, [rip + heap_start]
     lea r10, [rip + heap_ptr]
@@ -61,7 +80,7 @@ _start:
     call main
 
     mov edi, eax
-    mov eax, 60
+    mov eax, 231         # exit_group: all M workers
     syscall
 
 # alloc(size: int) -> string (pointer)
@@ -76,12 +95,17 @@ alloc:
     mov r8, rdi          # save requested size in r8
     add rdi, 15          # size + 8(header) + 7(align)
     and rdi, -8          # align to 8
+
+.Lalloc_try:
     lea r10, [rip + heap_ptr]
     mov rax, [r10]
     lea rdx, [rax + rdi]
-    lea rcx, [rip + heap_end]
+    lea rcx, [rip + heap_limit]
+    mov rcx, [rcx]
     cmp rdx, rcx
-    ja .Lalloc_oom
+    ja .Lalloc_grow
+
+.Lalloc_commit:
     mov [r10], rdx
 
     # Write requested size at header (before data ptr)
@@ -102,9 +126,47 @@ alloc:
     lea rax, [rax + 8]    # return ptr to data (after header)
     ret
 
-.Lalloc_oom:
-    xor eax, eax
-    ret
+# The static BSS heap is deliberately 1 GiB so every heap address stays inside
+# a signed 32-bit RIP-relative displacement. When it fills, map another region
+# with mmap and continue there instead of returning NULL (a NULL alloc used to
+# surface as an unrelated cell_load SIGSEGV in the compiler).
+.Lalloc_grow:
+    # r8 = requested size, rdi = aligned total. Grow by at least 1 GiB, and by
+    # the request size for larger allocations.
+    mov rsi, 1073741824
+    cmp rdi, rsi
+    jbe .Lalloc_grow_len
+    lea rsi, [rdi + 4096]
+.Lalloc_grow_len:
+    push rdi
+    push rsi
+    push r8
+    mov eax, 9            # mmap
+    xor edi, edi          # addr = NULL
+    mov edx, 3            # PROT_READ|PROT_WRITE
+    mov r10d, 34          # MAP_PRIVATE|MAP_ANONYMOUS
+    mov r8, -1            # fd = -1
+    xor r9d, r9d          # offset = 0
+    syscall
+    pop r8
+    pop rsi
+    pop rdi
+    test rax, rax
+    js .Lalloc_fail
+
+    lea r10, [rip + heap_ptr]
+    mov [r10], rax
+    lea rcx, [rax + rsi]
+    lea r11, [rip + heap_limit]
+    mov [r11], rcx
+    jmp .Lalloc_try
+
+.Lalloc_fail:
+    # Fail closed: a silent NULL return corrupts callers that cannot check it.
+    mov edi, 132
+    mov eax, 231          # exit_group
+    syscall
+    ud2
 
 
 # get_arg(n: int) -> string
@@ -249,22 +311,103 @@ fiber_init:
 
     ret
 
-# g_set_curg(ptr) — set current goroutine pointer
-# Core-side bridge: rt.s cannot reference Core globals directly
-# (they are managed by the ELF backend), so the current G lives here.
+# g_set_curg(ptr) — set current goroutine pointer (per-thread)
 .globl g_set_curg
 .type g_set_curg, @function
 g_set_curg:
-    lea rax, [rip + current_g]
-    mov [rax], rdi
+    mov qword ptr fs:[0], rdi
     ret
 
-# g_get_curg() — get current goroutine pointer
+# g_get_curg() — get current goroutine pointer (per-thread)
 .globl g_get_curg
 .type g_get_curg, @function
 g_get_curg:
-    lea rax, [rip + current_g]
-    mov rax, [rax]
+    mov rax, qword ptr fs:[0]
+    ret
+
+# Per-thread runtime state accessors.
+.globl rt_m_idx
+.type rt_m_idx, @function
+rt_m_idx:
+    mov rax, qword ptr fs:[8]
+    ret
+
+.globl rt_sigreturn_stub
+.type rt_sigreturn_stub, @function
+rt_sigreturn_stub:
+    mov eax, 15
+    syscall
+
+.globl rt_set_m_idx
+.type rt_set_m_idx, @function
+rt_set_m_idx:
+    mov qword ptr fs:[8], rdi
+    ret
+
+.globl rt_current_arena
+.type rt_current_arena, @function
+rt_current_arena:
+    mov rax, qword ptr fs:[16]
+    ret
+
+.globl rt_set_current_arena
+.type rt_set_current_arena, @function
+rt_set_current_arena:
+    mov qword ptr fs:[16], rdi
+    ret
+
+.globl rt_arena_suspend
+.type rt_arena_suspend, @function
+rt_arena_suspend:
+    mov rax, qword ptr fs:[24]
+    ret
+
+.globl rt_set_arena_suspend
+.type rt_set_arena_suspend, @function
+rt_set_arena_suspend:
+    mov qword ptr fs:[24], rdi
+    ret
+
+# Atomic primitives. Offsets are byte offsets; callers keep them 8-byte aligned.
+.globl rt_sp
+.type rt_sp, @function
+rt_sp:
+    mov rax, rsp
+    ret
+
+.globl rt_atomic_load
+.type rt_atomic_load, @function
+rt_atomic_load:
+    mov rax, qword ptr [rdi + rsi]
+    ret
+
+.globl rt_atomic_store
+.type rt_atomic_store, @function
+rt_atomic_store:
+    mov qword ptr [rdi + rsi], rdx
+    ret
+
+.globl rt_atomic_xchg
+.type rt_atomic_xchg, @function
+rt_atomic_xchg:
+    mov rax, rdx
+    xchg qword ptr [rdi + rsi], rax
+    ret
+
+.globl rt_atomic_cas
+.type rt_atomic_cas, @function
+rt_atomic_cas:
+    mov rax, rdx
+    lock cmpxchg qword ptr [rdi + rsi], rcx
+    sete al
+    movzx eax, al
+    ret
+
+.globl rt_atomic_fetch_add
+.type rt_atomic_fetch_add, @function
+rt_atomic_fetch_add:
+    mov rax, rdx
+    lock xadd qword ptr [rdi + rsi], rax
     ret
 
 # m_start_workers(n: int) — launch N worker threads via clone
@@ -284,46 +427,53 @@ m_start_workers:
     push r12
     push r13
     push r15
-    mov rbx, rdi         # rbx = n (number of workers)
-    xor r12d, r12d       # r12 = 0 (start from index 0; skip 0 = main thread)
+    mov rbx, rdi         # rbx = n (total workers)
+    xor r12d, r12d       # r12 = 0; increment before first use
 .Lworker_loop:
-    inc r12              # increment to next worker index (start at 1)
+    inc r12              # worker index 1..n-1
     cmp r12, rbx
-    jge .Ldone           # if r12 >= n, done (workers are 1..n-1; n-1 total)
+    jge .Ldone
 
-    # Allocate 64KB stack for worker
+    # 64KB stack for the worker; 16-byte align the top.
     push r12
     mov rdi, 65536
     call alloc
     pop r12
     test rax, rax
-    jz .Lnext_worker     # skip if alloc fails
-
-    # rax = stack_base, stack_top = base + 65536
+    jz .Lnext_worker
     mov r15, rax
     add r15, 65536
+    and r15, -16
 
-    # Set up child stack:
-    #   child_stack_top - 8  = worker index (popped by worker_entry)
-    #   child_stack_top - 16 = return address (worker_entry)
-    lea r13, [rip + worker_entry]
-    mov [r15 - 16], r13
+    # 32-byte TLS block per worker: current_g, m_idx, current_arena, suspend.
+    mov rdi, 32
+    call alloc
+    test rax, rax
+    jz .Lnext_worker
+    mov r13, rax
+    mov qword ptr [r13], -1
+    mov [r13 + 8], r12
+    mov qword ptr [r13 + 16], -1
+    mov qword ptr [r13 + 24], 0
+
+    # Child stack: [top-16] = worker_entry, [top-8] = worker index.
+    lea r11, [rip + worker_entry]
+    mov [r15 - 16], r11
     mov [r15 - 8], r12
 
-    # clone(flags=0x10F00, child_stack=r15-16, parent_tid=0, child_tls=0, child_tid=0)
-    mov edi, 0x10F00
+    # clone(flags=CLONE_*|CLONE_SETTLS, child_stack, parent_tid, child_tls, child_tid)
+    mov edi, 0x90F00
     lea rsi, [r15 - 16]
     xor edx, edx
     xor r10d, r10d
-    xor r8d, r8d
-    mov eax, 56          # sys_clone
+    mov r8, r13
+    mov eax, 56
     syscall
 
     test rax, rax
     jz .Lchild
 
 .Lnext_worker:
-    inc r12
     jmp .Lworker_loop
 
 .Lchild:
@@ -350,31 +500,45 @@ worker_entry:
     xor edi, edi
     syscall
 
-# goroutine_entry_wrapper: entry point for goroutines spawned via go.
-# Called via fiber_init as the fiber entry.
-# Reads the current G via g_get_curg(),
-# loads saved_fn and saved_arg from G, calls saved_fn(saved_arg),
-# sends rax to result_ch, then reclaims the goroutine:
-# g_free (arena_reset + mark _Gdead) and sched_schedule to the next G.
-.globl goroutine_entry_wrapper
-.type goroutine_entry_wrapper, @function
-goroutine_entry_wrapper:
-    call g_get_curg       # rax = current G pointer
-    mov rdi, [rax + 64]   # rdi = saved_arg (first parameter — SysV rdi)
-    mov rax, [rax + 56]   # rax = saved_fn (G pointer no longer needed)
-    call rax              # call saved_fn(saved_arg)
-    # rax = return value
-    push rax
-    call g_get_curg
-    mov rdi, [rax + 40]   # rdi = result_ch
-    pop rsi               # rsi = return value
-    call chan_send        # chan_send(result_ch, return_value)
-.Lexit:
-    # Get current G and reclaim it: arena_reset + mark _Gdead
-    call g_get_curg
-    mov rdi, rax
-    call g_free
-    # Exit goroutine: switch to next without re-enqueueing
-    call sched_schedule
-    # If schedule returns (no more work), just return (fiber dead)
-    ret
+# sched_call_N(table, index, args...): load the function pointer and tail-call it.
+# These are the native/rt.s counterparts of the backend-emitted trampolines;
+# they are used by the self-hosted compiler's own conc runtime.
+.globl sched_call_0
+.type sched_call_0, @function
+sched_call_0:
+    mov rax, [rdi + rsi*8]
+    jmp rax
+
+.globl sched_call_1
+.type sched_call_1, @function
+sched_call_1:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    jmp rax
+
+.globl sched_call_2
+.type sched_call_2, @function
+sched_call_2:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    jmp rax
+
+.globl sched_call_3
+.type sched_call_3, @function
+sched_call_3:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, r8
+    jmp rax
+
+.globl sched_call_4
+.type sched_call_4, @function
+sched_call_4:
+    mov rax, [rdi + rsi*8]
+    mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, r8
+    mov rcx, r9
+    jmp rax

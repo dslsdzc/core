@@ -95,18 +95,24 @@ g_cli_matched_cmd : string, mut
 fn cli_init(prog: string, desc: string), pub:
     g_cli_prog = prog
     g_cli_desc = desc
+    // Fixed-capacity tables: CLI limits are small, and the self-host compiler
+    // must not depend on a dynamic realloc path during startup.
+    g_cli_cmds = alloc(16 * 16)
     g_cli_cmd_count = 0
-    g_cli_cmd_cap = 0
+    g_cli_cmd_cap = 16
+    g_cli_flags = alloc(32 * 56)
     g_cli_flag_count = 0
-    g_cli_flag_cap = 0
+    g_cli_flag_cap = 32
+    g_cli_args = alloc(64 * 8)
     g_cli_arg_count = 0
-    g_cli_arg_cap = 0
+    g_cli_arg_cap = 64
     g_cli_matched_cmd = ""
 
 // --- Registration ---
 
 fn cli_cmd(name: string, desc: string), pub:
-    grow_cli_cmds(g_cli_cmd_count + 1)
+    if g_cli_cmd_count >= g_cli_cmd_cap:
+        return
     off : ., mut = g_cli_cmd_count * 16
     // Flat table with 16-byte records: name and description. String values are
     // stored as 64-bit words, so access them through @ptr_of inside unsafe.
@@ -116,7 +122,8 @@ fn cli_cmd(name: string, desc: string), pub:
     g_cli_cmd_count = g_cli_cmd_count + 1
 
 fn cli_flag(long_name: string, short_name: string, desc: string), pub:
-    grow_cli_flags(g_cli_flag_count + 1)
+    if g_cli_flag_count >= g_cli_flag_cap:
+        return
     off : ., mut = g_cli_flag_count * 56
     unsafe:
         cell_store(g_cli_flags, off, @ptr_of(long_name))

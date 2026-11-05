@@ -1413,7 +1413,6 @@ IR_ALLOC = 6          # ast.cr:554（同）
 IR_LOAD = 10          # ast.cr:558（同）
 IR_DEREF = 25         # ast.cr:573（tk = 访问宽度，非行号）
 IR_STORE_PTR = 26     # ast.cr:574（同上）
-IR_SPAWN = 27         # ast.cr:576（tk = spawn_count；-1 = 动态）
 IR_BOUNDS_CHECK = 30  # ast.cr:579（tk = 0/1 动态上限旗标）
 IR_HOTPATCH_ROUTE = 39  # ast.cr:587（F1 修正后 tk 恒 0 = 无面）
 IR_I2F = 49           # ast.cr:596（恒 TI_DEX 行）
@@ -1422,7 +1421,7 @@ TT_ATOM = 7           # type_terms.cr 的 TT_* 标签
 AK_INT, AK_DEX, AK_STRING, AK_BOOL, AK_UNIT, AK_PTR = 0, 1, 2, 3, 4, 8
 # 类型行面（可建项）op 集 = 规格表；辅码面 op 集 = 规格表；其余 = 无面。
 MINT_OPS = {IR_CONST, IR_BINARY, IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}
-AUX_OPS = {IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_BOUNDS_CHECK, IR_HOTPATCH_ROUTE}
+AUX_OPS = {IR_DEREF, IR_STORE_PTR, IR_BOUNDS_CHECK, IR_HOTPATCH_ROUTE}
 
 # 复合行夹具（F2 面）：BINARY 的操作数行是指针行（AK_PTR 项：b = -1 ⇒ 不可逆）——
 # 该节点的项槽必须为 -1、辅码槽 = 原行号，派生码 ≡ 行号（单槽化前该槽的值）。
@@ -1633,8 +1632,6 @@ def test_p4t4_tk_slot_rule_per_node():
                     traps['bounds_flag0'] += 1
                 if op == IR_CALL and tk in (0, 2, 3, 4):
                     traps['call_row'] += 1
-            if op == IR_SPAWN and tk == -1:
-                traps['spawn_dyn'] += 1
         # 正控（类型行的项内容：a = AK_*，b = 行号）
         assert (0, AK_INT) in saw['const_rows'], saw['const_rows']
         assert (2, AK_BOOL) in saw['const_rows'], saw['const_rows']
@@ -2269,22 +2266,20 @@ def test_p6t3_types_match_memory_face():
 
 def test_p6t3_aux_face_and_composite_preserved():
     """㊷ 辅码面 + 复合行分类：辅码面 op（`IR_BOUNDS_CHECK`/`IR_DEREF`/
-    `IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）**必须无 type_id**（-1）；
+    `IR_STORE_PTR`/`IR_HOTPATCH_ROUTE`）**必须无 type_id**（-1）；
     复合行（`ptr_ref_first.cr` 的 `IR_BINARY` 指针行）同。语义特性只进 flags：
-    BOUNDS_CHECK 的动态上限 = bit0，SPAWN 的动态标记 = bit1。
+    BOUNDS_CHECK 的动态上限 = bit0。
     非空转：三类形态在语料里都必须真出现。"""
-    aux_ops = {IR_BOUNDS_CHECK, IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_HOTPATCH_ROUTE}
+    aux_ops = {IR_BOUNDS_CHECK, IR_DEREF, IR_STORE_PTR, IR_HOTPATCH_ROUTE}
     # 语料分工：
     #   ptr_ref_first.cr = 复合行（IR_BINARY 指针行）+ hotpatch route 辅码；
     #   p_dex.cr = IR_STORE_PTR + IR_BOUNDS_CHECK 旗标；
-    #   p_spawn.cr = IR_SPAWN 动态标记。
+
     sources = [(os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr'), 'prf', 'comp'),
                (os.path.join(BASE, 'tests', 'probes', 'p_dex.cr'), 'dex', 'aux'),
-               (os.path.join(BASE, 'tests', 'probes', 'p_spawn.cr'), 'spawn', 'aux'),
                (tk_fixture('p6t3aux_tk', TK_FIXTURE), 'tk', 'aux')]
     total_aux = 0
     saw_bound = 0
-    saw_spawn = 0
     for src, tag, kind in sources:
         ccr_path = os.path.join(BASE, 'build', f'test_p6t3_aux_{tag}.ccr')
         try:
@@ -2307,8 +2302,6 @@ def test_p6t3_aux_face_and_composite_preserved():
                         f"{tag}: aux-face op {op} carries type_id {type_id} (must be -1)"
                 if op == IR_BOUNDS_CHECK and flags_ & 1:
                     saw_bound += 1
-                if op == IR_SPAWN and flags_ & 2:
-                    saw_spawn += 1
                 assert flags_ <= 0x7
 
         finally:
@@ -2317,7 +2310,6 @@ def test_p6t3_aux_face_and_composite_preserved():
                 _cleanup(src)
     assert total_aux > 0, "vacuous: no aux-face node in any source"
     assert saw_bound > 0, "vacuous: no dynamic BOUNDS_CHECK flag in corpus"
-    assert saw_spawn > 0, "vacuous: no dynamic SPAWN flag in corpus"
 
 
 def _patch_type_id(data: bytes, node: int, value: int) -> bytes:

@@ -129,9 +129,10 @@ backend_support_files = [
     'src/compiler/ccr_io.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',
-    'src/stdlib/goroutine.cr',
-    'src/stdlib/chan.cr',
-    'src/stdlib/sched.cr',
+    'src/stdlib/conc.cr',
+    'src/os/linux/runtime/conc_cpu.cr',
+    'src/os/linux/runtime/chan.cr',
+    'src/os/linux/runtime/sched.cr',
     'src/arch/x86_64/backend_flags.cr',
     'src/arch/x86_64/corearch.cr',
 ]
@@ -325,11 +326,13 @@ def main():
     # corec — frontend: .cr → .ccr/.cir
     corec_files = COREC_FILES
     guard_manifest(corec_files, 'corec')
-    compile_and_assemble(
-        concat(corec_files, wrapper_fn='compiler_main'),
-        label='corec',
-        out_name='corec',
-    )
+    corec_src = concat(corec_files, wrapper_fn='compiler_main')
+    # Persist the exact input for the Core self-host chain (corec -> corec2 ->
+    # corec3). Regenerating it here prevents a stale build/corec_self.cr from
+    # silently compiling old sources during bootstrap.
+    with open(os.path.join(BASE, 'build', 'corec_self.cr'), 'w', encoding='utf-8') as fh:
+        fh.write(corec_src)
+    compile_and_assemble(corec_src, label='corec', out_name='corec')
 
     # corearch — backend: .ccr → binary/asm
     # 段顺序 = 行为定义面：common → hit → kernel → 架构轴 → 格式轴 → OS 轴
@@ -361,9 +364,10 @@ def main():
         'src/stdlib/hotpatch.cr',
         'src/stdlib/panic.cr',
         'src/stdlib/arena.cr',
-        'src/stdlib/goroutine.cr',
-        'src/stdlib/chan.cr',
-        'src/stdlib/sched.cr',
+        'src/stdlib/conc.cr',
+        'src/os/linux/runtime/conc_cpu.cr',
+        'src/os/linux/runtime/chan.cr',
+        'src/os/linux/runtime/sched.cr',
         'src/kernel/bytes.cr',
         'src/compiler/ast.cr',
         'src/compiler/ccr_schema.cr',

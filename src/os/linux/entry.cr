@@ -13,6 +13,99 @@
 // Depends on instr.cr for encoding primitives and sizes.cr for sz_start_body and
 // sz_start_argv_save.
 
+// TLS 初始化：arch_prctl(ARCH_SET_FS, tls_block)，然后写
+// fs:[0] current_g=-1、fs:[8] m_idx=0、fs:[16] current_arena=-1、
+// fs:[24] arena_suspend=0。tls_block 地址由 g_start_tls_patch_pos 回填。
+fn emit_tls_init(buf: string, pos: int) -> int:
+    cp : ., mut = pos
+    g_start_tls_patch_pos = cp + 3
+    // arch_prctl(ARCH_SET_FS, addr) takes the address in rsi. e2_lr always
+    // targets r10, so it cannot be used here: doing so left rsi holding the
+    // initial argv pointer and set FS to the process stack. The four fs:
+    // stores below then overwrote argc/argv (fs:0 clobbered argv[0]).
+    cp = cp + e2_lrb_reg(buf, cp, 6)        // lea rsi, [rip+disp32]
+    e2_w8(buf, cp, 191)                     // mov edi, imm32
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 0x1002)       // ARCH_SET_FS
+    e2_w8(buf, cp, 184)                     // mov eax, imm32
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 158)          // sys_arch_prctl
+    e2_w8(buf, cp, 15)                      // syscall
+    cp = cp + 1
+    e2_w8(buf, cp, 5)
+    cp = cp + 1
+
+    e2_w8(buf, cp, 72)                      // mov rax, -1
+    cp = cp + 1
+    e2_w8(buf, cp, 199)
+    cp = cp + 1
+    e2_w8(buf, cp, 192)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, -1)
+    e2_w8(buf, cp, 100)                     // mov fs:[0], rax
+    cp = cp + 1
+    e2_w8(buf, cp, 72)
+    cp = cp + 1
+    e2_w8(buf, cp, 137)
+    cp = cp + 1
+    e2_w8(buf, cp, 4)
+    cp = cp + 1
+    e2_w8(buf, cp, 37)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 0)
+
+    e2_w8(buf, cp, 49)                      // xor eax, eax
+    cp = cp + 1
+    e2_w8(buf, cp, 192)
+    cp = cp + 1
+    e2_w8(buf, cp, 100)                     // mov fs:[8], rax
+    cp = cp + 1
+    e2_w8(buf, cp, 72)
+    cp = cp + 1
+    e2_w8(buf, cp, 137)
+    cp = cp + 1
+    e2_w8(buf, cp, 4)
+    cp = cp + 1
+    e2_w8(buf, cp, 37)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 8)
+
+    e2_w8(buf, cp, 72)                      // mov rax, -1
+    cp = cp + 1
+    e2_w8(buf, cp, 199)
+    cp = cp + 1
+    e2_w8(buf, cp, 192)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, -1)
+    e2_w8(buf, cp, 100)                     // mov fs:[16], rax
+    cp = cp + 1
+    e2_w8(buf, cp, 72)
+    cp = cp + 1
+    e2_w8(buf, cp, 137)
+    cp = cp + 1
+    e2_w8(buf, cp, 4)
+    cp = cp + 1
+    e2_w8(buf, cp, 37)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 16)
+
+    e2_w8(buf, cp, 49)                      // xor eax, eax
+    cp = cp + 1
+    e2_w8(buf, cp, 192)
+    cp = cp + 1
+    e2_w8(buf, cp, 100)                     // mov fs:[24], rax
+    cp = cp + 1
+    e2_w8(buf, cp, 72)
+    cp = cp + 1
+    e2_w8(buf, cp, 137)
+    cp = cp + 1
+    e2_w8(buf, cp, 4)
+    cp = cp + 1
+    e2_w8(buf, cp, 37)
+    cp = cp + 1
+    cp = cp + e2_w32(buf, cp, 24)
+    return cp - pos
+
 fn emit_start(buf: string, pos: int) -> int:
     cp : ., mut = pos
     // mov rdi, [rsp], load argc (rdi=7)
@@ -57,6 +150,9 @@ fn emit_start(buf: string, pos: int) -> int:
         e2_w8(buf, cp, 137)
         cp = cp + 1
         cp = cp + emit_modrm(buf, cp, 0, 6, 10%8)
+
+    // Per-thread TLS must exist before any alloc/main call.
+    cp = cp + emit_tls_init(buf, cp)
 
     // Initialize g_current_arena = -1 (no arena active)
     if gv_current_arena >= 0:
@@ -133,7 +229,7 @@ fn emit_start(buf: string, pos: int) -> int:
     // mov eax, 60  (sys_exit)
     e2_w8(buf, cp, 184)
     cp = cp + 1  // 0xB8 MOV r, imm32 (rax)
-    cp = cp + e2_w32(buf, cp, 60)
+    cp = cp + e2_w32(buf, cp, 231)  // exit_group: terminate all M workers
 
     // syscall
     e2_w8(buf, cp, 15)
@@ -149,6 +245,8 @@ fn emit_start_size() -> int:
         sz = sz + sz_start_argv_save()
     if gv_argv >= 0:
         sz = sz + sz_start_argv_save()
+    // TLS init: arch_prctl + four fs stores = 73 bytes (emit_tls_init).
+    sz = sz + 73
     // g_current_arena init: lea(7) + rex+mov+modrm+imm32(7) = 14 bytes
     if gv_current_arena >= 0:
         sz = sz + 14

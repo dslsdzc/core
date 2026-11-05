@@ -389,7 +389,7 @@ fn sh_term_of_ti(ti: int) -> int:
 //   · 辅码（face 1，tk 语义 = 非类型码 -> 原码进辅码槽）：IR_BOUNDS_CHECK（0/1
 //     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（旧访问宽度
 //     码 8/4/2/1；v10 Task 5 起前端不再发射，宽度由 corearch 从 pointee 语义类型
-//     重建——分类规则保留：重引入的宽度码仍必须落辅码面）/ IR_SPAWN（spawn_count；
+//     重建——分类规则保留：重引入的宽度码仍必须落辅码面）；
 //     -1 = 动态）/ IR_HOTPATCH_ROUTE with explicit 0.
 //   · 无类型信息（face 2，tk 语义 = 无）：其余全部 op。
 // Numeric coincidence: flag 1 equals the TI_DEX row and the legacy width code 8
@@ -437,7 +437,7 @@ fn sh_tk_face_of_code(opcode: int, tk: int) -> int:
             if tt_atom_of_term(sh_term_of_ti(tk)) == tk:
                 return 0
         return 1   // 复合行 / 越界 / 桥接缺口 / 负值 ， 一律辅码（码保真）
-    if opcode == IR_BOUNDS_CHECK || opcode == IR_DEREF || opcode == IR_STORE_PTR || opcode == IR_SPAWN || opcode == IR_HOTPATCH_ROUTE:
+    if opcode == IR_BOUNDS_CHECK || opcode == IR_DEREF || opcode == IR_STORE_PTR || opcode == IR_HOTPATCH_ROUTE:
         return 1
     return 2
 
@@ -473,7 +473,7 @@ fn sh_tk_split_impl(opcode: int, tk: int, count_fail: int):
         g_sh_slot_term = sh_term_of_ti(tk)
     else:
         // 码保真：旗标/宽度/计数/复合行码/无类型信息 op 的非零码一律原样承载（含负码，
-        // IR_SPAWN 的 tk = -1 = 动态 spawn 计数，是合法辅码，不得钳成 0）。
+        // 辅码不得钳成 0）。
         // 辅码哨兵：0 = 无；非零（含负）= 该码本身。
         g_sh_slot_aux = tk
         // If a type-information operation has an untranslatable row (out of range

@@ -398,7 +398,7 @@ fn ir_interp_str_char(a: int, i: int) -> int:
 fn ir_interp_str_sub(a: int, start: int, len: int) -> int:
     return str_intern(str_sub(istr_get(a), start, len))
 
-// Dispatch for IR_CALL and IR_SPAWN. d is the result slot, s1 the first argument
+// Dispatch for IR_CALL. d is the result slot, s1 the first argument
 // slot, s2 the argument count, and s3 the interned function name. Builtins mirror
 // the previous main-loop branches. User functions run inline through
 // ir_interp_run_fn; nested calls use the same depth check.
@@ -1073,8 +1073,8 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             println("error: interp 不支持固定地址放置（IR_ALLOC_AT）")
             g_interp_abort = 2
             break
-        // IR_CALL and IR_SPAWN use the shared dispatch for builtins and inline calls.
-        if op2 == 4 || op2 == 27:
+        // IR_CALL uses the shared dispatch for builtins and inline calls.
+        if op2 == 4:
             ir_interp_call(d2, t1, t2, t3)
         if op2 == 5:
             if t1 >= 0:
@@ -1614,7 +1614,7 @@ fn ir_interpret() -> int:
             if d >= 0:
                 cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8))
 
-        // IR_CALL and IR_SPAWN use the shared dispatch in ir_interp_call. Builtins,
+        // IR_CALL uses the shared dispatch in ir_interp_call. Builtins,
         // inline user functions, nested recursion, and abort propagation all live
         // in that one function.
         if op == 4 || op == 27:

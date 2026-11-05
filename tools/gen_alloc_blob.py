@@ -41,6 +41,9 @@ EXTERNAL_GLOBALS = {
     "g_heap_ptr",
     "g_heap_end",
     "g_arena_scalars",
+    "g_slot_free_m",
+    "g_slot_count_m",
+    "g_segment_count_m",
     "g_arena_scalars_ready",
     "g_arena_suspend",
     "g_arena_slot",
@@ -65,6 +68,10 @@ EXTERNAL_GLOBALS = {
 EXTERNAL_CALLS = {
     "heap_expand",
     "arena_grow_pool",
+    "arena_grow_pool_m",
+    "rt_m_idx",
+    "rt_current_arena",
+    "rt_arena_suspend",
 }
 
 GROUP_SIMPLE = 0
@@ -108,7 +115,11 @@ def compile_source(source: Path) -> bytes:
     def declare_with_externals():
         original_declare()
         for name in sorted(EXTERNAL_CALLS):
-            resolver.symtab.define(name, SymbolKind.FUNCTION, BaseType("int"))
+            try:
+                resolver.symtab.define(name, SymbolKind.FUNCTION, BaseType("int"))
+            except NameError:
+                # Already a bootstrap builtin (rt_* runtime ABI).
+                pass
 
     resolver._declare_builtins = declare_with_externals
     resolver.resolve(ast)

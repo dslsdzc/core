@@ -364,6 +364,7 @@ g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
 g_dyn_type_set_cap : int, mut
 
+g_ir_func_reachable : string, mut
 g_ir_func_name_idx : string, mut
 g_ir_func_name_idx_cap : int, mut
 g_ir_func_ret_type : string, mut
@@ -506,7 +507,6 @@ g_ni_get_arg : int, mut
 g_ni_cell_store : int, mut
 g_ni_dyncpy : int, mut
 g_ni_cell_load : int, mut
-g_ni_goroutine_wrapper_addr : int, mut
 // Single-pass backpatching: pending forward jumps
 g_pending_pos : string, mut        // rel32 buffer positions to patch
 g_pending_label : string, mut      // target label indices

@@ -23,7 +23,7 @@ fn _panic_writeln(s: string):
 // Core panic entry point — prints message + location to stderr, then aborts.
 // Mirrors Rust's default_hook output format:
 //   panicked at FILE:LINE:COL:\nMESSAGE
-fn panic_at(msg: string, file: string, line: int, col: int):
+fn panic_at(msg: string, file: string, line: int, col: int), pub:
     // Build: "panicked at FILE:LINE:COL:\nMESSAGE\n"
     _panic_write("panicked at ")
     _panic_write(file)
@@ -35,11 +35,11 @@ fn panic_at(msg: string, file: string, line: int, col: int):
     _panic_writeln(msg)
 
     // Abort via exit(1)
-    r1 := syscall3(60, 1, 0, 0)
+    r1 := syscall3(231, 1, 0, 0)
 
 // Convenience — panic without location info
 // Prints: "panicked at:\nMESSAGE\n"
-fn panic(msg: string):
+fn panic(msg: string), pub:
     _panic_writeln("panicked at:")
     _panic_writeln(msg)
-    r1 := syscall3(60, 1, 0, 0)
+    r1 := syscall3(231, 1, 0, 0)

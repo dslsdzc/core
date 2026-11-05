@@ -205,9 +205,29 @@
 #     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
-canary_elf	pa	560dbd2566ad0230ff5b1679de7f656f405804e370cf76a764af423ca4dbb59e	61622
-pa_ccr	pa.ccr	b453223750f1559ab738b5795e2faf2b2cc3b38b4b126cb6eab89aa42149e249	97736
-pa_static_ccr	pa_st.bin.ccr	4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2fdeac7ebe69e	97958
+# ── 「本次重锁 2026-11-04」merge develop + concurrency line ──
+# **性质 = 分支 codegen/编译器身份变化，不是 canary 语料回归**。
+# 取数环境（权威）：CI run **41851774486**，head `409cedf7`，selfhost-tests 的
+#   `canary_check.sh`；本地同源复跑逐字节相同，D1 5/5 PASS。
+# 读数：canary ELF size 61622 不变、sha 变；四条 `.ccr` 全部增大：
+#   pa_ccr 97736 → 100202（+2466）· pa_static 97958 → 100314（+2356）
+#   gt_ccr 132546 → 135036（+2490）· gt_static 132768 → 135124（+2356）
+# 归因：分支合入 OS runtime/并发、loop memo/region 与 arena 修复后，编译器
+#   自身的 intern/身份序列与被编译程序嵌入的函数/串集变化；不是 canary 源
+#   的语义变化（pa/gt 运行仍 rc=0，D1 确定）。
+# 维护者已显式授权重锁（2026-11-04）。
+# 旧值留痕（自本次起作废）：
+#   canary_elf    560dbd2566ad0230ff5b1679de7f656f405804e370cf76a764af423ca4dbb59e 61622
+#   pa_ccr        b453223750f1559ab738b5795e2faf2b2cc3b38b4b126cb6eab89aa42149e249 97736
+#   pa_static_ccr 4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2fdeac7ebe69e 97958
+#   gt_ccr        2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a 132546
+#   gt_static_ccr e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8 132768
+# 2026-11-05 追加：alloc_body 改调公共 arena_grow_pool wrapper，allocator blob
+# 字节变化 ⇒ canary ELF sha 变、size 仍 61622；四条 `.ccr` 不变。D1 5/5 PASS。
+# 旧值：canary_elf af606c27be2b3100d7e5ea408ff273545931f33725d8d6cddbc79b9ecf83209c 61622
+canary_elf	pa	fd37b88a2c5383a8b7f607c0675790413dfb4a0103b9feb658e739d1a7d86e0c	61622
+pa_ccr	pa.ccr	7cf5392284b67133b12e4985440ded33332cdb116b7b5a3a6a68fe7edc6a50e2	100202
+pa_static_ccr	pa_st.bin.ccr	f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920ebed5a809b49	100314
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -227,8 +247,8 @@ pa_static_ccr	pa_st.bin.ccr	4058d6dc2d0c96ccc626c1b1a4240ec6c5ec3e6d37bba9ed7fc2
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a	132546
-gt_static_ccr	gt_st.bin.ccr	e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8	132768
+gt_ccr	gt.ccr	1b48a36f6c76330ebdcbce4a046dd90ff5b60020c75352759d94aa4f006cde0b	135036
+gt_static_ccr	gt_st.bin.ccr	123a37f1d5012e5409294478c7aa87f6a476f243683141fc9997bac736550959	135124
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下

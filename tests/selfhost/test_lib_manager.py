@@ -14,7 +14,7 @@ def test_lib_manager_selftest():
         [str(COREC), "selftest-lib"], capture_output=True, text=True, cwd=str(BASE), timeout=30
     )
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "lib: 18/18 ok" in run.stdout, run.stdout + run.stderr
+    assert "lib: 23/23 ok" in run.stdout, run.stdout + run.stderr
 
 
 def test_import_direction_is_enforced():

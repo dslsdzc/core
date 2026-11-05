@@ -328,7 +328,6 @@ fn ccr_seg_prepare_save() -> int:
 //   otherwise                        -> type_id = -1
 // Flags carry semantic node features only:
 //   IR_BOUNDS_CHECK, tk != 0        -> DYNAMIC_LIMIT
-//   IR_SPAWN, tk < 0                -> DYNAMIC_SPAWN
 //   IR_DEREF/IR_STORE_PTR, s3 > 0   -> RUNTIME_PTR_BOUNDS
 // The width/stride/byte extent behind those facts is a target fact and is not
 // written; corearch reconstructs it from type_id and the target layout.
@@ -484,11 +483,6 @@ fn ccr_nod_type_populate() -> int:
         else if op == IR_BOUNDS_CHECK:
             if tk != 0:
                 fl = fl + CCR_NOD_FLAG_DYNAMIC_LIMIT
-        else if op == IR_SPAWN:
-            if tk < 0:
-                fl = fl + CCR_NOD_FLAG_DYNAMIC_SPAWN
-            else if tk != 0:
-                return -1
         else if op == IR_DEREF || op == IR_STORE_PTR:
             if iri_s3(ii) > 0:
                 fl = fl + CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS

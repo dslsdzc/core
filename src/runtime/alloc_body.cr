@@ -89,7 +89,6 @@ fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string:
 
 g_arena_scalars : string, mut
 g_arena_scalars_ready : int, mut
-g_arena_suspend : int, mut
 g_arena_slot : string, mut
 g_arena_slot_cursor : string, mut
 g_arena_slot_next : string, mut
@@ -103,6 +102,10 @@ g_class_limit : string, mut
 g_class_lookup : string, mut
 g_arena_large_head : string, mut
 g_arena_large_count : string, mut
+g_slot_free_m : string, mut
+g_slot_count_m : string, mut
+g_segment_count_m : string, mut
+
 
 fn arena_slot_base(slot: int) -> string:
     seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
@@ -117,22 +120,25 @@ fn arena_fail_slot(size: int, cursor: int, limit: int) -> int:
     return 0
 
 fn arena_get_slot(ai: int, size: int) -> int:
-    sf := cell_load(g_arena_scalars, 40)
+    m := rt_m_idx()
+    if m < 0:
+        m = 0
+    sf := cell_load(g_slot_free_m, m * 8)
     slot : ., mut = -1
     if sf >= 0:
         slot = sf
-        cell_store(g_arena_scalars, 40, cell_load(g_arena_slot_next, sf * 8))
+        cell_store(g_slot_free_m, m * 8, cell_load(g_arena_slot_next, sf * 8))
     else:
-        count := cell_load(g_arena_scalars, 32)
-        pool := cell_load(g_arena_scalars, 16)
-        if count >= pool:
+        count := cell_load(g_slot_count_m, m * 8)
+        if count >= 256:
+            return arena_fail_slot(size, count, 256)
+        slot = m * 256 + count
+        cell_store(g_slot_count_m, m * 8, count + 1)
+        seg := slot / 64
+        if seg >= cell_load(g_segment_count_m, m * 8):
             arena_grow_pool()
-            count = cell_load(g_arena_scalars, 32)
-            pool = cell_load(g_arena_scalars, 16)
-        if count >= pool:
-            return arena_fail_slot(size, count, pool)
-        slot = count
-        cell_store(g_arena_scalars, 32, count + 1)
+        if seg >= cell_load(g_segment_count_m, m * 8):
+            return arena_fail_slot(size, seg, 0)
     // Both the free-list and bump paths must link the new slot into this
     // arena's chain and make it current. arena_reset walks that chain to
     // return slots, so a missing link leaks the slot and lets the next
@@ -173,19 +179,21 @@ fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if size > 1099511627776:
         return alloc_fail(size, -1, 0, 0)
     aligned := (size + 15) / 8 * 8
-    if g_arena_suspend != 0 || g_arena_scalars_ready == 0:
+    if rt_arena_suspend() != 0 || g_arena_scalars_ready == 0:
         return alloc_global(size, aligned, heap_start, heap_end)
     if alloc_uword(g_arena_scalars) == 0:
         return alloc_global(size, aligned, heap_start, heap_end)
-    ai := cell_load(g_arena_scalars, 0)
+    ai := rt_current_arena()
     if ai < 0:
+        if rt_m_idx() != 0:
+            return alloc_fail(size, -3, 0, 0)
         return alloc_global(size, aligned, heap_start, heap_end)
 
     slot : ., mut = cell_load(g_arena_slot, ai * 8)
     if slot < 0:
         // arena_new_sized could not obtain a first slot (pool limit). The
         // legacy body traps here instead of silently allocating a new one.
-        return alloc_fail(size, -1, slot, cell_load(g_arena_scalars, 16))
+        return alloc_fail(size, -1, slot, 1024)
     max_size := cell_load(g_arena_scalars, 8)
     slot_base : ., mut = arena_slot_base(slot)
     if cell_load(g_arena_static, ai * 8) != 0:

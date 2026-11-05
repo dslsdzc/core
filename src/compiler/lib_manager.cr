@@ -4,6 +4,7 @@
 // SourceManager owns files. LibManager owns the library each file belongs to:
 //   @core  src/compiler
 //   @std   src/stdlib
+//   @os    src/os/*/runtime  (target/OS process runtime)
 //   user   the project root (catch-all)
 //
 // Each library owns its own dependency and export arrays, so adding one library
@@ -14,6 +15,7 @@ LIB_KIND_UNKNOWN : int = 0
 LIB_KIND_CORE : int = 1
 LIB_KIND_STD : int = 2
 LIB_KIND_USER : int = 3
+LIB_KIND_OS : int = 4
 
 // Library record: name ni, root path, kind, deps (ptr/count/cap),
 // exports (ptr/count/cap).
@@ -302,9 +304,16 @@ fn lib_set_user_root(root: string):
 fn lib_register_defaults():
     c := lib_add("@core", "src/compiler/", LIB_KIND_CORE)
     s := lib_add("@std", "src/stdlib/", LIB_KIND_STD)
+    o := lib_add("@os", "src/os/linux/runtime/", LIB_KIND_OS)
     u := lib_add("@user", "", LIB_KIND_USER)
+    // @std is the target-neutral leaf. @os owns everything that depends on a
+    // concrete OS ABI (scheduler, channels, syscall-backed runtime). @core
+    // may consume both; user code may consume both; @std may not reach @os.
     lib_dep_add(c, s)
+    lib_dep_add(c, o)
+    lib_dep_add(o, s)
     lib_dep_add(u, s)
+    lib_dep_add(u, o)
     g_lib_inited = 1
     lib_set_user_root("")
 
@@ -436,6 +445,8 @@ fn lib_path_is_core_impl(path: string) -> int:
         return 1
     if lib_path_has_dir_prefix(path, "src/runtime/") != 0:
         return 1
+    // src/os/<system>/ holds OS ABI descriptors and backend emitters that
+    // belong to the compiler. Only the process runtime subdirectory is @os.
     if lib_path_has_dir_prefix(path, "src/os/") != 0:
         return 1
     if lib_path_has_dir_prefix(path, "src/format/") != 0:
@@ -505,14 +516,23 @@ fn lib_selftest() -> int:
     fails : ., mut = 0
     c := lib_find("@core")
     s := lib_find("@std")
+    o := lib_find("@os")
     u := lib_find("@user")
-    if c < 0 || s < 0 || u < 0:
+    if c < 0 || s < 0 || o < 0 || u < 0:
         fails = fails + 1
     if lib_for_path("src/compiler/parser.cr") != c:
         fails = fails + 1
     if lib_for_path("src/stdlib/fmt.cr") != s:
         fails = fails + 1
+    if lib_for_path("src/os/linux/runtime/sched.cr") != o:
+        fails = fails + 1
     if lib_for_path("examples/main.cr") != u:
+        fails = fails + 1
+    if lib_can_import(o, s) != 1:
+        fails = fails + 1
+    if lib_can_import(u, o) != 1:
+        fails = fails + 1
+    if lib_can_import(s, o) != 0:
         fails = fails + 1
     if lib_for_path("src/compilerish/x.cr") != u:
         fails = fails + 1
@@ -552,7 +572,7 @@ fn lib_selftest() -> int:
     if sm_file_lib(cf) != c:
         fails = fails + 1
     if fails == 0:
-        println("lib: 18/18 ok")
+        println("lib: 23/23 ok")
     else:
         print("lib: FAIL ")
         println(int_str(fails))

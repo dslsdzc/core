@@ -233,7 +233,7 @@ fn purity_selftest_run() -> int:
     src = src + "fn chain_pure() -> int:\n    a : ., mut = 0\n    a = 1\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
     src = src + "fn chain_loop() -> int:\n    acc : ., mut = 0\n    i : ., mut = 0\n    loop:\n        if i >= 3:\n            break\n        g_test = g_test + 1\n        acc = acc + 1\n        i = i + 1\n    return acc\n"
     // Two calls to an effectful function, a pure call with the same shape, and the
-    // IR_CALL_EXTERN, IR_SPAWN, and IR_YIELD opcodes. Each case has a store before
+    // IR_CALL_EXTERN and IR_YIELD opcodes. Each case has a store before
     // and after, so the expected touch value is 3.
     src = src + "fn chain_two() -> int:\n    a : ., mut = 0\n    g_test = 1\n    effect()\n    effect()\n    b := pure_add(a, 1)\n    g_test = 2\n    return g_test + b\n"
     src = src + "fn chain_extern_op(x: int) -> int:\n    a : ., mut = 0\n    g_test = 1\n    r := ext_probe(a)\n    g_test = 2\n    return g_test + r\n"
@@ -340,13 +340,8 @@ fn purity_selftest_run() -> int:
     fails = fails + ps_check_b("chain.extern_op_exists", (n_ex >= 0), true)
     total = total + 1
     fails = fails + ps_check("chain.extern_op_pierced", ps_state_touch(n_ex), 3)
-    // IR_SPAWN, emitted for each range-go iteration, takes part in the state dependency.
-    irf_sp := ps_ir_index_of("chain_spawn_op")
-    n_sp := ps_op_node(irf_sp, IR_SPAWN)
-    total = total + 1
-    fails = fails + ps_check_b("chain.spawn_op_exists", (n_sp >= 0), true)
-    total = total + 1
-    fails = fails + ps_check("chain.spawn_op_in_chain", ps_has_state_in(n_sp), 1)
+    // CP-5/CP-6: IR_SPAWN is retired; range go uses conc_go and no longer participates in
+    // purity classification. The opcode remains in the wire schema.
     // IR_YIELD in a flow function body takes part in the state dependency.
     irf_yl := ps_ir_index_of("chain_yield_op")
     n_yl := ps_op_node(irf_yl, IR_YIELD)

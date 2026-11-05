@@ -621,7 +621,7 @@ IR_SLICE : int = 24   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var; 
 IR_DEREF : int = 25   // dest=loaded_val, s1=ptr, s2=runtime_base, s3=runtime-bound marker; access width is target-owned
 IR_STORE_PTR : int = 26 // dest=runtime_base, s1=ptr, s2=value, s3=runtime-bound marker; access width is target-owned
 IR_ADDR_INDEX : int = 31 // dest=addr, s1=arr_var, s2=index_var, s3=scale (target-owned, zero on the wire); compute &arr[index] without loading
-IR_SPAWN : int = 27     // dest=result_var, s1=first_arg, s2=arg_count, s3=fn_name_ni, type_kind=spawn_count (-1=dynamic)
+// 27 is retired (legacy IR_SPAWN); the slot stays reserved so later IDs do not move.
 IR_YIELD : int = 28     // s1=value_var; emit value from flow to consumer channel
 IR_AWAIT : int = 29     // dest=value_var, s1=future_var; block until future ready, get value
 IR_BOUNDS_CHECK : int = 30 // s1=index, s2=max_len/len_var, type_kind=1 for dynamic max

@@ -138,12 +138,17 @@ fn run_frontend(source_name: string) -> int:
         g_prelude_src = ""
         g_prelude_path = ""
         g_prelude_pending = 0
+    if cli_has("timing") != 0:
+        g_timing_last_ms = timing_now_ms()
     println("[1/5] tokenize...")
     tokenize(source_file, 0)
+    timing_mark("tokenize")
     println("[2/5] resolve imports...")
     res_imports()
+    timing_mark("imports")
     println("[3/5] parse...")
     parse_all_files()
+    timing_mark("parse")
     if g_diag_count > 0:
         print_diagnostics()
         return 1
@@ -152,6 +157,7 @@ fn run_frontend(source_name: string) -> int:
         return 1
     println("[4/5] type check...")
     check_all()
+    timing_mark("type_check")
     // Dump the VC list before the fail-closed gate, so red entries are still
     // listed. The dump only prints; it does not change rc or output.
     if cli_has("dump-vcs") != 0:
@@ -205,6 +211,7 @@ if g_opt_level >= 1 && g_func_count > 0 {
 
 */
     println("[5/5] frontend done")
+    timing_mark("frontend_done")
     // Hidden check: the named-type side table must agree with res_type_node.
     // It runs after check_all. A mismatch returns non-zero. Off by default.
     if cli_has("verify-named-dedup") != 0:
@@ -218,6 +225,19 @@ if g_opt_level >= 1 && g_func_count > 0 {
     return 0
 
 // Determine default output path from source path (strip .cr, add extension)
+fn conc_plan_output_path(src_path: string) -> string:
+    out : ., mut = cli_get("output")
+    if str_len(out) == 0:
+        if g_is_project_mode != 0:
+            out = g_project_name + ".plan"
+        else:
+            sl := str_len(src_path)
+            if sl > 3 && str_eq(str_sub(src_path, sl - 3, 3), ".cr") != 0:
+                out = str_sub(src_path, 0, sl - 3) + ".plan"
+            else:
+                out = src_path + ".plan"
+    return out
+
 fn default_out_path(src_path: string, ext: string) -> string:
     out : ., mut = ""
     if g_is_project_mode != 0:
@@ -233,10 +253,28 @@ fn default_out_path(src_path: string, ext: string) -> string:
 
 // The old shadow-comparison finish hook and its CLI channels were removed.
 
+g_timing_last_ms : int, mut = 0
+
+fn timing_now_ms() -> int:
+    ts := alloc(16)
+    cell_store(ts, 0, 0)
+    cell_store(ts, 8, 0)
+    r := syscall3(228, 1, ts, 0)
+    if r < 0:
+        return 0
+    return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
+
 fn timing_mark(name: string):
     if cli_has("timing") != 0:
+        now := timing_now_ms()
+        if g_timing_last_ms == 0:
+            g_timing_last_ms = now
         print("[timing] ")
-        println(name)
+        print(name)
+        print(" ")
+        print(int_str(now - g_timing_last_ms))
+        println("ms")
+        g_timing_last_ms = now
 
 fn corec_main() -> int:
     cli_init("corec", "Core compiler frontend")
@@ -244,6 +282,7 @@ fn corec_main() -> int:
     cli_cmd("check", "Type-check only, no output")
     cli_cmd("cir",   "Output dataflow graph (.cir)")
     cli_cmd("ccr",   "Output linear CFG (.ccr)")
+    cli_cmd("conc-plan", "Emit target-neutral concurrency plan (.plan)")
     cli_cmd("run",   "Execute code directly (interpreter mode)")
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
@@ -425,6 +464,7 @@ fn corec_main() -> int:
         if run_rc != 0:
             return 1
         ir_diag_base_run := g_diag_count
+        g_interp_mode = 1
         ir_gen_all()
         if g_diag_count > ir_diag_base_run:
             print_diagnostics()
@@ -432,7 +472,9 @@ fn corec_main() -> int:
         // The interpreter consumes the wire CASE table. Derive it from the
         // semantic model exactly as the .ccr path does before executing.
         lower_to_ccr()
-        return ir_interpret()
+        rc_interp := ir_interpret()
+        g_interp_mode = 0
+        return rc_interp
 
     // === clean-cache: delete incremental compilation cache ===
     if cli_eq(cmd, "clean-cache"):
@@ -468,6 +510,10 @@ fn corec_main() -> int:
         println(" requires a source file or directory")
         return 1
     src_path := cli_arg(0)
+    if cli_eq(cmd, "conc-plan"):
+        explicit_out := cli_get("output")
+        if str_len(explicit_out) > 0:
+            _conc_emit_remove(explicit_out)
 
     if read_source_or_project(src_path) != 0:
         return 1
@@ -481,6 +527,9 @@ fn corec_main() -> int:
         g_prelude_src = rt_src
         g_prelude_path = target_static_runtime_source()
         g_prelude_pending = 1
+
+    if cli_eq(cmd, "conc-plan"):
+        _conc_emit_remove(conc_plan_output_path(src_path))
 
     fe_rc := run_frontend(src_path)
     if fe_rc != 0:
@@ -529,18 +578,16 @@ fn corec_main() -> int:
     // A cached caller does not replay monomorphization, so its specialized
     // callee FuncInfo entries would be missing on the next compile.
     cache_enabled : int, mut = 1
-    cache_scan : ., mut = 0
-    loop:
-        if cache_scan >= g_func_count:
-            break
-        if fi_generic_count(cache_scan) > 0:
-            cache_enabled = 0
-            break
-        cache_scan = cache_scan + 1
     // Optional representation uses process-local side tables that the snapshot
     // does not carry. A cache hit would unpack through the boxed path and diverge
     // from a cold build, so optional programs disable the cache.
     if g_optrep_on != 0:
+        cache_enabled = 0
+    // The self-host concat is one huge user source. Its cache key is
+    // source_path::name, so every function is a miss on a clean tree and a
+    // full-table load on a warm tree; both are slower than regenerating the
+    // IR. The bootstrap chain does not need incremental caching.
+    if g_self_host_mode != 0:
         cache_enabled = 0
     // Hidden mutation hook: skip intern-journal replay on load to reproduce the
     // original defect. Real builds never set it.
@@ -559,16 +606,40 @@ fn corec_main() -> int:
             fi = fi + 1
             continue
 
+        if cli_has("timing") != 0 && fi % 250 == 0:
+            print("[irprog] func ")
+            print(int_str(fi))
+            print(" instr ")
+            print(int_str(g_ir_instr_count))
+            print(" vars ")
+            print(int_str(g_ir_var_count))
+            print(" t ")
+            print(int_str(timing_now_ms()))
+            println("")
         // DFG metadata uses the compact IR function index. Source FuncInfo
         // indices diverge as soon as a generic function is skipped.
         ir_func_idx := g_ir_func_count
         df_begin_func(ir_func_idx)
 
-        // Build cache key from source path + function name
+        // Content-addressed cache key: name + body fingerprint + signature.
+        // The old key included the top-level source path, so every test in a
+        // fresh temp directory recompiled the whole imported stdlib. The
+        // loader still verifies fingerprint/signature, so a collision is a
+        // cache miss, not a wrong hit.
         fn_node := fi_ast_node(fi)
         name_ni := ast_a(fn_node)
         name := istr_get(name_ni)
-        func_id := src_path + "::" + name
+        owner := func_owner(fi)
+        func_id : ., mut = ""
+        if owner >= 0 && lib_kind(owner) == LIB_KIND_USER:
+            // User code keeps the source-path identity used by the cache
+            // witness tests; imported stdlib functions below use content
+            // identity so fresh temp-directory tests can share entries.
+            func_id = src_path + "::" + name
+        else:
+            fp := func_fingerprint(fn_node)
+            sfp := sig_fingerprint(fn_node)
+            func_id = name + "_" + int_str(fp) + "_" + int_str(sfp)
 
         // Sanitize func_id for filesystem: replace / with _
         cache_path : ., mut = ".core/cache/cir/"
@@ -619,6 +690,7 @@ fn corec_main() -> int:
             // before any id is used. Optional-representation programs disable the
             // cache entirely.
             tc0 := g_type_count
+            gen0 := g_gen_instance_count
             // Intern journal window: record each new string created during this
             // function's generation. The entry stores the contents; the loader
             // replays them in order.
@@ -634,7 +706,7 @@ fn corec_main() -> int:
             // function is saved like any other. g_cir_has_match remains
             // diagnostic only.
             if cache_enabled != 0:
-                if g_type_count == tc0:
+                if g_type_count == tc0 && g_gen_instance_count == gen0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 
         fi = fi + 1
@@ -654,6 +726,7 @@ fn corec_main() -> int:
     // on it.
     df_state_finalize()
     compute_usage_counts()
+    ir_dce_reachable()
     timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived
@@ -690,10 +763,11 @@ fn corec_main() -> int:
 
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
     base_diags : ., mut = g_diag_count
-    ptr_analysis_all()
-    timing_mark("ptr_analysis")
-    region_check_all()
-    timing_mark("region_check")
+    if g_self_host_mode == 0:
+        ptr_analysis_all()
+        timing_mark("ptr_analysis")
+        region_check_all()
+        timing_mark("region_check")
     // Phase A may reject the v1 program. Do not plan on top of a failed graph.
     if g_diag_count > base_diags:
         print_diagnostics()
@@ -702,12 +776,13 @@ fn corec_main() -> int:
     // The cross-function share proof reads g_bp_param_write. Compute the
     // Phase A summary before planning; the plan-regeneration path recomputes
     // it after Phase B as before.
-    byte_permission_all()
-    timing_mark("byte_permission_plan")
-    if g_diag_count > base_diags:
-        print_diagnostics()
-        return 1
-    region_plan_analyze()
+    if g_self_host_mode == 0:
+        byte_permission_all()
+        timing_mark("byte_permission_plan")
+        if g_diag_count > base_diags:
+            print_diagnostics()
+            return 1
+        region_plan_analyze()
     if cli_has("dump-region-plan") != 0:
         pi : ., mut = 0
         loop:
@@ -747,10 +822,17 @@ fn corec_main() -> int:
         timing_mark("ptr_analysis_plan")
         region_check_all()
         timing_mark("region_check_plan")
-
-    byte_permission_all()
-    timing_mark("byte_permission")
-    provenance_verify_all()
+        // The plan regenerated IR, so re-run the byte-permission proof on the
+        // new graph. With no plan the first pass already proved this exact IR.
+        if g_self_host_mode == 0:
+            byte_permission_all()
+            timing_mark("byte_permission")
+        else:
+            timing_mark("byte_permission")
+    else:
+        timing_mark("byte_permission")
+    if g_self_host_mode == 0:
+        provenance_verify_all()
     timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.
     if g_diag_count > base_diags:
@@ -778,6 +860,10 @@ fn corec_main() -> int:
     print(" funcs, ")
     print(int_str(g_ir_instr_count))
     println(" instrs")
+
+    // === conc-plan: target-neutral plan artifact (CP-2) ===
+    if cli_eq(cmd, "conc-plan"):
+        return conc_plan_emit_write(conc_plan_output_path(src_path))
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr"):

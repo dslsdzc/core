@@ -1,8 +1,8 @@
 # Core 主 CI——结构与 rust-lang/rust 的 ci.yml 同构（模板源 ~/rust），按 Core 裁剪。
 # 触发分层（merge_group 暂缺：merge_queue 因免费计划降级不可用，且 merge_group 事件
 # 的工作流只能在默认分支注册——待计划升级后恢复 merge_group + suite/full-bootstrap）：
-#   - pull_request（PR 快速层）：check / bootstrap-tests / selfhost-tests
-#   - （恢复时）merge_group（完整层）：suite / full-bootstrap
+#   - pull_request（PR 快速层）：check / bootstrap-tests / selfhost-fast
+#   - （恢复时）merge_group（完整层）：suite / full-bootstrap / selfhost-tests
 # PR 层 job 在合并时也需通过（Rust 语义：PR CI jobs 自动注册为 auto jobs）。
 # job 命令定义在 src/ci/run.sh（case CI_JOB_NAME 分发），本地用 run.sh 可复现。
 #
@@ -47,7 +47,7 @@ jobs:
         include:
           - name: check
           - name: bootstrap-tests
-          - name: selfhost-tests
+          - name: selfhost-fast
           # opt-regress（O0/O1 自举回归）留位，按 TODO 逐步点亮：
           # - name: opt-regress
     steps:
@@ -81,6 +81,10 @@ jobs:
         include:
           - name: suite
           - name: full-bootstrap
+          - name: selfhost-tests-0
+          - name: selfhost-tests-1
+          - name: selfhost-tests-2
+          - name: selfhost-tests-3
     steps:
       - name: checkout the source code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09

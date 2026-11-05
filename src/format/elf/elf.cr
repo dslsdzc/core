@@ -39,7 +39,7 @@ fn ea_modrm(buf: string, pos: int, m: int, reg: int, rm: int) -> int:
     return 1
 
 fn ea_mov_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -47,7 +47,7 @@ fn ea_mov_rr(buf: string, pos: int, dst: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
     w8(buf, cp, 139)
     cp = cp + 1
@@ -62,7 +62,7 @@ fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
     return cp - pos
 
 fn ea_mov_rip_store(buf: string, pos: int, src: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, 0)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -80,8 +80,8 @@ fn ea_mov_load(buf: string, pos: int, dst: int, base: int) -> int:
     // A base whose low three bits are 5 (rbp/r13) cannot use mod=00: that
     // encoding means RIP-relative or disp32 with no base. Use mod=01 with a
     // zero displacement instead.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
@@ -94,7 +94,7 @@ fn ea_mov_load(buf: string, pos: int, dst: int, base: int) -> int:
     return cp - pos
 
 fn ea_mov_load_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
     w8(buf, cp, 139)
     cp = cp + 1
@@ -106,34 +106,34 @@ fn ea_mov_load_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> i
 fn ea_load_arena_scalar(buf: string, pos: int, dst: int, gid: int, disp: int) -> int:
     // Scalar cells hold raw machine values. cell_load/cell_store tag and untag
     // at the library boundary; the allocator reads the cells directly.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, dst, gid)
     cp = cp + ea_mov_load_disp8(buf, cp, dst, dst, disp)
     return cp - pos
 
 fn ea_store_arena_scalar(buf: string, pos: int, src: int, gid: int, disp: int, scratch: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, scratch, gid)
     cp = cp + ea_mov_store_disp8(buf, cp, scratch, disp, src)
     return cp - pos
 
 fn ea_load_meta_index8(buf: string, pos: int, dst: int, gid: int, index: int) -> int:
     // r12 holds the table base so dst may equal the index register.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, 12, gid)
     cp = cp + ea_mov_load_index8(buf, cp, dst, 12, index)
     return cp - pos
 
 fn ea_store_meta_index8(buf: string, pos: int, gid: int, index: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_mov_rip_load(buf, cp, 12, gid)
     cp = cp + ea_mov_store_index8(buf, cp, 12, index, src)
     return cp - pos
 
 fn ea_mov_load_index8(buf: string, pos: int, dst: int, base: int, index: int) -> int:
     // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, dst / 8, index / 8, base / 8)
@@ -149,8 +149,8 @@ fn ea_mov_load_index8(buf: string, pos: int, dst: int, base: int, index: int) ->
 
 fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -> int:
     // SIB base 5 with mod=00 means "no base, disp32"; rbp/r13 need disp8=0.
-    cp := pos
-    md := 0
+    cp : ., mut = pos
+    md : ., mut = 0
     if base % 8 == 5:
         md = 1
     cp = cp + ea_rex(buf, cp, 1, src / 8, index / 8, base / 8)
@@ -165,7 +165,7 @@ fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -
     return cp - pos
 
 fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -180,7 +180,7 @@ fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
     return cp - pos
 
 fn ea_lea_base_index8(buf: string, pos: int, dst: int, base: int, index: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, index / 8, base / 8)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -192,7 +192,7 @@ fn ea_lea_base_index8(buf: string, pos: int, dst: int, base: int, index: int, di
     return cp - pos
 
 fn ea_lea_base_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, base / 8)
     w8(buf, cp, 141)
     cp = cp + 1
@@ -202,7 +202,7 @@ fn ea_lea_base_disp8(buf: string, pos: int, dst: int, base: int, disp: int) -> i
     return cp - pos
 
 fn ea_add_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -212,7 +212,7 @@ fn ea_add_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_and_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -222,7 +222,7 @@ fn ea_and_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_add_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 1)
     cp = cp + 1
@@ -230,7 +230,7 @@ fn ea_add_rr(buf: string, pos: int, dst: int, src: int) -> int:
     return cp - pos
 
 fn ea_cmp_rr(buf: string, pos: int, left: int, right: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, right / 8, 0, left / 8)
     w8(buf, cp, 57)
     cp = cp + 1
@@ -238,7 +238,7 @@ fn ea_cmp_rr(buf: string, pos: int, left: int, right: int) -> int:
     return cp - pos
 
 fn ea_test_rr(buf: string, pos: int, a: int, b: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, b / 8, 0, a / 8)
     w8(buf, cp, 133)
     cp = cp + 1
@@ -261,7 +261,7 @@ fn ea_jmp8(buf: string, pos: int, rel: int) -> int:
     return 2
 
 fn ea_mul(buf: string, pos: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, src / 8)
     w8(buf, cp, 247)
     cp = cp + 1
@@ -269,7 +269,7 @@ fn ea_mul(buf: string, pos: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_store(buf: string, pos: int, base: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, base / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -277,7 +277,7 @@ fn ea_mov_store(buf: string, pos: int, base: int, src: int) -> int:
     return cp - pos
 
 fn ea_mov_store_disp8(buf: string, pos: int, base: int, disp: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, base / 8)
     w8(buf, cp, 137)
     cp = cp + 1
@@ -287,7 +287,7 @@ fn ea_mov_store_disp8(buf: string, pos: int, base: int, disp: int, src: int) -> 
     return cp - pos
 
 fn ea_cmp_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 129)
     cp = cp + 1
@@ -313,7 +313,7 @@ fn ea_ud2(buf: string, pos: int) -> int:
     return 2
 
 fn ea_sar_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -323,7 +323,7 @@ fn ea_sar_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -333,7 +333,7 @@ fn ea_shr_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_shl_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 193)
     cp = cp + 1
@@ -343,7 +343,7 @@ fn ea_shl_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, src / 8)
     w8(buf, cp, 107)
     cp = cp + 1
@@ -353,7 +353,7 @@ fn ea_imul_imm8(buf: string, pos: int, dst: int, src: int, imm: int) -> int:
     return cp - pos
 
 fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 184 + dst % 8)
     cp = cp + 1
@@ -364,7 +364,7 @@ fn ea_mov_imm64(buf: string, pos: int, dst: int, imm: int) -> int:
 fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     // REX.W + C7 /0 id: mov r64, sign-extended imm32. B8+rd with REX.W is
     // mov r64, imm64 and would desynchronise the stream if only 4 bytes follow.
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 199)
     cp = cp + 1
@@ -374,7 +374,7 @@ fn ea_mov_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_cmp_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 131)
     cp = cp + 1
@@ -384,7 +384,7 @@ fn ea_cmp_imm8(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_add_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 129)
     cp = cp + 1
@@ -394,7 +394,7 @@ fn ea_add_imm32(buf: string, pos: int, dst: int, imm: int) -> int:
     return cp - pos
 
 fn ea_sub_rr(buf: string, pos: int, dst: int, src: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, dst / 8)
     w8(buf, cp, 41)
     cp = cp + 1
@@ -459,7 +459,7 @@ fn ea_jmp32(buf: string, pos: int, rel: int) -> int:
     return 5
 
 fn ea_dec(buf: string, pos: int, dst: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 255)
     cp = cp + 1
@@ -483,7 +483,7 @@ fn ea_jnz8(buf: string, pos: int, rel: int) -> int:
     return 2
 
 fn ea_inc(buf: string, pos: int, dst: int) -> int:
-    cp := pos
+    cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, 0, 0, dst / 8)
     w8(buf, cp, 255)
     cp = cp + 1
@@ -783,7 +783,7 @@ fn emit_sched_call(buf: string, p: int, n: int) -> int:
     w8(buf, p, 72)
     w8(buf, p+1, 139)
     w8(buf, p+2, 4)
-    w8(buf, p+3, 240)
+    w8(buf, p+3, 247)
     off : ., mut = 4
     if n >= 1:
         w8(buf, p+off, 72)
@@ -829,41 +829,252 @@ fn sched_tramp_sz(n: int) -> int:
 // Size: 11 bytes each: must match Phase 2 estimate.
 fn emit_curg_stubs(buf: string, pos: int, curg_va: int) -> int:
     cp : ., mut = 0
-    // g_set_curg: lea rax, [rip + curg_va]; mov [rax], rdi; ret
-    fva := TEXT_BASE + pos + cp
+    // g_set_curg: mov qword ptr fs:[0], rdi; ret  (11 bytes)
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
     w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 5)  // lea rax, [rip+disp32]
-    e2_w32(buf, pos+cp+3, curg_va - (fva + 7))
-    cp = cp + 7
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 56)
-    cp = cp + 3  // mov [rax], rdi
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 60)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, 0)
+    cp = cp + 4
+    w8(buf, pos+cp, 144)
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-    // g_get_curg: lea rax, [rip + curg_va]; mov rax, [rax]; ret
-    fva2 := TEXT_BASE + pos + cp
+    cp = cp + 1
+    // g_get_curg: mov rax, qword ptr fs:[0]; ret  (11 bytes)
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
     w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 5)  // lea rax, [rip+disp32]
-    e2_w32(buf, pos+cp+3, curg_va - (fva2 + 7))
-    cp = cp + 7
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 0)
-    cp = cp + 3  // mov rax, [rax]
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, 0)
+    cp = cp + 4
+    w8(buf, pos+cp, 144)
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
+    cp = cp + 1
     return cp
-// ── Goroutine runtime stubs (pure-static self-contained runtime) ──
-// rt.s equivalents emitted into the binary so `go f()` works without
-// linking rt.s: fiber_init, fiber_switch, goroutine_entry_wrapper.
-// The wrapper is the fiber entry for every G (g_new sets it via @addr);
-// it reads saved_fn/saved_arg from the G struct (offsets 56/64), calls
-// saved_fn(saved_arg), sends the result to result_ch (G+40), then yields
-// forever. chan_send/sched_yield are Core functions: recorded as call
-// patches resolved by the Phase 3 patch loop (user function names).
+
+fn rt_pad16(buf: string, pos: int, cp: int) -> int:
+    loop:
+        if cp % 16 == 0:
+            break
+        w8(buf, pos+cp, 144)
+        cp = cp + 1
+    return cp
+
+fn rt_emit_fs_load(buf: string, pos: int, disp: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, disp)
+    cp = cp + 4
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_fs_store_rdi(buf: string, pos: int, disp: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 100)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 60)
+    cp = cp + 1
+    w8(buf, pos+cp, 37)
+    cp = cp + 1
+    e2_w32(buf, pos+cp, disp)
+    cp = cp + 4
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_sp(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 224)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_load(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 139)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_store(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 20)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_xchg(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 135)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_cas(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 240)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 177)
+    cp = cp + 1
+    w8(buf, pos+cp, 12)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 148)
+    cp = cp + 1
+    w8(buf, pos+cp, 192)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 182)
+    cp = cp + 1
+    w8(buf, pos+cp, 192)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn rt_emit_atomic_fetch_add(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 137)
+    cp = cp + 1
+    w8(buf, pos+cp, 208)
+    cp = cp + 1
+    w8(buf, pos+cp, 240)
+    cp = cp + 1
+    w8(buf, pos+cp, 72)
+    cp = cp + 1
+    w8(buf, pos+cp, 15)
+    cp = cp + 1
+    w8(buf, pos+cp, 193)
+    cp = cp + 1
+    w8(buf, pos+cp, 4)
+    cp = cp + 1
+    w8(buf, pos+cp, 55)
+    cp = cp + 1
+    w8(buf, pos+cp, 195)
+    cp = cp + 1
+    return cp
+
+fn emit_rt_sigreturn_stub(buf: string, pos: int) -> int:
+    // Naked rt_sigreturn trampoline: the kernel enters it with RSP pointing at
+    // the signal frame, so it must not touch the stack before syscall 15.
+    cp : ., mut = 0
+    w8(buf, pos+cp, 184)
+    w8(buf, pos+cp+1, 15)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 0)
+    w8(buf, pos+cp+4, 0)
+    cp = cp + 5
+    w8(buf, pos+cp, 15)
+    w8(buf, pos+cp+1, 5)
+    cp = cp + 2
+    cp = rt_pad16(buf, pos, cp)
+    return cp
+
+fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
+    cp : ., mut = 0
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 8)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 16)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 16)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_load(buf, pos+cp, 24)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 24)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_load(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_store(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_xchg(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_cas(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    cp = cp + rt_emit_atomic_fetch_add(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    // rt_set_m_idx (fs:8), appended so existing registered offsets stay stable.
+    cp = cp + rt_emit_fs_store_rdi(buf, pos+cp, 8)
+    cp = rt_pad16(buf, pos, cp)
+    // rt_sp (current stack pointer), appended after rt_set_m_idx.
+    cp = cp + rt_emit_sp(buf, pos+cp)
+    cp = rt_pad16(buf, pos, cp)
+    return cp
+
 fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
@@ -947,91 +1158,6 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // ret
     // 27 bytes
 
-    // goroutine_entry_wrapper: fiber entry, no prologue (runs on the G's stack):
-    //   call g_get_curg; rdi = [rax+64] (saved_arg: first param, SysV rdi);
-    //   rax = [rax+56] (saved_fn); call rax; push rax; call g_get_curg;
-    //   rdi = [rax+40] (result_ch); pop rsi; call chan_send;
-    //   then exit: call g_get_curg; mov rdi, rax; call g_free (arena_reset +
-    //   mark _Gdead); call sched_schedule (switch to next, no re-enqueue);
-    //   ret (fiber dead if no work)
-    call_pos0 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos0)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 120)
-    w8(buf, pos+cp+3, 64)
-    cp = cp + 4  // mov rdi, [rax+64]
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 64)
-    w8(buf, pos+cp+3, 56)
-    cp = cp + 4  // mov rax, [rax+56]  (modrm 01 000 000 = 0x40 + disp8)
-    w8(buf, pos+cp, 255)
-    w8(buf, pos+cp+1, 208)
-    cp = cp + 2  // call rax
-    w8(buf, pos+cp, 80)
-    cp = cp + 1  // push rax
-    call_pos1 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos1)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 139)
-    w8(buf, pos+cp+2, 120)
-    w8(buf, pos+cp+3, 40)
-    cp = cp + 4  // mov rdi, [rax+40]
-    w8(buf, pos+cp, 94)
-    cp = cp + 1  // pop rsi
-    call_pos2 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos2)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("chan_send"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call chan_send
-    // exit: call g_get_curg; mov rdi, rax; call g_free; call sched_schedule; ret
-    call_pos3 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos3)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_get_curg
-    w8(buf, pos+cp, 72)
-    w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 248)
-    cp = cp + 3  // mov rdi, rax
-    call_pos4 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos4)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_free"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call g_free
-    call_pos5 := pos + cp
-    grow_call_patch(g_x86_call_patch_count + 1)
-    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos5)
-    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_schedule"))
-    g_x86_call_patch_count = g_x86_call_patch_count + 1
-    e2_w8(buf, pos+cp, 232)
-    e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call sched_schedule
-    w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-
     return cp
 
 // ── m_start_workers runtime stub (pure-static self-contained runtime) ──
@@ -1052,9 +1178,9 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
 fn emit_m_start_workers(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
-    // worker_entry (15 bytes):
+    // worker_entry (15 bytes): pop index; call sched_worker_run; exit.
     w8(buf, pos+cp, 95)
-    cp = cp + 1  // pop rdi
+    cp = cp + 1
     call_pos_we := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
     cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_we)
@@ -1062,59 +1188,60 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call sched_worker_run
+    cp = cp + 5
     w8(buf, pos+cp, 184)
     w8(buf, pos+cp+1, 60)
     w8(buf, pos+cp+2, 0)
     w8(buf, pos+cp+3, 0)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov eax, 60
+    cp = cp + 5
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 255)
-    cp = cp + 2  // xor edi, edi
+    cp = cp + 2
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // syscall
+    cp = cp + 2
 
-    // m_start_workers (111 bytes, starts at pos+15)
+    // m_start_workers starts at pos+15. Offsets below are relative to m_start.
     w8(buf, pos+cp, 83)
-    cp = cp + 1  // push rbx
+    cp = cp + 1                    // push rbx
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 84)
-    cp = cp + 2  // push r12
+    cp = cp + 2                    // push r12
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 85)
-    cp = cp + 2  // push r13
+    cp = cp + 2                    // push r13
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 87)
-    cp = cp + 2  // push r15
+    cp = cp + 2                    // push r15
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 251)
-    cp = cp + 3  // mov rbx, rdi
+    cp = cp + 3                    // mov rbx, rdi
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 49)
     w8(buf, pos+cp+2, 228)
-    cp = cp + 3  // xor r12d, r12d
-    // .Lworker_loop (offset 13)
+    cp = cp + 3                    // xor r12d, r12d
+    // .Lloop at m_start+13
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 255)
     w8(buf, pos+cp+2, 196)
-    cp = cp + 3  // inc r12
+    cp = cp + 3                    // inc r12
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 57)
     w8(buf, pos+cp+2, 220)
-    cp = cp + 3  // cmp r12, rbx
-    w8(buf, pos+cp, 125)
-    w8(buf, pos+cp+1, 83)
-    cp = cp + 2  // jge .Ldone (+83)
+    cp = cp + 3                    // cmp r12, rbx
+    w8(buf, pos+cp, 15)
+    w8(buf, pos+cp+1, 141)
+    e2_w32(buf, pos+cp+2, 129)      // jge .Ldone (m_start+154)
+    cp = cp + 6
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 84)
-    cp = cp + 2  // push r12
+    cp = cp + 2                    // push r12
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 199)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // mov rdi, 65536
+    cp = cp + 3                    // mov rdi, 65536
     w8(buf, pos+cp, 0)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 1)
@@ -1127,118 +1254,183 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
-    cp = cp + 5  // call alloc
+    cp = cp + 5                    // call alloc(65536)
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 92)
-    cp = cp + 2  // pop r12
+    cp = cp + 2                    // pop r12
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // test rax, rax
+    cp = cp + 3                    // test rax, rax
     w8(buf, pos+cp, 116)
-    w8(buf, pos+cp+1, 54)
-    cp = cp + 2  // jz .Lnext_worker (+54)
+    w8(buf, pos+cp+1, 100)
+    cp = cp + 2                    // jz .Lnext (m_start+146)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // mov r15, rax
+    cp = cp + 3                    // mov r15, rax
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 129)
     w8(buf, pos+cp+2, 199)
-    cp = cp + 3  // add r15, 65536
+    cp = cp + 3                    // add r15, 65536
     w8(buf, pos+cp, 0)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 1)
     w8(buf, pos+cp+3, 0)
     cp = cp + 4
-    // lea r13, [rip + worker_entry]: worker_entry at stub base (pos+0), this lea
-    // is 7 bytes ending at (pos+58): disp = (pos+0) - (pos+58) = -58
+    w8(buf, pos+cp, 73)
+    w8(buf, pos+cp+1, 131)
+    w8(buf, pos+cp+2, 231)
+    w8(buf, pos+cp+3, 240)
+    cp = cp + 4                    // and r15, -16
+
+    // TLS block: alloc(32); block+0=-1, +8=m_idx, +16=-1, +24=0
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 199)
+    cp = cp + 3                    // mov rdi, 32
+    w8(buf, pos+cp, 32)
+    w8(buf, pos+cp+1, 0)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 0)
+    cp = cp + 4
+    call_pos_tls := pos + cp
+    grow_call_patch(g_x86_call_patch_count + 1)
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_tls)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("alloc"))
+    g_x86_call_patch_count = g_x86_call_patch_count + 1
+    e2_w8(buf, pos+cp, 232)
+    e2_w32(buf, pos+cp+1, 0)
+    cp = cp + 5                    // call alloc(32)
+    w8(buf, pos+cp, 73)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 197)
+    cp = cp + 3                    // mov r13, rax
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 0)
+    w8(buf, pos+cp+3, 255)
+    w8(buf, pos+cp+4, 255)
+    w8(buf, pos+cp+5, 255)
+    w8(buf, pos+cp+6, 255)
+    cp = cp + 7                    // mov qword [rax], -1
+    w8(buf, pos+cp, 76)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 96)
+    w8(buf, pos+cp+3, 8)
+    cp = cp + 4                    // mov [rax+8], r12
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 64)
+    w8(buf, pos+cp+3, 16)
+    w8(buf, pos+cp+4, 255)
+    w8(buf, pos+cp+5, 255)
+    w8(buf, pos+cp+6, 255)
+    w8(buf, pos+cp+7, 255)
+    cp = cp + 8                    // mov qword [rax+16], -1
+    w8(buf, pos+cp, 72)
+    w8(buf, pos+cp+1, 199)
+    w8(buf, pos+cp+2, 64)
+    w8(buf, pos+cp+3, 24)
+    w8(buf, pos+cp+4, 0)
+    w8(buf, pos+cp+5, 0)
+    w8(buf, pos+cp+6, 0)
+    w8(buf, pos+cp+7, 0)
+    cp = cp + 8                    // mov qword [rax+24], 0
+
+    // lea r11, [rip + worker_entry] (target is m_start-15; next is m_start+109)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
-    w8(buf, pos+cp+2, 45)
+    w8(buf, pos+cp+2, 29)
     cp = cp + 3
-    e2_w32(buf, pos+cp, -58)
+    e2_w32(buf, pos+cp, -124)
     cp = cp + 4
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 111)
+    w8(buf, pos+cp+2, 95)
     w8(buf, pos+cp+3, 240)
-    cp = cp + 4  // mov [r15-16], r13
-    w8(buf, pos+cp, 76)
+    cp = cp + 4                    // mov [r15-16], r11
+    w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
-    w8(buf, pos+cp+2, 71)
+    w8(buf, pos+cp+2, 103)
     w8(buf, pos+cp+3, 248)
-    cp = cp + 4  // mov [r15-8], r12
+    cp = cp + 4                    // mov [r15-8], r12
     w8(buf, pos+cp, 191)
     w8(buf, pos+cp+1, 0)
     w8(buf, pos+cp+2, 15)
-    w8(buf, pos+cp+3, 1)
+    w8(buf, pos+cp+3, 9)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov edi, 0x10F00
+    cp = cp + 5                    // mov edi, 0x90F00
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 119)
     w8(buf, pos+cp+3, 240)
-    cp = cp + 4  // lea rsi, [r15-16]
+    cp = cp + 4                    // lea rsi, [r15-16]
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 210)
-    cp = cp + 2  // xor edx, edx
+    cp = cp + 2                    // xor edx, edx
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 49)
     w8(buf, pos+cp+2, 210)
-    cp = cp + 3  // xor r10d, r10d
-    w8(buf, pos+cp, 69)
-    w8(buf, pos+cp+1, 49)
-    w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // xor r8d, r8d
+    cp = cp + 3                    // xor r10d, r10d (child_tid = 0)
+    w8(buf, pos+cp, 77)
+    w8(buf, pos+cp+1, 137)
+    w8(buf, pos+cp+2, 232)
+    cp = cp + 3                    // mov r8, r13 (tls = block)
     w8(buf, pos+cp, 184)
     w8(buf, pos+cp+1, 56)
     w8(buf, pos+cp+2, 0)
     w8(buf, pos+cp+3, 0)
     w8(buf, pos+cp+4, 0)
-    cp = cp + 5  // mov eax, 56
+    cp = cp + 5                    // mov eax, 56
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // syscall
+    cp = cp + 2                    // syscall
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 192)
-    cp = cp + 3  // test rax, rax
+    cp = cp + 3                    // test rax, rax
     w8(buf, pos+cp, 116)
     w8(buf, pos+cp+1, 5)
-    cp = cp + 2  // jz .Lchild (+5)
-    // .Lnext_worker (offset 95)
-    w8(buf, pos+cp, 73)
-    w8(buf, pos+cp+1, 255)
-    w8(buf, pos+cp+2, 196)
-    cp = cp + 3  // inc r12
-    w8(buf, pos+cp, 235)
-    w8(buf, pos+cp+1, 169)
-    cp = cp + 2  // jmp .Lworker_loop (-87)
-    // .Lchild (offset 100)
+    cp = cp + 2                    // jz .Lchild (m_start+151)
+    // .Lnext at m_start+146
+    w8(buf, pos+cp, 233)
+    e2_w32(buf, pos+cp+1, -138)    // jmp .Lloop (m_start+13)
+    cp = cp + 5
+    // .Lchild at m_start+151
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 237)
-    cp = cp + 2  // xor ebp, ebp
+    cp = cp + 2                    // xor ebp, ebp
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-    // .Ldone (offset 103)
+    cp = cp + 1                    // ret
+    // .Ldone at m_start+157
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 95)
-    cp = cp + 2  // pop r15
+    cp = cp + 2
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 93)
-    cp = cp + 2  // pop r13
+    cp = cp + 2
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 92)
-    cp = cp + 2  // pop r12
+    cp = cp + 2
     w8(buf, pos+cp, 91)
-    cp = cp + 1  // pop rbx
+    cp = cp + 1
     w8(buf, pos+cp, 195)
-    cp = cp + 1  // ret
-
+    cp = cp + 1
     return cp
 
 fn sched_reg_one(name: string, offset: int, cp: int):
+    // Phase 2 pre-registers the scheduler trampolines with estimated offsets.
+    // Call patching resolves the first matching entry, so Phase 3 must update
+    // that entry instead of appending a second one.
+    i : ., mut = 0
+    loop:
+        if i >= g_x86_func_off_count:
+            break
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, i * 16)), name) != 0:
+            cell_store(g_x86_func_offsets, i * 16 + 8, cp - 176)
+            return
+        i = i + 1
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
     cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name))
     cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
@@ -1356,6 +1548,7 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int):
 
 // ── _start 共享状态（发射序本体 = OS 轴 src/os/linux/entry.cr）──
 g_call_main_pos : int, mut  // set by emit_start (OS 轴 entry.cr), used for patching call main
+g_start_tls_patch_pos : int, mut = -1  // disp32 slot for the main TLS block VA
 gv_argc : int, mut   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
 gv_current_arena : int, mut = -1
@@ -1441,6 +1634,7 @@ fn elf_gen(buf: string) -> int:
     // the OS axis is still pending.
     g_ni_syscall3 = -1
     g_ni_syscall4 = -1
+    g_ni_syscall6 = -1
     g_ni_load8 = -1
     g_ni_store8 = -1
     g_ni_load64 = -1
@@ -1450,7 +1644,6 @@ fn elf_gen(buf: string) -> int:
     g_ni_cell_store = -1
     g_ni_dyncpy = -1
     g_ni_cell_load = -1
-    g_ni_goroutine_wrapper_addr = -1
     ni_i : ., mut = 0
     loop:
         if ni_i >= g_str_count:
@@ -1460,6 +1653,8 @@ fn elf_gen(buf: string) -> int:
             g_ni_syscall3 = ni_i
         if str_eq(ns, "syscall4") != 0:
             g_ni_syscall4 = ni_i
+        if str_eq(ns, "syscall6") != 0:
+            g_ni_syscall6 = ni_i
         if str_eq(ns, "load8") != 0:
             g_ni_load8 = ni_i
         if str_eq(ns, "store8") != 0:
@@ -1478,8 +1673,6 @@ fn elf_gen(buf: string) -> int:
             g_ni_cell_store = ni_i
         if str_eq(ns, "_dyncpy") != 0:
             g_ni_dyncpy = ni_i
-        if str_eq(ns, "goroutine_wrapper_addr") != 0:
-            g_ni_goroutine_wrapper_addr = ni_i
         ni_i = ni_i + 1
 
     print("  ni: syscall3=")
@@ -1681,6 +1874,10 @@ fn elf_gen(buf: string) -> int:
         cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
         total_code = total_code + 11
+        // per-thread TLS + atomic stubs: 11 * 16 bytes (incl. rt_set_m_idx)
+        total_code = total_code + 176
+        // naked rt_sigreturn trampoline (7 bytes, padded to 16)
+        total_code = total_code + 16
 
     hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE
     rodata_base := total_code
@@ -1863,7 +2060,8 @@ fn elf_gen(buf: string) -> int:
         globals_size = 256
     if g_x86_emit_rt_stubs != 0:
         globals_size = globals_size + 8
-    // + current_g slot
+    globals_size = globals_size + 32   // main TLS block at the end of BSS
+    // + current_g slot + main TLS block
     alloc_sz := emit_alloc_body(buf, cp, bss_va, globals_size)
     alloc_start := cp
     g_curg_stub_start : ., mut = -1
@@ -1971,15 +2169,32 @@ fn elf_gen(buf: string) -> int:
                 cell_store(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176 + 11)
             gsi2 = gsi2 + 1
 
-    // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
-    // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init
-    // builds the fake frame, fiber_switch performs the context switch.
-    // Registered in func_offsets so IR_CALL (fiber_init/fiber_switch from
-    // Core) and IR_FNADDR (@addr(goroutine_entry_wrapper)) resolve here.
+        // TLS/atomic stubs: fixed 16-byte slots.
+        tls_start := cp
+        cp = cp + emit_rt_tls_stubs(buf, cp)
+        sched_reg_one("rt_m_idx", 0, tls_start)
+        sched_reg_one("rt_current_arena", 0, tls_start + 16)
+        sched_reg_one("rt_set_current_arena", 0, tls_start + 32)
+        sched_reg_one("rt_arena_suspend", 0, tls_start + 48)
+        sched_reg_one("rt_set_arena_suspend", 0, tls_start + 64)
+        sched_reg_one("rt_atomic_load", 0, tls_start + 80)
+        sched_reg_one("rt_atomic_store", 0, tls_start + 96)
+        sched_reg_one("rt_atomic_xchg", 0, tls_start + 112)
+        sched_reg_one("rt_atomic_cas", 0, tls_start + 128)
+        sched_reg_one("rt_atomic_fetch_add", 0, tls_start + 144)
+        sched_reg_one("rt_set_m_idx", 0, tls_start + 160)
+        sched_reg_one("rt_sp", 0, tls_start + 176)
+
+        // Naked signal restorer: must keep RSP at the signal frame.
+        sched_reg_one("rt_sigreturn_stub", 0, cp)
+        cp = cp + emit_rt_sigreturn_stub(buf, cp)
+
+    // ── Fiber runtime stubs (fiber_init / fiber_switch) ──
+    // The conc activation scheduler uses these directly; the legacy goroutine
+    // wrapper was retired in CP-6.
     if g_x86_emit_rt_stubs != 0:
         sched_reg_one("fiber_init", 0, cp)
         sched_reg_one("fiber_switch", 0, cp + 20)
-        sched_reg_one("goroutine_entry_wrapper", 0, cp + 47)
         cp = cp + emit_goroutine_stubs(buf, cp)
         // m_start_workers: worker thread launcher (clone). worker_entry
         // (15 bytes) precedes the public entry so its RIP-relative LEA stays
@@ -2179,6 +2394,12 @@ fn elf_gen(buf: string) -> int:
     // +1 ensures BSS is on a different page from code.
     bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
     g_elf_bss_va = bss_va
+
+    // Fill the main TLS block VA now that the final BSS base is known.
+    if g_start_tls_patch_pos >= 0:
+        tls_va := bss_va + 16 + globals_size - 32
+        w32(buf, g_start_tls_patch_pos,
+            tls_va - (TEXT_BASE + g_start_tls_patch_pos + 4))
 
     // The allocator was emitted earlier with a provisional BSS address.
     // Re-emit it in place now that the final data-segment VA is known.

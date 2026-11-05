@@ -31,7 +31,6 @@
 tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同阶段评估
 tests/selfhost/test_ccrb_bundle.py	未挂：需外部 zstd（CI 镜像未保证）；`.ccrb` 是分发包装层，核心 v10 raw `.ccr` 检查已由 test_ccr_v10_format/stream 覆盖。接入条件 = CI 镜像声明 zstd 依赖
 tests/selfhost/test_bigint_arith.py	未挂（历史缺口）：BigInt 运行时端到端，需 corec+ELF；构建面成本高，独立阶段评估
-tests/selfhost/test_bigint_boundaries.py	未挂（历史缺口）：BigInt 边界语义，需 corec；与 arith 同族
 tests/selfhost/test_bigint_containers.py	未挂（历史缺口）：BigInt 容器载荷，需 corec+ELF
 tests/selfhost/test_bigint_interp.py	未挂（历史缺口）：BigInt 解释器路径，需 corec
 tests/selfhost/test_bigint_literals.py	未挂（历史缺口）：BigInt 字面量，需 corec
@@ -39,7 +38,6 @@ tests/selfhost/test_dex_arith.py	未挂（历史缺口）：dex 定点语义；�
 tests/selfhost/test_dex_type.py	未挂（历史缺口）：dex 类型核心；需 corec
 tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径工程构建；需 corec+corearch
 tests/selfhost/test_global_init.py	未挂（历史缺口）：全局初始化语义双路径；需 corec
-tests/selfhost/test_interp_float.py	未挂（历史缺口）：解释器 dex/enum/dyn/pointer；需 corec
 tests/selfhost/test_lexer_parity.py	未挂（历史缺口）：词法对照（两编译器均拒 `_`/宽度后缀）；需 corec
 tests/selfhost/test_lsp.py	未挂（**TODO #2026-09-11-13 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
 tests/selfhost/test_native_float.py	未挂（历史缺口）：Native ELF dex 运算

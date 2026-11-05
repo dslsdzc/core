@@ -1105,7 +1105,7 @@ fn rp_if_has_exit_or_effect(sg_start: int, sg_count: int) -> int:
             return 0
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        if op == IR_RETURN || op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_PTR_OF || op == IR_STR_OF:
+        if op == IR_RETURN || op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_PTR_OF || op == IR_STR_OF:
             return 1
         if op == IR_JUMP:
             t := rc_ctl_label_node(s1)
@@ -1585,7 +1585,7 @@ fn rp_clear_candidate(sg: int, nstart: int, ncount: int, sg_start: int, sg_end: 
         qn = qn + 1
     return -1
 
-// IR_CALL/IR_SPAWN carry contiguous argument vars starting at s1.
+// IR_CALL carries contiguous argument vars starting at s1.
 fn rp_call_arg_uses_alloc(s1: int, s2: int, ai_sel: int) -> int:
     if s1 < 0 || s2 <= 0:
         return 0
@@ -1918,7 +1918,7 @@ fn rp_string_calls_ok(sg_start: int, sg_count: int) -> int:
             cfi := rc_func_by_name(s3)
             if cfi < 0 || func_owner(cfi) != owner:
                 return 0
-        else if op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_RETURN:
+        else if op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_RETURN:
             return 0
         else if op == IR_JUMP:
             if rp_label_inside(rc_ctl_label_node(s1), sg_start, sg_count) == 0:
@@ -2195,7 +2195,7 @@ fn rp_if_merge_eligible(sg: int, sg_start: int, sg_count: int,
                 if literal_only == 0:
                     // IR_BINARY/IR_UNARY/IR_MATCH keep an operator or label
                     // range in the high fields; check only the value slots.
-                    if op == IR_CALL || op == IR_SPAWN:
+                    if op == IR_CALL:
                         if allow_calls == 0 && rp_call_arg_uses_sel(s1, s2, ai1, ai2) != 0:
                             return 0
                     else if op == IR_MATCH:
@@ -2319,11 +2319,11 @@ fn rp_share_bad_prepare():
                             rp_share_bad_set(fi, 4)
                         else if rk == TYP_BASE && get_type_data(rt) == TY_STRING:
                             rp_share_bad_set(fi, 4)
-                if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+                if op == IR_YIELD || op == IR_AWAIT:
                     rp_share_bad_set(fi, 4)
                 if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
                     rp_share_bad_set(fi, 4)
-                if op == IR_CALL || op == IR_SPAWN:
+                if op == IR_CALL:
                     if is_arena_infra_name(s3) != 0:
                         rp_share_bad_set(fi, 4)
                     else if rc_func_by_name(s3) < 0:
@@ -2339,39 +2339,83 @@ fn rp_share_bad_prepare():
                         rp_share_bad_set(fi, 1)
                 sg = sg + 1
         fi = fi + 1
-    // Propagate callee hazards to callers until stable.
-    changed : ., mut = 1
-    guard : ., mut = 0
+    // Propagate callee hazards to callers with a reverse-call worklist. A
+    // full scan per round is O(funcs * nodes * depth); the worklist is
+    // O(edges + funcs) and preserves the same monotone OR result.
+    if g_ir_func_count <= 0:
+        return
+    head := alloc(g_ir_func_count * 8)
+    fi = 0
     loop:
-        if changed == 0:
-            return
-        guard = guard + 1
-        if guard > g_ir_func_count + 4:
-            return
-        changed = 0
-        fi = 0
-        loop:
-            if fi >= g_ir_func_count:
-                break
-            cs := cell_load(g_df_func_node_start, fi * 8)
-            cc := cell_load(g_df_func_node_count, fi * 8)
-            if cs >= 0 && cc > 0:
-                ni : ., mut = cs
-                loop:
-                    if ni >= cs + cc:
-                        break
-                    op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if fi >= g_ir_func_count:
+            break
+        cell_store(head, fi * 8, -1)
+        fi = fi + 1
+    cap := g_ir_instr_count
+    if cap < 1:
+        return
+    from := alloc(cap * 8)
+    next := alloc(cap * 8)
+    ec : ., mut = 0
+    fi = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        cs := cell_load(g_df_func_node_start, fi * 8)
+        cc := cell_load(g_df_func_node_count, fi * 8)
+        if cs >= 0 && cc > 0:
+            ni : ., mut = cs
+            loop:
+                if ni >= cs + cc:
+                    break
+                op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+                if op == IR_CALL:
                     s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-                    if op == IR_CALL || op == IR_SPAWN:
-                        cfi := rc_func_by_name(s3)
-                        if cfi >= 0 && cfi < g_ir_func_count:
-                            cb := cell_load(g_share_bad, cfi * 8)
-                            ob := cell_load(g_share_bad, fi * 8)
-                            if cb != 0 && (ob + cb) != ob:
-                                rp_share_bad_set(fi, cb)
-                                changed = 1
-                    ni = ni + 1
-            fi = fi + 1
+                    cfi := rc_func_by_name(s3)
+                    if cfi >= 0 && cfi < g_ir_func_count:
+                        if ec < cap:
+                            cell_store(from, ec * 8, fi)
+                            cell_store(next, ec * 8, cell_load(head, cfi * 8))
+                            cell_store(head, cfi * 8, ec)
+                            ec = ec + 1
+                ni = ni + 1
+        fi = fi + 1
+    q := alloc(g_ir_func_count * 8)
+    qh : ., mut = 0
+    qt : ., mut = 0
+    fi = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        if cell_load(g_share_bad, fi * 8) != 0:
+            cell_store(q, qt * 8, fi)
+            qt = qt + 1
+        fi = fi + 1
+    loop:
+        if qh >= qt:
+            return
+        callee := cell_load(q, qh * 8)
+        qh = qh + 1
+        cb := cell_load(g_share_bad, callee * 8)
+        e : ., mut = cell_load(head, callee * 8)
+        loop:
+            if e < 0:
+                break
+            caller := cell_load(from, e * 8)
+            ob := cell_load(g_share_bad, caller * 8)
+            nb : ., mut = 0
+            b : ., mut = 1
+            loop:
+                if b > 8:
+                    break
+                if (ob / b) % 2 == 1 || (cb / b) % 2 == 1:
+                    nb = nb + b
+                b = b * 2
+            if nb != ob:
+                cell_store(g_share_bad, caller * 8, nb)
+                cell_store(q, qt * 8, caller)
+                qt = qt + 1
+            e = cell_load(next, e * 8)
 
 fn rp_share_event_for_label(q: int, p: int) -> int:
     g_rp_share_mode = -1
@@ -2510,7 +2554,7 @@ fn rp_share_window_ok(s_end: int, rn: int, mode: int, ai_sel: int, nstart: int, 
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
         s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-        if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        if op == IR_YIELD || op == IR_AWAIT:
             return 0
         if op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
             return 0
@@ -2689,7 +2733,7 @@ fn rp_if_share_eligible(sg: int, sg_start: int, sg_count: int,
             if op == IR_CONST || op == IR_CONST_BIG || op == IR_LABEL || op == IR_JUMP || op == IR_ALLOC || op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_BOUNDS_CHECK:
                 literal_only = 1
             if literal_only == 0:
-                if op == IR_CALL || op == IR_SPAWN:
+                if op == IR_CALL:
                     if rp_call_arg_uses_alloc(s1, s2, ai_sel) != 0:
                         umax = ni
                 else if op == IR_MATCH:
@@ -3237,7 +3281,7 @@ fn lazy_memory_write(op: int) -> int:
 fn lazy_op_may_mutate_memory(op: int) -> int:
     if lazy_memory_write(op) != 0:
         return 1
-    if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH || op == IR_YIELD || op == IR_AWAIT:
+    if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH || op == IR_YIELD || op == IR_AWAIT:
         return 1
     return 0
 
@@ -3351,7 +3395,7 @@ fn lazy_callee_safe(fi: int) -> int:
         d := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
-        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_DYN_DISPATCH:
             return 0
         if op == IR_STORE_PTR || op == IR_PTR_OF || op == IR_STR_OF || op == IR_ADDR_INDEX || op == IR_SLICE || op == IR_REF || op == IR_FNADDR:
             return 0
@@ -3394,7 +3438,7 @@ fn lazy_callee_no_alloc(fi: int) -> int:
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         if op == IR_ALLOC_ARRAY || op == IR_ALLOC_STRUCT || op == IR_ALLOC_AT || op == IR_ARENA_CLEAR:
             return 0
-        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        if op == IR_CALL || op == IR_CALL_EXTERN || op == IR_YIELD || op == IR_AWAIT:
             return 0
         ni = ni + 1
     return 0
@@ -3481,6 +3525,9 @@ fn lazy_memo_analyze():
     loop:
         if fi >= g_ir_func_count:
             return
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -3602,6 +3649,9 @@ fn lazy_plan_analyze():
     loop:
         if fi >= g_ir_func_count:
             return
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -3848,10 +3898,14 @@ fn region_plan_analyze():
             return
         gs = gs + 1
     rp_share_bad_prepare()
+    timing_mark("rp_prepare")
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -3884,6 +3938,7 @@ fn region_plan_analyze():
                                             region_plan_mark_merge(sg, g_rp_merge_kind, g_rp_merge_len, g_rp_merge_name, g_rp_merge_str1, g_rp_merge_str2)
             sg = sg + 1
         fi = fi + 1
+    timing_mark("rp_split_merge")
 
     // V2.3 share pass. Run after split/merge marks so the window can reject
     // merge copies landing in a candidate's slot. Candidates are processed in
@@ -3894,6 +3949,9 @@ fn region_plan_analyze():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -3919,7 +3977,9 @@ fn region_plan_analyze():
             sg = sg - 1
         fi = fi + 1
 
+    timing_mark("rp_share")
     rp_share_effective_prepare()
+    timing_mark("rp_share_effective")
 
     // Second pass: early clear for FUNC/LOOP/FOR/UNSAFE slots. Run after all
     // split marks so allocations in a split IF are not counted for the parent.
@@ -3931,6 +3991,9 @@ fn region_plan_analyze():
     loop:
         if fi >= g_ir_func_count:
             break
+        if ir_func_reachable(fi) == 0:
+            fi = fi + 1
+            continue
         nstart := cell_load(g_df_func_node_start, fi * 8)
         ncount := cell_load(g_df_func_node_count, fi * 8)
         if nstart < 0 || ncount <= 0:
@@ -3953,5 +4016,8 @@ fn region_plan_analyze():
             sg = sg + 1
         fi = fi + 1
 
+    timing_mark("rp_clear")
     lazy_memo_analyze()
+    timing_mark("rp_lazy_memo")
     lazy_plan_analyze()
+    timing_mark("rp_lazy_plan")
