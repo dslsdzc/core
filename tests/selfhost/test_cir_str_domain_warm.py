@@ -41,6 +41,10 @@ BASE = pathlib.Path(__file__).resolve().parents[2]
 COREC = pathlib.Path(os.environ.get("COREC_BIN", str(BASE / "build" / "corec")))
 
 # ── 语料 ────────────────────────────────────────────────────────────────────
+# Use the non-generic `print_str` / `println_str` sinks here. The fixture's
+# subject is the CIR intern journal; generic `print` creates a monomorph
+# instance during IR generation, which conservatively disables the CIR cache
+# for that function (see main.cr) and would hide the cached entry under test.
 REPRO = """import io
 
 struct Point:
@@ -48,10 +52,10 @@ struct Point:
 
 fn fields_of_point() -> int:
     f := @fields(Point)
-    print("fields=[")
-    print(f)
-    print("] len=")
-    println(int_str(str_len(f)))
+    print_str("fields=[")
+    print_str(f)
+    print_str("] len=")
+    println_str(int_str(str_len(f)))
     return str_len(f)
 
 fn main() -> int:
@@ -67,18 +71,18 @@ struct Two:
     x: int, y: int
 
 fn main() -> int:
-    print("ONE=")
-    println(@fields(One))
-    print("TWO=")
-    println(@fields(Two))
+    print_str("ONE=")
+    println_str(@fields(One))
+    print_str("TWO=")
+    println_str(@fields(Two))
     return 0
 """
 
 VARNAME = """import io
 
 fn cat_helper(a: string, b: string) -> int:
-    print("CAT=")
-    println(a + b)
+    print_str("CAT=")
+    println_str(a + b)
     return 0
 
 fn main() -> int:
@@ -115,8 +119,8 @@ fn f2(n: int) -> int:
     return s
 
 fn main() -> int:
-    print("R=")
-    println(int_str(f1(10) + f2(9)))
+    print_str("R=")
+    println_str(int_str(f1(10) + f2(9)))
     return 0
 """
 

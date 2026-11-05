@@ -321,6 +321,13 @@ case "$CI_JOB_NAME" in
     export CI_SHARD_INDEX="${CI_JOB_NAME##*-}"
     export CI_SHARD_TOTAL="${CI_SHARD_TOTAL:-4}"
     build_selfhost
+    # Criteria carrier runs once, on shard 0, after the compiler exists. The
+    # harness test validates that these two executable hooks stay present and
+    # that the locked values still fail closed when tampered with.
+    if [ "$CI_SHARD_INDEX" = "0" ]; then
+      bash tools/baseline/canary_check.sh
+      python3 tests/harness/test_canary_carrier.py --require-compiler
+    fi
     bash src/ci/selfhost_tests.sh
     ;;
 
