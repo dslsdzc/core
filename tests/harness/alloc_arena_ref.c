@@ -12,6 +12,15 @@
 #include <string.h>
 #include <sys/mman.h>
 
+/* Runtime-boundary adapters for the standalone single-arena C model.
+ * The Core blob is extracted without the rest of the runtime, so the symbols
+ * below are supplied here. The model uses arena 0 and never suspends arena
+ * metadata; these values match the reference state initialized in setup. */
+long _g_g_arena_suspend = 0;
+long rt_m_idx(void) { return 0; }
+long rt_current_arena(void) { return 0; }
+long rt_arena_suspend(void) { return _g_g_arena_suspend; }
+
 #define SLOT_SIZE (1UL << 20)
 #define SEG_SIZE (64UL << 20)
 #define MAX_SEGS 8
@@ -28,13 +37,17 @@ extern char *_g_g_heap_ptr;
 extern char *_g_g_heap_end;
 extern char *_g_g_arena_scalars;
 extern long _g_g_arena_scalars_ready;
-extern long _g_g_arena_suspend;
 extern char *_g_g_arena_slot;
 extern char *_g_g_arena_slot_cursor;
 extern char *_g_g_arena_slot_next;
 extern char *_g_g_arena_static;
 extern char *_g_g_arena_sizes;
 extern char *_g_g_arena_cursors;
+extern char *_g_g_arena_large_head;
+extern char *_g_g_arena_large_count;
+extern char *_g_g_slot_free_m;
+extern char *_g_g_slot_count_m;
+extern char *_g_g_segment_count_m;
 extern char *_g_g_segment_base;
 extern char *_g_g_class_base;
 extern char *_g_g_class_cursor;
@@ -259,6 +272,11 @@ static void setup_core(int static_mode, long pool_init) {
     _g_g_arena_static = calloc(4096, 8);
     _g_g_arena_sizes = calloc(4096, 8);
     _g_g_arena_cursors = calloc(4096, 8);
+    _g_g_arena_large_head = calloc(4096, 8);
+    _g_g_arena_large_count = calloc(4096, 8);
+    _g_g_slot_free_m = calloc(256, 8);
+    _g_g_slot_count_m = calloc(256, 8);
+    _g_g_segment_count_m = calloc(256, 8);
     _g_g_segment_base = calloc(256, sizeof(char *));
     _g_g_class_base = calloc(4096, 8);
     _g_g_class_cursor = calloc(4096, 8);
@@ -288,6 +306,19 @@ static void setup_core(int static_mode, long pool_init) {
     ((long *)_g_g_arena_static)[0] = static_mode;
     ((long *)_g_g_arena_sizes)[0] = SLOT_SIZE;
     ((long *)_g_g_arena_cursors)[0] = 0;
+    // Per-M slot/section tables: M=0 already owns slot 0 and segment 0;
+    // other M rows start empty. Large-object lists start empty everywhere.
+    for (int m = 0; m < 256; m++) {
+        ((long *)_g_g_slot_free_m)[m] = -1;
+        ((long *)_g_g_slot_count_m)[m] = 0;
+        ((long *)_g_g_segment_count_m)[m] = 0;
+    }
+    ((long *)_g_g_slot_count_m)[0] = 1;
+    ((long *)_g_g_segment_count_m)[0] = 1;
+    for (int i = 0; i < 4096; i++) {
+        ((long *)_g_g_arena_large_head)[i] = -1;
+        ((long *)_g_g_arena_large_count)[i] = 0;
+    }
     for (int i = 0; i < 256; i++)
         ((long *)_g_g_class_lookup)[i] = lookup_source[i];
     for (int i = 0; i < 8 * CLASSES; i++) {

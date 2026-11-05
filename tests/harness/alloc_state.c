@@ -7,6 +7,15 @@
 #include <stddef.h>
 #include <sys/mman.h>
 
+/* Runtime-boundary adapters for the standalone single-arena C model.
+ * The Core blob is extracted without the rest of the runtime, so the symbols
+ * below are supplied here. The model uses arena 0 and never suspends arena
+ * metadata; these values match the reference state initialized in setup. */
+long _g_g_arena_suspend = 0;
+long rt_m_idx(void) { return 0; }
+long rt_current_arena(void) { return 0; }
+long rt_arena_suspend(void) { return _g_g_arena_suspend; }
+
 #define ALLOC_HEAP_SIZE (1UL << 30)
 
 extern char *_g_g_heap_ptr;
