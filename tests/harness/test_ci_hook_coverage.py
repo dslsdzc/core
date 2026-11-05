@@ -29,6 +29,7 @@ import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RUN_SH = os.path.join(BASE, "src", "ci", "run.sh")
+SELFHOST_LIST = os.path.join(BASE, "src", "ci", "selfhost_tests.list")
 ALLOWLIST = os.path.join(BASE, "tests", "harness", "ci_hook_allowlist.txt")
 
 # SCOPE：与 run.sh 挂点命名一一对应的三目录（扩展须同步改本常量 + 白名单头注）
@@ -101,6 +102,11 @@ def check(run_sh_text, allow, scope):
 def main():
     with open(RUN_SH, encoding="utf-8") as fh:
         run_sh_text = fh.read()
+    # The full selfhost corpus is a shardable manifest; its command lines are
+    # still CI hooks even though they no longer live inside run.sh.
+    if os.path.exists(SELFHOST_LIST):
+        with open(SELFHOST_LIST, encoding="utf-8") as fh:
+            run_sh_text += "\n" + fh.read()
     allow = load_allowlist(ALLOWLIST)
     scope = scope_files()
     hooked = hooked_files(run_sh_text)

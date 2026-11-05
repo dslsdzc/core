@@ -9,6 +9,7 @@ Usage:
     python3 tests/gate.py changed   # default: tests matching the working diff
     python3 tests/gate.py conc      # concurrency happy paths + key failures
     python3 tests/gate.py full      # concurrency + compiler type/purity gates
+    python3 tests/gate.py fast      # PR smoke: concurrency + core verifier basics
     python3 tests/gate.py list
 """
 
@@ -44,6 +45,18 @@ COMPILER = [
 ]
 
 SMOKE = ["test_conc_runtime.py"]
+
+# PR fast layer: enough to catch a broken compiler/runtime while keeping the
+# feedback loop short. The full selfhost corpus stays in the merge/manual job.
+FAST = [
+    "test_conc_runtime.py",
+    "test_conc_sched.py",
+    "test_ccr_types.py",
+    "test_purity.py",
+    "test_region_escape.py",
+    "test_merge_copy.py",
+    "test_lib_manager.py",
+]
 
 
 def changed_files() -> list[str]:
@@ -128,8 +141,12 @@ def main() -> int:
         return run_tests(CONC, jobs)
     if arg == "full":
         return run_tests(CONC + COMPILER, jobs)
+    if arg == "fast":
+        # The warm-cache fixtures assume exclusive access to .core/cache/cir;
+        # run the PR smoke serially rather than racing entries.
+        return run_tests(FAST, 1)
     print(f"unknown gate: {arg}", file=sys.stderr)
-    print("use: changed | conc | full | list", file=sys.stderr)
+    print("use: changed | conc | full | fast | list", file=sys.stderr)
     return 2
 
 
