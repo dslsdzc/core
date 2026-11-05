@@ -276,8 +276,8 @@ fn cli_parse() -> int, pub:
             name := _cli_strip_dashes(arg)
             fi := _cli_find_flag(name)
             if fi < 0:
-                print("unknown flag: ")
-                println(arg)
+                print_str("unknown flag: ")
+                println_str(arg)
                 cli_help()
                 return -1
             if cell_load(g_cli_flags, fi * 56 + 40) != 0:
@@ -289,9 +289,9 @@ fn cli_parse() -> int, pub:
             else:
                 ai = ai + 1
                 if ai >= argc_int:
-                    print("flag ")
-                    print(arg)
-                    println(" requires a value")
+                    print_str("flag ")
+                    print_str(arg)
+                    println_str(" requires a value")
                     return -1
                 val := get_arg(ai)
                 unsafe:
@@ -357,16 +357,16 @@ fn cli_print_flags(debug_only: int), pub:
                 f_long := @str_of(cell_load(g_cli_flags, fi * 56))
                 f_desc := @str_of(cell_load(g_cli_flags, fi * 56 + 16))
                 if str_len(f_desc) > 0:
-                    print("  ")
+                    print_str("  ")
                     if str_len(f_short) > 0:
-                        print("-")
-                        print(f_short)
-                        print(", ")
+                        print_str("-")
+                        print_str(f_short)
+                        print_str(", ")
                     else:
-                        print("    ")
-                    print("--")
-                    print(f_long)
-                    print(" ")
+                        print_str("    ")
+                    print_str("--")
+                    print_str(f_long)
+                    print_str(" ")
                     // Pad to 24 chars total (prefix = "  " + short/"    " + "--" + " ")
                     total : ., mut = 9
                     if str_len(f_short) > 0:
@@ -375,55 +375,55 @@ fn cli_print_flags(debug_only: int), pub:
                     loop:
                         if total >= 24:
                             break
-                        print(" ")
+                        print_str(" ")
                         total = total + 1
-                    println(f_desc)
+                    println_str(f_desc)
         fi = fi + 1
 
 fn cli_help(), pub:
     // usage: prog [-h] {cmd1,cmd2,...} [options]
-    print("usage: ")
-    print(g_cli_prog)
-    print(" [-h]")
+    print_str("usage: ")
+    print_str(g_cli_prog)
+    print_str(" [-h]")
     if g_cli_cmd_count > 0:
-        print(" {")
+        print_str(" {")
         ci : ., mut = 0
         first : ., mut = 1
         loop:
             if ci >= g_cli_cmd_count:
                 break
             if first == 0:
-                print(",")
+                print_str(",")
             cmd_name_str := unsafe:
                 @str_of(cell_load(g_cli_cmds, ci * 16))
-            print(cmd_name_str)
+            print_str(cmd_name_str)
             first = 0
             ci = ci + 1
-        print("}")
-    println(" [options]")
-    println("")
+        print_str("}")
+    println_str(" [options]")
+    println_str("")
 
     if str_len(g_cli_desc) > 0:
-        println(g_cli_desc)
-        println("")
+        println_str(g_cli_desc)
+        println_str("")
 
     // Positional arguments (commands)
     if g_cli_cmd_count > 0:
-        println("positional arguments:")
-        print("  {")
+        println_str("positional arguments:")
+        print_str("  {")
         ci : ., mut = 0
         first : ., mut = 1
         loop:
             if ci >= g_cli_cmd_count:
                 break
             if first == 0:
-                print(",")
+                print_str(",")
             cmd_name_str := unsafe:
                 @str_of(cell_load(g_cli_cmds, ci * 16))
-            print(cmd_name_str)
+            print_str(cmd_name_str)
             first = 0
             ci = ci + 1
-        println("}")
+        println_str("}")
         ci = 0
         loop:
             if ci >= g_cli_cmd_count:
@@ -431,23 +431,23 @@ fn cli_help(), pub:
             unsafe:
                 cmd_name := @str_of(cell_load(g_cli_cmds, ci * 16))
                 cmd_desc := @str_of(cell_load(g_cli_cmds, ci * 16 + 8))
-                print("    ")
-                print(cmd_name)
+                print_str("    ")
+                print_str(cmd_name)
                 pad : ., mut = str_len(cmd_name)
                 loop:
                     if pad >= 12:
                         break
-                    print(" ")
+                    print_str(" ")
                     pad = pad + 1
-                println(cmd_desc)
+                println_str(cmd_desc)
             ci = ci + 1
-        println("")
+        println_str("")
 
     // Flags / options
-    println("options:")
+    println_str("options:")
     // Built-in -h, --help
-    println("  -h, --help            show this help message and exit")
+    println_str("  -h, --help            show this help message and exit")
     cli_print_flags(0)
-    println("")
-    println("debug options:")
+    println_str("")
+    println_str("debug options:")
     cli_print_flags(1)

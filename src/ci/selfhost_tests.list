@@ -113,3 +113,4 @@ python3 tests/selfhost/test_go_arena.py  # per-G arena save/restore across go/ch
 python3 tests/selfhost/test_rt_tls.py
 python3 tests/selfhost/test_stub_regalloc.py
 python3 tests/selfhost/test_bigint_boundaries.py
+python3 tests/selfhost/test_generic_constraints.py

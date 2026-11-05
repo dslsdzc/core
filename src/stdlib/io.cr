@@ -3,22 +3,62 @@
 // Rust-style string interpolation via format() in fmt.cr.
 // Note: depends on fmt.cr (str_len, int_str) — see stdlib/_import.cr or import fmt
 
-fn print(s: string), pub:
+// Printable is the printf-family constraint. Implementations are selected
+// during monomorphization, so print/println stay static and tag-free.
+interface Printable, pub:
+    fn render(self) -> string
+
+impl Printable for int:
+    fn render(self) -> string:
+        return int_str(self)
+
+impl Printable for string:
+    fn render(self) -> string:
+        return self
+
+impl Printable for bool:
+    fn render(self) -> string:
+        return bool_str(self)
+
+// Private syscall sink. Keeping it separate from the generic entry points
+// prevents print/println from recursing into themselves.
+fn write_str(s: string):
     slen := str_len(s)
     r1 := syscall3(1, 1, s, slen)  // write(1, s, len)
     return
 
-fn println(s: string), pub:
-    slen := str_len(s)
-    r1 := syscall3(1, 1, s, slen)  // write(1, s, len)
+// Non-generic string sinks. Stdlib internals use these so their diagnostic
+// sites do not instantiate the generic print family (which would force every
+// importer into monomorphized IR and disable region planning).
+fn print_str(s: string), pub:
+    write_str(s)
+    return
+
+fn println_str(s: string), pub:
+    write_str(s)
     r2 := syscall3(1, 1, "\n", 1)  // write(1, "\n", 1)
     return
 
+fn print(v: .), pub:
+    print_str(v.render())
+    return
+
+fn println(v: .), pub:
+    println_str(v.render())
+    return
+
+// Bootstrap stage0 compatibility. The Python frontend lowers a generic
+// `v.render()` method call to a plain call named `render`; the self-hosted
+// compiler resolves it through the Printable impl table instead. Corec itself
+// only prints strings, so this identity fallback is sufficient for bootstrap.
+fn render(v: string) -> string:
+    return v
+
 fn print_i(n: int), pub:
-    print(int_str(n))
+    print_str(int_str(n))
 
 fn println_i(n: int), pub:
-    println(int_str(n))
+    println_str(int_str(n))
 
 fn read_file(path: string) -> string, pub:
     fd := syscall3(2, path, 0, 0)  // open(path, O_RDONLY, 0)

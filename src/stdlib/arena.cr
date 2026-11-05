@@ -518,7 +518,7 @@ fn arena_grow_pool_m(m: int), pub:
         return
     local_seg := seg - m * SEGMENTS_PER_M
     if g_arena_pool_limit > 0 && (local_seg + 1) * 67108864 > g_arena_pool_limit:
-        println("arena: pool limit exceeded")
+        println_str("arena: pool limit exceeded")
         return
     saved := arena_scalar_get(0)
     arena_set_current(-1)

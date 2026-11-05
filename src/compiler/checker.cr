@@ -3953,6 +3953,18 @@ fn check_func(fi: int):
                 di = di + 1
             if dot_pos > 0:
                 struct_name := str_sub(fn_name, 0, dot_pos)
+                // Primitive impl receivers are keyed by the same names used in
+                // the method table; there is no named-type symbol to resolve.
+                if str_eq(struct_name, "int") != 0:
+                    ti = TI_INT
+                else if str_eq(struct_name, "string") != 0:
+                    ti = TI_STR
+                else if str_eq(struct_name, "bool") != 0:
+                    ti = TI_BOOL
+                else if str_eq(struct_name, "char") != 0:
+                    ti = TI_CHAR
+                else if str_eq(struct_name, "dex") != 0:
+                    ti = TI_DEX
                 struct_ni := str_intern(struct_name)
                 si := find_gsym(struct_ni)
                 if si >= 0 && sym_kind(si) == SYM_TYPE:
@@ -4821,6 +4833,28 @@ fn infer_expr(node: int) -> int:
             // Unwrap generic apply to base type
             if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_GENERIC_APPLY:
                 lookup_ti = get_type_data(lookup_ti)
+            if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_BASE:
+                base_ni := get_type_name(lookup_ti)
+                mi : ., mut = 0
+                loop:
+                    if mi >= g_method_count:
+                        break
+                    if cell_load(g_methods, mi * 24) == base_ni && cell_load(g_methods, mi * 24 + 8) == method_ni:
+                        cand_ni := cell_load(g_methods, mi * 24 + 16)
+                        cand_fi := find_func(cand_ni)
+                        if cand_fi >= 0:
+                            cand_node := fi_ast_node(cand_fi)
+                            cand_owner := lib_of_node(cand_node)
+                            if cand_owner >= 0 && cand_owner != g_cur_lib && (lib_can_import(g_cur_lib, cand_owner) == 0 || lib_export_find_kind(cand_owner, cand_ni, SYM_FN) < 0):
+                                check_error(EC_N_METHOD, "Undefined method '" + istr_get(method_ni) + "'", ast_line(node), ast_col(node))
+                                break
+                        func_ni = cand_ni
+                        if cand_fi >= 0:
+                            ast_set_data(node, func_link(cand_fi))
+                        else:
+                            ast_set_data(node, func_ni)
+                        break
+                    mi = mi + 1
             if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_NAMED:
                 struct_ni := get_type_data(lookup_ti)
                 // Look up method in method table

@@ -232,6 +232,28 @@ fn unpack_type(typ: int) -> int:
         return ast_type_val(typ)
     return 0
 
+// Name key for an impl target. Named types already carry their name ni; a
+// primitive target is stored as a base-type node (kind 0), so map its TY_* code
+// back to the same interned name used by the method table.
+fn impl_type_name_ni(typ: int) -> int:
+    if typ < 0:
+        return -1
+    if ast_kind(typ) == EXPR_IDENT:
+        return ast_int_val(typ)
+    if ast_kind(typ) == 0:
+        tv := ast_type_val(typ)
+        if tv == TY_INT:
+            return str_intern("int")
+        if tv == TY_DEX:
+            return str_intern("dex")
+        if tv == TY_BOOL:
+            return str_intern("bool")
+        if tv == TY_STRING:
+            return str_intern("string")
+        if tv == TY_CHAR:
+            return str_intern("char")
+    return -1
+
 // --- Expression parsing ---
 fn prec(k: int) -> int:
     if k == T_EQ:
@@ -1818,7 +1840,7 @@ fn rewrite_self_type(node: int, impl_ni: int):
         rewrite_self_type(ast_a(node), impl_ni)
         return
 
-fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int, impl_type_ni: int):
+fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_ver: int, impl_type_ni: int, impl_type_node: int):
     gnames : string, mut
     gnames_cap : int, mut
     gnames = alloc(64 * 8)
@@ -1848,7 +1870,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 if impl_type_ni < 0:
                     check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
                 else:
-                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                    stn = impl_type_node
+                    if ast_kind(stn) == 0:
+                        stv = ast_type_val(stn)
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, stv, stn, tok_lo(pt), tok_hi(pt))
@@ -1872,7 +1896,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 if impl_type_ni < 0:
                     check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
                 else:
-                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                    stn = impl_type_node
+                    if ast_kind(stn) == 0:
+                        stv = ast_type_val(stn)
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, stv, stn, tok_lo(pt), tok_hi(pt))
@@ -1895,7 +1921,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 if impl_type_ni < 0:
                     check_error(EC_P_EXPECTED, "`self` is only allowed in an impl method", tok_ln(pt), tok_cl(pt))
                 else:
-                    stn = alloc_node(EXPR_IDENT, 0, 0, 0, impl_type_ni, 0, 0, tok_lo(pt), tok_hi(pt))
+                    stn = impl_type_node
+                    if ast_kind(stn) == 0:
+                        stv = ast_type_val(stn)
                 if pf < 0:
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, stv, stn, tok_lo(pt), tok_hi(pt))
@@ -2293,7 +2321,7 @@ fn parse_declaration():
         nt := advance_tok()
         name := tok_lx(nt)
         ni := str_intern(name)
-        parse_body(name, ni, tok_lo(t), tok_hi(t), hotpatch_ver, -1)
+        parse_body(name, ni, tok_lo(t), tok_hi(t), hotpatch_ver, -1, -1)
 
         // A flow function may contain yield. The checker detects yield and skips
         // the return type check.
@@ -2665,18 +2693,19 @@ fn parse_declaration():
     // impl block (impl Type: ... or impl Interface for Type: ...)
     if check(T_IMPL):
         t := advance_tok()
-        first_nt := advance_tok()
-        first_name := tok_lx(first_nt)
-        first_ni := str_intern(first_name)
+        first_type := parse_type()
+        first_ni := impl_type_name_ni(first_type)
         trait_ni : ., mut = -1
         type_ni : ., mut = first_ni
-        type_name : ., mut = first_name
+        type_node : ., mut = first_type
         if check(T_FOR):
             advance_tok()
             trait_ni = first_ni
-            type_nt := advance_tok()
-            type_name = tok_lx(type_nt)
-            type_ni = str_intern(type_name)
+            type_node = parse_type()
+            type_ni = impl_type_name_ni(type_node)
+        type_name : ., mut = "?"
+        if type_ni >= 0:
+            type_name = istr_get(type_ni)
         has_items := expect_region_head()   // 0 = 空 region
         loop:
             if has_items == 0:
@@ -2691,7 +2720,7 @@ fn parse_declaration():
                 method_ni := str_intern(method_name)
                 mangled := type_name + "." + method_name
                 mangled_ni := str_intern(mangled)
-                parse_body(mangled, mangled_ni, tok_lo(ft), tok_hi(ft), 0, type_ni)
+                parse_body(mangled, mangled_ni, tok_lo(ft), tok_hi(ft), 0, type_ni, type_node)
                 // Register in method lookup table
                 grow_methods(g_method_count + 1)
                 cell_store(g_methods, g_method_count * 24, type_ni)

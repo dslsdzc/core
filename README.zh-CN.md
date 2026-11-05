@@ -22,7 +22,7 @@ fn fib(n: int) -> int:
     return fib(n - 1) + fib(n - 2)
 
 fn main() -> int:
-    println_i(fib(10))   // 55
+    println(fib(10))   // 55
     return 0
 ```
 
