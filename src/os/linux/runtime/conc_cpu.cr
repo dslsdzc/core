@@ -1092,6 +1092,9 @@ fn conc_preempt_depth() -> int, pub:
 g_conc_pi_locks : int, mut = 0
 
 fn conc_sched_set_pi(v: int) -> int, pub:
+    // Startup setting: choose the lock protocol before sched_init starts
+    // workers. Flipping it while a worker holds a spin lock would make the
+    // matching unlock use the PI-futex word protocol on a plain 0/1 word.
     if v != 0 && v != 1:
         return -1
     g_conc_pi_locks = v

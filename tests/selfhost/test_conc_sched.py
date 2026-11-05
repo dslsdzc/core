@@ -350,9 +350,10 @@ fn work(n: int) -> int:
     return n + 1
 
 fn main() -> int:
-    sched_init_n(2)
+    // PI mode selects the lock protocol; configure it before workers start.
     if conc_sched_set_pi(1) != 0:
         return 1
+    sched_init_n(2)
     a := go work(1)
     b := go work(2)
     if chan_recv(a) + chan_recv(b) != 5:
