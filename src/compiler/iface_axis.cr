@@ -132,10 +132,12 @@ fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int:
     ii := find_iface(iface_ni)
     if ii < 0:
         return -1
-    // Only named rows have a method-table identity. Other kinds return -1.
-    // Use decl_name_of_ti instead of get_type_name: get_type_name calls str_intern
-    // for base rows, and this layer must not grow the intern table.
-    tname_ni := decl_name_of_ti(t_ti)
+    // Named rows carry their name key directly. Primitive rows map through the
+    // native registry, whose name slots are already interned, so this layer still
+    // never grows the intern table.
+    tname_ni : ., mut = decl_name_of_ti(t_ti)
+    if tname_ni < 0 && get_type_kind(t_ti) == TYP_BASE:
+        tname_ni = iface_name_of(iface_kind_of(t_ti))
     if tname_ni < 0:
         return -1
     return iface_user_satisfies_ii(tname_ni, ii)

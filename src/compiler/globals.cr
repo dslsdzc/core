@@ -705,9 +705,11 @@ g_unf_entries : int, mut
 g_unf_hits : int, mut
 
 // Generic instance to source mapping. Each entry is 24 bytes
-// {src_fi, type_args_ni, inst_fi}, with the same layout as g_gen_instances in
-// monomorph.cr. gen_create_instance appends an entry, and compute_all_purity reads
-// it to fill the purity of the generic source function from its instances.
+// {src_fi, type_args_ni, inst_fi}; this is the shared prefix of the instance
+// cache record in monomorph.cr (which adds a solution-key string). Parser,
+// checker, and purity consumers only read these three fields.
+// gen_create_instance appends an entry, and compute_all_purity reads it to fill
+// the purity of the generic source function from its instances.
 // This table must be declared here because checker.cr uses it and bootstrap name
 // resolution does not allow forward references across files. Grow helpers live in
 // monomorph.cr, where function forward references are allowed.

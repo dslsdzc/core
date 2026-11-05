@@ -1398,6 +1398,27 @@ fn infer_iface_for_method(method_ni: int) -> int:
         return found
     return -1
 
+// Number of interfaces that declare this method name. Used to distinguish
+// "no constraint can be inferred" (0) from a genuinely ambiguous method set.
+fn count_iface_for_method(method_ni: int) -> int:
+    hits : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= g_iface_count:
+            break
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mi : ., mut = 0
+        loop:
+            if mi >= mc:
+                break
+            mb := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
+            if cell_load(g_ifaces, mb + OFF_IFM_NAME) == method_ni:
+                hits = hits + 1
+                break
+            mi = mi + 1
+        ii = ii + 1
+    return hits
+
 // Ambiguous method name: choose the unique interface whose method return type
 // matches the enclosing function's declared/inferred return type. This is the
 // V4 disambiguation rule when several interfaces declare the same method name.
@@ -4918,6 +4939,12 @@ fn infer_expr(node: int) -> int:
                                 cell_store(g_generic_constr, constr_idx2 * 8, iface_ni2)
                                 if constr_idx2 + 1 > g_generic_constr_count:
                                     g_generic_constr_count = constr_idx2 + 1
+                            else if count_iface_for_method(method_ni) > 1:
+                                // Never silently choose between interfaces that
+                                // declare the same method name. The return-type
+                                // rule above is the only accepted tie-breaker.
+                                check_error(EC_TG_AMBIG, "Ambiguous generic method '" + istr_get(method_ni) + "': more than one interface declares it", ast_line(node), ast_col(node))
+                                return TI_UNIT
                         if iface_ni2 >= 0:
                                 ii2 := find_iface(iface_ni2)
                                 if ii2 >= 0:
@@ -6343,12 +6370,23 @@ fn check_all():
             sym_name_map_insert(si2)
         ri2 = ri2 + 1
 
-    // Second pass: check function bodies
+    // Second pass: check function bodies. Generic templates go first so call
+    // sites see their inferred constraints and inferred return rows even when
+    // the caller is declared or parsed earlier. This is also the module-order
+    // case: the main unit is parsed before imported library functions.
     i : ., mut = 0
     loop:
         if i >= g_func_count:
             break
-        check_func(i)
+        if fi_generic_count(i) > 0:
+            check_func(i)
+        i = i + 1
+    i = 0
+    loop:
+        if i >= g_func_count:
+            break
+        if fi_generic_count(i) == 0:
+            check_func(i)
         i = i + 1
 
     // Check global let initializers

@@ -249,13 +249,13 @@ fn ts_t5_run() -> int:
             gen_constr_satisfied(t5_ni_int, TI_STR) == 0 &&
             gen_constr_satisfied(t5_ni_str, TI_INT) == 0 &&
             gen_constr_satisfied(t5_ni_nope, TI_INT) == -1), true)
-    // 3. 用户接口约束和非命名实参返回 -1。接口方法表只能查命名记录，
-    // 所以 int 实参不判；这不是未实现。命名实参的判定见 isat.* 和
+    // 3. 用户接口约束与原生实参：原生行现在按方法表判定。T5_Show 是零方法
+    // 接口，因此 int 空洞满足（1）。命名实参的判定见 isat.* 和
     // tests/selfhost/test_iface_satisfies.py。
     t5_if_ii := ts_t5_mk_iface("T5_Show")
-    fails = fails + ts_check_b("t5.constr_iface_non_named_unjudged",
+    fails = fails + ts_check_b("t5.constr_iface_primitive_vacuous",
         (find_iface(str_intern("T5_Show")) == t5_if_ii &&
-            gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1), true)
+            gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == 1), true)
     // 4. 反例文本：失败时非空，通过时为空。
     fails = fails + ts_check_b("t5.constr_witness_text",
         (str_len(gen_constr_witness_str(TI_STR, t5_ni_int)) > 0 &&
@@ -446,11 +446,12 @@ fn ts_isat_run() -> int:
     ts_isat_add_impl_method(str_intern("T0bR"), "show", 1, 3)
     fails = fails + ts_check("isat.axis_c_ret_code",
         iface_satisfies(isat_r_ti, str_intern("T0bShow")), 0)
-    // 5. 域限定：非命名记录（原生、dyn、泛型形参）返回 -1，不判。没有方法表身份时，不得因为查不到就返回 0。
+    // 5. 域限定：原生行有方法表身份，按实际方法判定。T0bShow 需要 show，
+    // int 没有登记，所以是确定的违反（0）。dyn 与泛型形参仍无身份，返回 -1。
     isat_dyn_ti := alloc_type(TYP_DYN, 0, 0)
     isat_gp_ti := alloc_type(TYP_GENERIC_PARAM, str_intern("T0bU"), 0)
-    fails = fails + ts_check("isat.axis_c_non_named_unjudged",
-        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("T0bShow")) == -1 &&
+    fails = fails + ts_check("isat.axis_c_primitive_judged",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("T0bShow")) == 0 &&
             iface_satisfies(isat_dyn_ti, str_intern("T0bShow")) == -1 &&
             iface_satisfies(isat_gp_ti, str_intern("T0bShow")) == -1), 1)
     // 6. 轴 B：本质类型，调用 gen_constr_satisfied。
@@ -480,11 +481,12 @@ fn ts_isat_run() -> int:
             iface_shape_register(str_intern("T0bDup"), tt_top_k(AK_SEQUENCE)) >= 0 &&
             iface_satisfies(TI_INT, str_intern("T0bDup")) == 0), 1)
     // 9. 轴优先级：同名既是接口又是原生类型名，接口优先，与
-    // gen_constr_satisfied 的 find_iface 先行相同。非命名实参返回 -1，
-    // 不进入本质轴。
-    ts_t5_mk_iface("int")
+    // gen_constr_satisfied 的 find_iface 先行相同。该接口要求 int 没有的
+    // 方法，所以用户轴给出 0；若误走本质轴会得到 1（int 满足 int）。
+    int_ii := ts_t5_mk_iface("int")
+    ts_isat_add_method(int_ii, "only_here", 0, 0)
     fails = fails + ts_check("isat.axis_order_iface_over_essence",
-        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("int")) == -1), 1)
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("int")) == 0), 1)
     // 10. 与 check_iface 逐例比较：满足、参数计数不符、返回类型码不符
     // 三种形态。缺方法形态在第 2 和第 11 例分别检查 0 和零驻留表增长。
     isat_eq : ., mut = -1
@@ -500,12 +502,14 @@ fn ts_isat_run() -> int:
     iface_satisfies(isat_zz_ti, str_intern("T0bShow"))
     fails = fails + ts_check("isat.no_str_intern_on_missing",
         ts_isat_b2i(g_str_count == isat_before), 1)
-    // 12. 空方法集满足：零方法接口加命名记录返回 1；非命名记录返回 -1，域检查先于空循环。
+    // 12. 空方法集满足：零方法接口对命名记录和原生行都返回 1；dyn 行没有
+    // 方法表身份，仍返回 -1。
     isat_empty_ii := ts_t5_mk_iface("T0bEmpty")
     fails = fails + ts_check("isat.empty_iface_vacuous",
         ts_isat_b2i(find_iface(str_intern("T0bEmpty")) == isat_empty_ii &&
             iface_satisfies(isat_t_ti, str_intern("T0bEmpty")) == 1 &&
-            iface_satisfies(TI_INT, str_intern("T0bEmpty")) == -1), 1)
+            iface_satisfies(TI_INT, str_intern("T0bEmpty")) == 1 &&
+            iface_satisfies(isat_dyn_ti, str_intern("T0bEmpty")) == -1), 1)
     // 13. 泛型应用记录：查方法使用基名，走 decl_name_of_ti 的 TYP_GENERIC_APPLY 分支。
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     isat_ga_s := g_gen_apply_data_count
@@ -751,14 +755,14 @@ fn ts_x2_run() -> int:
             iface_satisfies(x2_arr, -1) == -1 && iface_satisfies(-1, 0) == -1 &&
             g_ty_exhausted == 0), 1)
     // 12. 用户接口形状项：零方法接口产生空 product，可满足；未声明接口名
-    // 返回 -1。命名记录加零方法返回 1；原生记录受域限定返回 -1。
+    // 返回 -1。命名记录和原生记录加零方法都返回 1。
     x2_ii := ts_t5_mk_iface("X2ShapeIface")
     fails = fails + ts_check("x2.iface_shape_term_built",
         ts_x2_b(find_iface(str_intern("X2ShapeIface")) == x2_ii &&
             sh_iface_shape_term(str_intern("X2ShapeIface")) >= 0 &&
             sh_iface_shape_term(str_intern("X2NoSuchIface")) == -1 &&
             iface_satisfies(x2_named, str_intern("X2ShapeIface")) == 1 &&
-            iface_satisfies(TI_INT, str_intern("X2ShapeIface")) == -1), 1)
+            iface_satisfies(TI_INT, str_intern("X2ShapeIface")) == 1), 1)
     // 13. 形状项和类型表记录的桥接：切片的项除固定性位外与数组项同形，
     // 两者同判。固定性不进入形状判定。
     x2_same : ., mut = 0
@@ -998,13 +1002,14 @@ fn ts_ifc_run() -> int:
             if ts_isat_b2i(check_iface(str_intern("IfcR"), ifc_ii0)) == iface_satisfies(ifc_r_ti, str_intern("IfcI0")):
                 ifc_eq = 1
     fails = fails + ts_check("ifc.check_iface_same_source", ifc_eq, 1)
-    // 13. 域限定和不可判：非命名记录（原生、泛型形参、dyn）返回 -1；
-    // 零方法接口加命名记录返回 1；未知接口名返回 -1。
+    // 13. 三态域：原生行按方法表判定，int 缺 IfcI0 的方法因此是 0；
+    // 泛型形参与 dyn 返回 -1；零方法接口对命名记录返回 1；未知接口名和负键
+    // 返回 -1。
     ifc_gp_ti := alloc_type(TYP_GENERIC_PARAM, str_intern("IfcU"), 0)
     ifc_dyn_ti := alloc_type(TYP_DYN, 0, 0)
     ifc_ii6 := ts_t5_mk_iface("IfcI6")
-    fails = fails + ts_check("ifc.three_state_unjudged",
-        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("IfcI0")) == -1 &&
+    fails = fails + ts_check("ifc.three_state_primitive_judged",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("IfcI0")) == 0 &&
             iface_satisfies(ifc_gp_ti, str_intern("IfcI0")) == -1 &&
             iface_satisfies(ifc_dyn_ti, str_intern("IfcI0")) == -1 &&
             iface_satisfies(ifc_h_ti, str_intern("IfcI6")) == 1 &&

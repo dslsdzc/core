@@ -4,10 +4,26 @@
 // a specialized copy registered in g_funcs.
 
 // ── Instance cache ──
-// Each entry: 24 bytes = [original_func_ni, type_args_str_ni, specialized_fi]
+// Each entry: 32 bytes =
+//   [original_func_ni, type_args_str_ni, specialized_fi, solution_key_str]
+// The solution key is the canonical set of impl method identities selected for
+// the instance's constraints. A cache hit requires both the type arguments and
+// the solution key to match, so changing an impl invalidates dependent bodies.
 g_gen_instances : string, mut
 g_gen_instance_count : int, mut
 g_gen_instance_cap : int, mut
+GEN_INSTANCE_REC : int = 32
+
+// ── Instance creation stack ──
+// Keys currently being specialized. Re-entering the same key means the instance
+// chain does not decrease structurally; creation fails with TG04 instead of
+// looping or emitting a half-built body.
+g_gen_creating : string, mut
+g_gen_creating_count : int, mut
+g_gen_creating_cap : int, mut
+
+// Last solver status: 1 = key is valid (possibly empty), 0 = unsolved.
+g_gen_solution_ok : int, mut
 
 // ── Temporary substitution mapping (during clone) ──
 // Parallel arrays mapping a generic parameter name index to a concrete type name index.
@@ -49,10 +65,44 @@ fn grow_gen_instances(needed: int):
         nc = 64
     if nc < needed:
         nc = needed + 64
-    nb := alloc(nc * 24)
-    cell_copy(g_gen_instances, g_gen_instance_cap * 24, nb)
+    nb := alloc(nc * GEN_INSTANCE_REC)
+    cell_copy(g_gen_instances, g_gen_instance_cap * GEN_INSTANCE_REC, nb)
     g_gen_instances = nb
     g_gen_instance_cap = nc
+
+fn grow_gen_creating(needed: int):
+    if needed < g_gen_creating_cap:
+        return
+    nc : ., mut = g_gen_creating_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * 8)
+    cell_copy(g_gen_creating, g_gen_creating_cap * 8, nb)
+    g_gen_creating = nb
+    g_gen_creating_cap = nc
+
+// Keys are stored as raw strings, not interns: the creation stack is compiler
+// state and must not grow the .ccr STR segment.
+fn gen_creating_contains(key: string) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_gen_creating_count:
+            break
+        if str_eq(cell_load_str(g_gen_creating, i * 8), key) != 0:
+            return 1
+        i = i + 1
+    return 0
+
+fn gen_creating_push(key: string):
+    grow_gen_creating(g_gen_creating_count + 1)
+    cell_store_str(g_gen_creating, g_gen_creating_count * 8, key)
+    g_gen_creating_count = g_gen_creating_count + 1
+
+fn gen_creating_pop():
+    if g_gen_creating_count > 0:
+        g_gen_creating_count = g_gen_creating_count - 1
 
 // Instance-to-source mapping for purity. It is declared in globals.cr because
 // checker's compute_all_purity reads it, and bootstrap name resolution follows
@@ -1132,22 +1182,145 @@ fn gen_clone_tree(node: int) -> int:
     return n
 
 // ============================================================
+// Constraint solving
+// ============================================================
+// The solver is the single place that turns an inferred constraint set into
+// concrete evidence. It is deterministic: the same (generic, type args, impl
+// table) always produces the same key, and the key is part of the instance cache.
+
+// Type row -> name key, including primitive rows. Never interns.
+fn gen_concrete_name_of_ti(ti: int) -> int:
+    n := decl_name_of_ti(ti)
+    if n >= 0:
+        return n
+    if get_type_kind(ti) == TYP_BASE:
+        return iface_name_of(iface_kind_of(ti))
+    return -1
+
+// Canonical solution identity for one constraint: the interface name followed by
+// every method implementation selected from the concrete type's method table.
+// Empty means the constraint is not solvable from the current tables.
+fn gen_solution_key_of(iface_ni: int, cti: int) -> string:
+    ii := find_iface(iface_ni)
+    if ii < 0:
+        return ""
+    tname := gen_concrete_name_of_ti(cti)
+    if tname < 0:
+        return ""
+    mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    if mc < 0 || mc > MAX_IFACE_METHODS:
+        return ""
+    key : ., mut = istr_get(cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
+    mi : ., mut = 0
+    loop:
+        if mi >= mc:
+            return key
+        mb := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
+        m_ni := cell_load(g_ifaces, mb + OFF_IFM_NAME)
+        f_ni := iface_find_method(tname, m_ni)
+        if f_ni < 0:
+            return ""
+        key = key + "." + istr_get(f_ni)
+        mi = mi + 1
+    return key
+
+// Solve every constraint of an instance. Substitutions must already be loaded.
+// Returns the solution key. g_gen_solution_ok = 0 means a constraint is missing,
+// ambiguous, or cannot be judged; an unsolved instance is never cached.
+// The key stays a raw compiler-side string and never enters the intern table.
+fn gen_compute_solution_key(func_ni: int) -> string:
+    g_gen_solution_ok = 1
+    gc := fi_generic_count(func_ni)
+    key : ., mut = ""
+    gi : ., mut = 0
+    loop:
+        if gi >= gc:
+            return key
+        constr_idx := func_ni * MAX_GENERICS + gi
+        iface_ni : ., mut = -1
+        if constr_idx < g_generic_constr_count:
+            iface_ni = cell_load(g_generic_constr, constr_idx * 8)
+        if iface_ni >= 0:
+            pname := fi_generic_name(func_ni, gi)
+            cti : ., mut = gen_lookup_subst_ti(pname)
+            if cti < 0:
+                cname := gen_lookup_subst(pname)
+                if cname >= 0:
+                    cti = gen_constr_type_ti(cname)
+            if cti < 0:
+                g_gen_solution_ok = 0
+                return ""
+            if gen_inst_constr_satisfied(iface_ni, cti) != 1:
+                g_gen_solution_ok = 0
+                return ""
+            one := gen_solution_key_of(iface_ni, cti)
+            if str_len(one) == 0:
+                g_gen_solution_ok = 0
+                return ""
+            key = key + ";" + one
+        gi = gi + 1
+    return key
+
+// Fail-closed diagnostic for the first constraint that the solver cannot solve.
+// Runs only during instantiation, where the surrounding IR-generation gate turns
+// any new diagnostic into a hard build failure (no artifact).
+fn gen_raise_instance_constraint(func_ni: int, line: int, col: int):
+    gc := fi_generic_count(func_ni)
+    gi : ., mut = 0
+    loop:
+        if gi >= gc:
+            break
+        constr_idx := func_ni * MAX_GENERICS + gi
+        iface_ni : ., mut = -1
+        if constr_idx < g_generic_constr_count:
+            iface_ni = cell_load(g_generic_constr, constr_idx * 8)
+        if iface_ni >= 0:
+            pname := fi_generic_name(func_ni, gi)
+            cti : ., mut = gen_lookup_subst_ti(pname)
+            if cti < 0:
+                cname := gen_lookup_subst(pname)
+                if cname >= 0:
+                    cti = gen_constr_type_ti(cname)
+            if cti < 0:
+                check_error(EC_TG_BOUND, "Cannot resolve a type argument for interface '" + istr_get(iface_ni) + "'", line, col)
+                return
+            if gen_inst_constr_satisfied(iface_ni, cti) != 1:
+                check_error(EC_TG_BOUND, "Type '" + type_display(cti) + "' does not satisfy interface '" + istr_get(iface_ni) + "'", line, col)
+                return
+            if str_len(gen_solution_key_of(iface_ni, cti)) == 0:
+                check_error(EC_TG_BOUND, "No unique impl for interface '" + istr_get(iface_ni) + "' and type '" + type_display(cti) + "'", line, col)
+                return
+        gi = gi + 1
+    check_error(EC_TG_BOUND, "Generic constraint could not be solved for '" + istr_get(fi_name(func_ni)) + "'", line, col)
+
+// ============================================================
 // Cache API: find or create specialized instance
 // ============================================================
 
 // Find a specialized instance in the cache.
 // func_ni: the original generic FuncInfo index
 // type_args: comma-separated concrete type names (e.g. "int,string")
+// bstart: call-site binding block start, or -1
+// A hit requires the same type arguments and the same impl solution key. The
+// solution is recomputed from the current tables, so swapping an impl cannot
+// reuse a body specialized against the old one.
 // Returns the specialized function index, or -1 if not found.
-fn gen_find_cached(func_ni: int, type_args: string) -> int:
+fn gen_find_cached(func_ni: int, type_args: string, bstart: int) -> int:
+    gen_build_subst(func_ni, type_args)
+    gen_build_subst_tis(func_ni, bstart)
+    sol := gen_compute_solution_key(func_ni)
+    if g_gen_solution_ok == 0:
+        return -1
     i : ., mut = 0
     loop:
         if i >= g_gen_instance_count:
             break
-        if cell_load(g_gen_instances, i * 24) == func_ni:
-            cached_args_ni := cell_load(g_gen_instances, i * 24 + 8)
+        if cell_load(g_gen_instances, i * GEN_INSTANCE_REC) == func_ni:
+            cached_args_ni := cell_load(g_gen_instances, i * GEN_INSTANCE_REC + 8)
             if istr_eq(cached_args_ni, type_args) != 0:
-                return cell_load(g_gen_instances, i * 24 + 16)
+                cached_sol := cell_load_str(g_gen_instances, i * GEN_INSTANCE_REC + 24)
+                if str_eq(cached_sol, sol) != 0:
+                    return cell_load(g_gen_instances, i * GEN_INSTANCE_REC + 16)
         i = i + 1
     return -1
 
@@ -1156,7 +1329,7 @@ fn gen_find_cached(func_ni: int, type_args: string) -> int:
 // type_args: comma-separated concrete type names (e.g. "int,string")
 // Returns the specialized function index.
 fn gen_find_or_create(func_ni: int, type_args: string) -> int:
-    cached := gen_find_cached(func_ni, type_args)
+    cached := gen_find_cached(func_ni, type_args, -1)
     if cached >= 0:
         return cached
     return gen_create_instance(func_ni, type_args, -1)
@@ -1165,7 +1338,7 @@ fn gen_find_or_create(func_ni: int, type_args: string) -> int:
 // canonical key and the block start. The key is the joined structural type string,
 // so different instances get different keys.
 fn gen_find_or_create_bind(func_ni: int, type_args: string, bstart: int) -> int:
-    cached := gen_find_cached(func_ni, type_args)
+    cached := gen_find_cached(func_ni, type_args, bstart)
     if cached >= 0:
         return cached
     return gen_create_instance(func_ni, type_args, bstart)
@@ -1190,8 +1363,24 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
         if rrow != -2:
             inst_ret_code = ret_code_of_ti(gen_subst_ti(rrow))
 
-    // 2. Clone the original function AST
+    // 2. Solve constraints before cloning. A failed solve must not produce a
+    // specialized body: the clone would dispatch through a missing or ambiguous
+    // impl and fail later with a misleading symbol error.
     orig_fn_node := fi_ast_node(func_ni)
+    sol_key := gen_compute_solution_key(func_ni)
+    if g_gen_solution_ok == 0:
+        gen_raise_instance_constraint(func_ni, ast_line(orig_fn_node), ast_col(orig_fn_node))
+        return -1
+
+    // Re-entering the same (generic, type args, solution) while it is being
+    // created has no structural decrease. Fail closed instead of recursing.
+    create_key := int_str(func_ni) + "|" + type_args + "|" + sol_key
+    if gen_creating_contains(create_key) != 0:
+        check_error(EC_TG_NONTERM, "Non-terminating generic instance chain for '" + istr_get(fi_name(func_ni)) + "[" + type_args + "]'", ast_line(orig_fn_node), ast_col(orig_fn_node))
+        return -1
+    gen_creating_push(create_key)
+
+    // 2b. Clone the original function AST
     g_gen_dedup_count = 0
     g_gen_dedup_cap = 0
     g_gen_structpat_bad = 0
@@ -1290,12 +1479,13 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     // gate in main.cr and fail the build closed.
     check_func(new_fi)
 
-    // 4. Cache the new function
+    // 4. Cache the new function together with its impl solution identity.
     type_args_ni := str_intern(type_args)
     grow_gen_instances(g_gen_instance_count + 1)
-    cell_store(g_gen_instances, g_gen_instance_count * 24, func_ni)
-    cell_store(g_gen_instances, g_gen_instance_count * 24 + 8, type_args_ni)
-    cell_store(g_gen_instances, g_gen_instance_count * 24 + 16, new_fi)
+    cell_store(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC, func_ni)
+    cell_store(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC + 8, type_args_ni)
+    cell_store(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC + 16, new_fi)
+    cell_store_str(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC + 24, sol_key)
     g_gen_instance_count = g_gen_instance_count + 1
 
     // Record the instance-to-source mapping for purity. Do not copy
@@ -1309,5 +1499,6 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     cell_store(g_purity_inst, g_purity_inst_count * 24 + 16, new_fi)
     g_purity_inst_count = g_purity_inst_count + 1
 
-    // 5. Return new function index
+    // 5. Leave the creation stack and return the new function index
+    gen_creating_pop()
     return new_fi
