@@ -135,7 +135,7 @@ fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int:
     // Named rows carry their name key directly. Primitive rows map through the
     // native registry, whose name slots are already interned, so this layer still
     // never grows the intern table.
-    tname_ni := decl_name_of_ti(t_ti)
+    tname_ni : ., mut = decl_name_of_ti(t_ti)
     if tname_ni < 0 && get_type_kind(t_ti) == TYP_BASE:
         tname_ni = iface_name_of(iface_kind_of(t_ti))
     if tname_ni < 0:

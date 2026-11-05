@@ -1210,7 +1210,7 @@ fn gen_solution_key_of(iface_ni: int, cti: int) -> string:
     mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
     if mc < 0 || mc > MAX_IFACE_METHODS:
         return ""
-    key := istr_get(cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
+    key : ., mut = istr_get(cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
     mi : ., mut = 0
     loop:
         if mi >= mc:
@@ -1242,7 +1242,7 @@ fn gen_compute_solution_key(func_ni: int) -> string:
             iface_ni = cell_load(g_generic_constr, constr_idx * 8)
         if iface_ni >= 0:
             pname := fi_generic_name(func_ni, gi)
-            cti := gen_lookup_subst_ti(pname)
+            cti : ., mut = gen_lookup_subst_ti(pname)
             if cti < 0:
                 cname := gen_lookup_subst(pname)
                 if cname >= 0:
@@ -1276,7 +1276,7 @@ fn gen_raise_instance_constraint(func_ni: int, line: int, col: int):
             iface_ni = cell_load(g_generic_constr, constr_idx * 8)
         if iface_ni >= 0:
             pname := fi_generic_name(func_ni, gi)
-            cti := gen_lookup_subst_ti(pname)
+            cti : ., mut = gen_lookup_subst_ti(pname)
             if cti < 0:
                 cname := gen_lookup_subst(pname)
                 if cname >= 0:
