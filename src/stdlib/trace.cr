@@ -10,12 +10,12 @@
 fn trace_assert(cond: int, msg: string), pub:
     if cond != 0:
         return
-    println(msg)
+    println_str(msg)
 
 fn trace_dbg(name: string, val: int) -> int, pub:
     print_i(val)
     return val
 
 fn trace_dbg_str(name: string, val: string) -> string, pub:
-    print(val)
+    print_str(val)
     return val

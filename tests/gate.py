@@ -56,6 +56,7 @@ FAST = [
     "test_region_escape.py",
     "test_merge_copy.py",
     "test_lib_manager.py",
+    "test_generic_constraints.py",
 ]
 
 

@@ -3890,13 +3890,6 @@ fn region_plan_analyze():
             ti = ti + 1
         if total_nodes > g_cfg_region_plan_max_nodes:
             return
-    gs : ., mut = 0
-    loop:
-        if gs >= g_func_count:
-            break
-        if fi_generic_count(gs) > 0:
-            return
-        gs = gs + 1
     rp_share_bad_prepare()
     timing_mark("rp_prepare")
     fi : ., mut = 0

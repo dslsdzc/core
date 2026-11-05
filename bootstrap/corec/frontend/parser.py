@@ -538,6 +538,11 @@ class Parser:
             return (name, typ)
         name = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.COLON_DECL)
+        # V4 inferred generic parameter: `name: .` or `name: auto` has no
+        # concrete type node; the caller infers it per instantiation.
+        if self.check(TokenType.AUTO) or self.check(TokenType.DOT):
+            self.advance()
+            return (name, None)
         typ = self.parse_type()
         return (name, typ)
 
