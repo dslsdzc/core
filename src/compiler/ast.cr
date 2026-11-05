@@ -516,6 +516,8 @@ EC_TS_FIELD_DUP     : int = 11004 // TS04  Field init twice
 // TG0xx; Type: Generic
 EC_TG_ARG_COUNT  : int = 12001 // TG01  Generic arg count mismatch
 EC_TG_BOUND      : int = 12002 // TG02  Generic bound unsatisfied
+EC_TG_AMBIG      : int = 12003 // TG03  Ambiguous generic method: multiple interfaces declare it
+EC_TG_NONTERM    : int = 12004 // TG04  Non-terminating generic instance chain
 
 // B0xx; Borrow
 EC_B_BORROW_MUT     : int = 13001 // B001  Mutable borrow on already-borrowed

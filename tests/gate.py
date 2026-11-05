@@ -57,6 +57,7 @@ FAST = [
     "test_merge_copy.py",
     "test_lib_manager.py",
     "test_generic_constraints.py",
+    "test_generic_modules.py",
 ]
 
 

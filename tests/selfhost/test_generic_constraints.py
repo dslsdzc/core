@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generic constraints: primitive impls, inferred method constraints, Printable."""
+"""Generic constraints: primitive impls, solver/cache identity, ambiguity, Printable."""
 
 from __future__ import annotations
 
@@ -46,6 +46,45 @@ def check_rejected(name: str, source: str, needle: str) -> bool:
         return True
     print(f"FAIL {name}: rc={r.returncode} needle={needle!r}\n{out}")
     return False
+
+
+def cache_identity(name: str, source: str) -> bool:
+    with tempfile.TemporaryDirectory(prefix="generic_cache_") as td:
+        root = Path(td)
+        src = root / f"{name}.cr"
+        ccr = root / f"{name}.ccr"
+        src.write_text(source)
+        built = _run(["ccr", str(src), "-o", str(ccr), "--dump-ir-text"])
+        text = built.stdout + built.stderr
+        if built.returncode != 0:
+            print(f"FAIL {name}: ccr rc={built.returncode}\n{text[-2000:]}")
+            return False
+        lines = [ln for ln in text.splitlines() if ln.startswith("Function: show[")]
+        ints = [ln for ln in lines if "[int," in ln]
+        strs = [ln for ln in lines if "[string," in ln]
+        if len(lines) != 2 or len(ints) != 1 or len(strs) != 1:
+            print(f"FAIL {name}: instances={lines!r}")
+            return False
+        print(f"PASS {name}")
+        return True
+
+
+def build_rejected(name: str, source: str, needle: str) -> bool:
+    with tempfile.TemporaryDirectory(prefix="generic_neg_") as td:
+        root = Path(td)
+        src = root / f"{name}.cr"
+        elf = root / name
+        src.write_text(source)
+        built = _run(["build", str(src), "--static", "-O", "0", "-o", str(elf)])
+        text = built.stdout + built.stderr
+        if built.returncode == 0 or needle not in text:
+            print(f"FAIL {name}: rc={built.returncode} needle={needle!r}\n{text}")
+            return False
+        if elf.exists():
+            print(f"FAIL {name}: rejection left an output artifact")
+            return False
+        print(f"PASS {name}")
+        return True
 
 
 def build_run(name: str, source: str, expected_stdout: list[str], rc: int = 0) -> bool:
@@ -105,6 +144,70 @@ fn main() -> int:
     return show(true)
 """
 
+NESTED_GENERIC = """\
+interface P:
+    fn r(self) -> string
+
+impl P for int:
+    fn r(self) -> string:
+        return "int"
+
+impl P for string:
+    fn r(self) -> string:
+        return "string"
+
+fn inner(v):
+    return v.r()
+
+fn outer(v):
+    return inner(v)
+
+fn main() -> int:
+    if outer(1) != "int":
+        return 1
+    if outer("x") != "string":
+        return 2
+    return 0
+"""
+
+AMBIGUOUS_METHOD = """\
+interface P:
+    fn r(self) -> int
+
+interface Q:
+    fn r(self) -> int
+
+impl P for int:
+    fn r(self) -> int:
+        return 1
+
+impl Q for string:
+    fn r(self) -> int:
+        return 2
+
+fn show(v):
+    return v.r()
+
+fn main() -> int:
+    return show(1)
+"""
+
+DUPLICATE_IMPL = """\
+interface P:
+    fn r(self) -> string
+
+impl P for int:
+    fn r(self) -> string:
+        return "a"
+
+impl P for int:
+    fn r(self) -> string:
+        return "b"
+
+fn main() -> int:
+    return 0
+"""
+
 GENERIC_PRINT = """\
 import io
 
@@ -127,6 +230,14 @@ def main() -> int:
     ok.append(check_ok("primitive_impl_dispatch", PRIMITIVE_DISPATCH))
     ok.append(check_rejected("missing_impl_rejected", MISSING_IMPL,
                              "does not satisfy interface"))
+    ok.append(build_rejected("missing_impl_no_artifact", MISSING_IMPL,
+                             "does not satisfy interface"))
+    ok.append(build_run("nested_generic_dispatch", NESTED_GENERIC, []))
+    ok.append(cache_identity("instance_cache_identity", PRIMITIVE_DISPATCH))
+    ok.append(build_rejected("ambiguous_method_rejected", AMBIGUOUS_METHOD,
+                             "error[TG03]"))
+    ok.append(build_rejected("duplicate_impl_rejected", DUPLICATE_IMPL,
+                             "Conflicting impl"))
     ok.append(build_run("generic_print", GENERIC_PRINT,
                         ["55", "ok", "true", "55"]))
     passed = sum(1 for x in ok if x)

@@ -247,8 +247,18 @@ pa_static_ccr	pa_st.bin.ccr	f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	1b48a36f6c76330ebdcbce4a046dd90ff5b60020c75352759d94aa4f006cde0b	135036
-gt_static_ccr	gt_st.bin.ccr	123a37f1d5012e5409294478c7aa87f6a476f243683141fc9997bac736550959	135124
+# ── 「本次重锁 2026-11-05」泛型 Printable / 非泛型字符串 sink ──
+#   PR #227 在 `src/stdlib/io.cr` 新增 `Printable`、三个 impl、`print_str` /
+#   `println_str`，并把 `print` / `println` 改为泛型入口。`generics_test.cr`
+#   import io ⇒ 其 `.ccr` 的 STR/SYM 段随 stdlib 实体增加：gt 两条 +1986B，
+#   gt_static +2010B。编译器源码改动同时顺移自身 intern 序，sha 随之变化。
+#   pa 两条与 canary ELF 不变。归因是**有意的泛型打印落地**，不是发射面泄漏。
+#   D1 5/5 PASS（2026-11-05，基线 e1ddcee8 与本分支产物逐字节相同）。
+#   旧值留痕：
+#     gt_ccr        1b48a36f6c76330ebdcbce4a046dd90ff5b60020c75352759d94aa4f006cde0b 135036
+#     gt_static_ccr 123a37f1d5012e5409294478c7aa87f6a476f243683141fc9997bac736550959 135124
+gt_ccr	gt.ccr	ff3c18fd1fbbadf75c23c0582203d7a9afc68036f9b76b692ed3c63cb1ff71cf	137022
+gt_static_ccr	gt_st.bin.ccr	d88781b28227f9113fbdccca53f49991d11544b6d7639634a119c5d552418da9	137134
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
