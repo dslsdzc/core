@@ -140,32 +140,11 @@ jobs:
             python3 src/ci/select_tests.py --profile "$profile" --changed-files "$changed" | sed 's/^/  /'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  build:
-    name: build
+  upload-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
     steps:
-      - name: checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-        with:
-          ref: ${{ env.CI_REF }}
-      - name: environment
-        run: src/ci/scripts/setup-environment.sh
-      - name: build compiler
-        run: |
-          python3 build_selfhost_native.py
-          python3 tools/gen_alloc_blob.py --check
-      - name: stage compiler artifact
-        run: |
-          rm -rf build/ci-artifact
-          mkdir -p build/ci-artifact
-          cp build/corec build/corearch build/corelsp build/runtime.o build/ci-artifact/
-          cp -r build/alloc_blob build/ci-artifact/
-      - name: upload compiler artifact
+      - name: upload
         uses: actions/upload-artifact@v4
         with:
-          name: core-build
-          path: build/ci-artifact/
-          if-no-files-found: error
-          retention-days: 1
-
+          name: probe
+          path: README.md
