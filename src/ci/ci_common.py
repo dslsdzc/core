@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_FILE = ROOT / "src" / "ci" / "selfhost_tests.list"
 AREAS_FILE = ROOT / "src" / "ci" / "areas.toml"
 
-AREA_ORDER = ["core", "generics", "ccr-cir", "runtime-alloc", "concurrency", "stdlib", "canary", "misc"]
+AREA_ORDER = ["core", "generics", "ccr-cir", "runtime-alloc", "concurrency-runtime", "concurrency-plan", "concurrency-flow", "stdlib", "canary", "misc"]
 
 
 def load_area_defs() -> dict[str, dict]:
@@ -36,10 +36,12 @@ def load_area_defs() -> dict[str, dict]:
 
 def load_commands() -> list[str]:
     commands: list[str] = []
+    seen: set[str] = set()
     for raw in COMMANDS_FILE.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
-        if line:
+        if line and line not in seen:
             commands.append(line)
+            seen.add(line)
     return commands
 
 

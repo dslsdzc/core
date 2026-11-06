@@ -112,17 +112,41 @@ match = [
   "gen_alloc_blob\\.py",
 ]
 
-[concurrency]
+[concurrency-runtime]
 paths = [
   "src/stdlib/conc.cr",
   "src/compiler/conc_plan",
   "src/os/linux/runtime/",
 ]
 match = [
-  "test_conc_",
+  "test_conc_runtime\\.py",
+  "test_conc_sched\\.py",
   "test_multi_m\\.py",
   "test_chan_handle_model\\.py",
   "test_go_",
+]
+
+[concurrency-plan]
+paths = [
+  "src/stdlib/conc.cr",
+  "src/compiler/conc_plan",
+  "src/os/linux/runtime/",
+]
+match = [
+  "test_conc_plan",
+  "test_conc_autopar\\.py",
+]
+
+[concurrency-flow]
+paths = [
+  "src/stdlib/conc.cr",
+  "src/compiler/conc_plan",
+  "src/os/linux/runtime/",
+]
+match = [
+  "test_conc_flow\\.py",
+  "test_conc_transfer\\.py",
+  "test_conc_preempt\\.py",
 ]
 
 [stdlib]
