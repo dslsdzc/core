@@ -140,10 +140,10 @@ jobs:
             python3 src/ci/select_tests.py --profile "$profile" --changed-files "$changed" | sed 's/^/  /'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  static-bootstrap:
-    name: static / bootstrap
+  build:
+    name: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - name: checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -151,6 +151,21 @@ jobs:
           ref: ${{ env.CI_REF }}
       - name: environment
         run: src/ci/scripts/setup-environment.sh
-      - name: bootstrap and harness static checks
-        run: CI_JOB_NAME=bootstrap-tests src/ci/run.sh
+      - name: build compiler
+        run: |
+          python3 build_selfhost_native.py
+          python3 tools/gen_alloc_blob.py --check
+      - name: stage compiler artifact
+        run: |
+          rm -rf build/ci-artifact
+          mkdir -p build/ci-artifact
+          cp build/corec build/corearch build/corelsp build/runtime.o build/ci-artifact/
+          cp -r build/alloc_blob build/ci-artifact/
+      - name: upload compiler artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-build
+          path: build/ci-artifact/
+          if-no-files-found: error
+          retention-days: 1
 
