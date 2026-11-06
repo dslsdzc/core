@@ -140,11 +140,248 @@ jobs:
             python3 src/ci/select_tests.py --profile "$profile" --changed-files "$changed" | sed 's/^/  /'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  upload-probe:
+  static-bootstrap:
+    name: static / bootstrap
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: upload
-        uses: actions/upload-artifact@v4
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          name: probe
-          path: README.md
+          ref: ${{ env.CI_REF }}
+      - name: environment
+        run: src/ci/scripts/setup-environment.sh
+      - name: bootstrap and harness static checks
+        run: CI_JOB_NAME=bootstrap-tests src/ci/run.sh
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: environment
+        run: src/ci/scripts/setup-environment.sh
+      - name: build compiler
+        run: |
+          python3 build_selfhost_native.py
+          python3 tools/gen_alloc_blob.py --check
+      - name: stage compiler artifact
+        run: |
+          rm -rf build/ci-artifact
+          mkdir -p build/ci-artifact
+          cp build/corec build/corearch build/corelsp build/runtime.o build/ci-artifact/
+          cp -r build/alloc_blob build/ci-artifact/
+      - name: upload compiler artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-build
+          path: build/ci-artifact/
+          if-no-files-found: error
+          retention-days: 1
+
+  compiler-check:
+    name: compiler check
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: check compiler sources
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=check src/ci/run.sh
+
+  core-tests:
+    name: core tests
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: core test set
+        run: python3 src/ci/run_tests.py --area core --profile "${{ needs.plan.outputs.profile }}"
+
+  areas:
+    name: area / ${{ matrix.area }}
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.profile == 'pr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.areas_matrix) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: run area
+        run: python3 src/ci/run_tests.py --area "${{ matrix.area }}" --profile pr
+
+  suite:
+    name: suite
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_suite == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: suite corpus
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=suite src/ci/run.sh
+
+  selfhost:
+    name: selfhost / ${{ matrix.area }}
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.profile != 'pr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.full_matrix) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: run area
+        run: python3 src/ci/run_tests.py --area "${{ matrix.area }}" --profile "${{ needs.plan.outputs.profile }}"
+
+  canary:
+    name: canary / carrier
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_canary == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: canary values
+        run: bash tools/baseline/canary_check.sh
+      - name: canary carrier validity
+        run: python3 tests/harness/test_canary_carrier.py --require-compiler
+
+  full-bootstrap:
+    name: full bootstrap
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_full_bootstrap == 'true'
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.runner) || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: three-stage bootstrap
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=full-bootstrap src/ci/run.sh
+
+  pr-gate:
+    name: pr-gate
+    if: always() && (github.event_name == 'pull_request' || needs.plan.outputs.profile == 'pr' || (github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'pr'))
+    needs: [plan, static-bootstrap, build, compiler-check, core-tests, areas, suite, canary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: aggregate PR jobs
+        shell: bash
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result"[[:space:]]*:[[:space:]]*"(failure|cancelled)"'; then
+            echo "::error::PR gate failed; see the failed job above"
+            exit 1
+          fi
+
+  full-gate:
+    name: full-gate
+    if: always() && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.event.inputs.profile != 'pr')
+    needs: [plan, static-bootstrap, build, compiler-check, core-tests, suite, selfhost, canary, full-bootstrap]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: aggregate full jobs
+        shell: bash
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result"[[:space:]]*:[[:space:]]*"(failure|cancelled)"'; then
+            echo "::error::full gate failed; see the failed job above"
+            exit 1
+          fi
