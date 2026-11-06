@@ -61,12 +61,21 @@ import arena
 g_current_arena : int, mut = -1
 g_arena_pool_data : string, mut
 g_arena_free_list : int, mut = -1
-g_arena_scalars : string, mut
 fn main() -> int:
-    arena_init(67108864, 65536)
-    a := arena_new()
-    cell_store(g_arena_scalars, 32, 64)
-    cell_store(g_arena_scalars, 16, 64)
+    // One 64MiB segment, 1MiB slots. Creating 64 arenas consumes every slot;
+    // filling the last slot then forces a segment grow, which the pool limit
+    // rejects.
+    arena_init(67108864, 1048576)
+    a := arena_new_sized(1048576)
+    if a < 0:
+        return 1
+    i : ., mut = 1
+    loop:
+        if i >= 64:
+            break
+        if arena_new_sized(1048576) < 0:
+            return 2
+        i = i + 1
     p := alloc(1048568)
     q := alloc(16)
     return 0

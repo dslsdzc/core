@@ -442,6 +442,38 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
         return
+    // Runtime arena boundary. The interpreter models one memory index (M=0)
+    // and mirrors the current-arena/suspend globals it already initializes.
+    if ir_interp_name_is(fn_ni, "rt_current_arena") != 0:
+        if d >= 0:
+            vca : ., mut = 0
+            if g_interp_current_arena_var >= 0:
+                vca = cell_load(g_ir_vals, g_interp_current_arena_var * 8)
+            cell_store(g_ir_vals, d * 8, vca)
+        return
+    if ir_interp_name_is(fn_ni, "rt_set_current_arena") != 0:
+        if s2 >= 1 && g_interp_current_arena_var >= 0:
+            cell_store(g_ir_vals, g_interp_current_arena_var * 8, cell_load(g_ir_vals, s1 * 8))
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
+    if ir_interp_name_is(fn_ni, "rt_m_idx") != 0:
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
+    if ir_interp_name_is(fn_ni, "rt_arena_suspend") != 0:
+        if d >= 0:
+            vsus : ., mut = 0
+            if g_interp_suspend_var >= 0:
+                vsus = cell_load(g_ir_vals, g_interp_suspend_var * 8)
+            cell_store(g_ir_vals, d * 8, vsus)
+        return
+    if ir_interp_name_is(fn_ni, "rt_set_arena_suspend") != 0:
+        if s2 >= 1 && g_interp_suspend_var >= 0:
+            cell_store(g_ir_vals, g_interp_suspend_var * 8, cell_load(g_ir_vals, s1 * 8))
+        if d >= 0:
+            cell_store(g_ir_vals, d * 8, 0)
+        return
     if ir_interp_name_is(fn_ni, "cell_load") != 0:
         if d >= 0 && s2 >= 2:
             cb := cell_load(g_ir_vals, s1 * 8)
