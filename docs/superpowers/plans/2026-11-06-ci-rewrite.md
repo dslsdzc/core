@@ -48,7 +48,7 @@
 
 - [ ] **Step 1: Write the area manifest**
 
-Create `src/ci/areas.toml` with ordered areas: `core`, `generics`, `ccr-cir`, `runtime-alloc`, `concurrency`, `stdlib`, `canary`, `misc`. Each has `paths` (glob prefixes) and `match` (regex strings). `core` has `always = true`. `misc` has `paths = []` and matches `.*` as the fallback.
+Create `src/ci/areas.toml` with ordered areas: `core`, `generics`, `ccr-cir`, `runtime-alloc`, `concurrency-runtime`, `concurrency-plan`, `concurrency-flow`, `stdlib`, `canary`, `misc`. Each has `paths` (glob prefixes) and `match` (regex strings). `core` has `always = true`. `misc` has `paths = []` and matches `.*` as the fallback.
 
 - [ ] **Step 2: Implement `ci_common.py`**
 
@@ -61,7 +61,7 @@ CLI flags: `--profile pr|full|nightly`, `--changed-files PATH`, `--json`, `--git
 - [ ] **Step 4: Validate coverage**
 
 Run `python3 src/ci/select_tests.py --validate`.
-Expected: `117 commands assigned`, no `unassigned` entries, every area non-empty.
+Expected: `116 commands assigned` (the list had one duplicate), no `unassigned` entries, every area non-empty.
 
 - [ ] **Step 5: Commit**
 
