@@ -1,8 +1,52 @@
+# Core CI — layered, build-once, changed-area pipeline.
+#
+# Layers:
+#   plan / build            one plan, one compiler build, shared artifact
+#   PR gate                 static checks + compiler check + core tests + selected areas
+#   full gate               every area + suite + canary (push/merge_group/manual full)
+#   L3                      full-bootstrap (manual, optional larger runner)
+#
+# Required PR check: pr-gate. Required post-submit/manual check: full-gate.
+# The full-bootstrap job is intentionally not part of every full run: it is the
+# only three-stage self-host build and may need a larger runner.
+#
+# Local equivalents:
+#   python3 src/ci/select_tests.py --profile pr --changed-files <file>
+#   python3 src/ci/run_tests.py --area core --profile pr
+
 name: Core CI
 
 on:
   pull_request:
     branches: ["**"]
+  push:
+    branches: [develop, main]
+  merge_group:
+  schedule:
+    # Nightly full layer (no full-bootstrap; see workflow_dispatch input).
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "pr | full | nightly"
+        type: choice
+        options: [pr, full, nightly]
+        default: full
+      full_bootstrap:
+        description: "Run the three-stage bootstrap (L3)"
+        type: boolean
+        default: false
+      pr:
+        description: "PR number: test refs/pull/<n>/merge (merge gate)"
+        type: string
+        default: ""
+      runner:
+        description: "Runner label for full-bootstrap (use a larger runner if available)"
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
 
 jobs:
   probe:
