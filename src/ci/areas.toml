@@ -1,0 +1,206 @@
+# CI area manifest.
+#
+# Order matters: a command belongs to the first area whose `match` regex hits,
+# and a changed path belongs to every area whose `paths` prefix hits (minus
+# `exclude`). `core` is always selected for pull requests.
+#
+# `match` values are Python regular expressions searched against the command
+# line from src/ci/selfhost_tests.list. Keep the list as the single command
+# source; this file only classifies it.
+
+[core]
+always = true
+paths = []
+match = [
+  "test_compile\\.py",
+  "test_type_engine\\.py",
+  "test_purity\\.py",
+  "test_ccr_types\\.py",
+  "test_merge_copy\\.py",
+  "test_region_escape\\.py",
+  "test_generic_constraints\\.py",
+  "test_generic_modules\\.py",
+]
+
+[generics]
+paths = [
+  "src/compiler/checker.cr",
+  "src/compiler/parser.cr",
+  "src/compiler/monomorph.cr",
+  "src/compiler/iface_axis.cr",
+  "src/compiler/iface_registry.cr",
+  "src/compiler/type_engine.cr",
+  "src/compiler/type_terms.cr",
+  "src/compiler/ty_shadow.cr",
+  "src/compiler/ast.cr",
+  "src/compiler/region_plan.cr",
+  "src/compiler/type_selftest.cr",
+  "src/compiler/prelude.cr",
+  "src/stdlib/collections.cr",
+]
+match = [
+  "test_iface_ops\\.py",
+  "test_impl\\.py",
+  "test_enum_impl\\.py",
+  "test_struct_impl\\.py",
+  "test_v4_",
+  "test_named_",
+  "test_let_check\\.py",
+  "test_arg_inference_gap\\.py",
+  "test_optional\\.py",
+  "test_collections_v4\\.py",
+  "test_xcut_iface\\.py",
+  "test_enum_limit\\.py",
+  "test_diag_gate\\.py",
+  "test_tf01_fallthrough\\.py",
+  "test_tc02_branch\\.py",
+  "test_match_exhaust\\.py",
+  "test_cast\\.py",
+]
+
+[ccr-cir]
+paths = [
+  "src/compiler/ccr_",
+  "src/compiler/cir_cache.cr",
+  "src/compiler/dataflow.cr",
+  "src/compiler/ir_gen.cr",
+  "src/compiler/dump.cr",
+  "src/compiler/region_check.cr",
+  "src/compiler/opt.cr",
+  "src/format/",
+  "src/arch/",
+]
+match = [
+  "test_ccr_v10_",
+  "test_multibranch_v10\\.py",
+  "test_ccr_v7\\.py",
+  "test_warm_cache_gate\\.py",
+  "test_cache_identity\\.py",
+  "test_cir_",
+  "tools/cir-str-domain/",
+  "test_region_cfg\\.py",
+  "test_live_ranges\\.py",
+  "test_hit_table\\.py",
+]
+
+[runtime-alloc]
+paths = [
+  "src/stdlib/arena.cr",
+  "src/stdlib/io.cr",
+  "src/stdlib/fmt.cr",
+  "src/runtime/",
+  "src/os/",
+  "src/kernel/",
+]
+match = [
+  "test_alloc_",
+  "test_arena_",
+  "test_rt_tls\\.py",
+  "test_bigint_boundaries\\.py",
+  "test_bits\\.py",
+  "test_interp_",
+  "test_view_builtins\\.py",
+  "test_raw_int_ptr\\.py",
+  "test_byte_permission\\.py",
+  "test_pointer_safety\\.py",
+  "test_borrow\\.py",
+  "test_early_clear\\.py",
+  "test_lazy\\.py",
+  "test_region_plan\\.py",
+  "test_share\\.py",
+  "test_slice_bounds\\.py",
+  "gen_alloc_blob\\.py",
+]
+
+[concurrency-runtime]
+paths = [
+  "src/stdlib/conc.cr",
+  "src/compiler/conc_plan",
+  "src/os/linux/runtime/",
+]
+match = [
+  "test_conc_runtime\\.py",
+  "test_conc_sched\\.py",
+  "test_multi_m\\.py",
+  "test_chan_handle_model\\.py",
+  "test_go_",
+]
+
+[concurrency-plan]
+paths = [
+  "src/stdlib/conc.cr",
+  "src/compiler/conc_plan",
+  "src/os/linux/runtime/",
+]
+match = [
+  "test_conc_plan",
+  "test_conc_autopar\\.py",
+]
+
+[concurrency-flow]
+paths = [
+  "src/stdlib/conc.cr",
+  "src/compiler/conc_plan",
+  "src/os/linux/runtime/",
+]
+match = [
+  "test_conc_flow\\.py",
+  "test_conc_transfer\\.py",
+  "test_conc_preempt\\.py",
+]
+
+[stdlib]
+paths = [
+  "src/stdlib/",
+  "src/kernel/",
+]
+exclude = [
+  "src/stdlib/arena.cr",
+  "src/stdlib/io.cr",
+  "src/stdlib/fmt.cr",
+  "src/stdlib/conc.cr",
+  "src/kernel/",
+]
+match = [
+  "test_lib_manager\\.py",
+  "test_pub_",
+  "test_lsp_visibility\\.py",
+  "test_hash\\.py",
+  "test_intmap\\.py",
+  "test_params_limit\\.py",
+  "test_at_rename\\.py",
+  "test_global_seams\\.py",
+  "test_tuple_slots\\.py",
+  "test_agg_",
+  "test_apx_",
+  "test_extern_opt\\.py",
+  "test_opt_",
+  "test_nested_fn\\.py",
+  "test_suite_hygiene\\.py",
+  "test_move_keyword_removed\\.py",
+  "test_import_graph\\.py",
+  "test_string_interp\\.py",
+  "test_spec_grammar\\.py",
+  "test_s1p_",
+  "test_toplevel_reject\\.py",
+]
+
+[canary]
+paths = [
+  "tools/baseline/",
+  "src/format/",
+  "src/arch/",
+]
+match = [
+  "canary",
+  "test_so_index_repro\\.py",
+  "test_backend_bootstrap\\.py",
+  "test_stub_regalloc\\.py",
+  "test_raw_abi_boundary\\.py",
+]
+
+[misc]
+paths = []
+match = [
+  ".*",
+]

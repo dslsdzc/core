@@ -28,7 +28,12 @@ ci_dir="$(cd "$(dirname "$0")" && pwd)"
 source "$ci_dir/shared.sh"
 
 # 自举构建：Python bootstrap → 原生 corec/corearch
+# CI 的 build job 只构建一次，后续 job 下载产物后设 CI_SKIP_BUILD=1。
 build_selfhost() {
+  if [ "${CI_SKIP_BUILD:-0}" = "1" ]; then
+    echo "build_selfhost skipped (CI_SKIP_BUILD=1)"
+    return 0
+  fi
   python3 build_selfhost_native.py
 }
 
