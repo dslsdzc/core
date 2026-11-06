@@ -140,3 +140,90 @@ jobs:
             python3 src/ci/select_tests.py --profile "$profile" --changed-files "$changed" | sed 's/^/  /'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  static-bootstrap:
+    name: static / bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: environment
+        run: src/ci/scripts/setup-environment.sh
+      - name: bootstrap and harness static checks
+        run: CI_JOB_NAME=bootstrap-tests src/ci/run.sh
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: environment
+        run: src/ci/scripts/setup-environment.sh
+      - name: build compiler
+        run: |
+          python3 build_selfhost_native.py
+          python3 tools/gen_alloc_blob.py --check
+      - name: stage compiler artifact
+        run: |
+          rm -rf build/ci-artifact
+          mkdir -p build/ci-artifact
+          cp build/corec build/corearch build/corelsp build/runtime.o build/ci-artifact/
+          cp -r build/alloc_blob build/ci-artifact/
+      - name: upload compiler artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-build
+          path: build/ci-artifact/
+          if-no-files-found: error
+          retention-days: 1
+
+  compiler-check:
+    name: compiler check
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: check compiler sources
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=check src/ci/run.sh
+
+  core-tests:
+    name: core tests
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: core test set
+        run: python3 src/ci/run_tests.py --area core --profile "${{ needs.plan.outputs.profile }}"
+
