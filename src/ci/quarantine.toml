@@ -1,0 +1,19 @@
+# CI quarantine list.
+#
+# An entry is a temporary, attributed exception. The test runner keeps going:
+#   - matching + failing  -> reported as QUARANTINED, does not fail the job
+#   - matching + passing  -> UNEXPECTED PASS, fails the job (delete the entry)
+#   - expired             -> treated as a normal failure
+#
+# Fields:
+#   match   = substring of the command from src/ci/selfhost_tests.list
+#   issue   = tracking issue or PR (required for humans)
+#   expires = YYYY-MM-DD (required; expired entries fail)
+#   reason  = one line
+#
+# Example:
+# [[quarantine]]
+# match = "test_example.py"
+# issue = "#1234"
+# expires = "2026-12-31"
+# reason = "known flake on the 2-core runner; see issue"

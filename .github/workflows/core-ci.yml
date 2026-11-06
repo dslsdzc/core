@@ -1,98 +1,387 @@
-# Core 主 CI——结构与 rust-lang/rust 的 ci.yml 同构（模板源 ~/rust），按 Core 裁剪。
-# 触发分层（merge_group 暂缺：merge_queue 因免费计划降级不可用，且 merge_group 事件
-# 的工作流只能在默认分支注册——待计划升级后恢复 merge_group + suite/full-bootstrap）：
-#   - pull_request（PR 快速层）：check / bootstrap-tests / selfhost-fast
-#   - （恢复时）merge_group（完整层）：suite / full-bootstrap / selfhost-tests
-# PR 层 job 在合并时也需通过（Rust 语义：PR CI jobs 自动注册为 auto jobs）。
-# job 命令定义在 src/ci/run.sh（case CI_JOB_NAME 分发），本地用 run.sh 可复现。
+# Core CI — layered, build-once, changed-area pipeline.
 #
-# 2026-08-17 修复：job 级 if 不能引用 matrix 上下文（GitHub 解析器拒绝——
-# available: github/inputs/needs/vars），原 `if: matrix.run_type == 'pr'` 导致
-# workflow 注册失败（"workflow file issue"，所有 run 0s 失败）——拆分 pr/full 两 job，
-# 触发分派改为事件级 if，分发由 CI_JOB_NAME 承担。
+# Layers:
+#   plan / build            one plan, one compiler build, shared artifact
+#   PR gate                 static checks + compiler check + core tests + selected areas
+#   full gate               every area + suite + canary (push/merge_group/manual full)
+#   L3                      full-bootstrap (manual, optional larger runner)
+#
+# Required PR check: pr-gate. Required post-submit/manual check: full-gate.
+# The full-bootstrap job is intentionally not part of every full run: it is the
+# only three-stage self-host build and may need a larger runner.
+#
+# Local equivalents:
+#   python3 src/ci/select_tests.py --profile pr --changed-files <file>
+#   python3 src/ci/run_tests.py --area core --profile pr
 
 name: Core CI
+
 on:
   pull_request:
-    branches:
-      - "**"
+    branches: ["**"]
+  push:
+    branches: [develop, main]
+  merge_group:
+  schedule:
+    # Nightly full layer (no full-bootstrap; see workflow_dispatch input).
+    - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "pr | full | nightly"
+        type: choice
+        options: [pr, full, nightly]
+        default: full
+      full_bootstrap:
+        description: "Run the three-stage bootstrap (L3)"
+        type: boolean
+        default: false
+      pr:
+        description: "PR number: test refs/pull/<n>/merge (merge gate)"
+        type: string
+        default: ""
+      runner:
+        description: "Runner label for full-bootstrap (use a larger runner if available)"
+        type: string
+        default: ubuntu-latest
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI_REF: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.pr != '' && format('refs/pull/{0}/merge', github.event.inputs.pr)) || github.ref }}
+  TMPDIR: /tmp
 
 jobs:
-  pr:
-    name: ${{ matrix.name }}
+  plan:
+    name: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    # PR 快速层：pull_request 事件全矩阵项（3 项）
-    # R2 P7 非构建的小型阶段（CI 挂点审计 #6）：原 `if: github.event_name == 'pull_request'`
-    # 使 `workflow_dispatch` 手动派发**两个 job 全被跳过**（= 派发空转）⇒ 本条纳入
-    # workflow_dispatch（手动派发即可跑 PR 层；`||` 右侧为本次改动点）。
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    env:
-      CI_JOB_NAME: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: check
-          - name: bootstrap-tests
-          - name: selfhost-fast
-          # opt-regress（O0/O1 自举回归）留位，按 TODO 逐步点亮：
-          # - name: opt-regress
+    timeout-minutes: 10
+    outputs:
+      profile: ${{ steps.plan.outputs.profile }}
+      areas_matrix: ${{ steps.plan.outputs.areas_matrix }}
+      full_matrix: ${{ steps.plan.outputs.full_matrix }}
+      run_suite: ${{ steps.plan.outputs.run_suite }}
+      run_canary: ${{ steps.plan.outputs.run_canary }}
+      run_full_bootstrap: ${{ steps.plan.outputs.run_full_bootstrap }}
     steps:
-      - name: checkout the source code
+      - name: checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          fetch-depth: 2
+          ref: ${{ env.CI_REF }}
+          fetch-depth: 0
 
-      - name: add extra environment variables
+      - name: environment
         run: src/ci/scripts/setup-environment.sh
 
-      - name: run the build
-        run: src/ci/scripts/run-build-from-ci.sh
+      - name: resolve profile and changed files
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          event="$GITHUB_EVENT_NAME"
+          profile=""
+          case "$event" in
+            pull_request) profile=pr ;;
+            merge_group|push) profile=full ;;
+            schedule) profile=nightly ;;
+            workflow_dispatch)
+              profile="${{ github.event.inputs.profile }}"
+              [ -n "$profile" ] || profile=full
+              ;;
+            *) profile=full ;;
+          esac
+          case "$profile" in
+            pr|full|nightly) ;;
+            *) echo "::error::invalid profile: $profile"; exit 1 ;;
+          esac
 
-  full:
-    name: ${{ matrix.name }}
+          changed="$RUNNER_TEMP/changed-files.txt"
+          : > "$changed"
+          if [ "$event" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            if ! git diff --name-only "$base"...HEAD > "$changed"; then
+              git ls-files > "$changed"
+            fi
+          elif [ "$event" = "push" ]; then
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+              if ! git diff --name-only "$before"...HEAD > "$changed"; then
+                git ls-files > "$changed"
+              fi
+            else
+              git ls-files > "$changed"
+            fi
+          elif [ "$event" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+            if ! git diff --name-only "$base"...HEAD > "$changed"; then
+              git ls-files > "$changed"
+            fi
+          else
+            # Full/nightly dispatch: the selector ignores the file list, but a
+            # complete list keeps the plan summary honest.
+            git ls-files > "$changed"
+          fi
+
+          args=(--profile "$profile" --changed-files "$changed" --github-output "$GITHUB_OUTPUT")
+          if [ "${{ github.event.inputs.full_bootstrap }}" = "true" ]; then
+            args+=(--full-bootstrap)
+          fi
+          python3 src/ci/select_tests.py "${args[@]}"
+
+          {
+            echo "### CI plan"
+            echo "- profile: $profile"
+            echo "- changed files: $(wc -l < "$changed")"
+            python3 src/ci/select_tests.py --profile "$profile" --changed-files "$changed" | sed 's/^/  /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  static-bootstrap:
+    name: static / bootstrap
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    # 完整层（suite / full-bootstrap）：merge_group 事件——当前休眠
-    # （免费计划无 merge queue；恢复时在默认分支注册 merge_group 事件）。
-    # R2 P7 非构建的小型阶段（CI 挂点审计 #6）：原 `if: github.event_name == 'merge_group'`
-    # 在休眠期使本层**任何事件都不可达** ⇒ 纳入 workflow_dispatch（手动全量派发即可跑
-    # suite / full-bootstrap；`||` 右侧为本次改动点）。若日后需「派发时只跑 PR 层」，
-    # 可改为 `workflow_dispatch` 输入开关（本次不做）。
-    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
-    env:
-      CI_JOB_NAME: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: suite
-          - name: full-bootstrap
-          - name: selfhost-tests-0
-          - name: selfhost-tests-1
-          - name: selfhost-tests-2
-          - name: selfhost-tests-3
+    timeout-minutes: 15
     steps:
-      - name: checkout the source code
+      - name: checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          fetch-depth: 2
-
-      - name: add extra environment variables
+          ref: ${{ env.CI_REF }}
+      - name: environment
         run: src/ci/scripts/setup-environment.sh
+      - name: bootstrap and harness static checks
+        run: CI_JOB_NAME=bootstrap-tests src/ci/run.sh
 
-      - name: run the build
-        run: src/ci/scripts/run-build-from-ci.sh
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: environment
+        run: src/ci/scripts/setup-environment.sh
+      - name: build compiler
+        run: |
+          python3 build_selfhost_native.py
+          python3 tools/gen_alloc_blob.py --check
+      - name: stage compiler artifact
+        run: |
+          rm -rf build/ci-artifact
+          mkdir -p build/ci-artifact
+          cp build/corec build/corearch build/corelsp build/runtime.o build/ci-artifact/
+          cp -r build/alloc_blob build/ci-artifact/
+      - name: upload compiler artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-build
+          path: build/ci-artifact/
+          if-no-files-found: error
+          retention-days: 1
+
+  compiler-check:
+    name: compiler check
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: check compiler sources
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=check src/ci/run.sh
+
+  core-tests:
+    name: core tests
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: core test set
+        run: python3 src/ci/run_tests.py --area core --profile "${{ needs.plan.outputs.profile }}"
+
+  areas:
+    name: area / ${{ matrix.area }}
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.profile == 'pr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.areas_matrix) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: run area
+        run: python3 src/ci/run_tests.py --area "${{ matrix.area }}" --profile pr
+
+  suite:
+    name: suite
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_suite == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: suite corpus
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=suite src/ci/run.sh
+
+  selfhost:
+    name: selfhost / ${{ matrix.area }}
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.profile != 'pr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.full_matrix) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: run area
+        run: python3 src/ci/run_tests.py --area "${{ matrix.area }}" --profile "${{ needs.plan.outputs.profile }}"
+
+  canary:
+    name: canary / carrier
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_canary == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: canary values
+        run: bash tools/baseline/canary_check.sh
+      - name: canary carrier validity
+        run: python3 tests/harness/test_canary_carrier.py --require-compiler
+
+  full-bootstrap:
+    name: full bootstrap
+    needs: [plan, build]
+    if: needs.plan.result == 'success' && needs.plan.outputs.run_full_bootstrap == 'true'
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.runner) || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CI_REF }}
+      - name: download compiler artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: core-build
+          path: build
+      - name: environment
+        run: |
+          chmod +x build/corec build/corearch build/corelsp
+          src/ci/scripts/setup-environment.sh
+      - name: three-stage bootstrap
+        run: CI_SKIP_BUILD=1 CI_JOB_NAME=full-bootstrap src/ci/run.sh
+
+  pr-gate:
+    name: pr-gate
+    if: always() && (github.event_name == 'pull_request' || needs.plan.outputs.profile == 'pr' || (github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'pr'))
+    needs: [plan, static-bootstrap, build, compiler-check, core-tests, areas, suite, canary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: aggregate PR jobs
+        shell: bash
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result"[[:space:]]*:[[:space:]]*"(failure|cancelled)"'; then
+            echo "::error::PR gate failed; see the failed job above"
+            exit 1
+          fi
+
+  full-gate:
+    name: full-gate
+    if: always() && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.event.inputs.profile != 'pr')
+    needs: [plan, static-bootstrap, build, compiler-check, core-tests, suite, selfhost, canary, full-bootstrap]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: aggregate full jobs
+        shell: bash
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result"[[:space:]]*:[[:space:]]*"(failure|cancelled)"'; then
+            echo "::error::full gate failed; see the failed job above"
+            exit 1
+          fi
