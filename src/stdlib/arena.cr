@@ -385,12 +385,12 @@ fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
         seg := mi * SEGMENTS_PER_M
         cell_store(g_segment_count_m, mi * 8, seg)
         p := syscall6(9, 0, 67108864, 3, 34, -1, 0)
-        ps : ., mut = ""
+        ps : ., mut = _arena_ptr(0)
         if p > 0:
             unsafe:
                 ps = @str_of(p)
-        if _arena_word(ps) == 0:
-            // The interpreter maps syscall6 to 0; use the host heap there.
+        else:
+            // syscall6 maps to 0 in the interpreter. Use the host heap there.
             ps = alloc(67108864)
         if _arena_word(ps) != 0:
             store_str_ptr(g_segment_base, seg * 8, ps)
@@ -523,11 +523,12 @@ fn arena_grow_pool_m(m: int), pub:
     saved := arena_scalar_get(0)
     arena_set_current(-1)
     p := syscall6(9, 0, 67108864, 3, 34, -1, 0)
-    ps : ., mut = ""
+    ps : ., mut = _arena_ptr(0)
     if p > 0:
         unsafe:
             ps = @str_of(p)
-    if _arena_word(ps) == 0:
+    else:
+        // syscall6 maps to 0 in the interpreter. Use the host heap there.
         ps = alloc(67108864)
     if _arena_word(ps) == 0:
         arena_set_current(saved)
