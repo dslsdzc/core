@@ -69,3 +69,8 @@ gh workflow run core-ci.yml --ref <branch> -f profile=full -f pr=<number>
 gh workflow run core-ci.yml --ref <branch> -f profile=full \
   -f full_bootstrap=true -f runner=<runner-label>
 ```
+
+The stage-2 self-host build does not fit the standard `ubuntu-latest` runner:
+the runner is shut down after roughly eight minutes with no compiler error.
+Pass a larger runner label when exercising L3. The full layer without
+`full_bootstrap=true` does not depend on it.
