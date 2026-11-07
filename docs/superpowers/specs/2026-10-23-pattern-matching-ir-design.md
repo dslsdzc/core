@@ -216,7 +216,7 @@ corearch 只看 `IR_BRANCH` 的 case 数量和 value 分布，不看模式种类
 | points-to 和跨过程摘要 | 推断函数返回值的可能集合 | 后续 |
 | provenance | 不直接参与 match 编译 | 不在本次范围 |
 
-HDFG 的 region 信息已经写入 `.ccr` 的 REG 段，corearch 可以直接读取，不需要为热度新增字段。
+v10 时 HDFG 的 region 信息写在 `.ccr` 的 REG 段；v11 已删除 REG，若后续需要 corearch 热路径提示，必须另设载体（例如 `.coi` 或新的只读段），不能假设 `.ccr` 里仍有 region。
 
 ## 约束
 

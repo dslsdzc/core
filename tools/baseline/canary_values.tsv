@@ -226,8 +226,8 @@
 # 字节变化 ⇒ canary ELF sha 变、size 仍 61622；四条 `.ccr` 不变。D1 5/5 PASS。
 # 旧值：canary_elf af606c27be2b3100d7e5ea408ff273545931f33725d8d6cddbc79b9ecf83209c 61622
 canary_elf	pa	fd37b88a2c5383a8b7f607c0675790413dfb4a0103b9feb658e739d1a7d86e0c	61622
-pa_ccr	pa.ccr	7cf5392284b67133b12e4985440ded33332cdb116b7b5a3a6a68fe7edc6a50e2	100202
-pa_static_ccr	pa_st.bin.ccr	f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920ebed5a809b49	100314
+pa_ccr	pa.ccr	5fb621929445d45b7b4af60bc6bb3dc345b4005212061ec55af806e6ecc16d2d	98142
+pa_static_ccr	pa_st.bin.ccr	1a9598a30029af5f294b5e05f42a731c62f82e8eb3f296a9db4b83eb262cebc3	98254
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -257,8 +257,8 @@ pa_static_ccr	pa_st.bin.ccr	f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920
 #   旧值留痕：
 #     gt_ccr        1b48a36f6c76330ebdcbce4a046dd90ff5b60020c75352759d94aa4f006cde0b 135036
 #     gt_static_ccr 123a37f1d5012e5409294478c7aa87f6a476f243683141fc9997bac736550959 135124
-gt_ccr	gt.ccr	ff3c18fd1fbbadf75c23c0582203d7a9afc68036f9b76b692ed3c63cb1ff71cf	137022
-gt_static_ccr	gt_st.bin.ccr	d88781b28227f9113fbdccca53f49991d11544b6d7639634a119c5d552418da9	137134
+gt_ccr	gt.ccr	cc9b0a15d6321acdc238e022865a7ecaf268b147f0cad86cb8b8f8fb5aaf1602	134170
+gt_static_ccr	gt_st.bin.ccr	a5f980aa371835638149318e798621e9e5c2359f5ee12482fbe3954ab569882c	134282
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -701,3 +701,15 @@ gt_static_ccr	gt_st.bin.ccr	d88781b28227f9113fbdccca53f49991d11544b6d7639634a119
 # 新值：
 #   gt_ccr        2a58b1185a25d70f9028de2a7f153e9f0b36f4bdfcf3fbf418248b4cc26a2d4a 132546
 #   gt_static_ccr e83ee46a75d2f71e0a8f41fe91cfdc12e3e4d299b94a3a69f3fa655e6c16e9f8 132768
+
+# ── 「本次重锁 2026-11-07」.ccr v11：删除 REG，函数 NOD 范围落 SYM ──
+# 归因：v11 段表 9→8，删除 REG（24B/region）；SYM 函数头 24B→28B
+# （instr_start/instr_count，+4B/function）。净变化：
+#   pa_ccr 100202→98142（−2060B）; pa_static_ccr 100314→98254（−2060B）;
+#   gt_ccr 137022→134170（−2852B）; gt_static_ccr 137134→134282（−2852B）。
+# ELF canary fd37b88a… 61622B 不变；D1 5/5 PASS。
+# 旧值留痕（自本次起作废）：
+#   pa_ccr        7cf5392284b67133b12e4985440ded33332cdb116b7b5a3a6a68fe7edc6a50e2 100202
+#   pa_static_ccr f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920ebed5a809b49 100314
+#   gt_ccr        ff3c18fd1fbbadf75c23c0582203d7a9afc68036f9b76b692ed3c63cb1ff71cf 137022
+#   gt_static_ccr d88781b28227f9113fbdccca53f49991d11544b6d7639634a119c5d552418da9 137134

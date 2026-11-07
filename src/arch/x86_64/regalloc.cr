@@ -684,7 +684,7 @@ fn alloc_registers():
                         loop:
                             if mj >= mc:
                                 break
-                            mtgt := cell_load_i32(g_ccr_case, (ms + mj) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                            mtgt := cell_load_i32(g_ccr_case, (ms + mj) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
                             mlab : ., mut = -1
                             if mtgt >= 0 && mtgt < g_ir_instr_count:
                                 if iri_op(mtgt) == IR_LABEL:

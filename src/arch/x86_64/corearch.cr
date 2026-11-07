@@ -293,7 +293,7 @@ fn dump_object_surface():
             loop:
                 if mi3 >= mcount:
                     break
-                cbase := (mstart + mi3) * CCR_V10_CASE_DISK
+                cbase := (mstart + mi3) * CCR_V11_CASE_DISK
                 print("case ")
                 print_i(mstart + mi3)
                 print(" value ")
@@ -351,7 +351,7 @@ fn dump_match_plan():
             loop:
                 if cj >= mc:
                     break
-                ct := cell_load_i32(g_ccr_case, (ms + cj) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                ct := cell_load_i32(g_ccr_case, (ms + cj) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
                 if ct >= 0 && ct < g_v7_nod_count:
                     if nod_op(ct) == IR_LABEL:
                         ln := nod_s1(ct)

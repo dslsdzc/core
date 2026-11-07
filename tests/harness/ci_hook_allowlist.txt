@@ -29,7 +29,7 @@
 
 # ─── tests/selfhost（12 条；未挂）───
 tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同阶段评估
-tests/selfhost/test_ccrb_bundle.py	未挂：需外部 zstd（CI 镜像未保证）；`.ccrb` 是分发包装层，核心 v10 raw `.ccr` 检查已由 test_ccr_v10_format/stream 覆盖。接入条件 = CI 镜像声明 zstd 依赖
+tests/selfhost/test_ccrb_bundle.py	未挂：需外部 zstd（CI 镜像未保证）；`.ccrb` 是分发包装层，核心 v11 raw `.ccr` 检查已由 test_ccr_v11_format/stream 覆盖。接入条件 = CI 镜像声明 zstd 依赖
 tests/selfhost/test_bigint_arith.py	未挂（历史缺口）：BigInt 运行时端到端，需 corec+ELF；构建面成本高，独立阶段评估
 tests/selfhost/test_bigint_containers.py	未挂（历史缺口）：BigInt 容器载荷，需 corec+ELF
 tests/selfhost/test_bigint_interp.py	未挂（历史缺口）：BigInt 解释器路径，需 corec

@@ -12,7 +12,7 @@
 硬约束：
 
 - 不新增源码语法；transfer/budget/slot 都是 stdlib API 或 plan 旁路字段。
-- `.ccr` 的 9 段 wire 不变；plan/证书走旁路文件。
+- `.ccr` 的 v11 wire 为 8 段；plan/证书走旁路文件。
 - 无法证明的映射 fail-closed；`unknown` 不渲染为通过。
 - activation 仍固定 home M；TLS/arena 不跨 M。
 - 信号 handler 内不切 fiber、不拿锁、不分配。

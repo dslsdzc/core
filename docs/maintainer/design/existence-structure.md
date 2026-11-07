@@ -1,9 +1,10 @@
-# 存在结构：v6 格形态 IR 的语义表示（ENT/NOD/REG）
+# 存在结构：格形态 IR 的语义表示（ENT/NOD；v11 起 REG 不落盘）
 
 > 定位：受众 = 维护者（ccr_io/分配器/验证器实现者）；状态 = active（设计定稿，实现推进中）。
 > 本文件从语义角度说明 v6 存在结构，以及规则 1–7（权威 = docs/academic/cache-semantics.md）如何在 `.ccr` 中定义为 IR 一等结构。字节级布局（段表/字段宽/对齐）的最终规格在 docs/ir-schema/coreir-schema.md（实现期并入）；格式设计草案与实施状态以 docs/archive/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
 > 2026-09-20 层定义修订（ADR-0021）：规则所属的层本体 = 存在格 / Materialization Space（层定义与七字段模型 = docs/maintainer/design/materialization-space.md），本文件的表示结构不变，变的只是规则的层归属称谓。
 > 决策：adr/adr-0002（.ccr v6 段表架构）。
+> 2026-11-07 v11：`.ccr` 删除 REG 段，函数 NOD 范围由 SYM 的 `instr_start/instr_count` 承载；`g_sgs` 仍是前端 region 表。
 
 ---
 
@@ -23,10 +24,10 @@
 | 段 | 内容 | 语义层角色 |
 |---|---|---|
 | STR | 字符串表 | 符号名的字节表示 |
-| SYM | 符号表（函数/全局/结构/枚举，v5 func_meta 等归并） | 函数记录带 root_region 与 first_ent/last_ent |
+| SYM | 符号表（函数/全局/结构/枚举） | 函数记录带 instr_start/instr_count 与 first_ent/last_ent |
 | NOD | 节点表 = 图事件（v5 instrs 图坐标化）+ 显式边表 | 方法 |
 | ENT | 条目表（v6 新增，存在结构核心） | 条目：位置 + 方法 + 存在 |
-| REG | region 表（SG 嵌套，坐标升级） | 存在区间定位 |
+| REG | v10 及更早的 region 表；v11 起不落盘 | 历史段；前端 `g_sgs` 保留 |
 
 变量（局部）不入 SYM，由 ENT 全量携带（存在即声明）。
 
@@ -83,20 +84,11 @@ ENT flags bit0 = 无方法(`recipe = unrecomputable`，图内不可重算），�
 
 ---
 
-## 五、REG：存在区间定位
+## 五、REG（v11 起不落盘）
 
-REG 记录 = v5 sgs 坐标升级：
-
-| 字段 | 语义 |
-|---|---|
-| kind | SG_IF/LOOP/FOR/FLOW/UNSAFE/FUNC |
-| parent | 父 region id（-1 = 根） |
-| enter_nod / exit_nod | 入口/出口节点（NOD id） |
-| first_ent / last_ent | 区内条目范围（-1 = 无） |
-
-REG 的 first_ent/last_ent 使“子图边界 = 存在域边界”可以直接查询，是以图为依据的区域内存模型（region-model.md）的语义依据。区域生命周期由 region 的存在结构推导，而不是词法作用域。
-
----
+v10 及更早的 `.ccr` 在 REG 段保存 SG 嵌套（kind/parent/enter/exit/first_ent/last_ent）。
+v11 删除该段：函数 NOD 范围改由 SYM 的 `instr_start/instr_count` 给出，嵌套 region
+仍由前端 `g_sgs` 和 `.cir` 缓存表示，但不进入 `.ccr`。
 
 ## 六、共存判定：不写入文件，sweep 推导
 

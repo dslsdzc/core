@@ -1,7 +1,7 @@
 # ADR-0008: 执行模型 region 化：RVSDG 风格嵌套 + state edges
 
 - 日期：2026-08-08（region-cfg 定稿；HDFG v2 文档体系 2026-08-15 同步）
-- 状态：accepted（已实现：dataflow.cr sg 段表 + 边 kind）
+- 状态：accepted（v11 起 REG 不落盘；历史决策保留）（已实现：dataflow.cr sg 段表 + 边 kind）
 - 决策者：DslsDZC
 
 ## 背景

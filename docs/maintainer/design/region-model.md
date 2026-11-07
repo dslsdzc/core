@@ -64,7 +64,7 @@ Core 采用图绑定区域的统一内存管理：区域（Region）绑定在 HD
  - share：分叉点一个区域被多个消费者只读共享（共享者必须 outlive 引用）
 - 推论 C：每字节归属 = 图的 provenance 边。“字节序列 + 宽度 + 边界”与类型无关，provenance（归属）、offset（偏移）、alloc_size 是图上本有的信息（缓存规则 6 的经典视图）。
 
-> 术语注意：dataflow 的“region”（控制流嵌套，见 execution-model.md 第 2 节与 existence-structure.md REG 段）与本文的“区域”（内存字节域）不同。v6 REG 段 first_ent/last_ent 提供“子图边界 = 存在域边界”的直接查询，区域机制在 IR 层的依据。
+> 术语注意：dataflow 的“region”（控制流嵌套，见 execution-model.md 第 2 节与 existence-structure.md REG 段）与本文的“区域”（内存字节域）不同。v6–v10 的 REG 段 first_ent/last_ent 提供“子图边界 = 存在域边界”的直接查询；v11 起 `.ccr` 不再落 REG，前端 `g_sgs`/`.cir` 仍是区域机制的 IR 依据。
 
 ### 3.3 逃逸规则（2026-08-13 修订）
 

@@ -1525,7 +1525,7 @@ fn rp_clear_suffix_safe(qn: int, sg_end: int) -> int:
                 if k >= cnt:
                     break
                 if base >= 0 && base + k < g_lat_case_count:
-                    lbl := cell_load_i32(g_lat_case, (base + k) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                    lbl := cell_load_i32(g_lat_case, (base + k) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
                     t := rc_ctl_label_node(lbl)
                     if t >= 0 && t <= qn:
                         return 0
