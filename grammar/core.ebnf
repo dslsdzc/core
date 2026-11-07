@@ -125,7 +125,9 @@ BreakStmt = 'break' ;
 ContinueStmt = 'continue' ;
 
 (*** 复合类型声明 ***)
-StructDecl = 'struct' IDENT ':' { FieldDecl } ;
+StructDecl = 'struct' IDENT [ LayoutClause ] ':' { FieldDecl } ;
+LayoutClause = 'layout' '(' LayoutItem { ',' LayoutItem } ')' ;
+LayoutItem = 'packed' | 'align' '(' INT_LIT ')' ;
 FieldDecl = IDENT ':' Type ;
 
 EnumDecl = 'enum' IDENT ':' { '|' Variant } ;

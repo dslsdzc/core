@@ -183,8 +183,18 @@ g_si_f_names : string, mut
 g_si_f_types : string, mut
 g_si_f_nodes : string, mut
 g_si_f_pub : string, mut
+// Per-field witness mark. A generic-parameter field that is never read or
+// written has size zero and is omitted from construction. The mark is derived
+// after type checking; it is process-local and not serialized.
+g_si_f_witness : string, mut
 g_si_f_used : int, mut
 g_si_f_cap : int, mut
+// Per-struct declared layout alignment (`layout(packed, align(n))`). 0 means the
+// default packed layout. Process-local, like the other declaration tables.
+g_si_layout_align : string, mut
+// Per-AST-node inferred type row. Only expression nodes whose type must survive
+// into IR generation are written (struct literals, array literals, tuples).
+g_ast_ti : string, mut
 // Enum variant side tables, the same shape as struct fields. The OFF_EI_VARIANTS
 // slot now holds variant_base. Three tables describe variants (name, payload base,
 // payload count) and two describe payloads (raw code, type node).

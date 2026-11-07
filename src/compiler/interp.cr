@@ -39,6 +39,30 @@ fn ir_interp_word(v: int) -> int:
         return bi_to_word_checked(v)
     return v
 
+// Width-aware aggregate access. The interpreter keeps aggregate storage in
+// byte-addressed buffers, so packed struct fields and array elements must use
+// the same 1/4/8-byte widths as the ELF backend.
+fn interp_mem_load(addr: int, off: int, width: int) -> int:
+    if width == 1:
+        unsafe:
+            return cell_load_byte(@str_of(addr), off)
+    if width == 4:
+        unsafe:
+            return cell_load32(@str_of(addr), off)
+    unsafe:
+        return cell_load(@str_of(addr), off)
+
+fn interp_mem_store(addr: int, off: int, width: int, val: int):
+    if width == 1:
+        unsafe:
+            cell_store_byte(@str_of(addr), off, val)
+    else if width == 4:
+        unsafe:
+            cell_store32(@str_of(addr), off, val)
+    else:
+        unsafe:
+            cell_store(@str_of(addr), off, val)
+
 fn ir_interp_tag(v: int) -> int:
     if g_interp_big != 0:
         return bi_from_word(v)
@@ -918,67 +942,99 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             unsafe:
                 cell_store(g_ir_vals, d2 * 8, @ptr_of(bp2))
         if op2 == 13 && d2 >= 0 && t1 >= 0:
-            // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
+            // IR_LOAD_INDEX: t1=arr_var, s2=stride, t3=literal_idx
             av2 := cell_load(g_ir_vals, t1 * 8)
             if irv_type(t1) == TI_STR:
                 cell_store(g_ir_vals, d2 * 8, str_load8(av2, t3))
             else:
-                unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), t3 * interp_ptr_stride()))
+                stride2 : ., mut = t2
+                if stride2 <= 0:
+                    stride2 = interp_ptr_stride()
+                w2 := stride2
+                if w2 > interp_ptr_stride():
+                    w2 = interp_ptr_stride()
+                cell_store(g_ir_vals, d2 * 8, interp_mem_load(av2, t3 * stride2, w2))
         if op2 == 14 && t1 >= 0 && t2 >= 0:
-            // IR_STORE_INDEX: t1=arr_var, t2=val_var
+            // IR_STORE_INDEX: t1=arr_var, t2=val_var, t4=stride
             av2 := cell_load(g_ir_vals, t1 * 8)
             if irv_type(t1) == TI_STR:
                 cell_store_byte(istr_get(av2), t3, cell_load(g_ir_vals, t2 * 8))
             else:
-                unsafe:
-                    cell_store(@str_of(av2), t3 * interp_ptr_stride(), cell_load(g_ir_vals, t2 * 8))
+                stride2 : ., mut = d2
+                if stride2 <= 0:
+                    stride2 = interp_ptr_stride()
+                w2 := stride2
+                if w2 > interp_ptr_stride():
+                    w2 = interp_ptr_stride()
+                interp_mem_store(av2, t3 * stride2, w2, cell_load(g_ir_vals, t2 * 8))
         if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0:
-            // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
+            // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var, t3=stride
             av2 := cell_load(g_ir_vals, t1 * 8)
             ix2 := ir_interp_word(cell_load(g_ir_vals, t2 * 8))
             if irv_type(t1) == TI_STR:
                 cell_store(g_ir_vals, d2 * 8, str_load8(av2, ix2))
             else:
-                unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), ix2 * interp_ptr_stride()))
+                stride2 : ., mut = t3
+                if stride2 <= 0:
+                    stride2 = interp_ptr_stride()
+                w2 := stride2
+                if w2 > interp_ptr_stride():
+                    w2 = interp_ptr_stride()
+                cell_store(g_ir_vals, d2 * 8, interp_mem_load(av2, ix2 * stride2, w2))
         if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0:
-            // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
+            // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var, t3=stride
             av2 := cell_load(g_ir_vals, t1 * 8)
             ix2 := ir_interp_word(cell_load(g_ir_vals, t2 * 8))
             if irv_type(t1) == TI_STR:
                 cell_store_byte(istr_get(av2), ix2, cell_load(g_ir_vals, d2 * 8))
             else:
-                unsafe:
-                    cell_store(@str_of(av2), ix2 * interp_ptr_stride(), cell_load(g_ir_vals, d2 * 8))
+                stride2 : ., mut = t3
+                if stride2 <= 0:
+                    stride2 = interp_ptr_stride()
+                w2 := stride2
+                if w2 > interp_ptr_stride():
+                    w2 = interp_ptr_stride()
+                interp_mem_store(av2, ix2 * stride2, w2, cell_load(g_ir_vals, d2 * 8))
         if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0:
-            // IR_ADDR_INDEX: &arr[i]. The element scale is a target fact.
-            cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * interp_ptr_stride())
+            // IR_ADDR_INDEX: &arr[i], stride in s3.
+            stride2 : ., mut = t3
+            if stride2 <= 0:
+                stride2 = interp_ptr_stride()
+            cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * stride2)
         if op2 == 11 && d2 >= 0 && t1 >= 0:
-            // IR_LOAD_FIELD: t1=struct_var, t3=field_idx. Field offsets use the
-            // target field stride, not an inlined x86 constant.
+            // IR_LOAD_FIELD: packed mode (t4 > 0) uses t3 as a byte offset and
+            // t4 as the storage width; t4 == 0 keeps the legacy slot layout.
             pf2 := cell_load(g_ir_vals, t1 * 8)
             if pf2 != 0:
-                unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(pf2), t3 * interp_field_stride()))
+                if t2 > 0:
+                    cell_store(g_ir_vals, d2 * 8, interp_mem_load(pf2, t3, t2))
+                else:
+                    unsafe:
+                        cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(pf2), t3 * interp_field_stride()))
             else:
                 cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
         if op2 == 12 && t1 >= 0 && t2 >= 0:
-            // IR_STORE_FIELD: t1=struct_var, t2=val_var, t3=field_idx
+            // IR_STORE_FIELD: packed mode uses t3 as offset and t4 as width.
             pf2 := cell_load(g_ir_vals, t1 * 8)
             if pf2 != 0:
-                unsafe:
-                    cell_store(@str_of(pf2), t3 * interp_field_stride(), cell_load(g_ir_vals, t2 * 8))
+                if d2 > 0:
+                    interp_mem_store(pf2, t3, d2, cell_load(g_ir_vals, t2 * 8))
+                else:
+                    unsafe:
+                        cell_store(@str_of(pf2), t3 * interp_field_stride(), cell_load(g_ir_vals, t2 * 8))
             else:
                 cell_store(g_ir_vals, t1 * 8, cell_load(g_ir_vals, t2 * 8))
         if op2 == 7 && d2 >= 0:
-            // IR_ALLOC_STRUCT. Fields are target-stride spaced; the trailing
-            // word is the enum/tag header slot.
-            si2 := find_struct(t3)
-            fc2 : ., mut = 0
-            if si2 >= 0:
-                fc2 = si_field_count(si2)
-            need3 := fc2 * interp_field_stride() + interp_ptr_stride()
+            // IR_ALLOC_STRUCT. s2 carries the baked allocation extent; the old
+            // field-count fallback remains for compiler-internal rows without a
+            // semantic struct type.
+            need3 := t2
+            if need3 <= 0:
+                si2 := find_struct(t3)
+                fc2 : ., mut = 0
+                if si2 >= 0:
+                    fc2 = si_field_count(si2)
+                need3 = fc2 * interp_field_stride() + interp_ptr_stride()
             bp2 := alloc(need3)
             vi3 : ., mut = 0
             loop:
@@ -1033,7 +1089,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         // element scale comes from the target hook.
         if op2 == 24:
             if d2 >= 0 && t1 >= 0 && t2 >= 0:
-                cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * interp_ptr_stride())
+                cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)))
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. A dynamic
         // limit uses ti = 1. An index below 0 or at least the limit aborts with -1.
         if op2 == 30 && t2 >= 0:
@@ -1328,14 +1384,15 @@ fn ir_interpret() -> int:
                 cell_store(g_ir_vals, d * 8, 0)
         // IR_ALLOC
         if op == 7:
-            // IR_ALLOC_STRUCT. Fields use the target field stride; the trailing
-            // word is the tag/header slot.
+            // IR_ALLOC_STRUCT. s2 is the baked allocation extent.
             if d >= 0:
-                si := find_struct(s3)
-                fc : ., mut = 0
-                if si >= 0:
-                    fc = si_field_count(si)
-                need2 := fc * interp_field_stride() + interp_ptr_stride()
+                need2 := s2
+                if need2 <= 0:
+                    si := find_struct(s3)
+                    fc : ., mut = 0
+                    if si >= 0:
+                        fc = si_field_count(si)
+                    need2 = fc * interp_field_stride() + interp_ptr_stride()
                 bp := alloc(need2)
                 vi2 : ., mut = 0
                 loop:
@@ -1382,61 +1439,87 @@ fn ir_interpret() -> int:
                 cell_store(g_ir_vals, d * 8, v)
         // IR_LOAD
         if op == 11:
-            // IR_LOAD_FIELD: s1=struct_var, s3=field_idx
+            // IR_LOAD_FIELD: packed mode uses s3 as offset, ti as width.
             if d >= 0 && s1 >= 0:
                 ptr := cell_load(g_ir_vals, s1 * 8)
                 if ptr != 0:
-                    unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(ptr), s3 * interp_field_stride()))
+                    if s2 > 0:
+                        cell_store(g_ir_vals, d * 8, interp_mem_load(ptr, s3, s2))
+                    else:
+                        unsafe:
+                            cell_store(g_ir_vals, d * 8, cell_load(@str_of(ptr), s3 * interp_field_stride()))
                 else:
                     cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8))
         if op == 12:
-            // IR_STORE_FIELD: s1=struct_var, s2=val_var, s3=field_idx
+            // IR_STORE_FIELD: packed mode uses s3 as offset, ti as width.
             if s1 >= 0 && s2 >= 0:
                 ptr := cell_load(g_ir_vals, s1 * 8)
                 if ptr != 0:
-                    unsafe:
-                        cell_store(@str_of(ptr), s3 * interp_field_stride(), cell_load(g_ir_vals, s2 * 8))
+                    if d > 0:
+                        interp_mem_store(ptr, s3, d, cell_load(g_ir_vals, s2 * 8))
+                    else:
+                        unsafe:
+                            cell_store(@str_of(ptr), s3 * interp_field_stride(), cell_load(g_ir_vals, s2 * 8))
                 else:
                     cell_store(g_ir_vals, s1 * 8, cell_load(g_ir_vals, s2 * 8))
         if op == 13:
-            // IR_LOAD_INDEX: s1=arr_var, s3=literal_idx
+            // IR_LOAD_INDEX: s1=arr_var, s2=stride, s3=literal_idx
             if d >= 0 && s1 >= 0:
                 arr_value := cell_load(g_ir_vals, s1 * 8)
                 if irv_type(s1) == TI_STR:
                     cell_store(g_ir_vals, d * 8, str_load8(arr_value, s3))
                 else:
-                    unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), s3 * interp_ptr_stride()))
+                    stride3 : ., mut = s2
+                    if stride3 <= 0:
+                        stride3 = interp_ptr_stride()
+                    w3 := stride3
+                    if w3 > interp_ptr_stride():
+                        w3 = interp_ptr_stride()
+                    cell_store(g_ir_vals, d * 8, interp_mem_load(arr_value, s3 * stride3, w3))
         if op == 14:
-            // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx
+            // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx, ti=stride
             if s1 >= 0 && s2 >= 0:
                 arr_value := cell_load(g_ir_vals, s1 * 8)
                 if irv_type(s1) == TI_STR:
                     cell_store_byte(istr_get(arr_value), s3, cell_load(g_ir_vals, s2 * 8))
                 else:
-                    unsafe:
-                        cell_store(@str_of(arr_value), s3 * interp_ptr_stride(), cell_load(g_ir_vals, s2 * 8))
+                    stride3 : ., mut = d
+                    if stride3 <= 0:
+                        stride3 = interp_ptr_stride()
+                    w3 := stride3
+                    if w3 > interp_ptr_stride():
+                        w3 = interp_ptr_stride()
+                    interp_mem_store(arr_value, s3 * stride3, w3, cell_load(g_ir_vals, s2 * 8))
         if op == 15:
-            // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
+            // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var, s3=stride
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 arr_value := cell_load(g_ir_vals, s1 * 8)
                 idx := ir_interp_word(cell_load(g_ir_vals, s2 * 8))
                 if irv_type(s1) == TI_STR:
                     cell_store(g_ir_vals, d * 8, str_load8(arr_value, idx))
                 else:
-                    unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), idx * interp_ptr_stride()))
+                    stride3 : ., mut = s3
+                    if stride3 <= 0:
+                        stride3 = interp_ptr_stride()
+                    w3 := stride3
+                    if w3 > interp_ptr_stride():
+                        w3 = interp_ptr_stride()
+                    cell_store(g_ir_vals, d * 8, interp_mem_load(arr_value, idx * stride3, w3))
         if op == 16:
-            // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
+            // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var, s3=stride
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 arr_value := cell_load(g_ir_vals, s1 * 8)
                 idx := ir_interp_word(cell_load(g_ir_vals, s2 * 8))
                 if irv_type(s1) == TI_STR:
                     cell_store_byte(istr_get(arr_value), idx, cell_load(g_ir_vals, d * 8))
                 else:
-                    unsafe:
-                        cell_store(@str_of(arr_value), idx * interp_ptr_stride(), cell_load(g_ir_vals, d * 8))
+                    stride3 : ., mut = s3
+                    if stride3 <= 0:
+                        stride3 = interp_ptr_stride()
+                    w3 := stride3
+                    if w3 > interp_ptr_stride():
+                        w3 = interp_ptr_stride()
+                    interp_mem_store(arr_value, idx * stride3, w3, cell_load(g_ir_vals, d * 8))
         // IR_MAKE_ENUM: allocate one tag slot plus s2 payload fields and store s1
         // (the variant-name index) in the first word. This matches the ELF layout
         // [tag][payload]; IR_STORE_FIELD writes the payload.
@@ -1473,7 +1556,7 @@ fn ir_interpret() -> int:
         // element scale is a target fact.
         if op == 24:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * interp_ptr_stride())
+                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)))
 
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. An index
         // below 0 or at least the limit aborts with -1.
@@ -1538,7 +1621,10 @@ fn ir_interpret() -> int:
         // IR_ADDR_INDEX: d = slot s1 + stride * slot s2 for &arr[i].
         if op == 31:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * interp_ptr_stride())
+                stride3 : ., mut = s3
+                if stride3 <= 0:
+                    stride3 = interp_ptr_stride()
+                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * stride3)
         // IR_ARENA_NEW and IR_ARENA_RESET call the interpreted arena library.
         if op == 32:
             ir_interp_arena_new(d, s1)

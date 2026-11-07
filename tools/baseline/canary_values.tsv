@@ -225,9 +225,9 @@
 # 2026-11-05 追加：alloc_body 改调公共 arena_grow_pool wrapper，allocator blob
 # 字节变化 ⇒ canary ELF sha 变、size 仍 61622；四条 `.ccr` 不变。D1 5/5 PASS。
 # 旧值：canary_elf af606c27be2b3100d7e5ea408ff273545931f33725d8d6cddbc79b9ecf83209c 61622
-canary_elf	pa	fd37b88a2c5383a8b7f607c0675790413dfb4a0103b9feb658e739d1a7d86e0c	61622
-pa_ccr	pa.ccr	5fb621929445d45b7b4af60bc6bb3dc345b4005212061ec55af806e6ecc16d2d	98142
-pa_static_ccr	pa_st.bin.ccr	1a9598a30029af5f294b5e05f42a731c62f82e8eb3f296a9db4b83eb262cebc3	98254
+canary_elf	pa	b2ee96845406c4d5e4a9162d6fe27c0d2464feca48a977aa61ac25fe9b50c968	61622
+pa_ccr	pa.ccr	2e52196cec100031edb8ffeacc8d9075d586dedf5dad98b3bd786f5d1bdbab96	98118
+pa_static_ccr	pa_st.bin.ccr	8756706e807cdd624d40fb57352b2bfc0caae968e8a6f60c4bfa9670f335420c	98230
 # ── 「本次重锁 2026-10-26」if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -257,8 +257,8 @@ pa_static_ccr	pa_st.bin.ccr	1a9598a30029af5f294b5e05f42a731c62f82e8eb3f296a9db4b
 #   旧值留痕：
 #     gt_ccr        1b48a36f6c76330ebdcbce4a046dd90ff5b60020c75352759d94aa4f006cde0b 135036
 #     gt_static_ccr 123a37f1d5012e5409294478c7aa87f6a476f243683141fc9997bac736550959 135124
-gt_ccr	gt.ccr	cc9b0a15d6321acdc238e022865a7ecaf268b147f0cad86cb8b8f8fb5aaf1602	134170
-gt_static_ccr	gt_st.bin.ccr	a5f980aa371835638149318e798621e9e5c2359f5ee12482fbe3954ab569882c	134282
+gt_ccr	gt.ccr	72e97a428437e2542ff1add345107cb75bf7dcd0f01f48bb0906077231e3bd25	134010
+gt_static_ccr	gt_st.bin.ccr	7bbe8e77aa7cac9e5458965245ac0a078df93dd5b47cbe8a7b5059a55a65d35f	134122
 # 警告：**本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -713,3 +713,14 @@ gt_static_ccr	gt_st.bin.ccr	a5f980aa371835638149318e798621e9e5c2359f5ee12482fbe3
 #   pa_static_ccr f2f3465ead228c1a8b8acde8dad9caa8c14822fba9c8b0a7c920ebed5a809b49 100314
 #   gt_ccr        ff3c18fd1fbbadf75c23c0582203d7a9afc68036f9b76b692ed3c63cb1ff71cf 137022
 #   gt_static_ccr d88781b28227f9113fbdccca53f49991d11544b6d7639634a119c5d552418da9 137134
+
+# ── 2026-11-08 layout semantics relock (size(T) / packed struct / witness) ─────
+# D1 determinism: 5/5 PASS. The ELF and .ccr hashes move because named structs
+# are now packed by field size (bool/char no longer force an 8-byte slot),
+# witness type-variable fields have size zero, and ALLOC_ARRAY/field/index/
+# slice carriers use the baked element/field layout.
+#   canary_elf    b2ee96845406c4d5e4a9162d6fe27c0d2464feca48a977aa61ac25fe9b50c968 61622
+#   pa_ccr        2e52196cec100031edb8ffeacc8d9075d586dedf5dad98b3bd786f5d1bdbab96 98118
+#   pa_static_ccr 8756706e807cdd624d40fb57352b2bfc0caae968e8a6f60c4bfa9670f335420c 98230
+#   gt_ccr        72e97a428437e2542ff1add345107cb75bf7dcd0f01f48bb0906077231e3bd25 134010
+#   gt_static_ccr 7bbe8e77aa7cac9e5458965245ac0a078df93dd5b47cbe8a7b5059a55a65d35f 134122

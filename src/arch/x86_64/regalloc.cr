@@ -517,7 +517,10 @@ fn alloc_registers():
             d := iri_dest(inst)
             s1 := iri_s1(inst)
             s2 := iri_s2(inst)
-            if d >= vs && d < vs + vc:
+            d_is_var : ., mut = 1
+            if op == IR_STORE_INDEX || op == IR_STORE_FIELD:
+                d_is_var = 0
+            if d_is_var != 0 && d >= vs && d < vs + vc:
                 dl := d - vs
                 cell_store(var_uses, dl * 8, cell_load(var_uses, dl * 8) + 1)
                 if op == IR_CONST:
@@ -625,7 +628,10 @@ fn alloc_registers():
                     d := iri_dest(inst)
                     s1 := iri_s1(inst)
                     s2 := iri_s2(inst)
-                    if d >= vs && d < vs + vc:
+                    d_is_var2 : ., mut = 1
+                    if op == IR_STORE_INDEX || op == IR_STORE_FIELD:
+                        d_is_var2 = 0
+                    if d_is_var2 != 0 && d >= vs && d < vs + vc:
                         lvd := d - vs
                         if cell_load(st, lvd * 8) == 0:
                             // dest 定值同指令自读（s1/s2 == d）：读先于写，该读
@@ -976,6 +982,11 @@ fn corearch_nod_access_width(n: int) -> int:
 // the explicit single-slot fallback applies. An unreadable type row also falls
 // back explicitly instead of assuming every element is an int slot.
 fn corearch_nod_alloc_stride(n: int, dest: int) -> int:
+    // The frontend bakes the element storage stride into s2 when the element
+    // type is known. Keep the semantic fallbacks for compiler-internal arrays.
+    baked := nod_s2(n)
+    if baked > 0:
+        return baked
     // v10 type_id for ALLOC_ARRAY is the element domain. Use it first; the
     // destination variable's array row is the fallback when the domain was not
     // derivable at save time.
@@ -1016,6 +1027,9 @@ fn corearch_alloc_size_of_var(v: int) -> int:
                 // natively sized fields make mp_extent(n, TI_INT) wrong.
                 return cnt * corearch_nod_alloc_stride(ni, v)
             if aop == IR_ALLOC_STRUCT:
+                baked := nod_s2(ni)
+                if baked > 0:
+                    return baked
                 nm := nod_s3(ni)
                 si : ., mut = 0
                 loop:
