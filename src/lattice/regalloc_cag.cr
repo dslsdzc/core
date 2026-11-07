@@ -243,6 +243,8 @@ impl CagAllocator:
                         cell_store(self.pin_count, k * 8, n + 1)
             i = i + 1
 
+    // Inclusive interval overlap. An entry with no start (start < 0) never
+    // overlaps; callers treat those as not yet live.
     fn overlap(&self, a: int, b: int) -> int:
         sa := cell_load(self.start, a * 8)
         ea := cell_load(self.end, a * 8)
@@ -317,6 +319,8 @@ impl CagAllocator:
         cell_store(self.live_count, k * 8, j)
         return 0
 
+    // First-fit register choice: return the first physical register whose live and
+    // pinned entries do not overlap id, or -1 when none is free.
     fn pick(&mut self, id: int) -> int:
         k : ., mut = 0
         loop:
@@ -378,6 +382,8 @@ impl CagAllocator:
             w = w + 1
         return CAG_OK
 
+    // Scan order: by start position, then by id. An entry without a start sorts
+    // after entries that have one.
     fn order_before(&self, a: int, b: int) -> int:
         sa := cell_load(self.start, a * 8)
         sb := cell_load(self.start, b * 8)
@@ -429,6 +435,10 @@ impl CagAllocator:
             cell_store(self.calls, (j + 1) * 8, key)
             i = i + 1
 
+    // Run the allocation. Resets prior results, validates pins, sorts intervals and
+    // calls, then performs first-fit/eviction per interval with call invalidation.
+    // A second pass retries spilled entries once. Returns CAG_OK or a CAG_ERR_*
+    // code; results are read through assigned, spilled, and rematted.
     fn run(&mut self) -> int:
         self.spill_count = 0
         self.error = CAG_OK

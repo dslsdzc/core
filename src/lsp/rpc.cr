@@ -59,6 +59,7 @@ fn rpc_read_header() -> int:
     buf := g_rpc_hdr_buf
     hlen : ., mut = 0
     seen : ., mut = 0   // consecutive bytes matched against the "\r\n\r\n" prefix
+    // A mismatch resets the count, but a CR can begin a new terminator immediately.
     loop:
         c := rpc_read_byte()
         if c < 0:
@@ -241,6 +242,8 @@ fn rpc_send_shutdown(id: int):
 fn rpc_send_initialized_ack():
     rpc_send("{\"jsonrpc\":\"2.0\",\"id\":null,\"result\":null}")
 
+// Emit a fixed-shape error response. Codes -32601 and -32602 have specific
+// messages; every other code uses "Invalid Request".
 fn rpc_send_error(id: int, code: int):
     out : string, mut = "{\"jsonrpc\":\"2.0\",\"id\":"
     out = out + int_str(id)

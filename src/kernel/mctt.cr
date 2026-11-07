@@ -1,3 +1,9 @@
+// === mctt.cr ===
+// Term and substitution constructors for the kernel arena, plus the typing
+// context stack. Each mk_* helper allocates one five-slot node and fills the
+// slots described in term_io.cr; allocation failure propagates as -1.
+
+// Term constructors.
 fn mk_typ(i : int) -> int:
     n := kern_new(K_TYP)
     kern_set(n , 1 , i)
@@ -44,6 +50,8 @@ fn mk_var(x : int) -> int:
     kern_set(n , 1 , x)
     return n
 
+// Substitution constructors. S_ID and S_WEAKEN carry no children and store the
+// variant in slot 4; S_COMPOSE and S_EXTEND use slots 1 and 2.
 fn mk_sub(e : int, s : int) -> int:
     n := kern_new(K_SUB)
     kern_set(n , 1 , e)
@@ -81,10 +89,13 @@ fn exp_a(e : int) -> int:
 fn exp_b(e : int) -> int:
     return kern_get(e , 2)
 
+// Typing context: a growable stack of term nodes. The buffer appends newest
+// bindings at the end; de Bruijn index 0 is the last element.
 g_ctx_buf : string , mut
 g_ctx_len : int , mut = 0
 g_ctx_cap : int , mut = 0
 
+// Push a type onto the context, doubling the cell buffer when it is full.
 fn ctx_extend(a : int):
     if g_ctx_len >= g_ctx_cap:
         nc : ., mut = g_ctx_cap * 2
@@ -102,6 +113,8 @@ fn ctx_extend(a : int):
     cell_store(g_ctx_buf , g_ctx_len * 8 , a)
     g_ctx_len = g_ctx_len + 1
 
+// Return the type at de Bruijn index x (0 is the newest binding), or -1 when x
+// is out of range.
 fn ctx_get(x : int) -> int:
     if x < 0 || x >= g_ctx_len:
         return -1

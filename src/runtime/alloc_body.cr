@@ -1,3 +1,4 @@
+// === alloc_body.cr ===
 // Raw allocator bodies. Compiled by tools/gen_alloc_blob.py with raw-int
 // semantics; the blob generator supplies cell_load/cell_store and patches the
 // globals listed in EXTERNAL_GLOBALS.
@@ -12,18 +13,22 @@ g_alloc_fail_class : int, mut
 g_alloc_fail_cursor : int, mut
 g_alloc_fail_limit : int, mut
 
+// Reinterpret a raw machine word as a string pointer without allocation.
 fn alloc_ptr(v: int) -> string:
     p : ., mut = ""
     unsafe:
         p = @str_of(v)
     return p
 
+// Reinterpret a string pointer as a raw machine word without dereferencing it.
 fn alloc_uword(s: string) -> int:
     v : ., mut = 0
     unsafe:
         v = @ptr_of(s)
     return v
 
+// Record the failed size and allocator state in the g_alloc_fail_* witness
+// globals, then terminate with exit status 132. The trailing return is unreachable.
 fn alloc_fail(size: int, cls: int, cursor: int, limit: int) -> string:
     g_alloc_fail_request = size
     g_alloc_fail_class = cls
@@ -48,6 +53,12 @@ fn zero_alloc(p: string, n: int):
         store8(p, i, 0)
         i = i + 1
 
+// Bump allocator used when no arena is active. The heap window comes from the
+// trampoline arguments on first use; callers pass an aligned size that includes
+// the 8-byte block header, and large blocks are page-rounded here. On exhaustion
+// heap_expand is called once; if the window still cannot fit, alloc_fail records
+// the request and exits. The size header is stored at the block start and the
+// payload begins at +8.
 fn alloc_global(size: int, aligned: int, heap_start: string,
                 heap_end: string) -> string:
     need : ., mut = aligned
@@ -79,6 +90,9 @@ fn alloc_global(size: int, aligned: int, heap_start: string,
     cell_store(p, 0, size)
     return alloc_ptr(hp_raw + 8)
 
+// Size-limited wrapper around alloc_global. Negative requests and requests over
+// 64 MiB return the null pointer. The aligned size also covers the 8-byte block
+// header left by the (size + 15) / 8 * 8 rounding.
 fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string:
     if size < 0:
         return alloc_ptr(0)
@@ -87,6 +101,9 @@ fn alloc_simple(size: int, heap_start: string, heap_end: string) -> string:
     aligned := (size + 15) / 8 * 8
     return alloc_global(size, aligned, heap_start, heap_end)
 
+// Arena state shared with the stdlib arena implementation. Per-arena arrays are
+// indexed by arena id; class metadata uses arena * 26 + class. Each M owns 256
+// slots laid out in 64-slot, 1 MiB segments.
 g_arena_scalars : string, mut
 g_arena_scalars_ready : int, mut
 g_arena_slot : string, mut
@@ -107,10 +124,14 @@ g_slot_count_m : string, mut
 g_segment_count_m : string, mut
 
 
+// Slot id to the base address of its 1 MiB region: segment = slot / 64,
+// offset within the segment = (slot % 64) * 1 MiB.
 fn arena_slot_base(slot: int) -> string:
     seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
     return alloc_ptr(alloc_uword(seg) + (slot % 64) * 1048576)
 
+// Arena counterpart of alloc_fail: record the request, class index -1, cursor,
+// and limit, then exit with status 132.
 fn arena_fail_slot(size: int, cursor: int, limit: int) -> int:
     g_alloc_fail_request = size
     g_alloc_fail_class = -1
@@ -119,6 +140,10 @@ fn arena_fail_slot(size: int, cursor: int, limit: int) -> int:
     syscall3(60, 132, 0, 0)
     return 0
 
+// Return a slot for arena ai on the current M: pop the per-M free list, or bump
+// the high-water count and grow the segment pool when needed. The chosen slot is
+// linked at the head of ai's slot chain and becomes current. Pool exhaustion
+// records a witness and exits; failure paths never return.
 fn arena_get_slot(ai: int, size: int) -> int:
     m := rt_m_idx()
     if m < 0:
@@ -152,6 +177,9 @@ fn arena_get_slot(ai: int, size: int) -> int:
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     return slot
 
+// Allocate a dedicated anonymous mapping for a large object and prepend it to
+// the arena's extent list. The payload starts at +24 and munmap uses the length
+// at +8. A failed mmap records a witness and exits.
 fn alloc_arena_extent(size: int, aligned: int, ai: int) -> string:
     // Dedicated anonymous mapping. Layout matches arena.cr:
     //   +0  next extent pointer
@@ -173,6 +201,12 @@ fn alloc_arena_extent(size: int, aligned: int, ai: int) -> string:
                cell_load(g_arena_large_count, ai * 8) + 1)
     return alloc_ptr(alloc_uword(base) + 24)
 
+// Arena allocator. Negative sizes and requests over 1 TiB go to alloc_fail.
+// Fall back to alloc_global when arenas are suspended, metadata is not ready, no
+// current arena exists on the main M, or the scalar buffer is missing. Static
+// arenas bump within one slot; non-static arenas use dedicated mmap extents
+// above 1 MiB, otherwise a 26-class suballocator that carves slot chunks and
+// retries when a class is full.
 fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if size < 0:
         return alloc_fail(size, -1, 0, 0)
@@ -196,6 +230,8 @@ fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
         return alloc_fail(size, -1, slot, 1024)
     max_size := cell_load(g_arena_scalars, 8)
     slot_base : ., mut = arena_slot_base(slot)
+    // A static arena has a fixed peak recorded by arena_new_sized; bump within
+    // the current slot and trap instead of requesting another slot.
     if cell_load(g_arena_static, ai * 8) != 0:
         cur := cell_load(g_arena_cursors, ai * 8)
         limit := cell_load(g_arena_sizes, ai * 8)
@@ -213,6 +249,9 @@ fn alloc_arena(size: int, heap_start: string, heap_end: string) -> string:
     if aligned > 1048576:
         return alloc_arena_extent(size, aligned, ai)
 
+    // Size-class path: map the aligned size to one of 25 small classes (or the
+    // large class), carve class metadata from the current slot when empty, then
+    // bump the class cursor. A full class is invalidated and the loop retries.
     loop:
         lookup := aligned / 16
         cls : ., mut = 25

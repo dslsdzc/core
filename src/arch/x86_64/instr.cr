@@ -76,6 +76,9 @@ fn g2_slot(v: int) -> int:
         return -(v + 1 - g_current_func_var_start) * 8
     return 0
 
+// Return the rodata data offset for interned string si, interning it on first
+// use. Each entry is an 8-byte length header, the bytes, a NUL, and padding to
+// 8 bytes. Earlier offsets stay stable because entries are appended.
 fn g2_str_off(si: int) -> int:
     o : ., mut = 0
     i : ., mut = 0
@@ -94,6 +97,8 @@ fn g2_str_off(si: int) -> int:
     g_x86_str_count = g_x86_str_count + 1
     return o + 8  // +8 for this string's header
 
+// Total rodata bytes for all interned strings, using the same header and
+// 8-byte padding as g2_str_off.
 fn g2_rodata_sz() -> int:
     o : ., mut = 0
     i : ., mut = 0
@@ -307,6 +312,11 @@ fn e2_jae(b: string, p: int, rel: int) -> int:
     e2_w32(b, p+2, rel)
     return 6
 
+// Emit a bounds check for a pointer access. r10 holds the pointer; base_var is
+// the allocation base variable, alloc_sz its byte extent, and access_width the
+// accessed width. Traps with ud2 when the pointer is outside
+// [base, base + alloc_sz - width] or null. Returns bytes written, or 0 when no
+// base information is available.
 fn e2_ptr_bounds_check(b: string, p: int, base_var: int, alloc_sz: int, access_width: int) -> int:
     if base_var < 0 || alloc_sz <= 0:
         return 0
@@ -461,6 +471,8 @@ fn e2_push_xmm0(b: string, p: int) -> int:
     cp = cp + 5
     return cp - p
 
+// cvtsi2sd xmm0, [rbp+disp]: convert a signed 64-bit integer in a frame slot
+// to binary64. Returns bytes written.
 fn e2_sd_cvt(b: string, p: int, o: int) -> int:
     cp : ., mut = p
     w8(b, cp, 242)
@@ -497,6 +509,9 @@ fn e2_sd_store(b: string, p: int, o: int) -> int:
 
 // ── emit_instr: write one instruction to buffer, return bytes written ──
 
+// Load var_idx into reg. Globals use a RIP-relative lea (patched later) and a
+// register-indirect load; locals use a frame slot through e2_ld. The
+// destination doubles as the RIP scratch for globals, so r11 stays free.
 fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
     if var_idx >= 0 && cell_load(g_x86_is_global, var_idx * 8) != 0:
         grow_rip_patch(g_x86_rip_patch_count + 1)
@@ -767,6 +782,8 @@ fn e2_match_case_label(ctarget: int) -> int:
             return iri_s1(ctarget)
     return -1
 
+// Resolve a conditional jump to label_no now when the label is known, else
+// queue a pending patch at the rel32 field (jmp_pos + 2).
 fn e2_match_patch_jcc(buf: string, jmp_pos: int, label_no: int):
     if label_no < 0:
         return
@@ -778,6 +795,8 @@ fn e2_match_patch_jcc(buf: string, jmp_pos: int, label_no: int):
         cell_store(g_pending_label, g_pending_count * 8, label_no)
         g_pending_count = g_pending_count + 1
 
+// Unconditional-jump counterpart of e2_match_patch_jcc; the rel32 field is at
+// jmp_pos + 1.
 fn e2_match_patch_jmp(buf: string, jmp_pos: int, label_no: int):
     if label_no < 0:
         return
@@ -1081,6 +1100,11 @@ fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
         fi = fi + 1
     return table_bytes
 
+// Emit one IR instruction at absolute buffer position pos and return the bytes
+// written. The emitter is single-pass: forward labels are queued in the pending
+// table and resolved by IR_LABEL, and global/RIP-relative and allocator call
+// sites are recorded for patching after the code layout is final. Returns 0 for
+// opcodes with no machine-code effect.
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     op := iri_op(instr_idx)
     d := iri_dest(instr_idx)
@@ -3011,6 +3035,8 @@ HIT_EV_CLS_POOL : int = 2
 HIT_EV_CLS_JUMP : int = 3
 HIT_EV_CLS_IMM  : int = 4
 
+// Map an event id plus flags to its semantic class. -1 means the event has no
+// table-emission class and must fall back to the direct emitter.
 fn hit_ev_class(ev_id: int, fl: int) -> int:
     if ev_id == HIT_EV_SUB || ev_id == HIT_EV_NAND:
         return HIT_EV_CLS_ALU

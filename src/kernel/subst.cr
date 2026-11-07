@@ -1,12 +1,21 @@
+// === subst.cr ===
+// Substitution builders used by type checking. Each helper returns a K_SUB
+// node built with the constructors in mctt.cr.
+
 fn subst_q(s : int) -> int:
     return mk_extend(mk_compose(s , mk_weaken()) , mk_var(0))
 
+// Map the newest variable to zero and leave older variables unchanged.
 fn subst_id_zero() -> int:
     return mk_extend(mk_id() , mk_zero())
 
+// Weaken twice, then bind the new #1 to succ #1. This is the substitution used
+// for the successor case of natrec.
 fn subst_wk_wk_succ1() -> int:
     return mk_extend(mk_compose(mk_weaken() , mk_weaken()) , mk_succ(mk_var(1)))
 
+// Extend the identity substitution with e, so #0 maps to e and older variables
+// are unchanged.
 fn subst_id_of(e : int) -> int:
     return mk_extend(mk_id() , e)
 

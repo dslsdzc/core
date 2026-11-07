@@ -5,6 +5,8 @@ g_dump_buf : string, mut
 g_dump_pos : int, mut
 g_dump_cap : int, mut
 
+// Growable output buffer for dumps. Call reset before a new dump; finish
+// returns a NUL-terminated copy of the accumulated bytes.
 fn dump_buf_reset():
     g_dump_cap = 4096
     g_dump_buf = alloc(g_dump_cap)
@@ -82,6 +84,9 @@ fn binop_name(op: int) -> string:
         19 => "- (diff)"
         _ => "?"
 
+// Format one linear IR instruction. The opcode name is padded to 18 columns,
+// then each opcode's operand shape decides the text; unknown opcodes fall back
+// to raw slot values.
 fn ir_instr_str(instr_idx: int) -> string:
     opname := df_opcode_name(iri_op(instr_idx), iri_s3(instr_idx))
     s : ., mut = "  "
@@ -208,6 +213,9 @@ fn ir_instr_str(instr_idx: int) -> string:
     s = s + "dest=" + ir_var_str(iri_dest(instr_idx)) + " s1=" + int_str(iri_s1(instr_idx)) + " s2=" + int_str(iri_s2(instr_idx)) + " s3=" + int_str(iri_s3(instr_idx))
     return s
 
+// `corec ir` command: run the frontend, build the DF graph as DOT, and write it
+// beside the source (replacing a `.cr` suffix with `.cir`). Returns 1 on read,
+// parse, check, or write failure.
 fn cmd_ir(src_path: string) -> int:
     g_source = read_file(src_path)
     if str_len(g_source) == 0:

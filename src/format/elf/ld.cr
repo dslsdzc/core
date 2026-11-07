@@ -103,6 +103,8 @@ g_ch_count : int, mut
 // Chunk helpers
 // ============================================================
 
+// Grow the four parallel chunk arrays (kind, vaddr, foff, size) to the same
+// capacity, zero-filling the new tails. The arrays are indexed by chunk number.
 fn grow_chunks(needed: int):
     nc : ., mut = g_ch_kind_cap * 2
     if nc < 8:
@@ -150,6 +152,7 @@ fn grow_chunks(needed: int):
     g_ch_size = nb4
     g_ch_size_cap = nc
 
+// Append a zeroed chunk record of kind k. Its index is the pre-call g_ch_count.
 fn cnew(k: int):
     grow_chunks(g_ch_count + 1)
     cell_store(g_ch_kind, g_ch_count * 8, k)
@@ -173,6 +176,9 @@ fn cby(k: int) -> int:
 // .so symbol lookup
 // ============================================================
 
+// Look up name in a shared object image's .dynsym. Returns the symbol value
+// (st_value) or -1 when the image is not ET_DYN, has no symbol/string table, or
+// the symbol is absent.
 fn so_find(buf: string, name: string) -> int:
     if str_len(buf) < 64:
         return -1
@@ -228,6 +234,8 @@ fn so_find(buf: string, name: string) -> int:
         i = i + 1
     return -1
 
+// Search the loaded .so paths in order and return the first symbol value for
+// name, or -1 when no file contains it.
 fn so_find_any(name: string) -> int:
     si : ., mut = 0
     loop:
@@ -250,6 +258,8 @@ fn so_find_any(name: string) -> int:
 // Layout: assign VA and file offsets to all chunks
 // ============================================================
 
+// Assign each chunk a virtual address and file offset starting at g_text_base,
+// computing per-kind sizes from the current PLT and user-code state.
 fn layout():
     va : ., mut = g_text_base
     i : ., mut = 0
@@ -295,6 +305,8 @@ fn layout():
 fn w32s(buf: string, pos: int, v: int):
     w32(buf, pos, v)
 
+// Write the complete image into buf. The buffer is zeroed first, then each chunk
+// emits its kind-specific contents at its assigned file offset.
 fn emit(buf: string, total: int, is_so: int):
     // Zero buffer
     zi : ., mut = 0
@@ -582,6 +594,9 @@ fn emit(buf: string, total: int, is_so: int):
 // Relocation patching: fix up call offsets to PLT entries
 // ============================================================
 
+// Resolve recorded external call sites to PLT entries. code_off is relative to
+// the code section (user code starts at file offset 176); entries outside the
+// user-code range are skipped.
 fn patch_relocs():
     if g_x86_ext_rel_count == 0:
         return
@@ -625,6 +640,7 @@ fn patch_relocs():
 // Public API
 // ============================================================
 
+// Reset linker state: chunk, .so, and PLT counters, text base, and user code.
 fn ctx_init():
     g_ch_count = 0
     g_so_count = 0
@@ -703,6 +719,9 @@ g_so_off : int, mut  // .so .text file offset
 g_so_sz : int, mut   // .so .text size
 g_so_addr : int, mut // .so .text base address
 
+// Locate the .text section in a shared object image. Prefer the exact ".text"
+// name from shstrtab; otherwise use the first executable PROGBITS section.
+// Sets g_so_off/g_so_sz/g_so_addr and returns 0, or -1 when none is usable.
 fn so_parse_text(buf: string) -> int:
     // Find the executable PROGBITS section (.text) in the .so
     if str_len(buf) < 64:
@@ -766,6 +785,10 @@ fn so_parse_text(buf: string) -> int:
         return 0
     return -1
 
+// Emit a statically linked executable: append the first usable .so text after
+// the user code, resolve external calls against its symbols, and write a single
+// RX PT_LOAD plus a RW heap segment at the BSS page. Returns file size, -1 for
+// I/O or layout errors, and -2 for unresolved symbols.
 fn ctx_emit_static(buf: string, path: string) -> int:
     so_buf : ., mut = ""
     si : ., mut = 0

@@ -229,6 +229,8 @@ fn hit_pool_w64(buf: string, pos: int, v: int):
     store8(buf, pos + 6, b6)
     store8(buf, pos + 7, b7)
 
+// Reset the event stream, constant pool, pool patches, relocations, and event
+// positions for a new emission.
 fn hit_lower_reset():
     g_hit_ev_count = 0
     g_hit_pool_count = 0

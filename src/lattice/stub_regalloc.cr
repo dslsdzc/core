@@ -174,6 +174,11 @@ impl StubAllocator:
             cell_store(self.v_start, v * 8, i)
         cell_store(self.v_end, v * 8, i)
 
+    // Build live intervals from the instruction list, merge pins, and delegate to
+    // CagAllocator. Reads and writes both extend an interval; a conflicting pin
+    // returns SR_ERR_PIN_DISAGREE before allocation. On success, assign and spill
+    // hold the per-vreg result and spill_count is the allocator total. Returns
+    // SR_OK or an SR_ERR_*/CAG_ERR_* code.
     fn run(&mut self) -> int:
         self.spill_count = 0
         self.error = SR_OK

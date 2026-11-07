@@ -11,8 +11,10 @@
 import io
 import term_io
 
+// Total failed checks; main returns 1 when this is nonzero.
 g_fail_count : int, mut = 0
 
+// Parse and print s, requiring exact equality; returns 1 on failure.
 fn check_roundtrip(s: string) -> int:
     idx := kernel_parse(s)
     if idx < 0:
@@ -40,6 +42,7 @@ fn check_roundtrip_compact(s: string, canonical: string) -> int:
         return 1
     return 0
 
+// Require kernel_parse to reject s; returns 1 if it accepts.
 fn check_parse_fail(s: string) -> int:
     idx := kernel_parse(s)
     if idx >= 0:

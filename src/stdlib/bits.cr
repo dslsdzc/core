@@ -3,16 +3,21 @@
 // No new IR opcodes: bitwise work is expressed with %, /, * and conditionals,
 // Byte-order helpers live in rawbuf.cr; this file has no target builtins.
 
+// The 32-bit value domain is [0, 2^32); negative inputs wrap around.
 BITS32_MASK : int, pub = 4294967295
 BITS32_SIZE : int, pub = 4294967296
 BITS32_BITS : int, pub = 32
 
+// Reduce x modulo 2^32 and move negative remainders into the unsigned range.
 fn bits32Norm(x: int) -> int, pub:
     r : ., mut = x % BITS32_SIZE
     if r < 0:
         r = r + BITS32_SIZE
     return r
 
+// Bitwise operations rebuild the result one bit at a time, from least
+// significant to most significant. Inputs are normalized first, so negative
+// values behave as unsigned 32-bit words.
 fn bits32And(a: int, b: int) -> int, pub:
     x : ., mut = bits32Norm(a)
     y : ., mut = bits32Norm(b)
@@ -67,6 +72,8 @@ fn bits32Xor(a: int, b: int) -> int, pub:
 fn bits32Not(a: int) -> int, pub:
     return BITS32_MASK - bits32Norm(a)
 
+// Reduce the shift count modulo 32, then shift one bit at a time while keeping
+// the value normalized.
 fn bits32Shl(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     r : ., mut = bits32Norm(a)
@@ -89,6 +96,8 @@ fn bits32Shr(a: int, n: int) -> int, pub:
         i = i + 1
     return r
 
+// Rotate by splitting k into a left shift and the complementary right shift;
+// k == 0 returns the normalized input unchanged.
 fn bits32Rotl(a: int, n: int) -> int, pub:
     k := n % BITS32_BITS
     if k == 0:
@@ -110,6 +119,7 @@ fn bits32Sub(a: int, b: int) -> int, pub:
 fn bits32Mul(a: int, b: int) -> int, pub:
     return bits32Norm(bits32Norm(a) * bits32Norm(b))
 
+// Wrapper whose value invariant is 0 <= value < 2^32.
 struct Bits32, pub:
     value: int
 

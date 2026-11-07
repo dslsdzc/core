@@ -27,6 +27,13 @@ BP_READ  : int = 1
 BP_WRITE : int = 2
 BP_RW    : int = 3
 
+// Side tables, all indexed by their subject:
+//   alloc_perm  — one state per points-to allocation
+//   global_perm — one state per global row
+//   var_perm    — one state per IR variable
+//   last_store  — last defining node per IR variable
+//   param_write — per (function, parameter) write summary
+//   param_alias — per-variable bitmap of parameter indices it may alias
 g_bp_alloc_perm : string, mut
 g_bp_global_perm : string, mut
 g_bp_var_perm : string, mut
@@ -34,6 +41,8 @@ g_bp_last_store : string, mut
 g_bp_param_write : string, mut
 g_bp_param_alias : string, mut
 
+// Meet of two permission states: a bit survives only when both inputs have it.
+// Permissions can only decrease, so this is the combination used everywhere.
 fn bp_meet(a: int, b: int) -> int:
     r : ., mut = 0
     if (a % 2) == 1 && (b % 2) == 1:
@@ -48,6 +57,8 @@ fn bp_can_read(state: int) -> int:
 fn bp_can_write(state: int) -> int:
     return (state / 2) % 2
 
+// Meet a state into a variable's permission and report whether it changed.
+// Returns 1 on a change so callers can drive a fixed point, 0 otherwise.
 fn bp_meet_var(var: int, state: int) -> int:
     if var < 0 || var >= g_ir_var_count:
         return 0
@@ -95,6 +106,8 @@ fn bp_global_var_is_ro(var: int) -> int:
         return 1
     return 0
 
+// A variable may be readable only when every allocation it can point to is
+// readable; an empty points-to set stays permissive.
 fn bp_pts_can_read(var: int) -> int:
     if var < 0:
         return 1
@@ -108,6 +121,7 @@ fn bp_pts_can_read(var: int) -> int:
         ai = ai + 1
     return 1
 
+// Same must-analysis for writes.
 fn bp_pts_can_write(var: int) -> int:
     if var < 0:
         return 1
@@ -202,6 +216,9 @@ fn bp_init_var_range(vstart: int, vcount: int):
             cell_store(g_bp_var_perm, vi * 8, BP_RW)
         vi = vi + 1
 
+// Record the latest defining node for a variable and for the target of a
+// store. bp_arg_value uses this to recover call-argument values, whose
+// temporaries are reused across calls.
 fn bp_note_def(ni: int, op: int, d: int, s1: int):
     if op == IR_STORE && s1 >= 0 && s1 < g_ir_var_count:
         cell_store(g_bp_last_store, s1 * 8, ni)
@@ -230,6 +247,9 @@ fn bp_arg_value(arg: int, at_node: int, lo: int, depth: int) -> int:
             return bp_arg_value(s2, prod, lo, depth + 1)
     return arg
 
+// Permission of the single value that reaches `var` through `def_node`. Handles
+// string constants, store chains, PHI meets, lazy wrappers, and calls that
+// return one of their parameters; anything else is writable.
 fn bp_def_state(def_node: int, var: int, depth: int) -> int:
     if depth > RC_MAX_DEPTH:
         return BP_RW
@@ -475,6 +495,9 @@ fn bp_alias_compute(fi: int):
                         jj = jj + 1
             ni = ni + 1
 
+// Recompute the parameter-write summary for one function: which parameters may
+// be written through a store builtin or a callee that writes its own argument.
+// Returns 1 when the summary changed, so the caller can iterate to a fixed point.
 fn bp_summary_func(fi: int) -> int:
     pc := cell_load(g_ir_func_param_count, fi * 8)
     if pc <= 0:
@@ -531,6 +554,9 @@ fn bp_summary_func(fi: int) -> int:
     cell_store(g_bp_param_write, (fi * 2 + 1) * 8, new1)
     return 1
 
+// Check each argument passed to a callee parameter that the summary marks as
+// written. The argument is resolved through its preparing store before the
+// permission test.
 fn bp_check_call(ni: int, first_arg: int, argc: int, fn_ni: int,
                  nstart: int, fi: int):
     callee := rc_func_by_name(fn_ni)
@@ -549,6 +575,9 @@ fn bp_check_call(ni: int, first_arg: int, argc: int, fn_ni: int,
                     0, 0)
         j = j + 1
 
+// Walk one function's nodes in order and report byte-permission violations.
+// Nodes inside `unsafe` are skipped; stores and calls are checked against the
+// reaching-definition permission of their target.
 fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
     t0 : ., mut = 0
     if cli_has("timing") != 0:
@@ -637,6 +666,9 @@ fn bp_check_func(nstart: int, ncount: int, vstart: int, vcount: int, fi: int):
             print(int_str(d))
             println("ms")
 
+// Build the permission tables, infer string permissions per function, iterate
+// the parameter-write summaries to a fixed point, then check every function.
+// Permissions start read-write and are only lowered by inference.
 fn byte_permission_all():
     if g_pa_alloc_count > 0:
         g_bp_alloc_perm = alloc(g_pa_alloc_count * 8)

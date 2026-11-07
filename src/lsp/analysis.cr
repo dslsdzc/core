@@ -20,6 +20,7 @@
 //
 // String building uses literal-initialized accumulators. Do not name a variable
 // match: it is reserved in the bootstrap parser and crashes.
+// Later sections also implement completion, documentSymbol, and semanticTokens/full.
 
 // Type names from the read-only snapshot. Do not call res_type_node; it allocates type rows.
 
@@ -214,6 +215,8 @@ fn analysis_utf8_next_in(text: string, pos: int, sl: int) -> int:
 fn analysis_utf8_next(pos: int, sl: int) -> int:
     return analysis_utf8_next_in(g_source, pos, sl)
 
+// Decode the code point of a UTF-8 sequence whose byte advance came from
+// analysis_utf8_next_in. adv == 1 treats the byte as a single unit.
 fn analysis_utf8_cp_in(text: string, pos: int, adv: int) -> int:
     b0 := load8(text, pos)
     if adv == 1:
@@ -227,6 +230,8 @@ fn analysis_utf8_cp_in(text: string, pos: int, adv: int) -> int:
 fn analysis_utf8_cp(pos: int, adv: int) -> int:
     return analysis_utf8_cp_in(g_source, pos, adv)
 
+// Count UTF-16 code units in [start, end). A code point at or above 0x10000
+// counts as two units; a sequence crossing end is treated as one byte.
 fn analysis_utf16_units_in(text: string, start: int, end: int) -> int:
     sl := str_len(text)
     p : ., mut = start
@@ -472,6 +477,9 @@ fn analysis_hover(line: int, col: int) -> string:
 g_decl_line : int, mut
 g_decl_col : int, mut
 
+// Restore g_source, g_source_file, and the token stream to the main file after
+// analysis_decl_any tokenizes an imported file. Callers rely on this before
+// reading declaration coordinates or returning to the frame loop.
 fn analysis_restore_main_tokens():
     g_source = sm_file_text(g_main_sm)
     g_source_len = str_len(g_source)

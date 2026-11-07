@@ -33,6 +33,8 @@ fn index_of(arr, val) -> int, pub:
             return i
     return -1
 
+// min_element and max_element return 0 for an empty array; callers must check
+// arr.len when 0 is a valid element.
 fn min_element(arr) -> int, pub:
     if arr.len == 0:
         return 0
@@ -74,12 +76,14 @@ fn count(arr, val) -> int, pub:
             c = c + 1
     return c
 
+// Alias of index_of: return the first matching index, or -1 when absent.
 fn find(arr, val) -> int, pub:
     for i in 0..arr.len:
         if arr[i] == val:
             return i
     return -1
 
+// Copy src.len elements into dst; dst must have at least src.len slots.
 fn copy(src, dst), pub:
     i : ., mut = 0
     loop:
@@ -96,6 +100,7 @@ fn equals(a, b) -> bool, pub:
             return false
     return true
 
+// Sum arr[start..end), stopping when i reaches arr.len.
 fn slice_sum(arr, start, end) -> int, pub:
     s : ., mut = 0
     for i in start..end:

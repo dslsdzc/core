@@ -54,6 +54,8 @@ g_json_tables_cap : int, mut
 
 // Low-level byte helpers, independent of dyn_arr.cr.
 
+// Write val as eight little-endian bytes. Negative values are handled by taking
+// the modulo-256 byte and dividing the remaining value by 256.
 fn _jw64(buf: string, pos: int, val: int):
     cur : ., mut = val
     i : ., mut = 0
@@ -86,6 +88,9 @@ fn _jcopy(src: string, n: int, dst: string):
 
 // Growth: lazy allocation with doubling.
 
+// All three grow functions share the same policy: double the capacity, floor it
+// at 256 bytes, and overshoot to needed + 256 when doubling is still short.
+// Existing contents are copied to the new buffer; callers pass a total byte size.
 fn _json_grow_nodes(needed: int):
     if needed <= g_json_nodes_cap:
         return
@@ -140,11 +145,15 @@ fn json_new(kind: int) -> int:
     g_json_count = g_json_count + 1
     return i
 
+// Write one slot. Invalid node indexes, unaligned nodes, and out-of-range slots
+// are ignored rather than trapping.
 fn json_set(node: int, slot: int, val: int):
     if node < 0 || node % J_NODE_SLOTS != 0 || node / J_NODE_SLOTS >= g_json_count || slot < 0 || slot >= J_NODE_SLOTS:
         return
     _jw64(g_json_nodes, (node + slot) * 8, val)
 
+// Read one slot. Invalid node indexes, unaligned nodes, and out-of-range slots
+// return -1.
 fn json_get(node: int, slot: int) -> int:
     if node < 0 || node % J_NODE_SLOTS != 0 || node / J_NODE_SLOTS >= g_json_count || slot < 0 || slot >= J_NODE_SLOTS:
         return -1
@@ -292,6 +301,8 @@ fn _jstr_cp(cp: int):
     else:
         g_json_parse_failed = 1
 
+// Parse exactly four hex digits at pos. An invalid digit sets g_json_parse_failed
+// and returns -1.
 fn _jparse_hex4(pos: int) -> int:
     cp : ., mut = 0
     i : ., mut = 0
@@ -388,6 +399,9 @@ fn _jparse_str() -> int:
 
 // Value parsing, recursive descent.
 
+// Parse an object, consuming its opening brace. The member table is a contiguous
+// range in g_json_tables; on growth, existing members are copied to the new end.
+// Returns a J_OBJ node, or -1 on failure.
 fn _jparse_obj(depth: int) -> int:
     if depth > J_MAX_PARSE_DEPTH:
         g_json_parse_failed = 1
@@ -450,6 +464,9 @@ fn _jparse_obj(depth: int) -> int:
     json_set(n, 2, count)
     return n
 
+// Parse an array, consuming its opening bracket. Element tables use the same
+// contiguous-range growth as object member tables. Returns a J_ARRAY node, or -1
+// on failure.
 fn _jparse_arr(depth: int) -> int:
     if depth > J_MAX_PARSE_DEPTH:
         g_json_parse_failed = 1
@@ -497,6 +514,8 @@ fn _jparse_arr(depth: int) -> int:
     json_set(n, 2, count)
     return n
 
+// Recursive-descent dispatcher for one JSON value. depth bounds nesting; returns
+// a node index, or -1 when the input does not start a valid value.
 fn parse_value(depth: int) -> int:
     if depth > J_MAX_PARSE_DEPTH:
         g_json_parse_failed = 1
@@ -661,6 +680,8 @@ fn _jstr_out(off: int, len: int) -> string:
     out = out + "\""
     return out
 
+// Serialize a node tree recursively. Arrays and objects emit their tables in
+// stored order; an unknown kind falls back to "null".
 fn _jstringify_rec(idx: int) -> string:
     k := json_get(idx, 0)
     if k == J_NULL:

@@ -46,6 +46,9 @@ fn ea_mov_rr(buf: string, pos: int, dst: int, src: int) -> int:
     cp = cp + ea_modrm(buf, cp, 3, src % 8, dst % 8)
     return cp - pos
 
+// Emit mov dst, [rip+disp32] and register the disp32 slot in the RIP patch
+// table. The target global is resolved after the BSS address is known. Returns
+// bytes written.
 fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
     cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
@@ -61,6 +64,8 @@ fn ea_mov_rip_load(buf: string, pos: int, dst: int, gid: int) -> int:
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     return cp - pos
 
+// Store counterpart of ea_mov_rip_load: register the disp32 slot and return
+// bytes written.
 fn ea_mov_rip_store(buf: string, pos: int, src: int, gid: int) -> int:
     cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, src / 8, 0, 0)
@@ -164,6 +169,7 @@ fn ea_mov_store_index8(buf: string, pos: int, base: int, index: int, src: int) -
         cp = cp + 1
     return cp - pos
 
+// lea dst, [rip+disp32] and register the patch. Returns bytes written.
 fn ea_lea_rip(buf: string, pos: int, dst: int, gid: int) -> int:
     cp : ., mut = pos
     cp = cp + ea_rex(buf, cp, 1, dst / 8, 0, 0)
@@ -520,6 +526,8 @@ fn alloc_blob_group() -> int:
         return 1
     return 0
 
+// Return the IR var id for the named global, or -1 when no global row has that
+// name.
 fn find_global_by_name(name: string) -> int:
     i : ., mut = 0
     loop:
@@ -530,6 +538,10 @@ fn find_global_by_name(name: string) -> int:
         i = i + 1
     return -1
 
+// Resolve a name used by a call inside the allocator blob to an emitted code
+// position. Prefer g_x86_func_cp; fall back to the function offset table.
+// A named function with no emitted code returns -1 rather than a stale
+// estimate.
 fn find_alloc_blob_func(name: string) -> int:
     i : ., mut = 0
     loop:
@@ -552,6 +564,10 @@ fn find_alloc_blob_func(name: string) -> int:
         i = i + 1
     return -1
 
+// Patch every recorded call site inside the allocator blob. heap_expand is
+// bound to the backend-emitted body; other names resolve through the function
+// tables. A missing target sets g_alloc_blob_error and leaves the call site
+// unpatched.
 fn patch_alloc_blob_calls(buf: string, heap_expand_start: int):
     if g_alloc_blob_start < 0:
         return
@@ -576,6 +592,9 @@ fn patch_alloc_blob_calls(buf: string, heap_expand_start: int):
             w32(buf, g_alloc_blob_start + off, target - (g_alloc_blob_start + off + 4))
         i = i + 1
 
+// Patch the blob's RIP-relative references to globals. Each target is the BSS
+// virtual address converted back to a code-buffer offset before the rel32
+// delta. A missing global sets g_alloc_blob_error.
 fn patch_alloc_blob_globals(buf: string, bss_va: int):
     if g_alloc_blob_start < 0:
         return
@@ -598,6 +617,9 @@ fn patch_alloc_blob_globals(buf: string, bss_va: int):
             w32(buf, g_alloc_blob_start + off, target_off - (g_alloc_blob_start + off + 4))
         i = i + 1
 
+// Emit the selected allocator body with its heap-start and heap-end immediates.
+// The blob is 16-byte aligned after a short jump; body_off selects the simple
+// or arena variant. Returns bytes written and records g_alloc_blob_start.
 fn emit_alloc_blob_body(buf: string, pos: int, bss_va: int,
                         globals_size: int, body_off: int) -> int:
     cp : ., mut = 0
@@ -625,6 +647,9 @@ fn emit_alloc_blob_body(buf: string, pos: int, bss_va: int,
     g_alloc_blob_start = blob_start
     return (blob_start - pos) + ALLOC_BLOB_SIZE
 
+// Select and emit the allocator body: the simple bump allocator, or the arena
+// variant when the program carries the arena probe globals. Returns 0 and sets
+// g_alloc_blob_error when the selected body is absent.
 fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int:
     body_off : ., mut = ALLOC_BLOB_SIMPLE_OFF
     if has_arena_runtime() != 0:
@@ -809,6 +834,9 @@ fn emit_sched_call(buf: string, p: int, n: int) -> int:
     w8(buf, p+off+1, 224)
     off = off + 2
     return off
+
+// Byte size of the sched_call_N trampoline. Must match emit_sched_call for the
+// same n because Phase 2 uses this estimate.
 fn sched_tramp_sz(n: int) -> int:
     sz : ., mut = 6
     if n >= 1:
@@ -865,6 +893,8 @@ fn emit_curg_stubs(buf: string, pos: int, curg_va: int) -> int:
     cp = cp + 1
     return cp
 
+// Pad with single-byte nops (0x90) from cp to the next 16-byte boundary and
+// return the new offset.
 fn rt_pad16(buf: string, pos: int, cp: int) -> int:
     loop:
         if cp % 16 == 0:
@@ -873,6 +903,7 @@ fn rt_pad16(buf: string, pos: int, cp: int) -> int:
         cp = cp + 1
     return cp
 
+// mov rax, qword ptr fs:[disp]; ret. Reads a TLS slot and returns its value.
 fn rt_emit_fs_load(buf: string, pos: int, disp: int) -> int:
     cp : ., mut = 0
     w8(buf, pos+cp, 100)
@@ -909,6 +940,7 @@ fn rt_emit_fs_store_rdi(buf: string, pos: int, disp: int) -> int:
     cp = cp + 1
     return cp
 
+// mov rax, rsp; ret. Returns the current stack pointer.
 fn rt_emit_sp(buf: string, pos: int) -> int:
     cp : ., mut = 0
     w8(buf, pos+cp, 72)
@@ -1045,6 +1077,8 @@ fn emit_rt_sigreturn_stub(buf: string, pos: int) -> int:
     cp = rt_pad16(buf, pos, cp)
     return cp
 
+// Emit the TLS and atomic runtime stubs in a fixed 16-byte-slot order. The
+// slot order must match the sched_reg_one registrations in elf_gen.
 fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
     cp = cp + rt_emit_fs_load(buf, pos+cp, 8)
@@ -1075,6 +1109,9 @@ fn emit_rt_tls_stubs(buf: string, pos: int) -> int:
     cp = rt_pad16(buf, pos, cp)
     return cp
 
+// Emit fiber_init and fiber_switch. fiber_init builds a fake switch frame on a
+// new stack; fiber_switch saves the current callee-saved context and switches
+// rsp. The layout is size-sensitive: elf_gen registers fiber_switch at cp + 20.
 fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
@@ -1501,6 +1538,9 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
     cell_store(buf, base + P_ALIGN, p_align)
 
 // ── ELF header writer (x86-64) ──
+// Write the ELF header and the two program headers: RX code at TEXT_BASE and a
+// RW data segment covering rodata plus the 1 GiB virtual heap. code_end is the
+// file offset where the data segment starts; total_sz sizes that segment.
 fn elf2_hdr(buf: string, code_end: int, total_sz: int):
     hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE  // 64+112=176
     i : ., mut = 0
@@ -1606,6 +1646,11 @@ fn patch_forward_calls(buf: string, cp: int):
 
 
 // ── Main ELF generation ──
+// Generate the complete ELF image in buf and return its byte size, or -1 when
+// the allocator blob failed to patch. Phases: mark globals, bind builtin name
+// indices, lay out strings, estimate sizes, emit code and runtime bodies, then
+// patch calls and globals, write rodata, and build the ELF header. The entry
+// point is the bss_init stub, which zeroes BSS and jumps to _start.
 fn elf_gen(buf: string) -> int:
     g_x86_big_exit_call_pos = -1
     g_alloc_blob_start = -1

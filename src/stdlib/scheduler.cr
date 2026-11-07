@@ -7,9 +7,11 @@ import arena
 
 // ── Legacy: dispatch table for .so extensions ──
 
+// Legacy dispatch table entry point: allocate n 8-byte cells.
 fn sched_create(n: int) -> string, pub:
     return alloc(n * 8)
 
+// Store val in entry idx as eight bytes, least significant first.
 fn sched_set(entries: string, idx: int, val: int), pub:
     p := idx * 8
     v : ., mut = val
@@ -21,6 +23,7 @@ fn sched_set(entries: string, idx: int, val: int), pub:
         v = v / 256
         i = i + 1
 
+// Read entry idx as an unsigned little-endian 8-byte cell.
 fn sched_get(entries: string, idx: int) -> int, pub:
     p := idx * 8
     r : ., mut = 0
@@ -56,6 +59,7 @@ g_runq_cap : int, mut
 // ── Current executing fiber ──
 g_cur_fiber : int, mut
 
+// Allocate the fiber table and run queue, and clear the current fiber.
 fn fiber_init(), pub:
     g_fiber_cap = 64
     g_fibers = alloc(g_fiber_cap * 32)
@@ -67,6 +71,8 @@ fn fiber_init(), pub:
     g_runq_count = 0
     g_cur_fiber = -1
 
+// Append fi to the run queue. When full, double the ring and linearize the
+// existing entries in order.
 fn runq_push(fi: int), pub:
     if g_runq_count >= g_runq_cap:
         nc := g_runq_cap * 2
@@ -87,6 +93,7 @@ fn runq_push(fi: int), pub:
     g_runq_tail = (g_runq_tail + 1) % g_runq_cap
     g_runq_count = g_runq_count + 1
 
+// Remove and return the oldest queued fiber index; -1 when the queue is empty.
 fn runq_pop() -> int, pub:
     if g_runq_count <= 0:
         return -1
@@ -95,6 +102,8 @@ fn runq_pop() -> int, pub:
     g_runq_count = g_runq_count - 1
     return fi
 
+// Reuse a free slot or append a new one, give the fiber a fresh arena, and
+// enqueue it as runnable. Returns the fiber index.
 fn fiber_spawn(fn_idx: int) -> int, pub:
     i : ., mut = 0
     loop:
@@ -129,6 +138,7 @@ fn fiber_spawn(fn_idx: int) -> int, pub:
     runq_push(fi)
     return fi
 
+// Re-enqueue the current fiber only while it is still runnable.
 fn fiber_yield(), pub:
     if g_cur_fiber < 0:
         return
@@ -136,6 +146,8 @@ fn fiber_yield(), pub:
     if cell_load(g_fibers, off + 16) == FIBER_RUNNABLE:
         runq_push(g_cur_fiber)
 
+// Mark the current fiber waiting and record its target id; it leaves the run
+// queue until fiber_wake.
 fn fiber_wait(target: int), pub:
     if g_cur_fiber < 0:
         return
@@ -143,6 +155,7 @@ fn fiber_wait(target: int), pub:
     cell_store(g_fibers, off + 16, FIBER_WAITING)
     cell_store(g_fibers, off + 24, target)
 
+// Move a waiting fiber back to runnable and enqueue it.
 fn fiber_wake(fi: int), pub:
     if fi < 0:
         return
@@ -152,6 +165,8 @@ fn fiber_wake(fi: int), pub:
         cell_store(g_fibers, off + 24, 0)
         runq_push(fi)
 
+// Reset the fiber's arena and mark the slot done. The slot is not returned to
+// FIBER_FREE.
 fn fiber_done(fi: int), pub:
     if fi < 0 || fi >= g_fiber_count:
         return
@@ -161,6 +176,8 @@ fn fiber_done(fi: int), pub:
         arena.arena_reset(ai)
     cell_store(g_fibers, off + 16, FIBER_DONE)
 
+// Drain the run queue until empty, skipping entries that are no longer
+// runnable.
 fn sched_run(), pub:
     loop:
         fi := runq_pop()

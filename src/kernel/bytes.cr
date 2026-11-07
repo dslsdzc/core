@@ -8,6 +8,9 @@ fn w8(buf: string, pos: int, val: int):
     store8(buf, pos, val % 256)
 fn bu8(buf: string, pos: int) -> int:
     return load8(buf, pos) % 256
+// Write val as a little-endian 32-bit two's complement value. The explicit
+// borrow chain keeps negative inputs correct without relying on 32-bit
+// overflow.
 fn w32(buf: string, pos: int, val: int):
     b0 : ., mut = val % 256
     t1 : ., mut = val / 256
@@ -32,6 +35,8 @@ fn w32(buf: string, pos: int, val: int):
     store8(buf,pos+1,b1)
     store8(buf,pos+2,b2)
     store8(buf,pos+3,b3)
+// Read a little-endian 32-bit value and sign-extend it. A top byte of at least
+// 128 denotes a negative value.
 fn r32(buf: string, pos: int) -> int:
     b0 := bu8(buf,pos)
     b1 := bu8(buf,pos+1)
@@ -43,6 +48,9 @@ fn r32(buf: string, pos: int) -> int:
     else:
         v = v + b3 * 16777216
     return v
+// Write val as an 8-byte little-endian two's complement cell. Bytes are emitted
+// from low to high; subtracting the remainder before dividing keeps the next
+// value exact for negative inputs.
 fn cell_store(buf: string, pos: int, val: int):
     cur : ., mut = val
     i : ., mut = 0
@@ -55,6 +63,8 @@ fn cell_store(buf: string, pos: int, val: int):
         store8(buf, pos + i, byte)
         cur = (cur - byte) / 256
         i = i + 1
+// Read an 8-byte little-endian cell. The low dword is assembled as unsigned,
+// and the high dword is sign-extended before scaling by 2^32.
 fn cell_load(buf: string, pos: int) -> int:
     // The low dword is unsigned. Reading it through r32 double-subtracts
     // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
@@ -64,6 +74,8 @@ fn cell_load(buf: string, pos: int) -> int:
     hi_part = hi_part * 65536
     return lo + hi_part
 
+// Copy nbytes bytes forward. Overlapping source and destination ranges are not
+// supported.
 fn _dyncpy(src: string, nbytes: int, dst: string):
     ci : ., mut = 0
     loop:
