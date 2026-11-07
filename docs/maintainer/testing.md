@@ -88,7 +88,7 @@ cmp /tmp/corec2 /tmp/corec3                                             # 检查
 
 说明：固定使用 `-O 0`（CI 实录；O1 现状见第四节）。生成 corec3 后运行一次 `--help` 做基本检查。后端独立回归（ELF 后端/自举 corearch）：`python3 tests/selfhost/test_backend_bootstrap.py`（三阶段自举 corearch 并比对，内置 nice 和超时）。
 
-CI job 列表（本地复现命令为 `CI_JOB_NAME=<job> src/ci/run.sh`；run.sh 已内置 `ulimit -c 0`）：
+CI job 列表（本地复现命令为 `CI_JOB_NAME=<job> src/ci/run.sh`；run.sh 已内置 `ulimit -c 0`）。2026-11-07 起 PR 层按 area 选择，命令为 `python3 src/ci/run_tests.py --area <area> --profile pr`，完整 area 清单见 `src/ci/areas.toml`：
 
 | CI_JOB_NAME | 内容 |
 |---|---|
