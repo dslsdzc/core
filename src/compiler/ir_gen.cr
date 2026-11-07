@@ -384,17 +384,36 @@ fn track_alloc_unknown():
         cell_store(g_sg_alloc_unknown, g_cur_sg * 8, 1)
 
 fn track_alloc_array(count: int):
+    track_alloc_array_t(count, TI_INT)
+
+fn track_alloc_array_t(count: int, elem_ti: int):
     if count > 0 && count < 100000:
-        track_alloc_size(count * 8 + 8)
+        esz := target_introspect_storage_size(elem_ti)
+        track_alloc_size(count * esz + 8)
     else:
         track_alloc_unknown()
 
 fn track_alloc_struct(name_ni: int):
     si := find_struct_by_name(name_ni)
     if si >= 0:
-        track_alloc_size(si_field_count(si) * 8 + 8)
+        track_alloc_size(target_introspect_struct_alloc_size(alloc_named_type(si_name(si))))
     else:
         track_alloc_unknown()
+
+// Element storage stride for an array variable. The type row is the source of
+// truth; an untyped compiler-internal array falls back to one machine word.
+fn agg_array_stride(arr_var: int) -> int:
+    // The IR row is authoritative for inferred arrays/slices; the declaration
+    // table is only a fallback for rows whose type was erased.
+    et : ., mut = -1
+    ati := irv_type(arr_var)
+    if get_type_kind(ati) == TYP_ARRAY || get_type_kind(ati) == TYP_SLICE:
+        et = get_type_data(ati)
+    if et < 0:
+        et = elem_ti_of(arr_var)
+    if et < 0:
+        return X86_MP_WORD_BYTES
+    return target_introspect_storage_size(et)
 
 fn sg_alloc_cur_total() -> int:
     if g_cur_sg < 0:
@@ -1544,6 +1563,32 @@ fn gen_enum_pattern_test(pat: int, val: int, fall: int, val_ti: int) -> int:
         i = i + 1
     return 1
 
+// Pattern field loads use the same packed offsets and widths as ordinary field
+// projections. The scrutinee variable normally carries the struct/tuple row; a
+// pattern-only row falls back to the declared struct name.
+fn emit_pat_struct_field(fv: int, val: int, name_ni: int, fi: int):
+    sti : ., mut = irv_type(val)
+    if get_type_kind(sti) != TYP_NAMED && get_type_kind(sti) != TYP_GENERIC_APPLY:
+        sti = alloc_named_type(name_ni)
+    off := target_introspect_field_offset(sti, fi)
+    w := target_introspect_field_width(sti, fi)
+    if off >= 0 && w > 0:
+        emit(IR_LOAD_FIELD, fv, val, w, off, 0)
+    else:
+        emit(IR_LOAD_FIELD, fv, val, 0, fi, 0)
+
+fn emit_pat_tuple_field(fv: int, val: int, idx: int):
+    tti := irv_type(val)
+    off : ., mut = -1
+    w : ., mut = 0
+    if get_type_kind(tti) == TYP_TUPLE:
+        off = target_introspect_tuple_field_offset(tti, idx)
+        w = target_introspect_tuple_field_width(tti, idx)
+    if off >= 0 && w > 0:
+        emit(IR_LOAD_FIELD, fv, val, w, off, 0)
+    else:
+        emit(IR_LOAD_FIELD, fv, val, 0, idx, 0)
+
 fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
     si := find_struct_by_name(ast_a(pat))
     c := ast_c(pat)
@@ -1570,7 +1615,7 @@ fn gen_nested_struct_test(pat: int, val: int, fall: int) -> int:
                     return -1
                 fv := new_ir_var("fld", TI_INT)
                 irv_set_type(fv, structpat_field_load_ti_from(ft))
-                emit(IR_LOAD_FIELD, fv, val, 0, jdi, 0)
+                emit_pat_struct_field(fv, val, ast_a(pat), jdi)
                 if gen_pattern_test(sub, fv, fall, ft) < 0:
                     return -1
         i = i + 1
@@ -1598,7 +1643,7 @@ fn gen_nested_tuple_test(pat: int, val: int, fall: int) -> int:
                 return -1
             fv := new_ir_var("fld", TI_INT)
             irv_set_type(fv, structpat_field_load_ti_from(ft))
-            emit(IR_LOAD_FIELD, fv, val, 0, idx, 0)
+            emit_pat_tuple_field(fv, val, idx)
             if gen_pattern_test(sub, fv, fall, ft) < 0:
                 return -1
         i = i + 1
@@ -1692,12 +1737,12 @@ fn gen_structpat_binds(pat: int, match_val: int):
                                 irv_set_type(fv, structpat_field_load_ti_from(ft))
                                 if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
                                     irv_set_decl_ti(fv, ft)
-                                emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                                emit_pat_struct_field(fv, match_val, ast_a(pat), jdi)
                                 bind_local(nn, fv)
                             else if k == EXPR_STRUCTPAT || k == EXPR_TUPLEPAT || k == EXPR_ENUMPAT:
                                 fv := new_ir_var("fld", TI_INT)
                                 irv_set_type(fv, structpat_field_load_ti_from(ft))
-                                emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                                emit_pat_struct_field(fv, match_val, ast_a(pat), jdi)
                                 if k == EXPR_STRUCTPAT:
                                     gen_structpat_binds(sub, fv)
                                 else if k == EXPR_TUPLEPAT:
@@ -1739,7 +1784,7 @@ fn gen_tuplepat_binds(pat: int, match_val: int):
                     irv_set_type(fv, structpat_field_load_ti_from(ft))
                     if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
                         irv_set_decl_ti(fv, ft)
-                    emit(IR_LOAD_FIELD, fv, match_val, 0, ast_b(w), 0)
+                    emit_pat_tuple_field(fv, match_val, ast_b(w))
                     if k == EXPR_IDENT:
                         bind_local(ast_int_val(sub), fv)
                     else if k == EXPR_STRUCTPAT:
@@ -2006,6 +2051,14 @@ fn seq_type_of_node(node: int) -> int:
 fn ti_from_type_expr(node: int) -> int:
     if node < 0:
         return TI_UNIT
+    // `@sizeOf([T; N])` receives an array-literal-shaped expression because the
+    // builtin argument is parsed in expression position. Its wrappers are
+    // EXPR_NONE nodes with type_val 0, unlike a base type node.
+    if ast_kind(node) == EXPR_ARRAY && ast_type_val(node) == 0 && ast_b(node) > 0:
+        first := ast_a(node)
+        if first >= 0 && ast_kind(first) == EXPR_NONE && ast_type_val(first) == 0:
+            elem := ti_from_type_expr(ast_a(first))
+            return alloc_type(TYP_ARRAY, elem, ast_b(node))
     // Type node from parse_type: ast_kind == 0, type_val = TY_*
     if ast_kind(node) == 0:
         tv := ast_type_val(node)
@@ -2707,9 +2760,27 @@ fn dt_specialize(rows: string, pats: string, cols: string, tis: string,
         if ft >= 0:
             irv_set_type(fv, structpat_field_load_ti_from(ft))
         offset : ., mut = i
+        fw : ., mut = 0
         if ck == 1:
             offset = i + 1
-        emit(IR_LOAD_FIELD, fv, val, 0, offset, 0)
+        else if ck == 2:
+            sti : ., mut = val_ti
+            if get_type_kind(sti) != TYP_NAMED && get_type_kind(sti) != TYP_GENERIC_APPLY:
+                sti = irv_type(val)
+            offset = target_introspect_field_offset(sti, i)
+            fw = target_introspect_field_width(sti, i)
+        else if ck == 3:
+            tti : ., mut = val_ti
+            if get_type_kind(tti) != TYP_TUPLE:
+                tti = irv_type(val)
+            offset = target_introspect_tuple_field_offset(tti, i)
+            fw = target_introspect_tuple_field_width(tti, i)
+        if fw > 0 && offset >= 0:
+            emit(IR_LOAD_FIELD, fv, val, fw, offset, 0)
+        else:
+            if offset < 0:
+                offset = i
+            emit(IR_LOAD_FIELD, fv, val, 0, offset, 0)
         cell_store(sub_cols, i * 8, fv)
         cell_store(sub_tis, i * 8, ft)
         i = i + 1
@@ -3612,7 +3683,16 @@ fn gen_expr(node: int) -> int:
             val_var = dex_slot_norm(val_var)   // apx 阶段 T3：聚合类型恒精确（0 推论）；先归形式后装箱
             if g_optrep_on != 0:
                 val_var = box_for_optional_slot(val_node, val_var, field_ti_of_node(target, fi))
-            emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0)
+            obj_ti2 := irv_type(obj_var)
+            off2 : ., mut = -1
+            w2 : ., mut = 0
+            if get_type_kind(obj_ti2) == TYP_NAMED || get_type_kind(obj_ti2) == TYP_GENERIC_APPLY:
+                off2 = target_introspect_field_offset(obj_ti2, fi)
+                w2 = target_introspect_field_width(obj_ti2, fi)
+            if off2 >= 0 && w2 > 0:
+                emit(IR_STORE_FIELD, w2, obj_var, val_var, off2, 0)
+            else if off2 < 0:
+                emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0)
             return val_var
         if ast_kind(target) == EXPR_INDEX:
             arr_var : ., mut = gen_expr(ast_a(target))
@@ -3633,19 +3713,20 @@ fn gen_expr(node: int) -> int:
                 val_var = box_for_optional_slot(val_node, val_var, et)
             // Write-path bounds check hook.
             arr_len_lit : ., mut = arr_len_lit_of(arr_var)
+            esz_store := agg_array_stride(arr_var)
             if ast_kind(idx_node) == EXPR_INT:
                 emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
                 emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
                 if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
                     region_plan_emit_cow_write(arr_var)
-                    emit(IR_STORE_INDEX, -1, arr_data_store, val_var, ast_int_val(idx_node), 0)
+                    emit(IR_STORE_INDEX, esz_store, arr_data_store, val_var, ast_int_val(idx_node), 0)
             else:
                 idx_var : ., mut = gen_expr(idx_node)
                 idx_var = force_if_thunk(idx_var)
                 emit_slice_bounds(arr_var, idx_var)
                 if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
                     region_plan_emit_cow_write(arr_var)
-                    emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, 0, 0)
+                    emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, esz_store, 0)
             return val_var
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
             ptr_var : ., mut = gen_expr(ast_a(target))
@@ -3692,7 +3773,12 @@ fn gen_expr(node: int) -> int:
                 if is_slice_hdr(arr_var) != 0:
                     arr_data_addr = slice_hdr_data(arr_var)
                 v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)))
-                emit(IR_ADDR_INDEX, v, arr_data_addr, idx_var, 3, 0)
+                asz : ., mut = X86_MP_WORD_BYTES
+                if elem_ti >= 0:
+                    asz = target_introspect_storage_size(elem_ti)
+                if irv_type(arr_var) == TI_STR:
+                    asz = 1
+                emit(IR_ADDR_INDEX, v, arr_data_addr, idx_var, asz, 0)
                 return v
             op_var : ., mut = gen_expr(ast_a(node))
             op_var = force_if_thunk(op_var)
@@ -3991,7 +4077,7 @@ fn gen_expr(node: int) -> int:
                 fi := ti_field_index(ti, fn_name)
                 off : ., mut = -1
                 if fi >= 0:
-                    off = target_introspect_field_offset(fi)
+                    off = target_introspect_field_offset(ti, fi)
                 v := new_ir_var("_fldoff", TI_INT)
                 emit(IR_CONST, v, off, 0, 0, TI_INT)
                 return v
@@ -5366,7 +5452,7 @@ fn gen_expr(node: int) -> int:
                                 break
                             fv := new_ir_var("fld", TI_INT)
                             irv_set_type(fv, structpat_field_load_ti_from(ft))
-                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                            emit_pat_struct_field(fv, match_val, ast_a(arm_pat), jdi)
                             if gen_pattern_test(sub, fv, fall_lbl, ft) < 0:
                                 can_match = 0
                                 break
@@ -5414,7 +5500,7 @@ fn gen_expr(node: int) -> int:
                         break
                     fv := new_ir_var("fld", TI_INT)
                     irv_set_type(fv, structpat_field_load_ti_from(ft))
-                    emit(IR_LOAD_FIELD, fv, match_val, 0, idx, 0)
+                    emit_pat_tuple_field(fv, match_val, idx)
                     if gen_pattern_test(sub, fv, fall_lbl, ft) < 0:
                         can_match = 0
                         break
@@ -5657,14 +5743,17 @@ fn gen_expr(node: int) -> int:
             if ast_kind(type_node) == 19:
                 sz := ast_int_val(type_node)
                 if sz > 0:
-                    // Array stride is a target fact; corearch reconstructs it from
-                    // the allocation count. src2/src3 stay zero on the wire.
-                    track_alloc_array(sz)
-                    emit(IR_ALLOC_ARRAY, var, sz, 0, 0, 0)
+                    ati2 := res_type_node(type_node)
+                    elem2 : ., mut = TI_INT
+                    if get_type_kind(ati2) == TYP_ARRAY || get_type_kind(ati2) == TYP_SLICE:
+                        elem2 = get_type_data(ati2)
+                    esz2 := target_introspect_storage_size(elem2)
+                    track_alloc_array_t(sz, elem2)
+                    emit(IR_ALLOC_ARRAY, var, sz, esz2, 0, 0)
                     is_arr = 1
                     // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
                     // 检查（arr_len_lit_of）依赖该长度信息。
-                    irv_set_type(var, res_type_node(type_node))
+                    irv_set_type(var, ati2)
         // For dyn vars with initializer: skip allocation (value is packed below)
         if is_dyn_var == 0 || val_node < 0:
             if is_arr == 0:
@@ -5776,7 +5865,7 @@ fn gen_expr(node: int) -> int:
         if fi < 0 && prelude_builtin_return_ti(ni) < 0 && find_so_fn(ni) < 0:
             check_error(EC_N_FUNC, "Undefined function reference", ast_line(node), ast_col(node))
             return -1
-        name_ni := ni
+        name_ni : ., mut = ni
         if fi >= 0:
             name_ni = func_link(fi)
         rv := new_ir_var("_fnref", TI_INT)
@@ -5908,7 +5997,31 @@ fn gen_expr(node: int) -> int:
             ft := field_ti_of_node(node, fi)
             if ft >= 0 && dex_opt_slot_ti(ft) != 0:
                 irv_set_decl_ti(v, ft)
-        emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0)
+        obj_ti := irv_type(obj_var)
+        off : ., mut = -1
+        w : ., mut = 0
+        if ast_type_val(node) > 0:
+            if get_type_kind(obj_ti) == TYP_TUPLE:
+                off = target_introspect_tuple_field_offset(obj_ti, fi)
+                w = target_introspect_tuple_field_width(obj_ti, fi)
+        else:
+            if get_type_kind(obj_ti) == TYP_NAMED || get_type_kind(obj_ti) == TYP_GENERIC_APPLY:
+                off = target_introspect_field_offset(obj_ti, fi)
+                w = target_introspect_field_width(obj_ti, fi)
+            else if ast_c(node) >= 0:
+                // The object variable lost its aggregate row; the checker kept
+                // the struct name on the projection node.
+                nti := alloc_named_type(ast_c(node))
+                off = target_introspect_field_offset(nti, fi)
+                w = target_introspect_field_width(nti, fi)
+        if off >= 0 && w > 0:
+            emit(IR_LOAD_FIELD, v, obj_var, w, off, 0)
+        else if off >= 0:
+            // A zero-sized field (witness or unit) has no storage. Reading it
+            // yields the unit value.
+            emit(IR_CONST, v, 0, 0, 0, TI_UNIT)
+        else:
+            emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0)
         return v
 
     // Index
@@ -5957,16 +6070,27 @@ fn gen_expr(node: int) -> int:
                 if is_slice_hdr(arr_var) != 0:
                     base_var = slice_hdr_data(arr_var)
                 data_var := new_ir_var("slice_data", TI_INT)
-                emit(IR_SLICE, data_var, base_var, low_var, high_var, 0)
+                // IR_SLICE adds the low bound as a byte offset. Scale the
+                // element index here so every element layout reaches the same
+                // single add in both backends.
+                sstride := agg_array_stride(arr_var)
+                low_off : ., mut = low_var
+                if sstride != 1:
+                    sc := new_ir_var("slice_scale", TI_INT)
+                    emit(IR_CONST, sc, sstride, 0, 0, TI_INT)
+                    lb := new_ir_var("slice_low_off", TI_INT)
+                    emit(IR_BINARY, lb, low_var, sc, OP_MUL, TI_INT)
+                    low_off = lb
+                emit(IR_SLICE, data_var, base_var, low_off, high_var, 0)
                 elem_ti_s : ., mut = TI_INT
                 ati := irv_type(arr_var)
                 ka := get_type_kind(ati)
                 if ka == TYP_ARRAY || ka == TYP_SLICE:
                     elem_ti_s = get_type_data(ati)
                 v = new_ir_var("slice", alloc_type(TYP_SLICE, elem_ti_s, 0))
-                track_alloc_array(2)
-                emit(IR_ALLOC_ARRAY, v, 2, 0, 0, 0)
-                emit(IR_STORE_INDEX, -1, v, data_var, 0, 0)
+                track_alloc_array_t(2, TI_INT)
+                emit(IR_ALLOC_ARRAY, v, 2, X86_MP_WORD_BYTES, 0, 0)
+                emit(IR_STORE_INDEX, X86_MP_WORD_BYTES, v, data_var, 0, 0)
             // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
             // 非可选不登记 -> 零足迹。切片 var 的 IR 类型信息不动，避免影响 dtype/宽度等消费者）
             if g_optrep_on != 0:
@@ -5984,34 +6108,37 @@ fn gen_expr(node: int) -> int:
                     if is_str_slice == 0:
                         lc := new_ir_var("slice_len", TI_INT)
                         emit(IR_CONST, lc, sl, 0, 0, TI_INT)
-                        emit(IR_STORE_INDEX, -1, v, lc, 1, 0)
+                        emit(IR_STORE_INDEX, X86_MP_WORD_BYTES, v, lc, 1, 0)
             else:
                 len_var := new_ir_var("slice_len", TI_INT)
                 emit(IR_BINARY, len_var, high_var, low_var, OP_SUB, TI_INT)
                 slice_len_var_set(v, len_var)
                 if is_str_slice == 0:
-                    emit(IR_STORE_INDEX, -1, v, len_var, 1, 0)
+                    emit(IR_STORE_INDEX, X86_MP_WORD_BYTES, v, len_var, 1, 0)
             return v
         v := new_ir_var("elem", TI_INT)
         //  元素读定类型取声明信息形式（元素 ti 为 dex -> TI_DEX_S；纯表读）
         elem_tk : ., mut = 0
+        esz_elem : ., mut = X86_MP_WORD_BYTES
         if irv_type(arr_var) == TI_STR:
             irv_set_type(v, TI_CHAR)
             elem_tk = TI_CHAR
+            esz_elem = 1
         else:
             irv_set_type(v, agg_elem_read_form(arr_var))
+            esz_elem = agg_array_stride(arr_var)
         if idx_kind == EXPR_INT:
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
             emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
             if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX, v, arr_data, 0, ast_int_val(idx_node), elem_tk)
+                emit(IR_LOAD_INDEX, v, arr_data, esz_elem, ast_int_val(idx_node), elem_tk)
         else:
             idx_var : ., mut = gen_expr(idx_node)
             idx_var = force_if_thunk(idx_var)
             emit_string_bounds(arr_var, idx_var)
             emit_slice_bounds(arr_var, idx_var)
             if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX_VAR, v, arr_data, idx_var, 0, elem_tk)
+                emit(IR_LOAD_INDEX_VAR, v, arr_data, idx_var, esz_elem, elem_tk)
         return v
 
     // Enum constructor
@@ -6052,9 +6179,13 @@ fn gen_expr(node: int) -> int:
             si = find_struct_by_name(name_ni)
         if si >= 0:
             name_ni = si_name(si)
-        s := new_ir_var("struct", TI_UNIT)
-        track_alloc_struct(name_ni)
-        emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0)
+        sti : ., mut = ast_ti_get(node)
+        if get_type_kind(sti) != TYP_NAMED && get_type_kind(sti) != TYP_GENERIC_APPLY:
+            sti = alloc_named_type(name_ni)
+        s := new_ir_var("struct", sti)
+        total := target_introspect_struct_alloc_size(sti)
+        track_alloc_size(total)
+        emit(IR_ALLOC_STRUCT, s, 0, total, name_ni, 0)
         fi : ., mut = 0
         fn2 : ., mut = ast_b(node)
         loop:
@@ -6075,19 +6206,58 @@ fn gen_expr(node: int) -> int:
                 val_var = dex_slot_norm(val_var)   // apx 阶段 T3：字段槽恒精确
                 if g_optrep_on != 0:
                     val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx))
-                emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0)
+                off := target_introspect_field_offset(sti, field_idx)
+                w := target_introspect_field_width(sti, field_idx)
+                if off >= 0 && w > 0:
+                    emit(IR_STORE_FIELD, w, s, val_var, off, 0)
+                else if off < 0:
+                    emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0)
                 fn2 = fn2 + 1
             fi = fi + 1
+        // A construction may omit a type-variable field only when that field is
+        // a witness. If it is read anywhere, the whole-program pass cleared the
+        // witness mark and the type variable has no binding at this point.
+        if si >= 0:
+            fc0 := si_field_count(si)
+            fi0 : ., mut = 0
+            loop:
+                if fi0 >= fc0:
+                    break
+                if si_field_witness(si, fi0) == 0:
+                    tn0 := si_field_type_node(si, fi0)
+                    is_gp : ., mut = 0
+                    if tn0 >= 0 && ast_kind(tn0) == EXPR_IDENT:
+                        if is_struct_generic(si, ast_int_val(tn0)) != 0:
+                            is_gp = 1
+                    if is_gp != 0:
+                        present : ., mut = 0
+                        fn3 : ., mut = ast_b(node)
+                        k3 : ., mut = 0
+                        loop:
+                            if k3 >= ast_c(node):
+                                break
+                            if fn3 >= 0:
+                                if struct_field_index_by_name(si, ast_b(fn3)) == fi0:
+                                    present = 1
+                            k3 = k3 + 1
+                            fn3 = fn3 + 1
+                        if present == 0:
+                            check_error(EC_TG_BOUND, "cannot instantiate " + istr_get(name_ni) + ": type variable of field '" + istr_get(si_field_name(si, fi0)) + "' is unbound", ast_line(node), ast_col(node))
+                fi0 = fi0 + 1
         return s
 
     // Array literal
     if ast_kind(node) == EXPR_ARRAY:
         // F5 契约（见 parser.cr 下标分支）：a=首 wrapper（连续）、b=元素个数；wrapper.a=元素值
         // 节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移直取相邻节点。
-        v : ., mut = new_ir_var("arr", TI_UNIT)
-        track_alloc_unknown()
-        emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0)
+        ati := ast_ti_get(node)
         elem_ti : ., mut = TI_INT
+        if get_type_kind(ati) == TYP_ARRAY || get_type_kind(ati) == TYP_SLICE:
+            elem_ti = get_type_data(ati)
+        esz := target_introspect_storage_size(elem_ti)
+        v : ., mut = new_ir_var("arr", ati)
+        track_alloc_array_t(ast_b(node), elem_ti)
+        emit(IR_ALLOC_ARRAY, v, ast_b(node), esz, 0, 0)
         // (A) T3：数组级元素可选性预扫，元素序在后的 Some/None 也必须影响
         // 在前的裸元素（`[2, Some(1)]`）-> 装箱判定不能只按逐元素形态。
         elem_opt_ti : ., mut = -1
@@ -6112,7 +6282,8 @@ fn gen_expr(node: int) -> int:
                 e_var : ., mut = gen_expr(en)
                 e_var = force_if_thunk(e_var)
                 if ei == 0:
-                    elem_ti = irv_type(e_var)
+                    if get_type_kind(ati) != TYP_ARRAY && get_type_kind(ati) != TYP_SLICE:
+                        elem_ti = irv_type(e_var)
                 // 先取原元素类型（装箱前）
                 // 容量阶段 T2：可选元素写点规范化（字面量形；元素槽无声明信息 -> 按元素
                 // 表达式可选性保守判定，ident/调用覆盖范围，其余形态登记）。
@@ -6125,10 +6296,13 @@ fn gen_expr(node: int) -> int:
                     if elem_opt_ti >= 0:
                         eo = 1
                     e_var = box_for_slot_flag(ast_a(en), e_var, eo)
-                emit(IR_STORE_INDEX, -1, v, e_var, ei, 0)
+                emit(IR_STORE_INDEX, esz, v, e_var, ei, 0)
                 en = en + 1
             ei = ei + 1
-        irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, ast_b(node)))
+        if get_type_kind(ati) == TYP_ARRAY || get_type_kind(ati) == TYP_SLICE:
+            irv_set_type(v, ati)
+        else:
+            irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, ast_b(node)))
         // (A) T3：可选元素数组 -> 登记声明信息（元素写点 `elem_ti_of` 据此装箱；
         // 非可选不登记 -> 与既有语料/非可选程序零足迹）。IR 类型信息不动（只登记声明信息）。
         if g_optrep_on != 0 && elem_opt_ti >= 0:
@@ -6251,11 +6425,14 @@ fn gen_expr(node: int) -> int:
         // （复合元素值节点不连续，须经 wrapper 解引用，见 checker.cr EXPR_TUPLE 注）。
         elem_idx := ast_a(node)
         ec : ., mut = ast_b(node)
-        tv := new_ir_var("tuple", TI_INT)
-        // Element stride is a target fact; corearch reconstructs it.
-        track_alloc_array(ec)
-        emit(IR_ALLOC_ARRAY, tv, ec, 0, 0, 0)
-        // Store each element at its offset
+        tti : ., mut = ast_ti_get(node)
+        if get_type_kind(tti) != TYP_TUPLE:
+            tti = alloc_type(TYP_TUPLE, ec, get_type_extra(tti))
+        tv := new_ir_var("tuple", tti)
+        total := target_introspect_tuple_alloc_size(tti)
+        track_alloc_size(total)
+        emit(IR_ALLOC_STRUCT, tv, ec, total, 0, 0)
+        // Store each element at its packed offset
         e : ., mut = 0
         loop:
             if e >= ec:
@@ -6270,7 +6447,12 @@ fn gen_expr(node: int) -> int:
             if g_optrep_on != 0:
                 elem_var = box_for_slot_flag(en, elem_var, elem_node_optional(en))
             elem_var = dex_slot_norm(elem_var)   // apx 阶段 T3：元组元素槽恒精确
-            emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0)
+            toff := target_introspect_tuple_field_offset(tti, e)
+            tw := target_introspect_tuple_field_width(tti, e)
+            if toff >= 0 && tw > 0:
+                emit(IR_STORE_FIELD, tw, tv, elem_var, toff, 0)
+            else if toff < 0:
+                emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0)
             e = e + 1
         return tv
 

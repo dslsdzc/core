@@ -28,7 +28,64 @@
 // requires native_count == IFACE_ENTRY_COUNT, and validates every cross-segment
 // reference.
 
+// Does a type row still contain an unbound type variable? .ccr carries only
+// instantiated types: a live variable or node with an unbound variable is a
+// compiler bug (the checker's unbound-at-scope-end path must have fired).
+fn ccr_ti_has_unbound(ti: int, depth: int) -> int:
+    if ti < 0 || depth > 32:
+        return 0
+    k := get_type_kind(ti)
+    if k < 0:
+        return 0
+    if k == TYP_GENERIC_PARAM:
+        return 1
+    if k == TYP_ARRAY || k == TYP_SLICE || k == TYP_REF || k == TYP_PTR || k == TYP_OPTIONAL:
+        return ccr_ti_has_unbound(get_type_data(ti), depth + 1)
+    if k == TYP_GENERIC_APPLY:
+        start := get_type_extra(ti)
+        cnt := cell_load(g_gen_apply_data, start * 8)
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            if ccr_ti_has_unbound(cell_load(g_gen_apply_data, (start + 1 + i) * 8), depth + 1) != 0:
+                return 1
+            i = i + 1
+    if k == TYP_TUPLE:
+        start2 := get_type_extra(ti)
+        cnt2 := get_type_data(ti)
+        j : ., mut = 0
+        loop:
+            if j >= cnt2:
+                break
+            if ccr_ti_has_unbound(cell_load(g_gen_apply_data, (start2 + j) * 8), depth + 1) != 0:
+                return 1
+            j = j + 1
+    return 0
+
 fn ccr_type_populate() -> int:
+    // Live rows must be fully instantiated. Dead template rows created while
+    // checking generic declarations are normalized to unit below so the wire
+    // never carries an unbound type variable.
+    vi : ., mut = 0
+    loop:
+        if vi >= g_ir_var_count:
+            break
+        if ccr_ti_has_unbound(irv_type(vi), 0) != 0:
+            print("error: TYPE segment: variable ")
+            print_i(vi)
+            println(" still has an unbound type variable (save refused)")
+            return -1
+        vi = vi + 1
+    ri : ., mut = 0
+    loop:
+        if ri >= g_type_count:
+            break
+        if get_type_kind(ri) == TYP_GENERIC_PARAM:
+            cell_store(g_types, ri * ESZ_TYPE_ROW + OFF_TR_KIND, TYP_BASE)
+            cell_store(g_types, ri * ESZ_TYPE_ROW + OFF_TR_DATA, TY_UNIT)
+            cell_store(g_types, ri * ESZ_TYPE_ROW + OFF_TR_EXTRA, 0)
+        ri = ri + 1
     // Reset the term layer, engine state, and both bridge caches. All three hold
     // caches keyed by old row numbers; leaving one reset would reuse stale terms.
     tt_layer_reset()
@@ -490,7 +547,7 @@ fn ccr_nod_type_populate() -> int:
             // HOTPATCH_ROUTE carries tk == 0. IR_STR_OF's TI_STR scratch code is
             // not read by any backend consumer; neither is a node feature.
             fl = 0
-        else if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR || op == IR_CONST_BIG || op == IR_PTR_OF:
+        else if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_CONST_BIG || op == IR_PTR_OF:
             // These ops pass a semantic type row as their legacy type_kind
             // (INDEX element domain, CONST_BIG/PTR_OF int domain). Task 3 fixes
             // type_id to reversible atom rows only and no backend consumer reads

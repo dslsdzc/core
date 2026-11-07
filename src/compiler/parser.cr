@@ -2426,6 +2426,34 @@ fn parse_declaration():
         t := advance_tok()
         nt := advance_tok()
         name := tok_lx(nt)
+        // `struct Name layout(packed, align(n)):` — the documented layout
+        // clause. The default layout is already packed, so `packed` is accepted
+        // as an explicit spelling of the default; `align(n)` forces every field
+        // offset and the total size up to a multiple of n.
+        layout_align : ., mut = 0
+        if check(T_IDENT) && str_eq(tok_lx(cur_tok()), "layout") != 0:
+            advance_tok()
+            if check(T_LPAREN):
+                advance_tok()
+                loop:
+                    if check(T_RPAREN) || check(T_EOF):
+                        break
+                    item_tok := advance_tok()
+                    item := tok_lx(item_tok)
+                    if str_eq(item, "align") != 0:
+                        if check(T_LPAREN):
+                            advance_tok()
+                            if check(T_INT):
+                                n_tok := advance_tok()
+                                layout_align = tok_iv(n_tok)
+                            if check(T_RPAREN):
+                                advance_tok()
+                    if check(T_COMMA):
+                        advance_tok()
+                        continue
+                    break
+                if check(T_RPAREN):
+                    advance_tok()
         sg_names : string, mut
         sg_names_cap : int, mut
         sg_names = alloc(64 * 8)
@@ -2442,6 +2470,7 @@ fn parse_declaration():
 
         si := add_struct(name, tok_ln(t))
         if si >= 0:
+            si_set_layout_align(si, layout_align)
             if sg_count > 0:
                 cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
                 sgi : ., mut = 0

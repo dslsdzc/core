@@ -297,6 +297,12 @@ fn grow_ast(needed: int):
     nb := alloc(nc * ESZ_ASTNODE)
     cell_copy(g_ast, g_ast_cap * ESZ_ASTNODE, nb)
     g_ast = nb
+    // Inferred-type side table, one cell per AST node. It is filled only for
+    // nodes whose type has to reach IR generation; unwritten rows stay 0.
+    tb := alloc(nc * 8)
+    if g_ast_cap > 0:
+        cell_copy(g_ast_ti, g_ast_cap * 8, tb)
+    g_ast_ti = tb
     g_ast_cap = nc
 
 fn grow_syms(needed: int):
@@ -385,6 +391,10 @@ fn grow_structs(needed: int):
     nb := alloc(nc * ESZ_STRUCTINFO)
     cell_copy(g_structs, g_struct_cap * ESZ_STRUCTINFO, nb)
     g_structs = nb
+    ab := alloc(nc * 8)
+    if g_struct_cap > 0:
+        cell_copy(g_si_layout_align, g_struct_cap * 8, ab)
+    g_si_layout_align = ab
     g_struct_cap = nc
 
 fn grow_enums(needed: int):
@@ -806,6 +816,9 @@ fn grow_si_fields(needed: int):
     pb := alloc(nc * 8)
     cell_copy(g_si_f_pub, g_si_f_cap * 8, pb)
     g_si_f_pub = pb
+    wb := alloc(nc * 8)
+    cell_copy(g_si_f_witness, g_si_f_cap * 8, wb)
+    g_si_f_witness = wb
     g_si_f_cap = nc
 fn si_field_base(n: int) -> int:
     return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE)
@@ -852,6 +865,37 @@ fn si_field_pub(n: int, fi: int) -> int:
     if r < 0:
         return 0
     return cell_load(g_si_f_pub, r * 8)
+fn si_field_witness(n: int, fi: int) -> int:
+    r := si_field_row(n, fi)
+    if r < 0:
+        return 0
+    return cell_load(g_si_f_witness, r * 8)
+fn si_set_field_witness(n: int, fi: int, v: int):
+    b := si_field_base(n)
+    if b < 0 || fi < 0:
+        return
+    grow_si_fields(b + fi + 1)
+    cell_store(g_si_f_witness, (b + fi) * 8, v)
+// Declared layout alignment for a struct row (0 = default packed layout).
+fn si_layout_align(n: int) -> int:
+    if n < 0 || n >= g_struct_cap:
+        return 0
+    return cell_load(g_si_layout_align, n * 8)
+fn si_set_layout_align(n: int, v: int):
+    if n < 0 || n >= g_struct_cap:
+        return
+    cell_store(g_si_layout_align, n * 8, v)
+// Inferred type row of an AST node (0 = no entry). Only expression roots whose
+// type must survive into IR generation are recorded.
+fn ast_ti_get(n: int) -> int:
+    if n < 0 || n >= g_ast_cap:
+        return 0
+    return cell_load(g_ast_ti, n * 8)
+fn ast_ti_set(n: int, ti: int):
+    if n < 0:
+        return
+    grow_ast(n + 1)
+    cell_store(g_ast_ti, n * 8, ti)
 fn si_set_field_pub(n: int, fi: int, v: int):
     if fi < 0:
         return

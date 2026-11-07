@@ -88,9 +88,13 @@ fn x86_mp_align(ti: int) -> int:
         return X86_MP_WORD_BYTES
     return X86_MP_WORD_BYTES
 
-// Slot stride for an array element or an indexed pointer.
+// Slot stride for an array element or an indexed pointer. Scalar values use
+// their semantic size; an empty value still occupies one machine word.
 fn x86_mp_stride(ti: int) -> int:
-    return X86_MP_WORD_BYTES
+    sz := x86_mp_size(ti)
+    if sz <= 0:
+        return X86_MP_WORD_BYTES
+    return sz
 
 // Size of a block containing count slots.
 fn x86_mp_extent(count: int, ti: int) -> int:

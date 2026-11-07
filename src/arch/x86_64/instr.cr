@@ -142,6 +142,51 @@ fn emit_sib(buf: string, pos: int, scale: int, index: int, base: int) -> int:
     e2_w8(buf, pos, scale*64 + index*8 + base)
     return 1
 
+// Width-aware memory access at a displacement. Used by the packed struct and
+// array layout: 1-byte bool, 4-byte char, 8-byte word. The value is
+// zero-extended into the destination register for 1/4-byte loads.
+fn e2_load_mem_w(buf: string, pos: int, base: int, dst: int, off: int, width: int) -> int:
+    cp : ., mut = 0
+    w : ., mut = width
+    if w != 1 && w != 4:
+        w = 8
+    cp = cp + emit_rex(buf, pos+cp, w/8, dst/8, 0, base/8)
+    if w == 1:
+        e2_w8(buf, pos+cp, 15)
+        e2_w8(buf, pos+cp+1, 182)
+        cp = cp + 2
+    else:
+        e2_w8(buf, pos+cp, 139)
+        cp = cp + 1
+    cp = cp + emit_modrm(buf, pos+cp, 2, dst%8, base%8)
+    cp = cp + e2_w32(buf, pos+cp, off)
+    return cp
+
+fn e2_store_mem_w(buf: string, pos: int, base: int, src: int, off: int, width: int) -> int:
+    cp : ., mut = 0
+    w : ., mut = width
+    if w != 1 && w != 4:
+        w = 8
+    cp = cp + emit_rex(buf, pos+cp, w/8, src/8, 0, base/8)
+    if w == 1:
+        e2_w8(buf, pos+cp, 136)
+    else:
+        e2_w8(buf, pos+cp, 137)
+    cp = cp + 1
+    cp = cp + emit_modrm(buf, pos+cp, 2, src%8, base%8)
+    cp = cp + e2_w32(buf, pos+cp, off)
+    return cp
+
+// imul reg, reg, imm32
+fn e2_imul_imm(buf: string, pos: int, reg: int, imm: int) -> int:
+    cp : ., mut = 0
+    cp = cp + emit_rex(buf, pos+cp, 1, reg/8, 0, reg/8)
+    e2_w8(buf, pos+cp, 105)
+    cp = cp + 1
+    cp = cp + emit_modrm(buf, pos+cp, 3, reg%8, reg%8)
+    cp = cp + e2_w32(buf, pos+cp, imm)
+    return cp
+
 fn e2_mov(b: string, p: int, d: int, s: int) -> int:
     // mov r64, r64 — opcode 0x89 MOV r/m, r, mod=3 (register)
     // REX: W=1, R=source>>3, B=dest>>3
@@ -1944,6 +1989,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_ALLOC_STRUCT:
         do2 := g2_slot(d)
+        if s2 > 0:
+            cp = cp + e2_movabs_rdi(buf, pos+cp, s2)
+            grow_alloc_patch(g_x86_alloc_patch_count + 1)
+            cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+            g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
+            e2_w8(buf, pos+cp, 232)
+            e2_w32(buf, pos+cp+1, 0)
+            cp = cp + 5
+            cp = cp + e2_st(buf, pos+cp, 0, do2)
+            return cp
         name_ni := s3
         if name_ni >= 0:
             si : ., mut = -1
@@ -2204,30 +2259,47 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_LOAD_FIELD && d >= 0:
         do2 := g2_slot(d)
         fi2 := s3
-        fo : ., mut = fi2 * 8
-        // Load the base with e2_load_var: locals use [rbp+slot], globals use a
-        // RIP-relative lea. IR_LOAD_INDEX and IR_ADDR_INDEX use the same rule.
+        fo : ., mut = fi2
+        fw : ., mut = 0
+        if s2 > 0:
+            // Packed named-struct / tuple field: s3 is already a byte offset and
+            // s2 is the storage width.
+            fw = s2
+        else:
+            fo = fi2 * 8
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        // mov r10, [r10 + disp32] — REX.WRB + 0x8B
-        cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
-        e2_w8(buf, pos+cp, 139)
-        cp = cp + 1
-        cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
-        cp = cp + e2_w32(buf, pos+cp, fo)
+        if fw > 0:
+            cp = cp + e2_load_mem_w(buf, pos+cp, 10, 10, fo, fw)
+        else:
+            // mov r10, [r10 + disp32]
+            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
+            e2_w8(buf, pos+cp, 139)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
+            cp = cp + e2_w32(buf, pos+cp, fo)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
     if op == IR_STORE_FIELD:
         fi2 := s3
-        fo : ., mut = fi2 * 8
+        fo : ., mut = fi2
+        fw : ., mut = 0
+        if d > 0:
+            // Packed field width rides in dest (the opcode has no destination).
+            fw = d
+        else:
+            fo = fi2 * 8
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // mov [r10 + disp32], r11 — REX.WRB + 0x89
-        cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8)
-        e2_w8(buf, pos+cp, 137)
-        cp = cp + 1
-        cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8)
-        cp = cp + e2_w32(buf, pos+cp, fo)
+        if fw > 0:
+            cp = cp + e2_store_mem_w(buf, pos+cp, 10, 11, fo, fw)
+        else:
+            // mov [r10 + disp32], r11
+            cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8)
+            e2_w8(buf, pos+cp, 137)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8)
+            cp = cp + e2_w32(buf, pos+cp, fo)
         return cp
 
     if op == IR_REF && d >= 0:
@@ -2278,12 +2350,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             // load index (handles both local and global)
             cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // lea r10, [r10 + r11*8] = address of arr[i] on heap
+        stride : ., mut = s3
+        if stride <= 0:
+            stride = 8
+        if stride != 1:
+            cp = cp + e2_imul_imm(buf, pos+cp, 11, stride)
+        // lea r10, [r10 + r11] = address of arr[i] on heap
         cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8)
         e2_w8(buf, pos+cp, 141)
         cp = cp + 1  // 0x8D LEA
         cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4)  // mod=0, reg=r10, rm=4(SIB)
-        cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)  // scale=3, index=r11, base=r10
+        cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
@@ -2549,10 +2626,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_LOAD_INDEX && d >= 0:
         do2 := g2_slot(d)
         idx := s3
+        stride : ., mut = s2
+        if stride <= 0:
+            stride = 8
         // load array pointer (handles local and global)
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         if irv_type(s1) == TI_STR:
-            // Strings are byte sequences, unlike arrays of 8-byte values.
+            // Strings are byte sequences.
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
             e2_w8(buf, pos+cp, 15)
             cp = cp + 1
@@ -2561,21 +2641,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
             cp = cp + e2_w32(buf, pos+cp, idx)
         else:
-            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
-            e2_w8(buf, pos+cp, 139)
-            cp = cp + 1
-            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
-            cp = cp + e2_w32(buf, pos+cp, idx * 8)
+            w : ., mut = stride
+            if w > 8:
+                w = 8
+            cp = cp + e2_load_mem_w(buf, pos+cp, 10, 10, idx * stride, w)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
     if op == IR_STORE_INDEX:
         idx := s3
+        stride : ., mut = d
+        if stride <= 0:
+            stride = 8
         // load array pointer (handles local and global)
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         // load value to store (handles local and global)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // mov [r10 + disp32], r11
         if irv_type(s1) == TI_STR:
             // String assignment stores one byte, not a full machine word.
             cp = cp + emit_rex(buf, pos+cp, 0, 11/8, 0, 10/8)
@@ -2584,16 +2665,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8)
             cp = cp + e2_w32(buf, pos+cp, idx)
         else:
-            // mov [r10 + idx*8], r11
-            cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8)
-            e2_w8(buf, pos+cp, 137)
-            cp = cp + 1
-            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8)
-            cp = cp + e2_w32(buf, pos+cp, idx * 8)
+            w : ., mut = stride
+            if w > 8:
+                w = 8
+            cp = cp + e2_store_mem_w(buf, pos+cp, 10, 11, idx * stride, w)
         return cp
 
     if op == IR_LOAD_INDEX_VAR && d >= 0:
         do2 := g2_slot(d)
+        stride : ., mut = s3
+        if stride <= 0:
+            stride = 8
         if g_x86_big_enabled != 0:
             // Convert the index before loading the array pointer.
             cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
@@ -2603,7 +2685,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             // load index (handles local and global)
             cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // Strings use byte indexing; arrays use 8-byte element indexing.
+        if stride != 1:
+            cp = cp + e2_imul_imm(buf, pos+cp, 11, stride)
+        // Strings use byte indexing; arrays use the element stride.
         if irv_type(s1) == TI_STR:
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8)
             e2_w8(buf, pos+cp, 15)
@@ -2613,15 +2697,26 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         else:
-            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8)
-            e2_w8(buf, pos+cp, 139)
-            cp = cp + 1
+            w : ., mut = stride
+            if w > 8:
+                w = 8
+            cp = cp + emit_rex(buf, pos+cp, w/8, 10/8, 11/8, 10/8)
+            if w == 1:
+                e2_w8(buf, pos+cp, 15)
+                e2_w8(buf, pos+cp+1, 182)
+                cp = cp + 2
+            else:
+                e2_w8(buf, pos+cp, 139)
+                cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4)
-            cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
+            cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
     if op == IR_STORE_INDEX_VAR && d >= 0:
+        stride : ., mut = s3
+        if stride <= 0:
+            stride = 8
         if g_x86_big_enabled != 0:
             cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
@@ -2648,19 +2743,28 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
                 cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         else:
-            // mov [r10 + r11*8], value — SIB(scale=3, index=r11%8, base=r10%8)
+            if stride != 1:
+                cp = cp + e2_imul_imm(buf, pos+cp, 11, stride)
+            w : ., mut = stride
+            if w > 8:
+                w = 8
             if g_x86_big_enabled != 0:
-                cp = cp + emit_rex(buf, pos+cp, 1, 8/8, 11/8, 10/8)
-                e2_w8(buf, pos+cp, 137)
+                cp = cp + emit_rex(buf, pos+cp, w/8, 8/8, 11/8, 10/8)
+                if w == 1:
+                    e2_w8(buf, pos+cp, 136)
+                else:
+                    e2_w8(buf, pos+cp, 137)
                 cp = cp + 1
                 cp = cp + emit_modrm(buf, pos+cp, 0, 8%8, 4)
-                cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
             else:
-                cp = cp + emit_rex(buf, pos+cp, 1, 12/8, 11/8, 10/8)
-                e2_w8(buf, pos+cp, 137)
+                cp = cp + emit_rex(buf, pos+cp, w/8, 12/8, 11/8, 10/8)
+                if w == 1:
+                    e2_w8(buf, pos+cp, 136)
+                else:
+                    e2_w8(buf, pos+cp, 137)
                 cp = cp + 1
                 cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
-                cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
+            cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         return cp
 
     if op == IR_MAKE_ENUM && d >= 0:
@@ -2706,13 +2810,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // shl r11, 3 — REX.WB + 0xC1, /4
-        cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 11/8)
-        e2_w8(buf, pos+cp, 193)
-        cp = cp + 1
-        cp = cp + emit_modrm(buf, pos+cp, 3, 4, 11%8)
-        e2_w8(buf, pos+cp, 3)
-        cp = cp + 1
+        // The frontend already scaled the low bound by the element stride;
+        // the instance adds it as a byte offset.
         // add r10, r11 — REX.WRB + 0x01
         cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8)
         e2_w8(buf, pos+cp, 1)

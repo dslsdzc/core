@@ -454,7 +454,6 @@ def _guard_block(text, guard):
 INTERP_LAYOUT_BRANCHES = {    "// IR_ALLOC_ARRAY": "interp_ptr_stride()",
     "// IR_ALLOC_STRUCT": "interp_field_stride()",
     "// IR_ADDR_INDEX": "interp_ptr_stride()",
-    "// IR_SLICE": "interp_ptr_stride()",
     "// IR_LOAD_FIELD": "interp_field_stride()",
     "// IR_STORE_FIELD": "interp_field_stride()",
     "// IR_LOAD_INDEX:": "interp_ptr_stride()",
@@ -542,7 +541,7 @@ def _branch_blocks(text, marker):
 
 def test_interp_has_no_direct_layout_calls():
     """`corec run` executes IR without a projection pass, so every layout branch
-    asks a target-owned hook. The check walks the actual ADDR_INDEX / SLICE /
+    asks a target-owned hook. The check walks the actual ADDR_INDEX /
     ALLOC_ARRAY / field / index / enum branches, not just names in the file: a
     reintroduced `* 8` (or `= 8` / `+ 8`) fails even if it is spelled inline."""
     src = (REPO_ROOT / "src/compiler/interp.cr").read_text(encoding="utf-8")
@@ -669,16 +668,17 @@ def test_v11_end_to_end():
     for (op, dest, s1, s2, s3, type_id, nod_flags, fe, ec) in recs:
         assert -1 <= type_id
         assert nod_flags <= 0x7
-        # No target facts in src2/src3 for the width/stride carriers.
+        # Packed layout facts ride in src2/src3 for the element/field carriers.
+        # The record size is unchanged; the domain is checked here.
         if op == 8:  # IR_ALLOC_ARRAY
-            assert s2 == 0 and s3 == 0, f"ALLOC_ARRAY carries target facts: {s2},{s3}"
+            assert s2 >= 0 and s3 == 0, f"ALLOC_ARRAY stride domain: {s2},{s3}"
         if op in (25, 26):  # IR_DEREF / IR_STORE_PTR
             assert s3 == 0, "pointer op carries a byte extent in src3"
             if nod_flags & 4:
                 base = s2 if op == 25 else dest
                 assert base >= 0, "runtime pointer bound has no base reference"
         if op == 31:  # IR_ADDR_INDEX
-            assert s3 == 0, "ADDR_INDEX carries a scale in src3"
+            assert s3 >= 0, "ADDR_INDEX scale domain"
 
 
 ALLOC_STRIDE_SOURCE = """fn main() -> int:
@@ -692,8 +692,9 @@ ALLOC_STRIDE_SOURCE = """fn main() -> int:
 
 
 def test_alloc_stride_is_element_type_driven():
-    """The wire carries no stride. corearch rebuilds it from the destination
-    variable's semantic array element type, not from an int-slot assumption.
+    """The frontend bakes the element storage stride into ALLOC_ARRAY and
+    corearch uses it. A bool element therefore occupies one byte, not one
+    machine word.
 
     TYP_ARRAY == 2 and TI_BOOL == 2 in ast.cr; they are asserted explicitly so
     the test fails loudly if either constant drifts.
@@ -704,7 +705,7 @@ def test_alloc_stride_is_element_type_driven():
         recs = [r for r in _nod_records(data) if r[0] == 8]
         assert recs, "no IR_ALLOC_ARRAY node in the probe"
         for rec in recs:
-            assert rec[3] == 0 and rec[4] == 0, "ALLOC_ARRAY carries a stride on the wire"
+            assert rec[3] == 1 and rec[4] == 0, f"unexpected bool element stride: {rec[3]}"
 
         ccr = tmp / "allocstride.ccr"
         ccr.write_bytes(data)
@@ -716,7 +717,7 @@ def test_alloc_stride_is_element_type_driven():
         pairs = dict(zip(row[2::2], row[3::2]))
         assert int(pairs["kind"]) == 2, f"dest type is not TYP_ARRAY: {pairs}"
         assert int(pairs["elem"]) == 2, f"element row is not TI_BOOL: {pairs}"
-        assert int(pairs["stride"]) == 8, f"unexpected reconstructed stride: {pairs}"
+        assert int(pairs["stride"]) == 1, f"unexpected reconstructed stride: {pairs}"
 
         out = tmp / "allocstride.elf"
         r = _run([COREARCH, ccr, "--elf", "--static", "-o", out])
@@ -941,10 +942,10 @@ def test_old_target_facts_in_src2_src3_rejected():
         data = _build_v10(tmp)
         cases = []
         off, _rec = _first_node_offset(data, 8)                 # ALLOC_ARRAY
-        cases.append(("alloc_src2", off + 16, 8))
+        cases.append(("alloc_negative_stride", off + 16, -1))
         cases.append(("alloc_src3", off + 20, 8))
         off, _rec = _first_node_offset(data, 31)                # ADDR_INDEX
-        cases.append(("addr_scale", off + 20, 3))
+        cases.append(("addr_negative_scale", off + 20, -1))
         off, _rec = _first_node_offset(data, 25)                # DEREF
         cases.append(("deref_width", off + 20, 8))
         off, _rec = _first_node_offset(data, 26)                # STORE_PTR

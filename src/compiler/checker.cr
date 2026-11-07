@@ -6520,9 +6520,20 @@ fn infer_expr(node: int) -> int:
                 if j >= fc:
                     break
                 if cell_load(used, j * 8) == 0:
-                    // 只报第一个缺字段（同一程序员错误不刷屏）
-                    check_error(EC_TS_MISSING_FIELD, "Missing field '" + istr_get(si_field_name(si, j)) + "' in struct literal " + istr_get(name_ni), ast_line(node), ast_col(node))
-                    break
+                    // A generic-parameter field may be a witness: its value is
+                    // omitted at construction and its size is zero when it is
+                    // never read. Whether it really is a witness is decided by
+                    // the whole-program field-use pass after checking, so the
+                    // missing-field diagnostic waits for that pass.
+                    skip_missing : ., mut = 0
+                    dtn0 := si_field_type_node(si, j)
+                    if dtn0 >= 0 && ast_kind(dtn0) == EXPR_IDENT:
+                        if is_struct_generic(si, ast_int_val(dtn0)) != 0:
+                            skip_missing = 1
+                    if skip_missing == 0:
+                        // 只报第一个缺字段（同一程序员错误不刷屏）
+                        check_error(EC_TS_MISSING_FIELD, "Missing field '" + istr_get(si_field_name(si, j)) + "' in struct literal " + istr_get(name_ni), ast_line(node), ast_col(node))
+                        break
                 j = j + 1
         // ── 值类型逐个推断（一次/字段：infer_expr 有副作用，勿重复推断；结构体名未找到时
         //  也要推断，嵌套诊断和 dyn 记录等副作用在此，不能丢弃）──
@@ -6595,14 +6606,24 @@ fn infer_expr(node: int) -> int:
                             bind = cell_load(g_gen_map_types, mi * 8)
                             break
                         mi = mi + 1
-                    if bind >= 0:
-                        cell_store(g_gen_apply_data, (ds + 1 + found) * 8, bind)
-                        found = found + 1
+                    // A missing binding is a witness candidate. Bind it to
+                    // unit so the application is fully instantiated: unbound
+                    // type variables must not enter the .ccr TYPE segment. If
+                    // the field turns out to be used, IR generation reports the
+                    // unbound construction instead of laying it out.
+                    if bind < 0:
+                        bind = TI_UNIT
+                    cell_store(g_gen_apply_data, (ds + 1 + found) * 8, bind)
+                    found = found + 1
                     g = g + 1
                 cell_store(g_gen_apply_data, ds * 8, found)
                 g_gen_apply_data_count = ds + 1 + found
-                return alloc_type(TYP_GENERIC_APPLY, base_ti, ds)
-            return alloc_named_type(si_name(si))
+                sti0 := alloc_type(TYP_GENERIC_APPLY, base_ti, ds)
+                ast_ti_set(node, sti0)
+                return sti0
+            sti1 := alloc_named_type(si_name(si))
+            ast_ti_set(node, sti1)
+            return sti1
         // 结构体名未找到：既有行为（不在此报错，返回具名类型）
         return alloc_named_type(name_ni)
 
@@ -6634,7 +6655,9 @@ fn infer_expr(node: int) -> int:
         // constructor. Its semantics belong to product types, sequence types with
         // length constraints, or F11 length facts. See the full note at
         // res_type_node's EXPR_ARRAY branch.
-        return alloc_type(TYP_ARRAY, elem_ti, ast_b(node))
+        ati0 := alloc_type(TYP_ARRAY, elem_ti, ast_b(node))
+        ast_ti_set(node, ati0)
+        return ati0
 
     if ast_kind(node) == EXPR_BREAK:
         return TI_NEVER   // 发散出口，类型为 never
@@ -6748,7 +6771,9 @@ fn infer_expr(node: int) -> int:
             cell_store(g_gen_apply_data, (data_start + e) * 8, cell_load(tis, e * 8))
             e = e + 1
         g_gen_apply_data_count = data_start + ec
-        return alloc_type(TYP_TUPLE, ec, data_start)
+        tti0 := alloc_type(TYP_TUPLE, ec, data_start)
+        ast_ti_set(node, tti0)
+        return tti0
 
     if ast_kind(node) == EXPR_AT:
         name_ni := ast_a(node)
@@ -6920,6 +6945,99 @@ fn infer_expr(node: int) -> int:
 
     return TI_UNIT
 
+// ─── Witness fields ────────────────────────────────────────────────────────
+// A field is a witness when its declared type is a struct type variable and no
+// position reads or writes it. Construction with a value counts as a write, so
+// such a field is not a witness. The pass marks every occurrence of a field in
+// a projection, a struct literal, or a struct pattern; fields left unmarked are
+// zero-sized and omitted from construction.
+fn witness_mark_field(used: string, si: int, fi: int):
+    if si < 0 || fi < 0:
+        return
+    if fi >= si_field_count(si):
+        return
+    b := si_field_base(si)
+    if b < 0:
+        return
+    cell_store(used, (b + fi) * 8, 1)
+
+fn mark_witness_fields():
+    if g_si_f_used <= 0:
+        return
+    used : string, mut = alloc(g_si_f_used * 8)
+    i : ., mut = 0
+    loop:
+        if i >= g_si_f_used:
+            break
+        cell_store(used, i * 8, 0)
+        i = i + 1
+    n : ., mut = 0
+    loop:
+        if n >= g_ast_count:
+            break
+        k := ast_kind(n)
+        if k == EXPR_FIELD:
+            // Numeric tuple projections carry the element type row in c, not a
+            // struct name; only named struct projections have type_val == 0.
+            if ast_type_val(n) == 0:
+                sni := ast_c(n)
+                fi0 := ast_data(n)
+                if sni >= 0 && fi0 >= 0:
+                    si0 := find_struct(sni)
+                    if si0 >= 0:
+                        witness_mark_field(used, si0, fi0)
+        else if k == EXPR_STRUCT:
+            si1 := ast_data(n)
+            if si1 >= 0:
+                w0 := ast_b(n)
+                c0 := ast_c(n)
+                wi : ., mut = 0
+                loop:
+                    if wi >= c0:
+                        break
+                    if w0 >= 0:
+                        nn := ast_b(w0 + wi)
+                        if nn >= 0:
+                            jdi := struct_field_index_by_name(si1, nn)
+                            witness_mark_field(used, si1, jdi)
+                    wi = wi + 1
+        else if k == EXPR_STRUCTPAT:
+            si2 := find_struct(ast_a(n))
+            if si2 >= 0:
+                w2 := ast_b(n)
+                c2 := ast_c(n)
+                wj : ., mut = 0
+                loop:
+                    if wj >= c2:
+                        break
+                    if w2 >= 0:
+                        nn2 := ast_b(w2 + wj)
+                        if nn2 >= 0:
+                            jdi2 := struct_field_index_by_name(si2, nn2)
+                            witness_mark_field(used, si2, jdi2)
+                    wj = wj + 1
+        n = n + 1
+    si : ., mut = 0
+    loop:
+        if si >= g_struct_count:
+            break
+        fc := si_field_count(si)
+        fi : ., mut = 0
+        loop:
+            if fi >= fc:
+                break
+            witness : ., mut = 0
+            tn := si_field_type_node(si, fi)
+            if tn >= 0 && ast_kind(tn) == EXPR_IDENT:
+                if is_struct_generic(si, ast_int_val(tn)) != 0:
+                    b2 := si_field_base(si)
+                    if b2 >= 0:
+                        if cell_load(used, (b2 + fi) * 8) == 0:
+                            witness = 1
+            si_set_field_witness(si, fi, witness)
+            fi = fi + 1
+        si = si + 1
+
 // --- Main entry ---
 
 fn check_all():
@@ -7018,6 +7136,11 @@ fn check_all():
 
     // 规约标注检查（形态 + 常量折叠的唯一判定点）。见 spec_check_all 头注。
     spec_check_all()
+
+    // Whole-program field-use analysis decides which type-variable fields are
+    // witnesses. It must run after every function body and impl method has been
+    // checked, because a single read or write makes the field a data field.
+    mark_witness_fields()
 
 // ─── 规约标注（`#check` / `#ensure`）────────────────────────────────────
 // 约束检查边界：

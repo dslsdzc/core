@@ -673,7 +673,7 @@ fn ccr_validate_nod_operands() -> int:
 // fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
 // their old src2/src3 facts are the migration's critical cases.
 fn ccr_nod_src3_semantic(op: int) -> int:
-    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_MATCH || op == IR_SLICE || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX || op == IR_ALLOC_AT:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_STORE_INDEX_VAR || op == IR_LOAD_INDEX_VAR || op == IR_ADDR_INDEX || op == IR_MATCH || op == IR_SLICE || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX || op == IR_ALLOC_AT:
         return 1
     return 0
 
@@ -1261,10 +1261,10 @@ fn save_ccr(path: string) -> int:
     // === NOD: instructions ===
     // 40B each. NOD id is file order and equals global instruction order. Each
     // record has the eight semantic fields plus first_edge and edge_count for the
-    // adjacency range. src2/src3 never carry a width, stride, or byte extent:
-    // IR_ALLOC_ARRAY's stride and IR_ADDR_INDEX's scale are target facts, and
-    // IR_DEREF/IR_STORE_PTR store only the runtime-base reference. EDG is written
-    // from edge_buf after the NOD body.
+    // adjacency range. Packed layout carriers use src2/src3/dest: field byte
+    // offset and storage width, array element stride, and the pre-scaled slice
+    // low bound. IR_DEREF/IR_STORE_PTR still store only the runtime-base
+    // reference. EDG is written from edge_buf after the NOD body.
     buf_write_u32(buf, pos, g_ir_instr_count)
     pos = pos + 4
     ii : ., mut = 0
@@ -1282,14 +1282,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 8
         ns2 : ., mut = iri_s2(ii)
         ns3 : ., mut = iri_s3(ii)
-        if nop == IR_ALLOC_ARRAY:
-            // element stride is a target fact; corearch reconstructs it
-            ns2 = 0
-            ns3 = 0
-        else if nop == IR_ADDR_INDEX:
-            // SIB scale exponent is a target fact; the instance fixes it
-            ns3 = 0
-        else if nop == IR_DEREF || nop == IR_STORE_PTR:
+        if nop == IR_DEREF || nop == IR_STORE_PTR:
             // allocation byte size is a target fact; the semantic flag records
             // that a runtime bound exists and corearch recomputes the size
             ns3 = 0
@@ -2282,8 +2275,8 @@ fn load_ccr(data: string, fsize: int) -> int:
     // Semantic fields go to the kernel object buffer g_v7_nod_sem (the in-memory
     // record mirrors the disk record without adjacency, with the same offsets).
     // type_id is a TYPE row (-1 = none); flags is the semantic feature word.
-    // src2/src3 are opaque auxiliary ids: the producer never writes a width,
-    // stride, or byte extent there. Adjacency first_edge/edge_count go to
+    // src2/src3/dest are layout carriers for packed field/index operations and
+    // opaque auxiliary ids elsewhere. Adjacency first_edge/edge_count go to
     // g_v7_nod_meta.
     // （EDG 段校验 + 对象数据 nod_edge_first/count 消费）。NOD->g_ir_instrs
     // 线性重建段已移出本函数（调度重建 = 实例事务 build_linear_schedule，
@@ -2326,10 +2319,10 @@ fn load_ccr(data: string, fsize: int) -> int:
         // src2/src3 may not carry legacy v9 target facts. The writer normalizes
         // them; the loader rejects old/foreign files instead of silently accepting.
         if opcode == IR_ALLOC_ARRAY:
-            if s2 != 0 || s3 != 0:
+            if s2 < 0 || s3 != 0:
                 return -1
         else if opcode == IR_ADDR_INDEX:
-            if s3 != 0:
+            if s3 < 0:
                 return -1
         else if opcode == IR_DEREF || opcode == IR_STORE_PTR:
             if s3 != 0:

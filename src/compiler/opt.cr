@@ -387,12 +387,33 @@ fn pass_cse():
                     new_v := cell_load(replace_map, rj * 8 + 8)
                     if iri_s1(inst) == old_v:
                         iri_set_s1(inst, new_v)
-                    // MATCH s2/s3 are CASE start/count, not variables.
-                    if op != IR_MATCH:
-                        if iri_s2(inst) == old_v:
-                            iri_set_s2(inst, new_v)
-                        if iri_s3(inst) == old_v:
-                            iri_set_s3(inst, new_v)
+                    // MATCH s2/s3 are CASE start/count, not variables. Packed
+                    // layout operands (field widths/offsets, index strides) are
+                    // not variable ids either.
+                    r2 : ., mut = 1
+                    r3 : ., mut = 1
+                    if op == IR_MATCH:
+                        r2 = 0
+                        r3 = 0
+                    else if op == IR_STORE_FIELD:
+                        r3 = 0
+                    else if op == IR_LOAD_FIELD:
+                        r2 = 0
+                        r3 = 0
+                    else if op == IR_STORE_INDEX:
+                        r3 = 0
+                    else if op == IR_LOAD_INDEX:
+                        r2 = 0
+                        r3 = 0
+                    else if op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX_VAR || op == IR_ADDR_INDEX:
+                        r3 = 0
+                    else if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY:
+                        r2 = 0
+                        r3 = 0
+                    if r2 != 0 && iri_s2(inst) == old_v:
+                        iri_set_s2(inst, new_v)
+                    if r3 != 0 && iri_s3(inst) == old_v:
+                        iri_set_s3(inst, new_v)
                     rj = rj + 1
 
             ii = ii + 1

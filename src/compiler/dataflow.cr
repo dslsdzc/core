@@ -114,7 +114,10 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_te
     // Record that this node produces `dest`. IR_STORE_INDEX_VAR is the one
     // opcode whose dest is the stored value, not a definition: the node reads
     // dest and writes through the array, so the previous producer must stay.
-    if dest >= 0 && opcode != IR_STORE_INDEX_VAR:
+    // IR_STORE_INDEX_VAR's dest is the stored value. IR_STORE_INDEX and
+    // IR_STORE_FIELD use dest as the baked element stride / field width; neither
+    // defines a variable.
+    if dest >= 0 && opcode != IR_STORE_INDEX_VAR && opcode != IR_STORE_INDEX && opcode != IR_STORE_FIELD:
         grow_df_arrays(dest + 1)
         cell_store(g_df_var_producer, dest * 8, nid)
 

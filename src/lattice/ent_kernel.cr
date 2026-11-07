@@ -155,7 +155,12 @@ fn compute_live_ranges():
                 d := nod_dest(inst)
                 s1 := nod_s1(inst)
                 s2 := nod_s2(inst)
-                if d >= vs && d < vs + vc:
+                // STORE_INDEX / STORE_FIELD use dest for the baked element stride
+                // or field width, not for a variable definition.
+                use_d : ., mut = 1
+                if op == IR_STORE_INDEX || op == IR_STORE_FIELD:
+                    use_d = 0
+                if use_d != 0 && d >= vs && d < vs + vc:
                     lv := d - vs
                     st := (seg + lv) * 16
                     if cell_load(g_ir_live_ranges, st) < 0:
@@ -338,7 +343,7 @@ fn compute_entries(func_i: int) -> int:
                 s1 := nod_s1(inst)
                 if s1 >= vs && s1 < vs + vc:
                     dv = s1
-            else if op != IR_STORE_INDEX_VAR && op != IR_STORE_PTR && op != IR_DYN_DISPATCH:
+            else if op != IR_STORE_INDEX_VAR && op != IR_STORE_INDEX && op != IR_STORE_FIELD && op != IR_STORE_PTR && op != IR_DYN_DISPATCH:
                 d := nod_dest(inst)
                 if d >= vs && d < vs + vc:
                     dv = d

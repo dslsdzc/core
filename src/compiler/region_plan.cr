@@ -1703,6 +1703,12 @@ fn rp_merge_alloc_kind(an: int) -> int:
         return -1
     op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
     if op == IR_ALLOC_STRUCT:
+        // Tuples use the same allocation opcode with no struct name; their
+        // element count rides in src1 and the byte extent in src2.
+        if cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3) < 0:
+            return 1
+        if cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3) == 0:
+            return 2
         return 1
     if op != IR_ALLOC_ARRAY:
         return -1
@@ -1719,10 +1725,12 @@ fn rp_tuple_pod(an: int, cnt: int, sg_start: int, sg_count: int) -> int:
     if an < 0 || cnt <= 0 || cnt > 64:
         return 0
     ad := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    tti := irv_type(ad)
     i : ., mut = 0
     loop:
         if i >= cnt:
             return 1
+        off := target_introspect_tuple_field_offset(tti, i)
         found : ., mut = 0
         ni : ., mut = sg_start
         loop:
@@ -1732,7 +1740,7 @@ fn rp_tuple_pod(an: int, cnt: int, sg_start: int, sg_count: int) -> int:
             s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
             s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
             s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
-            if op == IR_STORE_FIELD && s1 == ad && s3 == i:
+            if op == IR_STORE_FIELD && s1 == ad && s3 == off:
                 found = 1
                 if rp_copyable_leaf(irv_type(s2)) == 0:
                     return 0
@@ -2960,7 +2968,7 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         if subgraph_containing(ni) == sg:
             if kind == 1:
-                if op == IR_ALLOC_STRUCT:
+                if op == IR_ALLOC_STRUCT && cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3) >= 0:
                     an = ni
                     break
             else:
@@ -2971,6 +2979,16 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
     if an < 0:
         return 0
     alloc_dest := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    if kind == 2:
+        // The planner allocated a tuple copy with the element count as a byte
+        // placeholder. Replace it with the packed byte extent and a unit stride;
+        // the copy loop writes fields through their packed offsets.
+        tti0 := irv_type(alloc_dest)
+        if get_type_kind(tti0) == TYP_TUPLE:
+            total0 := target_introspect_tuple_alloc_size(tti0)
+            if total0 > 0:
+                cell_store(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1, total0)
+                cell_store(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S2, 1)
     dest : ., mut = -1
     ni = range_start
     loop:
@@ -3060,30 +3078,45 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
         if cnt <= 0 || cnt > 64:
             return 0
         child_av := cell_load(g_sg_arena_var, sg * 8)
+        sti := irv_type(alloc_dest)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 break
             ft := struct_row_field_ti(si, i)
+            off := target_introspect_field_offset(sti, i)
+            fw := target_introspect_field_width(sti, i)
             ev := new_ir_var("_merge_field", ft)
-            emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
+            if off >= 0 && fw > 0:
+                emit(IR_LOAD_FIELD, ev, alloc_dest, fw, off, 0)
+            else:
+                emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
             if rp_string_ti(ft) != 0:
                 cp := rp_emit_string_value_copy(ev, parent_var, child_av)
                 if cp < 0:
                     return 0
-                emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
+                if off >= 0 && fw > 0:
+                    emit(IR_STORE_FIELD, fw, copy_var, cp, off, 0)
+                else:
+                    emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
             else:
-                emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+                if off >= 0 && fw > 0:
+                    emit(IR_STORE_FIELD, fw, copy_var, ev, off, 0)
+                else:
+                    emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
             i = i + 1
     else:
         cnt = cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
         if cnt <= 0 || cnt > 64:
             return 0
-        irv_set_type(copy_var, irv_type(alloc_dest))
+        tti := irv_type(alloc_dest)
+        irv_set_type(copy_var, tti)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 break
+            off := target_introspect_tuple_field_offset(tti, i)
+            fw := target_introspect_tuple_field_width(tti, i)
             ft : ., mut = TI_INT
             fi : ., mut = range_start
             loop:
@@ -3093,19 +3126,28 @@ fn region_plan_emit_merge(sg: int, copy_var: int, copy_instr: int,
                 s1 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S1)
                 s2 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S2)
                 s3 := cell_load(g_df_nodes, fi * ESZ_DFNODE + OFF_DF_S3)
-                if op == IR_STORE_FIELD && s1 == alloc_dest && s3 == i:
+                if op == IR_STORE_FIELD && s1 == alloc_dest && s3 == off:
                     ft = irv_type(s2)
                 fi = fi + 1
             ev := new_ir_var("_merge_field", ft)
-            emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
+            if off >= 0 && fw > 0:
+                emit(IR_LOAD_FIELD, ev, alloc_dest, fw, off, 0)
+            else:
+                emit(IR_LOAD_FIELD, ev, alloc_dest, 0, i, 0)
             if rp_string_ti(ft) != 0:
                 child_av2 := cell_load(g_sg_arena_var, sg * 8)
                 cp := rp_emit_string_value_copy(ev, parent_var, child_av2)
                 if cp < 0:
                     return 0
-                emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
+                if off >= 0 && fw > 0:
+                    emit(IR_STORE_FIELD, fw, copy_var, cp, off, 0)
+                else:
+                    emit(IR_STORE_FIELD, -1, copy_var, cp, i, 0)
             else:
-                emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
+                if off >= 0 && fw > 0:
+                    emit(IR_STORE_FIELD, fw, copy_var, ev, off, 0)
+                else:
+                    emit(IR_STORE_FIELD, -1, copy_var, ev, i, 0)
             i = i + 1
     emit(IR_STORE, -1, dest, copy_var, 0, 0)
     return 1

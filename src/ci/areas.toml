@@ -45,6 +45,7 @@ match = [
   "test_enum_impl\\.py",
   "test_struct_impl\\.py",
   "test_v4_",
+  "test_layout_semantics\\.py",
   "test_named_",
   "test_let_check\\.py",
   "test_arg_inference_gap\\.py",
