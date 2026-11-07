@@ -1,5 +1,7 @@
 # 语法文档重写设计（`language-syntax.md`）
 
+> 定位：受众 = 历史读者；状态 = 历史记录；出处 = 本页。
+
 日期：2026-09-01
 状态：已批准（brainstorming 逐节确认）
 关联定案：`2026-08-30-type-system-direction-design.md`（类型方向）、`2026-08-16-numeric-types-design.md`（数值类型）、`2026-08-16-platform-abstract-design.md`（平台桥）、`2026-08-23-hw-map-design.md`（硬件映射表）
@@ -10,13 +12,13 @@
 
 `docs/language-syntax.md`（701 行、13 章）混合了“语言设计愿景”与“实际语法参考”两种定位，且多处与最新定案、源码现状冲突：
 
-1. 宽度类型与定案矛盾：3.2 节教 `0x1000_u64` / `100_i32` 后缀语法，4.4 枚举示例用 `u8/u16`，八章接口示例返回 `u64`，全部与 2026-08-30 width-out-of-language 定案（宽度移出语言）矛盾。
+1. 宽度类型与定案矛盾：3.2 节给出 `0x1000_u64` / `100_i32` 后缀语法，4.4 枚举示例用 `u8/u16`，八章接口示例返回 `u64`，全部与 2026-08-30 width-out-of-language 定案（宽度移出语言）矛盾。
 2. 虚构语法：七章 `a := vec![1, 2, 3];`，`vec!` 在源码中不存在。
 3. 自相矛盾：文末“设计要点”称“无指针操作符（\*, ->）和地址运算”，3.3 指针节却教 `*p` / `&arr[0]` / `cast<int*>`。
 4. 关键字表错误：称“共 35 个”且“self 按标识符解析”，实际 `lexer.cr` 的 `lookup_keyword()` 为 37 个，且 `self` 是关键字（T_SELF）。
 5. markdown 表格断裂：3.2 基础类型表被 `dyn` 说明行打断，unit/never 行落在表格外。
 6. 愿景内容混排：十二章“HDFG 视图”、十三章“π 示例”、5.4 requires/ensures 示例均未实现（源码零出现），与参考内容没有区分地混排。
-7. 标准库示例渗入：8.1 HashMap/HashSet、9.4 通道，语言语法文档不应包含标准库表层。
+7. 标准库示例混入：8.1 HashMap/HashSet、9.4 通道，语言语法文档不应包含标准库表层。
 
 ## 定位决策（brainstorming 已确认）
 
@@ -43,9 +45,9 @@
 10. 规约：requires / ensures / old / result + where 值约束（拟定语法，三档语义）
 11. 并发：go / await / flow / yield / recv
 12. 指针与 unsafe：`&` 取地址、`*` 解引用、偏移运算、cast、RawRef、unsafe 块
-13. @ 内建原语：元数据查询 / 编译控制 / 安全检查（详见 `docs/at-intrinsics.md`）
+13. @ 内建原语：元数据查询、编译控制、安全检查（详见 `docs/at-intrinsics.md`）
 
-删除内容：HDFG 愿景章、π 示例章、标准库表层（HashMap / HashSet / 通道 / Result 枚举，`?` 运算符本身保留在表达式章）、`vec!` 等虚构语法。
+删除内容：HDFG 愿景章、π 示例章、标准库表层（HashMap、HashSet、通道、Result 枚举，`?` 运算符本身保留在表达式章）、`vec!` 等虚构语法。
 
 ## 内容处理规则
 
@@ -57,15 +59,15 @@
 4. 示例规则：全部示例只用语言本体语法（int / dex / string / bool / char / 复合类型 / 可选 / 接口），可读且不依赖标准库与未定语法（where 示例除外，其语法为本文档拟定）。
 5. 实现状态：全文不出现“已实现 / 未实现 / 待实现”标注（定位决策）。
 6. 要点解释标准：设计要点与语义解释一律以格形态为标准框架（格 = 存在空间，图 = 关系空间，编码 = hw-map；语义保持 = 格全量表示），不用传统的 CFG 或编译器视角解释语言行为。
-7. 出处原则：关键字表以 lexer.cr 为准；优先级与语法形式以 `grammar/core.ebnf` 为准；冲突时 lexer.cr / parser.cr 优先于 EBNF（仓库惯例：实现以源码为准）。
+7. 出处原则：关键字表以 lexer.cr 为准；优先级与语法形式以 `grammar/core.ebnf` 为准；冲突时 lexer.cr 与 parser.cr 优先于 EBNF（仓库惯例：实现以源码为准）。
 
 ## 验证方式
 
-- 关键字表逐项核对 `src/compiler/lexer.cr lookup_keyword()`
-- 语法构造核对 `grammar/core.ebnf`（差异处加注，注解优先指向源码）
-- grep 检查：文档中无 `u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|vec!|HashMap|HashSet|chan` 残留
-- 无“已实现 / 未实现 / 待实现”字样
-- markdown 表格结构完整（无断裂行）
+- 关键字表与 `src/compiler/lexer.cr lookup_keyword()` 逐项一致
+- 语法构造与 `grammar/core.ebnf` 一致；差异处加注，注解优先指向源码
+- `grep` 检查结果：文档中没有 `u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|vec!|HashMap|HashSet|chan` 残留
+- 没有“已实现 / 未实现 / 待实现”字样
+- Markdown 表格结构完整，没有断裂行
 
 ## 变更范围
 

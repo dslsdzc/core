@@ -1,7 +1,8 @@
 # 图固定区域内存模型设计（Graph-Anchored Regions）
 
+> 定位：受众 = 历史读者；状态 = 历史记录；出处 = 本页。
 
-> 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
+> 术语注记（2026-08-15）：本规格为历史设计记录，其中“数据流图”（及“RVSDG 式”）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 > 当前区域模型见 [region-model.md](../maintainer/design/region-model.md)。本文是 2026-08-13 的历史设计记录，术语和实现已经演进，保留作为设计依据。
 
@@ -51,7 +52,7 @@ Core（图绑定）：
 
 ## 核心概念：图固定区域
 
-区域 = 子图节点（`DFNode`）的字节域。现有设计的「每个 `DFNode` 可关联一个 Arena」「子图绑定」「Arena 嵌套」原样继承，概念升级为区域。
+区域 = 子图节点（`DFNode`）的字节域。现有设计的“每个 `DFNode` 可关联一个 Arena”“子图绑定”“Arena 嵌套”原样继承，概念升级为区域。
 
 ### 推论 A：生命周期 = 图活性（非 LIFO）
 
@@ -61,13 +62,13 @@ RegionCheck 的 `cur_seq < exit_seq` 判定（`pointer-model.md` Pass 2）就是
 
 区域既可以嵌套（树），也可以沿数据流边操作：
 
-- `split`：一块字节沿边划给子消费者，字节块可以独立回收；子区域是图边的子块，有自己的游标和重置点
+- `split`：一块字节沿边划给子消费者，字节块可以独立回收；子区域是图边的子块，有独立的游标和重置点
 - `merge`：汇合点两个子区域的数据汇入（拷贝或区域合并）
-- `share`：分叉点的一个区域由多个消费者只读共享，共享者必须 `outlive` 引用
+- `share`：分叉点的一个区域由多个消费者只读共享，共享者需要满足 `outlive` 引用
 
 ### 推论 C：每字节归属 = 图的 `provenance` 边
 
-`pointer-model.md` 已定义内存模型为「字节序列 + 宽度 + 边界」，`provenance`（归属）、`offset`（字节偏移）、`alloc_size`（字节大小）全部与类型无关。"控制每一个字节"不是新语法，是图上已有的信息。
+`pointer-model.md` 已定义内存模型为“字节序列 + 宽度 + 边界”，`provenance`（归属）、`offset`（字节偏移）、`alloc_size`（字节大小）全部与类型无关。“控制每一个字节”不是新语法，是图上已有的信息。
 
 ### 与传统的关系
 
@@ -75,7 +76,7 @@ RegionCheck 的 `cur_seq < exit_seq` 判定（`pointer-model.md` Pass 2）就是
 
 ### 术语注记
 
-`dataflow` 模块已有「region」一词指控制流嵌套（`SG_IF`/`LOOP`/`FOR`/`FLOW`/`UNSAFE`）。本文的「区域」指内存字节域。文档中按上下文区分；需要精确时，内存区域全称「内存区域」。
+`dataflow` 模块已有“region”一词指控制流嵌套（`SG_IF`/`LOOP`/`FOR`/`FLOW`/`UNSAFE`）。本文的“区域”指内存字节域。文档中按上下文区分；需要精确时，内存区域全称“内存区域”。
 
 ## 机制总图
 
@@ -91,7 +92,7 @@ RegionCheck 的 `cur_seq < exit_seq` 判定（`pointer-model.md` Pass 2）就是
 
 1. 静态已知大小路径 = 纯 bump，零碎片
 2. 动态路径 = 分档子区域，浪费上界由 size class 表决定（工程可控：档位越细上界越低，如 pow2 档约 50%、细分档约 12.5%）
-3. Arena Pool / 嵌套 / 子图绑定 = 原样继承，概念升级为"区域"
+3. Arena Pool / 嵌套 / 子图绑定 = 原样继承，概念升级为“区域”
 
 ## 用户面（零管理负担）
 
@@ -121,7 +122,7 @@ struct PackedHeader layout(packed, align(4)):
 mmio := alloc_at(0x7fff0000, 4096, align(4096))
 ```
 
-- v1 不提供显式区域或回收语法（YAGNI）。「指定回收」是编译器内部机制（IR 层生成回收点，相当于 Cyclone early deallocation 的自动版本）。
+- v1 不提供显式区域或回收语法（YAGNI）。“指定回收”是编译器内部机制（IR 层生成回收点，相当于 Cyclone early deallocation 的自动版本）。
 - 与 `pointer-model.md` 2026-08-10 定论的关系：0x 字面量仍是 `unsafe` 外部入口；`alloc_at` 是声明式进图（获得 `provenance` 的节点），不冲突。声明是唯一信任点，之后全图追踪。
 
 ## 语义面（验证器）

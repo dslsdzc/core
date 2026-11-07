@@ -4,9 +4,9 @@
 
 日期：2026-08-16
 依据：[2026-08-16-numeric-types-design.md](../superpowers/specs/2026-08-16-numeric-types-design.md)（已批准）
-用途：Task 5/6 的迁移契约。每个站点按本表逐点执行，禁止机械替换（sed 或全局替换）。
+用途：Task 5/6 的迁移契约。每个站点按本表逐点执行，不采用机械替换（sed 或全局替换）。
 
-> 追记（2026-09-10，语言面收窄 R1）：本盘点为 2026-08-16 历史快照，下述分类结论按当时约束固化，不在本文件改写历史（原文保留）。R1（计划 `docs/superpowers/plans/2026-09-10-language-surface-narrowing-r1.md`）对其中宽度三项改判并落实：`T_FLOAT_F32/T_FLOAT_F64`（与 `T_INT_I8..T_INT_U64` 同族）及 `W_I8..W_F64` 删除（ce3e541c，编号保留勿复用），`_f32`/`_f64` 后缀退役并改为明确报错（51d74be3，宽度 = 机器形状，归映射层）。因此本表原标 `保留` 的三处（`ast.cr:93-94`、`ast.cr:117-118`、分类规则表「`_f32`/`_f64` 后缀改为保留」行）以本次改判为准；下文相关行逐点标注 R1 落点与一处实测修正（`analysis.cr:895` 行）。
+> 追记（2026-09-10，语言面收窄 R1）：本盘点为 2026-08-16 历史快照，下述分类结论按当时约束固化，不在本文件改写历史（原文保留）。R1（计划 `docs/superpowers/plans/2026-09-10-language-surface-narrowing-r1.md`）对其中宽度三项改判并落实：`T_FLOAT_F32/T_FLOAT_F64`（与 `T_INT_I8..T_INT_U64` 同族）及 `W_I8..W_F64` 删除（ce3e541c，编号保留，不复用），`_f32`/`_f64` 后缀退役并改为明确报错（51d74be3，宽度 = 机器形状，归映射层）。因此本表原标 `保留` 的三处（`ast.cr:93-94`、`ast.cr:117-118`、分类规则表“`_f32`/`_f64` 后缀改为保留”行）以本次改判为准；下文相关行逐点标注 R1 落点与一处实测修正（`analysis.cr:895` 行）。
 
 ## 分类规则
 
@@ -141,7 +141,7 @@
 | elf.cr:1250-1251 注释（"float 参数在 XMM"） | 注释 | `保留` | 注释 |
 | elf.cr:1252-1262 TI_FLOAT 参数 XMM 落槽（movsd [rbp+po2], xmm{frn}；9+ float 栈参数边缘路径） | 指令编码（函数序言参数搬移） | `dex,apx` | SysV XMM 参数搬移保留为 apx 快路径 |
 
-### src/lsp/analysis.cr（8 处；预扫报"5 处"为字面量 "float" 命中：36/312/848/865/908，本表补 T_FLOAT 变体 3 处）
+### src/lsp/analysis.cr（8 处；预扫报“5 处”为字面量 "float" 命中：36/312/848/865/908，本表补 T_FLOAT 变体 3 处）
 
 | 站点 | 角色 | 分类 | 理由 |
 |---|---|---|---|
@@ -207,7 +207,7 @@
 
 ## 范围外附录：bootstrap/corec（Python 自举编译器，预扫范围外但构建关键）
 
-`build_selfhost_native.py` 用 bootstrap 编译 src/compiler。bootstrap 的 dex 支持已随 Task 2-5 同步实施（2026-08-16 更新）：Task 3 认识 dex 类型名/字面量（base_types 含 'dex'、kind_map 'dex'、算术/比较规则 int|dex），Task 4 实施定点缩放语义（`Dex(int)` 值类 + `DEX_SCALE`，`Dex.__eq__` 对 float 期望值按缩放语义比较，测试期望值保持十进制语义），Task 5 移除 'float' 类型名别名（与自举侧同步拒绝 float）。
+`build_selfhost_native.py` 用 bootstrap 编译 src/compiler。bootstrap 的 dex 支持已随 Task 2-5 同步实施（2026-08-16 更新）：Task 3 支持 dex 类型名与字面量（base_types 含 'dex'、kind_map 'dex'、算术/比较规则 int|dex），Task 4 实施定点缩放语义（`Dex(int)` 值类 + `DEX_SCALE`，`Dex.__eq__` 对 float 期望值按缩放语义比较，测试期望值保持十进制语义），Task 5 移除 'float' 类型名别名（与自举侧同步拒绝 float）。
 
 Task 5 迁移后 bootstrap 的 float 残留（均按分类表 `保留`/`dex,apx` 处理，不属移除项）：
 
@@ -247,13 +247,13 @@ grep -rn "float\|FLOAT_LIT" bootstrap/corec/ | wc -l   # 22，附录 8 文件 22
 
 ## 分类争议点
 
-1. parser.cr:405-411（字面量节点）标 `dex`：该行同时含后缀宽度传递（W_F32/W_F64，保留）和 T_FLOAT 分支（dex 语义）。按「节点语义归属」标 dex，后缀部分在理由中注明不动。2026-09-10 R1 结案：后缀宽度传递（及 T_FLOAT_F32/F64 分支）已删除（ce3e541c），本争议点消解，该处现为单一 dex 字面量节点构建（`data` 槽恒为 0）。
-2. ir_gen.cr:482-483（字面量转 IR_CONST）标 `dex,apx`：发射的 binary64 位模式是 apx 表示（保留），但 TI_FLOAT 更名 TI_DEX 属 dex 侧。若执行时希望整体按语义层处理，可以改为 `dex`；建议以「位模式保留 = 快路径」为准标 dex,apx。
-3. ast.cr:99 T_FLOAT_TYPE 标 `删除`：从未被发射的死常量（float 关键字实际按 lexeme 匹配）。唯一风险是 LSP 连续区间 `T_INT_TYPE..T_AUTO_TYPE`（90..95），删除不重编号则区间语义不变，因此删除是安全的。若保守处理可以标保留，但契约建议删除。
-4. 计划文件 Task 5 的括号示例把 monomorph/module/dump/ccr_io/parser/lexer 列为 `dex,apx` 站点：本表按 Global Constraints 逐点判定，这些文件的类型名/常量更名站点属用户可见类型语义（`dex`），只有其 binary64 机制部分（lexer 位转换、ir_gen 运算生成）为 `dex,apx`。计划原文「按分类表逐点执行」，以本表为准。
+1. parser.cr:405-411（字面量节点）标 `dex`：该行同时含后缀宽度传递（W_F32/W_F64，保留）和 T_FLOAT 分支（dex 语义）。按“节点语义归属”标 dex，后缀部分在理由中注明不动。2026-09-10 R1 结案：后缀宽度传递（及 T_FLOAT_F32/F64 分支）已删除（ce3e541c），本争议点消解，该处现为单一 dex 字面量节点构建（`data` 槽恒为 0）。
+2. ir_gen.cr:482-483（字面量转 IR_CONST）标 `dex,apx`：发射的 binary64 位模式是 apx 表示（保留），但 TI_FLOAT 更名 TI_DEX 属 dex 侧。若执行时希望整体按语义层处理，可以改为 `dex`；建议以“位模式保留 = 快路径”为准标 dex,apx。
+3. ast.cr:99 T_FLOAT_TYPE 标 `删除`：从未被发射且未使用的常量（float 关键字实际按 lexeme 匹配）。唯一风险是 LSP 连续区间 `T_INT_TYPE..T_AUTO_TYPE`（90..95），删除不重编号则区间语义不变，因此删除是安全的。若保守处理可以标保留，但契约建议删除。
+4. 计划文件 Task 5 的括号示例把 monomorph、module、dump、ccr_io、parser、lexer 列为 `dex,apx` 站点：本表按 Global Constraints 逐点判定，这些文件的类型名/常量更名站点属用户可见类型语义（`dex`），只有其 binary64 机制部分（lexer 位转换、ir_gen 运算生成）为 `dex,apx`。计划原文“按分类表逐点执行”，以本表为准。
 5. module.cr:361/366 编码表注释与代码不符（注释 float=2、代码 =3）：既有 bug，非本任务修复项；Task 5 改注释时需核对实际 ABI 编码。
 6. bootstrap 范围外但构建关键（见附录）：若 Task 5 按表迁移 src/compiler 而 bootstrap 未先支持 dex，`build_selfhost_native.py` 自举失败，需在计划层面确认 bootstrap 的 dex 实施任务归属。
-7. T_FLOAT_TYPE 删除与 T_FLOAT_F32/F64 保留的检查对称性（2026-09-10 R1 结案：两者殊途同归，T_FLOAT_F32/F64 及 `W_*` 全族一并删除（ce3e541c），`_f32/_f64` 后缀退役并改为明确报错（51d74be3）；下述「保留 = 约束原文要求」的检查被 R1 用户裁决（宽度 = 机器形状，归映射层）覆盖，「宽度丢失需 lexer 新发射路径」的实现缺口随之消解，不再需要发射路径）：三者同为「从未被发射」的令牌常量，lexer 只发 `T_FLOAT`（lexer.cr:330-331 唯一发射点：小数点或 `f32/f64` 后缀一律汇入 `add_tok_int(T_FLOAT, str_to_f64_bits(...))`）；parser.cr:409-410 的 `T_FLOAT_F32` 到 `W_F32`、`T_FLOAT_F64` 到 `W_F64` 宽度分支是死代码（两个后缀令牌从未到达 parser，`w` 恒为 0）；`_f32/_f64` 后缀在 lexer 即被消费（num_str 已剔除后缀，见 lexer.cr:325-327），位宽信息在词法层丢失。分类差异的检查：`保留` 是约束原文（"_f32/_f64 后缀改为保留"）的明确要求，且后缀令牌在设计中有迁移后指称（apx CPU 位宽标注角色）；T_FLOAT_TYPE 没有任何迁移后指称（float 关键字消亡、从未发射），因此标 `删除`。风险提示：当前 `_f32/_f64` 后缀标注实际不生效（宽度丢失、w=0），apx 位宽标注需在 lexer 增加发射路径（suffix 分支发射 T_FLOAT_F32/F64 或等价标注令牌），属 Task 5/6 实现项；本表分类仅按约束原文执行，不改变此实现缺口。
+7. T_FLOAT_TYPE 删除与 T_FLOAT_F32/F64 保留的检查对称性（2026-09-10 R1 结案：两者结果相同，T_FLOAT_F32/F64 及 `W_*` 全族一并删除（ce3e541c），`_f32/_f64` 后缀退役并改为明确报错（51d74be3）；下述“保留 = 约束原文要求”的检查被 R1 用户裁决（宽度 = 机器形状，归映射层）覆盖，“宽度丢失需 lexer 新发射路径”的实现缺口随之消解，不再需要发射路径）：三者同为“从未被发射”的令牌常量，lexer 只发 `T_FLOAT`（lexer.cr:330-331 唯一发射点：小数点或 `f32/f64` 后缀一律汇入 `add_tok_int(T_FLOAT, str_to_f64_bits(...))`）；parser.cr:409-410 的 `T_FLOAT_F32` 到 `W_F32`、`T_FLOAT_F64` 到 `W_F64` 宽度分支是不可达代码（两个后缀令牌从未到达 parser，`w` 恒为 0）；`_f32/_f64` 后缀在 lexer 即被消费（num_str 已剔除后缀，见 lexer.cr:325-327），位宽信息在词法层丢失。分类差异的检查：`保留` 是约束原文（“_f32/_f64 后缀改为保留”）的明确要求，且后缀令牌在设计中有迁移后指称（apx CPU 位宽标注角色）；T_FLOAT_TYPE 没有任何迁移后指称（float 关键字移除、从未发射），因此标 `删除`。风险提示：当前 `_f32/_f64` 后缀标注实际不生效（宽度丢失、w=0），apx 位宽标注需在 lexer 增加发射路径（suffix 分支发射 T_FLOAT_F32/F64 或等价标注令牌），属 Task 5/6 实现项；本表分类仅按约束原文执行，不改变此实现缺口。
 
 ## Task 6 执行补记（2026-08-16，float 移除结束 + 测试迁移）
 
@@ -271,8 +271,8 @@ grep -rn "\bfloat\b" src/compiler/ src/stdlib/ src/arch/ src/lsp/   # 全为保�
 grep -rn "\bfloat\b" tests/                        # test_pipeline docstring（保留）+ float_str_bits 位模式回归（保留）+ 移除守卫测试
 ```
 
-用户可见 float 关键字/类型：lexer 不发射 float 令牌，parser/monomorph/ir_gen/module/LSP 的类型名
-清单均为 "dex"（Task 5）；`x : float = ...` 报 TF01 未知类型（test_dex_type 移除守卫）。
+用户可见的 float 关键字与类型：lexer 不发射 float 令牌，parser、monomorph、ir_gen、module、LSP 的类型名
+清单均为“dex”（Task 5）；`x : float = ...` 报 TF01 未知类型（test_dex_type 移除守卫）。
 
 ### 测试迁移清单（Task 6 结束）
 
@@ -288,7 +288,7 @@ grep -rn "\bfloat\b" tests/                        # test_pipeline docstring（�
 ### interp 改动（Task 4 审查建议）
 
 interp.cr：op 49/50（IR_F2I/IR_I2F）显式报错，"interpreter lacks binary64 semantics"（消息：
-`IR_I2F/IR_F2I needs binary64 semantics (apx dex)`），return -1（exit 255）。替代不报错地跳过
+`IR_I2F/IR_F2I needs binary64 semantics (apx dex)`），return -1（exit 255）。此前的做法是不报错地跳过
 （目的槽残留 0/脏值，后续除法可能 SIGFPE）。`corec run` 的精确 dex/int-apx 不受影响（无 49/50）。
 
 ### apx 打印行为定稿（Task 4 concern）
@@ -300,7 +300,7 @@ m < 0 分支减 0.5、m ≥ 0 分支加 0.5 后再 F2I（comisd 比较 + 分支�
 行为一致。全精度打印（Ryu 式）留待后续版本。文档：dex.cr 头注释。
 
 发现（Task 6）：str_to_f64_bits 字面量转换按 ~2ulp 截断（保留站点，lexer.cr:121 注释为
-文档化限制）。经典 binary64 演示「0.1b+0.2b != 0.3」因此不成立（0.1/0.2 各低 1ulp，
+文档化限制）。经典 binary64 演示“0.1b+0.2b != 0.3”因此不成立（0.1/0.2 各低 1ulp，
 相加恰好落在 0.3 位模式）。非回归；binary64 行为断言以 1/3 判别子为准（±2ulp 下鲁棒）。
 
 顺带修复（bootstrap bug）：bootstrap/corec/backend/x86_64_stack_asm.py 字符串长度头按
@@ -310,14 +310,14 @@ Python 字符数写（len(sval)+1），运行时 str_len 按字节读，非 ASCI
 ### 全套件回归证据
 
 bootstrap 6 文件全过（24/24 + 14/14 + 5/5 + 3/3 + 4/4 + 2/2）；selfhost 全过
-（test_compile 全过、test_dex_arith 9/9、test_lsp 8/8、test_region_cfg 16/16、apx/dex_type
-2/2 等）；build_selfhost_native.py 自举成功（corec/corearch/corelsp 三个二进制）。
+（test_compile 全过、test_dex_arith 9/9、test_lsp 8/8、test_region_cfg 16/16、apx 与 dex_type
+2/2 等）；build_selfhost_native.py 自举成功（corec、corearch、corelsp 三个二进制）。
 
-### 顺带修复（全绿要求，非 float 站点）
+### 顺带修复（全部测试通过要求，非 float 站点）
 
-`corec build`/`corearch` ELF 输出从 0644 改为 0755：既有怪癖（Task 3 已记录"corec build 输出
-0644"），导致 test_backend_bootstrap stage1/2/3 链不可执行（exit 126），全部测试被迫
-chmod 后备。根因修复：src/compiler/corearch.cr 2 处 + src/arch/linux/ld/main.cr 2 处 +
+`corec build` 与 `corearch` 的 ELF 输出从 0644 改为 0755：既有行为（Task 3 已记录“corec build 输出
+0644”），导致 test_backend_bootstrap stage1/2/3 链不可执行（exit 126），全部测试需要先
+chmod 才能运行。根因修复：src/compiler/corearch.cr 2 处、src/arch/linux/ld/main.cr 2 处、
 src/arch/linux/ld/ld.cr 3 处（ctx_emit_static/ctx_emit_dyn/elf_gen 写路径）open mode
 420 改为 493（0755；umask 仍生效）。.so 输出（emit_so）与 .ccr/缓存写保持 0644。修复后
 test_backend_bootstrap 全过（含 stage1/2/3 逐字节一致复现校验）。

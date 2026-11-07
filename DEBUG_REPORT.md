@@ -1,10 +1,12 @@
 # Core 自举调试报告：`corec2` 到 `corec3`
 
+> 定位：受众 = 历史读者；状态 = 历史记录；出处 = 本页。
+
 > 日期：2026-07-06
 > PR：https://github.com/dslsdzc/core/compare/main...RhineIris:core:main
 >
 > 历史存档：本报告描述的问题均已在后续修复中解决。文中 3 个已修复 Bug 已合并（PR #9/#16 时期）；
-> 「仍未解决的根本性 Bug」（rip_patch 位置错位）已由 2026-07-23 P0 全量修复（`emit_instr()` 的
+> “仍未解决的根本性 Bug”（rip_patch 位置错位）已由 2026-07-23 P0 全量修复（`emit_instr()` 的
 > disp32 写入补上当前指令基址）解决，`corec2` 到 `corec3` 自举现已全程通过。
 > 本文档仅作调试过程记录保留。
 
@@ -86,7 +88,7 @@
 
 `str_len(g_source)` 直接从字符串的 8 字节 header 读取长度，避开全局变量 patch 的问题。
 
-## 仍未解决的根本性 Bug：ELF 后端 rip_patch 位置错位
+## 当时未解决的根本性 Bug：ELF 后端 rip_patch 位置错位
 
 ### 现象
 
@@ -172,7 +174,7 @@ file offset 74893 (176+74717): [0xff, 0x48, 0x89, 0x45]
 = 0x458948ff (指令代码，不是 displacement 467455)
 ```
 
-第一个字节 `0xff`(255) 正确，后三个字节 `0x48 0x89 0x45` 是指令代码（`mov [rbp+...], rax`）。
+第一个字节 `0xff`（255）正确，后三个字节 `0x48 0x89 0x45` 是指令代码（`mov [rbp+...], rax`）。
 
 #### `w32` 写入位置错误（确认）
 
@@ -249,7 +251,7 @@ cp = cp + sz
 
 ### 调试建议
 
-在 `emit_instr` 中，对特定的全局变量（如 `g_pos`, var_idx=698）添加条件断点：
+调试时可以在 `emit_instr` 中，对特定的全局变量（如 `g_pos`, var_idx=698）设置条件断点：
 
 ```core
 // 在 e2_lr 调用前后验证
@@ -260,7 +262,7 @@ cp = cp + e2_lr(buf, pos+cp, 0);
 // 如果 buf[actual_lea_pos] 是其他值（如 0xE8 CALL），则存在偏移
 ```
 
-用 GDB 硬件 watchpoint 跟踪 `buf[74717]` 的写入顺序，确认是哪个操作在 rip_patch 循环之后覆盖了
+可以用 GDB 硬件 watchpoint 跟踪 `buf[74717]` 的写入顺序，确认是哪个操作在 rip_patch 循环之后覆盖了
 正确值。
 
 ## 环境

@@ -3,15 +3,15 @@
 > 定位：受众 = 维护者；状态 = archive（compcert 对照审查任务产物）
 
 > CompCert 是世界上唯一被形式化验证过的 C 编译器（INRIA，Leroy 团队）。
-> 整个后端用 Coq 编写，并由 Coq 证明正确，是学习「验证过的后端」如何编写和证明的唯一参考材料。
+> 整个后端用 Coq 编写，并由 Coq 证明正确，是学习“验证过的后端”如何编写和证明的唯一参考材料。
 > 本文件是对照 Core 后端的阅读指引。
 
 ## 获取源码
 
-网络恢复后执行 `bash ~/get-compcert.sh`（自动尝试 GitHub / INRIA GitLab / 代理）。
-或者手动下载 `https://github.com/AbsInt/CompCert/archive/refs/tags/v3.17.tar.gz`。
+网络恢复后，获取脚本为 `bash ~/get-compcert.sh`（自动尝试 GitHub / INRIA GitLab / 代理）。
+也可以手动下载 `https://github.com/AbsInt/CompCert/archive/refs/tags/v3.17.tar.gz`。
 
-许可证：GPL v2（研究使用无问题）。
+许可证：GPL v2（研究使用允许）。
 
 ## 目录结构（v3.17 解压后，2026-08-11 已下载到 ~/compcert/）
 
@@ -49,13 +49,13 @@ compcert/
 
 ## 两个优先阅读的点
 
-1. `backend/Allocproof.v` 的证明结构，回答「寄存器分配正确性到底意味着什么」：分配前程序与分配后程序在什么等价关系下行为一致（模拟关系 + 良基归纳）。这正是 `opt.cr` 缺少的论证。
+1. `backend/Allocproof.v` 的证明结构说明“寄存器分配正确性到底意味着什么”：分配前程序与分配后程序在什么等价关系下行为一致（模拟关系 + 良基归纳）。这正是 `opt.cr` 缺少的论证。
 
-2. `backend/Asm.v` 的指令语义，这是 CompCert 正确性的基础：每条指令先有精确语义（作为数学对象定义，而不是字符串或字节），才谈得上正确性。Core 的 `instr.cr` 目前只有编码，没有语义，差距就在这里。
+2. `backend/Asm.v` 的指令语义，这是 CompCert 正确性的基础：每条指令先有精确语义（作为数学对象定义，而不是字符串或字节），正确性以指令语义为前提。Core 的 `instr.cr` 目前只有编码，没有语义，差距在此。
 
 ## 与 Core 的关键差异
 
-- CompCert 生成汇编文本，交给外部 `as`/`ld`；Core 自己发射 ELF（`src/arch/linux/ld/`）。ELF 输出是 Core 独有、CompCert 没有对照的部分。
+- CompCert 生成汇编文本，交给外部 `as`/`ld`；Core 直接发射 ELF（`src/arch/linux/ld/`）。ELF 输出是 Core 独有、CompCert 没有对照的部分。
 - CompCert 不验证前端（Clight 语法解析）；它的验证从语义化的中间语言开始。
 - CompCert 用 pass 分阶段，每个阶段一个证明；Core 是单趟管线，架构思路不同，对照时需要注意。
 
@@ -151,13 +151,13 @@ O2 运行验证（首次验证，全部通过）：简单运算（42）、跨函
 - 流程：四组并行只读审查（算术/转换、内存/安全、控制流/调用/并发/动态、未修复项复核）+ 清单任务审查（spec 通过），全程未修改任何 Core 代码；修复范围待维护者反馈后另行授权（反馈门）
 - 核心结论：
   - 安全类：直接数组索引越界守卫的两个检查都失效（F1/F2，`arr[100]` 越界且不报错）；`&arr[i]` 路径第一轮已修，直接索引路径仍无检查；DEREF 检查对大分配（alloc_sz≥2³¹）失效（F17）
-  - 崩溃类：DYN_DISPATCH rel8 补丁错位（F3，已知 tag 也崩溃）、SPAWN 操作数约定错位（F4）、枚举裸变体（F15）、CALL_EXTERN 不传参（F16），均导致 SIGSEGV
+  - 崩溃类：DYN_DISPATCH rel8 补丁错位（F3，已知 tag 也崩溃）、SPAWN 操作数约定错位（F4）、枚举裸变体（不带括号的变体，F15）、CALL_EXTERN 不传参（F16），均导致 SIGSEGV
   - 正确性：I2F 缺 REX.W（F7，|a|≥2³¹ 转 float 错误）、NaN 比较（F8）、解释器无 TI_FLOAT 分支/STORE_PTR 槽拷贝/枚举 payload 损坏（F9/F12/F13）、分配尺寸 ≥2³² 回绕（F14）、YIELD 堆下溢写（F5）、SLICE 无 high 界守卫（F11）、Python 解释器除/模方向（F10）
   - 工具链：build/ 产物与 HEAD 源码不一致（F18，dex 实验残留，需重建 + 清 .core/cache）、check 退出码（F19）、dump 名表缺 49/50/29（F20）
   - 未启用路径（启用时需按契约补语义）：OP_SHL/SHR、OP_AND/OR、EC_R_*、IR_F2I 无发射方、interp 12 个未实现 opcode
   - 已排除或正常：DEREF off-by-one 数学精确、float 字面量 mov imm64、setl/setg 族、FNADDR/HOTPATCH/枚举布局/DYN 双槽/BRANCH-JUMP/LAZY/AWAIT 三方一致
   - 语义表修正（3 处）：cmpf_bool 对 NaN 为 `Some false`（非 None）；sar 为向下取整（8 倍数等价）；BC14 仅在 ≥2³² 时回绕（[2³¹,2³²) 的表述被证伪）
-- 未修复项 7/9/10/16 迁移后全部已修（见上表）
+- 未修复项 7、9、10、16 迁移后全部已修（见上表）
 
 ## 第四轮修复记录（2026-08-17）
 
@@ -171,6 +171,6 @@ O2 运行验证（首次验证，全部通过）：简单运算（42）、跨函
 
 附注：
 
-- F18（环境项）：build/ 产物重建 + 清缓存。修复验证均使用全新重建产物（build/corec + corearch，2026-08-17 00:27），消除 dex 实验残留污染。
-- test_directory_build 回归：波 3 审查发现（波 1 附带修复「字符串长度头按存储字节数」对转义形式计数偏长，GAS .asciz 反转义后引号类比较恒失败，导致 Core.toml 项目名读取失效），已修（nsysysyukvyv c8c4d22f：长度头改按原始字符串 UTF-8 字节数，同时覆盖中文按字符数偏短与转义按转义形式偏长两种情况）。
-- 修复后遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`「第四轮 CompCert 对照遗留项（2026-08-17 记）」；语义表已同步（通过标记 + BC 表状态列，见 `docs/maintainer/design/ir-op-semantics.md` 第 5/7 节）。
+- F18（环境项）：重建 build/ 产物并清缓存。修复验证均使用全新重建产物（build/corec + corearch，2026-08-17 00:27），消除 dex 实验残留污染。
+- test_directory_build 回归：波 3 审查发现（波 1 附带修复“字符串长度头按存储字节数”对转义形式计数偏长，GAS .asciz 反转义后引号类比较恒失败，导致 Core.toml 项目名读取失效），已修（nsysysyukvyv c8c4d22f：长度头改按原始字符串 UTF-8 字节数，同时覆盖中文按字符数偏短与转义按转义形式偏长两种情况）。
+- 修复后遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`“第四轮 CompCert 对照遗留项（2026-08-17 记）”；语义表已同步（通过标记 + BC 表状态列，见 `docs/maintainer/design/ir-op-semantics.md` 第 5/7 节）。
