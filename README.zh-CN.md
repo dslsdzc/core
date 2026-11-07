@@ -1,5 +1,7 @@
 # Core 编程语言
 
+> 定位：受众 = 所有读者；状态 = active；出处 = 本页。
+
 [English](README.md) | 中文
 
 ![self-hosted](https://img.shields.io/badge/self--hosted-yes-blue)

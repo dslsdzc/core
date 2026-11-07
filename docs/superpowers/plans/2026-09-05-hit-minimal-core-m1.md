@@ -1,8 +1,10 @@
 # 硬件接口表（HIT）M1：最小核运行验证实施计划
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
 
-目标：用最小核表（`sub`/`nand`/`load`/`store` 4 个事件）驱动 corearch 发射，运行第一个 Core 快速验证程序（直线加减、位运算、内存读写），验证「表是运行的唯一平台依赖」这一架构。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+
+目标：用最小核表（`sub`/`nand`/`load`/`store` 4 个事件）驱动 corearch 发射，运行第一个 Core 快速验证程序（直线加减、位运算、内存读写），验证“表是运行的唯一平台依赖”这一架构。
 
 结构：分三层。(1) HIT 表文件，toml 文本，4 个事件加 x86 投影条目。(2) corearch 表驱动编码器，读表后按模板解释发射，与现有 `emit_instr` 硬编码路径并行，逐字节对照验证。(3) 合成层，把 IR 直线子集降到 4 个核事件。验证策略：表驱动输出与手写 e2_* 输出逐字节一致，作为表驱动的正确性检查；快速验证程序运行正确，作为运行验证检查。
 
@@ -14,9 +16,9 @@
 - 长时间构建和测试用 `nice -n 19`，见项目规则第 6 条。trap 测试进程需加 `ulimit -c 0` 前缀，原因是本机 core_pattern 有问题，见 TODO:125。
 - 设计依据：`docs/superpowers/specs/2026-09-05-hardware-interface-table.md`（HIT 定稿）。最小核事件为 `sub=1 nand=2 load=3 store=4`。事件签名不含宽度、寄存器和寻址信息。换表即换平台。
 - 改动后重建 corec/corearch 再测：`nice -n 19 python3 build_selfhost_native.py`，约 2 分钟。只改了 corearch 时也可以只重建 corearch，或全量重建。
-- 现有 `emit_instr`（instr.cr:433）硬编码路径保持可用。表驱动路径与它并行存在，全套测试不得被破坏。
+- 现有 `emit_instr`（instr.cr:433）硬编码路径保持可用。表驱动路径与它并行存在，全套测试不能被破坏。
 - IR op 全集见 ast.cr:538-588，约 45 个，含空洞。`IR_BINARY`(2) 的 s3 是子操作，`OP_ADD=1 OP_SUB=2 OP_AND=12` 等见 ast.cr 的 OP_* 常量。变量采用内存槽模型，IR_STORE/IR_LOAD 即槽写读。
-- M1 范围边界，超出即拒绝编译并报「需要扩展事件」：只处理直线程序，不含 IR_BRANCH/JUMP/LABEL/PHI/CALL/RETURN 值和 SPAWN；运算只含加减位与（IR_BINARY OP_ADD/OP_SUB/OP_AND/OP_OR/OP_XOR/OP_NOT）；常量只含小整数，合成见 Task 3。
+- M1 范围边界，超出即拒绝编译并报“需要扩展事件”：只处理直线程序，不含 IR_BRANCH/JUMP/LABEL/PHI/CALL/RETURN 值和 SPAWN；运算只含加减位与（IR_BINARY OP_ADD/OP_SUB/OP_AND/OP_OR/OP_XOR/OP_NOT）；常量只含小整数，合成见 Task 3。
 - 合成、控制流、函数调用和复杂运算的完整覆盖属于 M2，本计划不覆盖。
 
 ---
@@ -160,7 +162,7 @@ Run: `nice -n 19 python3 tests/selfhost/test_hit_table.py`
 
 - [ ] Step 3: 写表文件
 
-按「表文件格式」节新建 `src/arch/hit/core-x86.toml`，含 4 个事件，nand 用单步 and 占位并加 M2 注释。
+按“表文件格式”节新建 `src/arch/hit/core-x86.toml`，含 4 个事件，nand 用单步 and 占位并加 M2 注释。
 
 - [ ] Step 4: 写 hit.cr + globals + 接入构建
 
@@ -218,7 +220,7 @@ M1 混合模式：表覆盖到的 op 走表，未覆盖的走旧路径。逐字�
 
 - [ ] Step 3: 实现编码器
 
-`emit_instr_tabled`：查 `hit_map_ir_op(iri_op)`，无映射时返回 -1，调用方走旧路径；有映射时调用 `hit_event_lookup`，再逐投影步发射。每一步按 `{opcode, reg_role, rm_role}` 组装，操作数角色从 IR 指令取（dst/src1/src2 依角色名），变量到寄存器或栈的映射使用现有 `g2_slot` 加 `e2_load_var` 机制，复用 instr.cr 现有 e2_* 的槽解析。sub 模板为 `48 29 /r`，modrm 的 reg 取 src1 寄存器，沿用 e2 家族 r10 为左操作数、r11 为右操作数的寄存器加载惯例。M1 的形态集：操作数经栈槽加载到固定寄存器对 r10/r11，再发 opcode 和 modrm（rm=r10 型），load/store 使用 rbp+disp 寻址形态。共两种 modrm 形态，由模板字段 `rm_mode` 区分（0=reg，1=rbp+disp32），已在 Task 1 表格式中补齐。nand 事件在 M1 用单步 and 占位，表文件已定。在 Task 3 用合成层把 nand 语义表达为「and 步加取反组合」之前，表模式不发射真正的 nand 程序。偏差记录见计划末尾。
+`emit_instr_tabled`：查 `hit_map_ir_op(iri_op)`，无映射时返回 -1，调用方走旧路径；有映射时调用 `hit_event_lookup`，再逐投影步发射。每一步按 `{opcode, reg_role, rm_role}` 组装，操作数角色从 IR 指令取（dst/src1/src2 依角色名），变量到寄存器或栈的映射使用现有 `g2_slot` 加 `e2_load_var` 机制，复用 instr.cr 现有 e2_* 的槽解析。sub 模板为 `48 29 /r`，modrm 的 reg 取 src1 寄存器，沿用 e2 家族 r10 为左操作数、r11 为右操作数的寄存器加载惯例。M1 的形态集：操作数经栈槽加载到固定寄存器对 r10/r11，再发 opcode 和 modrm（rm=r10 型），load/store 使用 rbp+disp 寻址形态。共两种 modrm 形态，由模板字段 `rm_mode` 区分（0=reg，1=rbp+disp32），已在 Task 1 表格式中补齐。nand 事件在 M1 用单步 and 占位，表文件已定。在 Task 3 用合成层把 nand 语义表达为“and 步加取反组合”之前，表模式不发射真正的 nand 程序。偏差记录见计划末尾。
 
 - [ ] Step 4: 接入 --table 参数
 
@@ -250,10 +252,10 @@ jj commit -m 'feat: 表驱动发射框架：corearch --table + emit_instr_tabled
   - `OP_SUB` 直接走 `sub`。
   - `OP_AND` 用 `nand(nand(a,b), nand(a,b))`。
   - `OP_OR` 用德摩根律：`nand(nand(a,a), nand(b,b))`。
-  - `OP_XOR`、`OP_NOT` 和移位在 M1 报错「需扩展事件」，不覆盖。
-  - `IR_CONST n` 合成「常量等于只读区 load」：编译期布局 `g_const_pool`，每常量 8B 槽，发射前把常量池写入 ELF rodata，`IR_CONST` 替换为 `load(pool_addr(n))`，pool_addr 由布局 pass 填。
+  - `OP_XOR`、`OP_NOT` 和移位在 M1 报错“需扩展事件”，不覆盖。
+  - `IR_CONST n` 合成“常量等于只读区 load”：编译期布局 `g_const_pool`，每常量 8B 槽，发射前把常量池写入 ELF rodata，`IR_CONST` 替换为 `load(pool_addr(n))`，pool_addr 由布局 pass 填。
   - `IR_LOAD/IR_STORE`（槽读写）直接走 `load/store` 事件。
-  - 变量槽地址作为 load/store 的地址操作数，即槽地址（栈基址加偏移，由投影解析）。x86 投影的 addr 角色是 rbp+disp 形态。这里需要扩展形态：Task 2 的单形态（rm=寄存器）不够，槽读写需要 rbp+disp 寻址。修正是 Task 2 实现时 load/store 模板需支持 disp 寻址形态（modrm rm=101 加 disp32 相对 rbp）。Task 2 的形态范围包含「rm = rbp+disp32」一种。
+  - 变量槽地址作为 load/store 的地址操作数，即槽地址（栈基址加偏移，由投影解析）。x86 投影的 addr 角色是 rbp+disp 形态。这里需要扩展形态：Task 2 的单形态（rm=寄存器）不够，槽读写需要 rbp+disp 寻址。修正是 Task 2 实现时 load/store 模板需支持 disp 寻址形态（modrm rm=101 加 disp32 相对 rbp）。Task 2 的形态范围包含“rm = rbp+disp32”一种。
 - 合成在 IR 层完成，位置是 corearch load_ccr 之后、发射之前的指令数组改写。新指令用现有 IR 结构（g_ir_instrs）表达。合成输出不是 IR 指令，而是事件级指令：表模式下的发射中间层是事件流。corearch 增加事件流数组 `g_hit_ev_stream`，每条包含 event_id、操作数 var 引用和常量地址。降低 pass 把 IR 指令翻译或合成为事件流，编码器消费事件流。
 - 这是本计划最关键的结构决策：表模式下 corearch 内部是 IR 经降低得到事件流，再经表投影得到字节；旧模式是 IR 直接得到字节。
 
@@ -350,6 +352,6 @@ jj commit -m 'docs: HIT M1 完成记录 + M2 待办（最小核表端到端完�
 4. M2 待办（评审 Minor）：hit_w32 负值标记值写入实现分裂（store dst/load s2 未用标记值 −1 读回 255 vs 0xFFFFFFFF）、预检对称性断言、add 反减的 dest-fresh 前提固化、'events emitted' 计数改名、REX 注释 W+R+B。
 
 1. nand 的 x86 投影：x86 没有 nand 指令，M1 用 and 单步占位。nand 语义由合成层在 Task 3 覆盖之前，不发射 nand 事件程序。完整 nand 序列投影（and 加 not 两步）与事件流语义闭合属于 M2 事项。
-2. 混合模式：M1 表驱动与旧路径并行，未映射的 op 走旧路径。「表是唯一平台依赖」的完全实现，即全 op 走表，是 M2 的 `--table` 全量切换。
+2. 混合模式：M1 表驱动与旧路径并行，未映射的 op 走旧路径。“表是唯一平台依赖”的完全实现，即全 op 走表，是 M2 的 `--table` 全量切换。
 3. 常量注入：设计上常量等于只读区 load，最小核没有 const 事件。M1 先做常量池布局，图常量区（v6 语义）后续处理。
 4. 地址形态：load/store 的槽和池寻址使用投影层 disp 形态，M1 支持 rbp+disp 一种。

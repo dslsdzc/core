@@ -1,23 +1,21 @@
 # CLAUDE.md
 
-本文件为 Claude Code 提供在本仓库中处理代码时的指引。
+本文件是 Claude Code 在本仓库中处理代码时的指引。
 
 ## 硬性规则（Hard Rules）
 
-这些规则不可违反，除非用户明确另有指示。
+除用户明确另有指示外，以下规则均适用。
 
-1. 不许绕过问题，找到 root cause 直接修复。
-2. 禁止使用 `git`。版本控制统一使用 `jj`，所有版本控制操作都用 `jj` 命令。
-3. 文件永久不允许还原。还原必须经过用户明确许可。
-4. 直接解决问题，不变通、不绕过、不掩盖。
-5. 除非彻底不可修复，充分验证后才可提替代方案。
-6. 编译任务限制 CPU。任何长时间编译或测试任务必须用 `cpulimit -l 10` 或 `nice -n 19` 限制 CPU 占用不超过 10%，避免风扇噪音影响用户体验。
-
-违反这些规则的后果：用户会非常愤怒，并且不再信任你。
+1. 问题要找到 root cause 后直接修复，不绕过。
+2. 版本控制统一使用 `jj`，所有版本控制操作都用 `jj` 命令，不使用 `git`。
+3. 文件永久不还原；确需还原时，先取得用户明确许可。
+4. 问题直接解决，不变通、不绕过、不掩盖。
+5. 只有彻底无法修复时才提出替代方案，并且替代方案需要充分验证。
+6. 编译任务需要限制 CPU。长时间编译或测试任务用 `cpulimit -l 10` 或 `nice -n 19` 把 CPU 占用限制在不超过 10%，以减小风扇噪音对用户体验的影响。
 
 ## Project Overview
 
-Core 是一门新的通用编程语言，设计取向是「语义保留」（semantic preservation）。它的 IR 在编译全过程中保留完整的类型和语义信息，供形式验证工具直接使用。
+Core 是一门新的通用编程语言，设计取向是语义保留（semantic preservation）。它的 IR 在编译全过程中保留完整的类型和语义信息，供形式验证工具直接使用。
 
 编译器有两个：
 
@@ -87,19 +85,19 @@ python3 build_selfhost_native.py       # 产出三个：build/corec、build/core
 ./build/corec selftest-purity          # 真纯度计算自测通道
 ```
 
-构建脚本有两个结构性事实（只有读 `build_selfhost_native.py` 才能看到，不要根据文件名推断）：
+构建脚本有两个结构性事实，只有读 `build_selfhost_native.py` 才能看到，无法从文件名推断：
 
 1. 清单是判断单元归属的依据。脚本按 `common_files` / `hit_engine_files` / `kernel_files` /
    `arch_x86_64_files` / `format_elf_files` / `os_linux_files` / `backend_support_files` /
    `corec_files` / `corelsp_files` / `x86_linux_target_files` 逐条列出全路径，然后 concat 成
    一个扁平编译单元（逐文件去掉 `import` 行）。段内和段间的相对顺序决定行为（平铺单元的声明序和
-   全局序），搬迁文件时必须保持顺序。因此，判断某个文件属于谁、是否参与编译，以这个脚本为准，
+   全局序），搬迁文件时需要保持顺序。因此，判断某个文件属于谁、是否参与编译，以这个脚本为准，
    不以目录位置或 `_import.cr` 为准。
-2. 两道构建检查（根据 ld 单元不报错地缺陷这一问题增加）。第一道是 `guard_manifest`，检查清单中的
+2. 两道构建检查（针对 ld 单元不报错这一缺陷增加）。第一道是 `guard_manifest`，检查清单中的
    文件是否存在；第二道是 `guard_build_log`，检查本阶段日志中的 `error[` 计数和未定义符号计数
-   必须为 0。project-mode 路径（`corec build <dir>`）不经过这两道检查，对应的检查是
+   需要为 0。project-mode 路径（`corec build <dir>`）不经过这两道检查，对应的检查是
    `tests/selfhost/test_backend_bootstrap.py` 的 `run_checked`（rc=0 时仍扫描 stdout 和 stderr
-   中的 `error[`）。两处检查互为补充，改一处必须同步另一处。
+   中的 `error[`）。两处检查互为补充，一处改动需要同步另一处。
 
 ### 本地复现 CI（首选入口，与 CI 运行同一条命令）
 
@@ -116,8 +114,8 @@ CI_JOB_NAME=suite src/ci/run.sh             # tests/suite/*.cr 逐个编译成 E
 CI_JOB_NAME=full-bootstrap src/ci/run.sh    # 三阶段自举：corec2 与 corec3 的 cmp 结果必须逐字节相同
 ```
 
-> 判断标准：修改 `src/compiler/**` 时，至少运行 `selfhost-tests` 和 `full-bootstrap`；只改文档或注释时，`check` 足够。
-> 长编译遵守硬性规则 #6。
+> 判断标准：修改 `src/compiler/**` 时，最低要求是运行 `selfhost-tests` 和 `full-bootstrap`；只改文档或注释时，运行 `check` 即可。
+> 长编译按硬性规则 #6 限制 CPU。
 
 ### Test suites
 
@@ -134,7 +132,7 @@ CI_JOB_NAME=full-bootstrap src/ci/run.sh    # 三阶段自举：corec2 与 corec
 | `kernel/` | 语料 + 驱动 | McTT 到 Core 内核差分测试；需要仓库外的 OCaml 参考实现 `~/mctt`（见 `tools/mctt_ref/`），因此不进入 CI |
 | `hit/` | `.cr` + `.ccr` | HIT 表快速验证语料 |
 
-运行单个套件：直接运行对应的 `.py`。多数套件不支持过滤参数，用例表写在文件内的
+运行单个套件的方法：直接运行对应的 `.py`。多数套件不支持过滤参数，用例表写在文件内的
 `CASES` / `CHECK_CASES` 列表里，因此运行单个用例需要修改列表或临时注释。
 
 ```bash
@@ -142,7 +140,7 @@ python3 tests/bootstrap/test_pipeline.py   # 核心管线：lex、parse、check�
 python3 tests/selfhost/test_impl.py        # Impl/method 测试
 python3 tests/selfhost/test_borrow.py      # 自举借用检查器（7 条规则）
 ```
-> 清单以什么为准（2026-09-16 文档审计修订）：上面三行只是入口示例，不是全集。
+> 清单范围（2026-09-16 文档审计修订）：上面三行只是入口示例，不是全集。
 > `tests/selfhost/test_*.py` 实际有 50 多个套件，`tests/bootstrap/*.py` 有 7 个套件。
 > 套件全集以 `ls tests/selfhost/test_*.py tests/bootstrap/*.py` 为准，CI 接入点以 `src/ci/run.sh`
 > 的 `selfhost-tests` / `bootstrap-tests` job 为准（每一档都有接入点和计数说明）。完整枚举见
@@ -153,42 +151,42 @@ python3 tests/selfhost/test_borrow.py      # 自举借用检查器（7 条规则
 行为探针语料（`tests/probes/`，29 档，以 `check` 面负例为主，不是编译单元）和回归测试的配置与步骤
 （`tools/baseline/`：固定基线重建、sha 允许清单、两条 runner）见 `tools/baseline/REBUILD.md`。判定面回归检查
 由四项组成：固定基线同源对拍、行为探针、突变控制和三态纪律（R2 P6 Task 1 起；影子通道已下线，
-不得引用其计数）。
+其计数不再引用）。
 
-修改单个 suite 语料：
+修改单个 suite 语料的方法：
 
 ```bash
 ./build/corec build tests/suite/at_test.cr -o /tmp/bin --static && chmod +x /tmp/bin && /tmp/bin
 ```
 
-> 新增测试文件必须同时登记，否则 CI 会失败（`test_ci_hook_coverage.py` 自动判定）：
-> 新建 `tests/{selfhost,bootstrap,harness}/*.py` 后，要在 `src/ci/run.sh` 加接入点，
+> 新增测试文件需要同时登记，`test_ci_hook_coverage.py` 自动检查这一点：
+> 新建 `tests/{selfhost,bootstrap,harness}/*.py` 后，在 `src/ci/run.sh` 加接入点，
 > 或者在 `tests/harness/ci_hook_allowlist.txt` 逐条登记一行理由（`路径<TAB>理由`）。
 > 两个方向都会检查：已挂或已删的条目留在允许清单里也会 FAIL。这项检查存在的原因见 `run.sh:71-79`
-> （曾因「自称已挂而 run.sh 零命中」导致 `error[N06]` 跨 5 个任务漏检 33 次）。
+> （历史问题：代码声称已挂接，而 run.sh 零命中，导致 `error[N06]` 跨 5 个任务漏检 33 次）。
 
-### 检查集合（回归检查四要素 + canary 检查）
+### 检查集合（回归检查四要素和 canary 检查）
 
 判定面回归检查包含四项：固定基线同源对拍、行为探针、突变控制、三态纪律（R2 P6 Task 1 起；
-影子通道已下线，不得引用其计数或摘要）。
+影子通道已下线，其计数或摘要不再引用）。
 
 - 固定基线：二进制不入库，由 `bash tools/baseline/rebuild.sh <outdir>` 从 pinned revision
   重建。重建步骤和三份 sha 允许清单见 `tools/baseline/REBUILD.md`；对拍 runner 是
   `tools/baseline/parity_run.sh`（逐档执行 `clean-cache`）。CI 内不运行，因为浅检出没有 jj。
 - 行为探针：语料在 `tests/probes/`（29 档，不是编译单元），加上行为套件；runner 是
   `tools/baseline/probes_run.sh`。
-- 突变控制：改坏派生面后，探针和对拍必须失败（`tests/harness/test_criteria_mutations.py`
+- 突变控制：改坏派生面后，探针和对拍应失败（`tests/harness/test_criteria_mutations.py`
   是这项要求的自动检查形式）。
 - 三态纪律：引擎返回 -1 时按 ICE04 硬错处理（`main.cr` 硬名单）。
 
 ELF 基准和 `.ccr` 四项检查（CI `selfhost-tests` 内，`bash tools/baseline/canary_check.sh` +
 `tests/harness/test_canary_carrier.py --require-compiler`）：基准值的唯一来源是
 `tools/baseline/canary_values.tsv`。检查规则分两类。ELF 基准检查要求生成结果不变；值发生变化表示
-超出范围，应停止并上报。`.ccr` 四项检查格式和内容形状；值变化不一定是回归，但需要说明原因，在同一组
-更新基准值并保留旧值。
-> 注：更新基准值的规则：运行结果不一致时先查明原因。原因无法确定时按回归处理，停止并上报。
-> 不要修改值表去匹配输出。
-> 详见 `docs/superpowers/plans/2026-09-16-criteria-carrier.md` 的「更新基准值的规则」。另注：`.ccr` 四项
+超出范围，此时停止并上报。`.ccr` 四项检查格式和内容形状；值变化不一定是回归，但需要说明原因，并在同一组
+更新基准值、保留旧值。
+> 注：更新基准值的规则如下：运行结果不一致时先查明原因；原因无法确定时按回归处理，停止并上报。
+> 值表不用于匹配输出，不应为了匹配输出而修改。
+> 详见 `docs/superpowers/plans/2026-09-16-criteria-carrier.md` 的“更新基准值的规则”。另注：`.ccr` 四项
 > 以空缓存状态的值为基准，并且 `.so` 索引方面需要环境归一化（检查脚本已将 `HOME` 固定为采集目录内的
 > 空 `home/`）。
 
@@ -244,7 +242,7 @@ src/compiler/     （共 38 个 .cr；2026-09-16 文档审计修订：原清单�
 ├── diag.cr         编译器诊断（corec+corelsp；含 fail-closed 豁免表 `diag_gate_exempt`）
 ├── dump.cr         调试 dump 工具（corec）
 ├── dyn_arr.cr      动态数组扩容辅助函数、字符串驻留（common+corec+corelsp）
-├── elf.cr          未被引用的文件（566 行、零 importer、三面清单都没有；TODO #2026-09-10-3；不要引用）
+├── elf.cr          未被引用的文件（566 行、零 importer、三面清单都没有；TODO #2026-09-10-3；不引用该文件）
 ├── entry.cr        project-mode 入口 shim（`fn main() { return compiler_main(); }`）
 ├── ext_mgr.cr      编译器扩展管理器：插件注册表和钩子调度（corec）
 ├── ext_safety.cr   运行时安全检查插件（通过 ext_mgr 注册到编译钩子）（corec）
@@ -401,31 +399,31 @@ Core 使用 `:=` 和 `: type` 声明，没有 `let` 关键字：
 
 ### corec2 tokenizer 死循环（自举阻塞项）：历史条目，当前不复现（2026-09-16 文档审计修订）
 
-`./build/corec2 check FILE.cr` 会卡在 tokenizer。根因：约 9 个全局变量（`g_tok_cap`, `g_tokens`,
-`g_str_count`, `g_line`, `g_source_len`, `g_x86_is_global`, `g_x86_global_cap`, `g_str_hash`,
-`g_error_count`）没有被 parser 注册到 `g_ir_globals`，赋值语句被不报错地丢弃。PR #9（RhineIris）已通过
+执行 `./build/corec2 check FILE.cr` 时，tokenizer 会进入死循环。根因：约 9 个全局变量（`g_tok_cap`、`g_tokens`、
+`g_str_count`、`g_line`、`g_source_len`、`g_x86_is_global`、`g_x86_global_cap`、`g_str_hash`、
+`g_error_count`）没有被 parser 注册到 `g_ir_globals`，赋值语句被丢弃且不报错。PR #9（RhineIris）已通过
 tokenizer 参数化（`tokenize(_src: string)`）避开 `g_source` 全局变量依赖，但其他未注册全局变量的问题
 仍待解决。
 
 > 现状（审计实核，2026-09-16）：`corec2` 链可以正常执行，并且逐字节稳定。`src/ci/run.sh` 的
 > `full-bootstrap` job 用 `./build/corec` 构建 `corec2`，再由 `corec2` 构建 `corec3` 并执行 `cmp`；
 > R2 P6 Task 7 实测 `corec2 == corec3` IDENTICAL、N06=0、快速验证 42（如果 tokenizer 死循环，这个 job
-> 一定失败）。因此本条目不再作为阻塞项，原文保留仅供追溯（「未注册全局变量」的历史记录仍是审计资料）。
+> 一定失败）。因此本条目不再作为阻塞项，原文保留仅供追溯（未注册全局变量的历史记录仍是审计资料）。
 
 ### pass_cse / O1 稳定性（未复核；2026-09-16 审计标注）
 
 `--opt-level 1` 在自举编译时可能崩溃（`pass_cse` 大函数问题，`alloc_registers` 元数据交互异常）。
 
-> 审计状态：本条目是推测性断言（「可能崩溃」），2026-09-16 审计未能实核（审计期间没有构建）。要判定
+> 审计状态：本条目是推测性断言（可能崩溃），2026-09-16 审计未能实核（审计期间没有构建）。要判定
 > 是否保留，需要实测一次 `-O 1` 自举链（检查：`corec build src/compiler/main.cr -O 1` 的 rc 和产物）。
-> 在此之前按「未复核」对待，不能据此推断 O1 可用或不可用。
+> 在此之前按未复核对待，无法据此推断 O1 可用或不可用。
 
 ## Key Conventions
 
 - 文件扩展名：`.cr`（源码）、`.cir`（数据流图 IR，图形态）、`.ccr`（格形态 IR，v9 是段表架构的
   8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)。R2 P4 实现方式阶段起使用段表，R2 P6 T3 起为 v9，
   NOD 40B 表示 TYPE 段项索引；版本以 `src/compiler/ccr_io.cr::CCR_VERSION` 为准；文件名和测试名
-  保留「v7」，它是段表架构的代号，见 specs/2026-09-09-lattice-ir-v7-format.md。2026-09-16 审计修订：
+  保留 v7，它是段表架构的代号，见 specs/2026-09-09-lattice-ir-v7-format.md。2026-09-16 审计修订：
   原文写 v8，已过时）、`.corespec`（2026-09-06 退役，规约并入 .cr 语法，见 grammar/core.ebnf
   迁移事项）
 - `tests/bootstrap/` 和 `tests/selfhost/` 的测试在代码中内联 Core 源码字符串，并比较输出
@@ -438,22 +436,22 @@ tokenizer 参数化（`tokenize(_src: string)`）避开 `g_source` 全局变量�
 
 ## Known Issues & TODO
 
-当前状态见 [TODO.md](TODO.md)。文件有 371 KB、1300 多行，不要整篇阅读，用 `rg` 或 `grep` 定位条目。
+当前状态见 [TODO.md](TODO.md)。文件有 371 KB、1300 多行，适合用 `rg` 或 `grep` 定位条目，不需要整篇阅读。
 
-### TODO 标识约定（自动检查，写错会导致 CI 失败）
+### TODO 标识约定（自动检查）
 
-新条目标识是 `#YYYY-MM-DD-N`（日期是创建日期；`N` 是当天序号，按标题行行号升序取「当天最大 +1」）。
-旧「全局单调号 `#NN`」已永久封存，不复用，也不重新编号。历史 commit 和文档里的旧号按 TODO.md 头部的
-「编号迁移对照表」解析。`tests/harness/test_todo_id_migration.py` 自动执行以下检查：
+新条目标识是 `#YYYY-MM-DD-N`（日期是创建日期；`N` 是当天序号，按标题行行号升序取当天最大序号加 1）。
+旧的全局单调号 `#NN` 已永久封存，不复用，也不重新编号。历史 commit 和文档里的旧号按 TODO.md 头部的
+编号迁移对照表解析。`tests/harness/test_todo_id_migration.py` 自动执行以下检查：
 J1 全仓没有旧形态残留；J2 新 id 与 TODO.md 标题双向一致，没有悬空；J3 映射完备；J4 突变自证。
 
-> 注：J4 的突变样本取自本文件，`elf.cr` 未被引用文件条目里的 `TODO #2026-09-10-3` 引用就是这个实现方式。
-> 删除或修改它会让 J4 失去自证能力（运行 `python3 tests/harness/test_todo_id_migration.py` 可以立即确认）。
+> 注：J4 的突变样本取自本文件：`elf.cr` 未被引用文件条目里的 `TODO #2026-09-10-3` 引用。
+> 删除或修改该引用会使 J4 失去自证能力（运行 `python3 tests/harness/test_todo_id_migration.py` 可以确认）。
 
-### 会话级硬性规则的自动检查（不能绕过）
+### 会话级硬性规则的自动检查
 
 - 硬性规则 #2（禁用 git）：`.claude/settings.json` 的 PreToolUse hook 指向 `.claude/hooks/block-git.py`，
   拦截任意位置的 git 调用（分隔符后、命令替换、`bash -c`、前缀命令后）。引号内的文本和 heredoc 体
   不会被误拦，`jj git push` 放行。回归测试是 `tests/harness/test_block_git.py`。hook 自身异常时
-  一律放行（宁可不拦截，也不阻塞会话），因此不要依赖它作为安全边界，只把它当作习惯约束。
-- 硬性规则 #3（文件永久不允许还原）：`jj restore`、`jj abandon`、覆盖回退既有文件，都必须先取得明确许可。
+  一律放行（宁可不拦截，也不阻塞会话），因此它不能作为安全边界，只作为习惯约束。
+- 硬性规则 #3（文件永久不还原）：`jj restore`、`jj abandon`、覆盖回退既有文件，都需要先取得明确许可。

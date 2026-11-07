@@ -1,5 +1,7 @@
 # 泛型完整实现设计
 
+> 定位：受众 = 维护者；状态 = superseded；出处 = 本页。
+
 ## 概述
 
 在自托管 Core 编译器中完整实现泛型。支持泛型函数（`fn foo<T>(x: T)`）和泛型结构体（`struct Box<T> { val: T }`），多参数（`<A, B>`），自动类型推导，编译期 monomorphization。

@@ -1,12 +1,14 @@
 # 更新日志
 
+> 定位：受众 = 历史读者；状态 = 历史记录；出处 = 本页。
+
 > 说明：本文档记录重要变更。近期每日开发记录、预存 bug 与架构规划以 `TODO.md` 为准。
 > 2026-06-21 至 2026-07-23 之间曾存在文档缺失期，以下条目按提交历史与 `TODO.md` 补齐。
 
 ## 2026-09-17
 ### [change] `@no_bounds_check` 更名为 `@NoBoundsCheck`
 - 维护者 2026-09-17 指示的重命名。完全重命名，不保留别名：旧名 `@no_bounds_check` 从此不是内建，
-  必须报错（`error[N01] unknown @ builtin`：rc=1，带文件:行:列定位，零产物），不得不报错地接受。
+  遇到旧名要求报错（`error[N01] unknown @ builtin`：rc=1，带文件:行:列定位，零产物），遇到旧名不报错而继续接受不符合要求。
 - 名称分派在四处同步：`src/compiler/checker.cr`（EXPR_AT 名分派）、`src/compiler/ir_gen.cr`（注解发射）、
   `src/compiler/dataflow.cr`（`.cir` 显示名）、`src/lsp/analysis.cr`（`@` 补全表）。语料和探针同步：
   `tests/suite/at_test.cr`、`tests/suite/at_test_mini7.cr`、`tests/probes/p_annots{,2}.cr`（另加探针 README 表）。
@@ -60,7 +62,7 @@
 - Fix disp32 emission to use the current instruction base for struct fields, constant array indices, enum tags, and enum construction.
 - Fix REX/ModRM/SIB encoding for variable array index loads and stores.
 - Add native ELF regression coverage for aggregate access at O0/O1.
-- Verify clean corec -> corec2 -> corec3 bootstrap at O0 and O1.
+- Verify clean corec to corec2 to corec3 bootstrap at O0 and O1.
 - corec2 自举阻塞解除：corec2 --help、tokenizer/check 和 corec2 到 corec3 构建均正常；O0/O1 自举均成功。
 
 ## 2026-07-26
@@ -93,7 +95,7 @@
 - Fix disp32 emission to use the current instruction base for struct fields, constant array indices, enum tags, and enum construction.
 - Fix REX/ModRM/SIB encoding for variable array index loads and stores.
 - Add native ELF regression coverage for aggregate access at O0/O1.
-- Verify clean corec -> corec2 -> corec3 bootstrap at O0 and O1.
+- Verify clean corec to corec2 to corec3 bootstrap at O0 and O1.
 
 ## 2026-04-24
 ### init
@@ -148,7 +150,7 @@
 ### [fix] global var stack size, REX/SIB codegen, resolve_labels copy semantics, text assembly path removed, Chunk linker restored
   - parser.cr: values[0] = -1 (global var without initializer no longer crashes)
 ### [bump] all MAX_* limits 4-16x for self-compilation headroom
-  MAX_FUNCS: 1024 -> 16384
+  MAX_FUNCS: 1024 to 16384
 
 ## 2026-06-14
 ### [wip] full dynamic array conversion + string pool

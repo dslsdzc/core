@@ -1,5 +1,7 @@
 # 格形态 IR 字节格式：修订记录与实施注记
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 对应设计：[2026-09-09-lattice-ir-v7-format.md](../specs/2026-09-09-lattice-ir-v7-format.md)
 
 本文保存格式版本演进、实施期裁决、检查集合和逐阶段修订注记。设计正文只保留当前 v9 字节布局、段定义和校验规则。
@@ -10,7 +12,7 @@
 状态：原为格式设计定稿（待实现），现已实施（2026-09-10，`plans/2026-09-09-lattice-ir-v7.md` Task 1-3 完成）。v7 段表架构时代的字节状态以此为准；实施期裁决回填见第 4 节规则 4、第 6 节开放点 3 和 5。
 2026-09-12 追加（R2 P4 Task 1，D9/D10）：版本 7 改为 8，段集合增加 TYPE(7)/IFACE(8)（Task 1 落空壳；内容面归 Task 2/3）。文件名保留“v7”，因为它是段表架构代号（改名涉及 40+ 处引用，收益为零）；v8 = v7 的加法扩展：前六段字节布局不变，加段加版本 bump。旧 v7 六段文件由版本检查整类拒收（会报错当作“两段缺席 = 空表”）。本条为现行字节权威（第 1/2/3.7/3.8/4 节已同步）。
 2026-09-14 追加（R2 P5 Task 2/7）：版本、段集合、记录布局零变化。单槽化只在内存面（DFNode `OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码，72B 不变）。`.ccr` 面的 `tk` 语义定为派生码（第 3.3 节“`tk` 字段语义”块，含 D20 稳定引用形态规范）；`version` 保持 8，`CIR_CACHE_VER` 保持 17；`test_ccr_types` 从 34 例增加到 40 例。
-2026-09-15 追加（#60 阶段 T2/T3：暖缓存不报错地缺陷修复加检查集合有缓存状态分支）：`.cir` 快照格式零变化（`CIR_CACHE_VER` 保持 17）。修复落在保存侧策略：生成期对“快照不载的共享面”（已确认面 = `g_types` 类型行表；`checker.cr:10-19` 只追加不去重、快照只载 var 的 `type` 行号）有副作用的函数不写条目，因此下一次运行必然 miss，重放全部生成期副作用（“宁可 miss 不可不报错地”）；实现 = `main.cr` miss 分支 `tc0 := g_type_count` 比对。代价实测 0.3%（语料 101 档 989 到 986 条目）和 0.9%（编译器自源 110 到 109）。第 3.3 节“有缓存状态缺行则写 -1”的分支因此收窄：分配行的函数不再被命中（复合 mint 行在有见证时结构上不落盘，实核 101 档扫描只有 `ptr_ref_first.cr` 有复合行且全缺，因此原盘面检查不可达，重新固定见 `tests/selfhost/test_ccr_types.py` ㊲ 加 `/tmp/fct4/task2-report.md` 第 3.2 节）。检查集合补齐有缓存状态分支（本缺陷长期不可见 = 检查范围对有缓存状态零覆盖）：入仓语料 `tests/probes/warm/`（7 档，定路径是该语料的设计要点）加 `tools/baseline/warm_leg.sh`（两层）/`warm_run.sh`（实际执行层）；实核：`check` 面写 0 条缓存条目，因此有缓存状态分支必须走 `ccr` 面。约定/预期值/时长见 `tools/baseline/REBUILD.md`；根因链与统一清单见 `docs/superpowers/plans/2026-09-15-warm-cache-diagnostics.md` 第 8-9 节与 `docs/archive/sdd/warm-task4-report.md`。
+2026-09-15 追加（#60 阶段 T2/T3：暖缓存不报错地缺陷修复加检查集合有缓存状态分支）：`.cir` 快照格式零变化（`CIR_CACHE_VER` 保持 17）。修复落在保存侧策略：生成期对“快照不载的共享面”（已确认面 = `g_types` 类型行表；`checker.cr:10-19` 只追加不去重、快照只载 var 的 `type` 行号）有副作用的函数不写条目，因此下一次运行必然 miss，重放全部生成期副作用（“宁可 miss 不可不报错地”）；实现 = `main.cr` miss 分支 `tc0 := g_type_count` 比对。代价实测 0.3%（语料 101 档 989 到 986 条目）和 0.9%（编译器自源 110 到 109）。第 3.3 节“有缓存状态缺行则写 -1”的分支因此收窄：分配行的函数不再被命中（复合 mint 行在有见证时结构上不落盘，实核 101 档扫描只有 `ptr_ref_first.cr` 有复合行且全缺，因此原盘面检查不可达，重新固定见 `tests/selfhost/test_ccr_types.py` ㊲ 加 `/tmp/fct4/task2-report.md` 第 3.2 节）。检查集合补齐有缓存状态分支（本缺陷长期不可见 = 检查范围对有缓存状态零覆盖）：入仓语料 `tests/probes/warm/`（7 档，定路径是该语料的设计要点）加 `tools/baseline/warm_leg.sh`（两层）/`warm_run.sh`（实际执行层）；实核：`check` 面写 0 条缓存条目，因此有缓存状态分支需要走 `ccr` 面。约定/预期值/时长见 `tools/baseline/REBUILD.md`；根因链与统一清单见 `docs/superpowers/plans/2026-09-15-warm-cache-diagnostics.md` 第 8-9 节与 `docs/archive/sdd/warm-task4-report.md`。
 2026-09-14 追加（R2 P6 Task 3，D20-2 兑现 = β）：版本 8 改为 9，NOD 记录 36B 改为 40B（语义区 28B 改为 32B：+28 新增 `item i32` = TYPE 段文件空间项索引，-1 = 无项；邻接域顺移 +32/+36）。前六段其余字段布局与 `tk` 槽语义/字节零变化。旧 v8 及更早文件由版本检查整类拒收（D10 先例）。`.cir` 快照面零改动（`CIR_CACHE_VER` 保持 17。项索引只在 TYPE 段重建后的文件空间成立，`.cir` 写点早于该空间，因此落盘只能得到进程内索引 = D20-3 禁令；保存期由派生码重新派生即可）。写侧装填 = `ccr_types.cr:ccr_nod_item_populate`（保存期单遍）；读侧 = `load_ccr` 的 TYPE 段后一致性硬校验（域外 / `atom_of(项) ≠ 盘上码` 则拒绝）加 corearch `--dump-nod-items` 读回通道。`test_ccr_types` 从 40 例增加到 48 例。
 性质：两段式第二段（字节格式）；语义定义 = `2026-09-09-lattice-ir-v7-carrier-design.md`（权威）；本文件 = 字节布局定义。
 
@@ -85,9 +87,9 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 
 邻接约定：节点出边在 EDG 段连续（节点 i+1 的 `first_edge` = 节点 i 的 `first_edge` + `edge_count`），重建时流式读取，零索引（`cir_cache` v13 同款）。文件序 = 节点 id 序 = 生产者选择的合法拓扑调度。
 
-`item` 字段语义（R2 P6 Task 3 起 = β 兑现；`tk` 槽字节零变化）：`item` = TYPE 段文件空间项索引（D20-2 唯一许可的跨边界形态；D13 确定性装填，因此文件内索引稳定）。写侧 = `ccr_types.cr:ccr_nod_item_populate`（保存期由盘上派生码经判定衔接层 `sh_tk_face_of_code`/`sh_term_of_ti` 重新派生，不得沿用 emit 期活表索引：`ccr_type_populate` 的 `tt_layer_reset` 在 save 前作废活表引用，D20-3/`bad_term=329`）。读侧 = `load_ccr` 的 TYPE 段后一致性硬校验（`item < -1` / `≥ tt_count()` / `atom_of(项) ≠ tk` 则拒绝 rc=1，不得不报错地当作无项）加 corearch `--dump-nod-items` 读回通道。有缓存状态缺行（缓存命中跳过 ir_gen）时写 `-1`（码仍由 `tk` 保真；有缓存状态项面登记为部分）。
+`item` 字段语义（R2 P6 Task 3 起 = β 兑现；`tk` 槽字节零变化）：`item` = TYPE 段文件空间项索引（D20-2 唯一许可的跨边界形态；D13 确定性装填，因此文件内索引稳定）。写侧 = `ccr_types.cr:ccr_nod_item_populate`（保存期由盘上派生码经判定衔接层 `sh_tk_face_of_code`/`sh_term_of_ti` 重新派生，不能沿用 emit 期活表索引：`ccr_type_populate` 的 `tt_layer_reset` 在 save 前作废活表引用，D20-3/`bad_term=329`）。读侧 = `load_ccr` 的 TYPE 段后一致性硬校验（`item < -1` / `≥ tt_count()` / `atom_of(项) ≠ tk` 则拒绝 rc=1，不能不报错地当作无项）加 corearch `--dump-nod-items` 读回通道。有缓存状态缺行（缓存命中跳过 ir_gen）时写 `-1`（码仍由 `tk` 保真；有缓存状态项面登记为部分）。
 
-`tk` 字段语义（R2 P5 Task 2 起 = 现行；字节/偏移零变化，R2 P6 Task 3 后仍为派生码）：`tk` = 派生码。类型面 op 到类型行（`IR_CONST`/`IR_BINARY` 以及 `{IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}`）；辅码面 op 到旗标/宽度/计数（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）；其余得到 0。由 `sh_dfn_code_of_slots(类型项, 辅码)` 单源派生（emit / `lower_to_ccr` / `.cir` 装载侧三处同源；分类表 = `ty_shadow.cr` 的 `sh_tk_face_of_code`）。盘面不表示进程内项引用，D20 禁令：进程内项表索引不得跨进程或跨复位边界（P4 `bad_term=329` 红证）。未来跨边界唯一许可形态 = TYPE 段文件内项索引（β 已兑现 = 上方 `item` 槽，R2 P6 Task 3）。P5 单槽化只在内存面（DFNode 72B 不变：`OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码），NOD `.ccr` 面实测与 P4 逐字节同（`ptr_arith`/`generics_test`；`--dump-objects` 同）。详见 `plans/2026-09-13-r2-p5-cleanup.md` Task 2。
+`tk` 字段语义（R2 P5 Task 2 起 = 现行；字节/偏移零变化，R2 P6 Task 3 后仍为派生码）：`tk` = 派生码。类型面 op 到类型行（`IR_CONST`/`IR_BINARY` 以及 `{IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}`）；辅码面 op 到旗标/宽度/计数（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）；其余得到 0。由 `sh_dfn_code_of_slots(类型项, 辅码)` 单源派生（emit / `lower_to_ccr` / `.cir` 装载侧三处同源；分类表 = `ty_shadow.cr` 的 `sh_tk_face_of_code`）。盘面不表示进程内项引用，D20 禁令：进程内项表索引不能跨进程或跨复位边界（P4 `bad_term=329` 红证）。未来跨边界唯一许可形态 = TYPE 段文件内项索引（β 已兑现 = 上方 `item` 槽，R2 P6 Task 3）。P5 单槽化只在内存面（DFNode 72B 不变：`OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码），NOD `.ccr` 面实测与 P4 逐字节同（`ptr_arith`/`generics_test`；`--dump-objects` 同）。详见 `plans/2026-09-13-r2-p5-cleanup.md` Task 2。
 
 ### 3.4 EDG：边表（8B/记录，v7 新增）
 
@@ -100,7 +102,7 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 | to_nod | u32 | 目标节点 id（from = 所属节点，邻接隐含） |
 | kind | u32 | 边类：0 = 数据（def-use 值流）、1 = state（副作用序 = VSDG 状态链）；（2+ 预留） |
 
-`edg_count` 必须等于 Σ 各节点 `edge_count`（校验规则 2）。
+`edg_count` 需要等于 Σ 各节点 `edge_count`（校验规则 2）。
 
 ### 3.5 ENT：条目表（28B，布局不变；内容从恒空改为实记录）
 
@@ -130,7 +132,7 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 
 段内容确定性（D13）：段体 = 类型表/接口表的纯函数（与判定历史无关）。写侧 `save` 前做“项层规范化重建”（`ccr_types.cr:ccr_type_populate`：项层/引擎/桥接三面复位，按行序逐行装填，序列化），因此项 DAG 行号 = 行序遍历的构造序。（注：行表本身的冷/热 `.cir` 缓存态分歧 = 既有的前端行分配面，缓存命中跳过 ir_gen 的 `alloc_type`，`ptr_arith` 实测冷 15 行/热 12 行且热 = 冷前缀；见 P4 Task 2 报告，本 spec 只记段面。）
 
-loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加两小节计数/长度自洽加段体无尾随字节加 `tag ∈ 0..10`（TT_*）加 `a..d ≥ -1` 加子项引用 -1 或 < 自身行号（拓扑无环；标注槽按 tag 分派跳过，ATOM 的 a/b、MU/VAR 的 a 等，字段表见 `ccr_io.cr:ccr_type_term_ref_ok`）。载入 = 重建 `g_types` 行表加 `g_type_terms` 项表加 `g_tt_index` 索引（`grow_tt_index`/`tt_reindex` 重放），失败时整体拒绝（不得留空表）。
+loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加两小节计数/长度自洽加段体无尾随字节加 `tag ∈ 0..10`（TT_*）加 `a..d ≥ -1` 加子项引用 -1 或 < 自身行号（拓扑无环；标注槽按 tag 分派跳过，ATOM 的 a/b、MU/VAR 的 a 等，字段表见 `ccr_io.cr:ccr_type_term_ref_ok`）。载入 = 重建 `g_types` 行表加 `g_type_terms` 项表加 `g_tt_index` 索引（`grow_tt_index`/`tt_reindex` 重放），失败时整体拒绝（不能留空表）。
 
 读回通道：`corearch --dump-types`（corec 侧 `ccr --dump-types` 同一打印路径，含项层原语 probe 行 = `tt_norm`/`tt_is_dnf`/`tt_is_literal` 在同构重建表上的逐点同值证据），跨进程行格式对拍实现方式（tests/selfhost/test_ccr_types.py）。
 未覆盖面：判定原语（`ty_sub`/`ty_equiv`/`ty_disjoint` 族，`type_engine.cr`）跨进程同值未覆盖，该文件不入 corearch 清单（两条既有 TF01 诊断触发 project-mode `error[`=0 门），归 Task 3/4/P5 结束（T2 报告登记）。
@@ -145,7 +147,7 @@ loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加�
 4 `impl_count u32` + `× 8B {trait_ni i32, type_ni i32}`（`g_impl_for`，裁决 2：声明元数据，不入判定）；
 5 `method_count u32` + `× 12B {type_ni i32, method_ni i32, mangled_ni i32}`（`g_methods`，`iface_find_method` 的唯一数据面）。
 
-loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加五小节计数/长度自洽加行走完 == 段体（无尾随字节）加 `native_count == 16` 加结构域（ak ∈ 0..AK_NULL、method_count ≤ `MAX_IFACE_METHODS`、param_count ≤ `MAX_IFACE_METHOD_PARAMS`、self_mode ∈ 0..3）加跨段引用域：`name_ni`/`type_ni`/`method_ni`/`mangled_ni` ∈ [0, STR 串数)、`ti_row` ∈ {-1} ∪ [0, TYPE 行数)、`term` ∈ {-1} ∪ [0, TYPE 项数)（TYPE(7) 先于 IFACE(8) 解析，两域已建立）。载入 = 重建 `g_iface_entries`（`g_iface_registry_ok = 1`，段 = corearch 侧出处）/ `g_iface_shape_*` / `g_ifaces`（corearch 无 AST，节点槽恒 -1，项槽 = 段值）/ `g_impl_for` / `g_methods`；失败整体拒绝（不得不报错地当空表）。
+loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加五小节计数/长度自洽加行走完 == 段体（无尾随字节）加 `native_count == 16` 加结构域（ak ∈ 0..AK_NULL、method_count ≤ `MAX_IFACE_METHODS`、param_count ≤ `MAX_IFACE_METHOD_PARAMS`、self_mode ∈ 0..3）加跨段引用域：`name_ni`/`type_ni`/`method_ni`/`mangled_ni` ∈ [0, STR 串数)、`ti_row` ∈ {-1} ∪ [0, TYPE 行数)、`term` ∈ {-1} ∪ [0, TYPE 项数)（TYPE(7) 先于 IFACE(8) 解析，两域已建立）。载入 = 重建 `g_iface_entries`（`g_iface_registry_ok = 1`，段 = corearch 侧出处）/ `g_iface_shape_*` / `g_ifaces`（corearch 无 AST，节点槽恒 -1，项槽 = 段值）/ `g_impl_for` / `g_methods`；失败整体拒绝（不能不报错地当空表）。
 
 读回通道：`corearch --dump-ifaces`（corec 侧 `ccr --dump-ifaces` 同一打印路径；含 `ifaceprobe` 行 = 跨段项索引在重建项表上的解析同值证据；`ifacesig*` 节 = corec-only 活算对拍），跨进程行格式对拍实现方式（tests/selfhost/test_ccr_types.py）。零判定面变化：扩列三行 ops = 0（纯信息面），`iface_kind_of` 的行分派与 P2b 域逐格保持。
 
@@ -156,7 +158,7 @@ loader 校验（违规 = 拒绝，三态纪律 C.5-3）：段必备（D11）加�
 3. `edg_count` == Σ edge_count；NOD/ENT/REG 引用 id 界内（NOD id < nod_count 等）
 4. 段表 offset/size 界、ENT home/flags 读入放行。裁决（2026-09-10 Task 2 review R3）：loader 对 `home`≠-1 / `flags`≠0 接受不拒绝。`home` = 实例映射注记，`.ccr` = corec 到 corearch 传输中间物，实例层（分配/缓存映射）决策不写回格式。非 -1/非 0 值不构成损坏证据（无消费方依赖恒 -1/0 前提之外的安全面）。开放点 3 保留：未来实例层选择写回（非传输中间物用途）时重议
 5. magic/version（`version == 9`，R2 P6 Task 3 起；`version ≠ 9` 整类拒收，含全部 v7 六段/v8 八段文件，D10 先例）；`ccr_i32_fits` 沿用（中间产物 < 4GB）
-6. 段集合完备性（R2 P4 Task 1，D11）：`seg_cnt` 未满或缺少任一必备段（STR/SYM/NOD/REG/EDG/TYPE/IFACE）则拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有约定）。“缺段 = 空表”只适用于 ENT，TYPE/IFACE 缺席必须明确拒绝（可选段 = 两种 `.ccr` 并存 = 不报错地降级面）
+6. 段集合完备性（R2 P4 Task 1，D11）：`seg_cnt` 未满或缺少任一必备段（STR/SYM/NOD/REG/EDG/TYPE/IFACE）则拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有约定）。“缺段 = 空表”只适用于 ENT，TYPE/IFACE 缺席需要明确拒绝（可选段 = 两种 `.ccr` 并存 = 不报错地降级面）
 7. 空壳期段体校验（R2 P4 Task 1）已退役（R2 P4 Task 3）：TYPE 段自 Task 2 起、IFACE 段自 Task 3 起皆为内容面，校验 = 第 3.7/3.8 节的逐条不变量（含跨段引用域）；两段必备（规则 6）不变
 
 ## 5. 消费方影响

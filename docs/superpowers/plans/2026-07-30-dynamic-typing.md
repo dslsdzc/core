@@ -1,6 +1,6 @@
 # 动态类型实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：为 Core 增加 `dyn` 动态类型。声明为 `dyn` 的变量在不同控制流路径上可以持有不同类型，编译器跟踪全部可能类型，并在汇合点生成带标签的联合体。
 

@@ -55,7 +55,7 @@ vim.keymap.set('n', 'gd', vim.lsp.buf.definition, { buffer = 0 })
 - 诊断：nvim 自动接收 `publishDiagnostics` 并显示（`vim.diagnostic`），无需额外配置。
 - 补全：使用 `vim.lsp.buf.completion`（`<C-x><C-o>`），或由 blink.cmp、nvim-cmp 等补全框架自动接入 LSP source。服务器的补全由 `@` 触发。
 - 语义着色：nvim 0.10+ 默认开启语义令牌，不存在 `:SemanticTokensEnable` 命令，不需要配置。如需高亮，需要 colorscheme 将 `@lsp.type.*` 映射到 `@keyword` 等高亮组。
-- 与现有 compiler 插件互斥：[editor/nvim/plugin/core.lua](../../editor/nvim/plugin/core.lua)（使用 `corec` 编译器的诊断和跳转）与 LSP 功能重叠。启用 LSP 时建议移除该插件，避免诊断和键位重复。
+- 与现有 compiler 插件互斥：[editor/nvim/plugin/core.lua](../../editor/nvim/plugin/core.lua)（使用 `corec` 编译器的诊断和跳转）与 LSP 功能重叠。启用 LSP 时，移除该插件可以避免诊断和键位重复。
 - 语法高亮、文件类型检测等基础配置的安装见 [editor/README.md](../../editor/README.md)。
 
 ## VS Code
@@ -101,7 +101,7 @@ code --install-extension editor/vscode-core/
 }
 ```
 
-其他项目和全局接入：全局 `~/.config/zed/settings.json` 的写法与上面相同，`binary.path` 建议使用绝对路径，因为全局配置没有工作区根，无法解析相对路径。此方式只提供 LSP，没有语法高亮，高亮需要扩展提供的 grammar。
+其他项目和全局接入：全局 `~/.config/zed/settings.json` 的写法与上面相同，`binary.path` 适合使用绝对路径，因为全局配置没有工作区根，无法解析相对路径。此方式只提供 LSP，没有语法高亮，高亮需要扩展提供的 grammar。
 
 - 此方式可用的功能：诊断、悬浮、跳转定义、补全（`@` 触发）、文档符号、语义令牌。
 - Zed 默认键位：`F12` 跳转定义，悬停显示信息，LSP 诊断自动显示。

@@ -1,5 +1,7 @@
 # Allocator 代码生成实施计划
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 `alloc` 的机器码从手写字节改成由 Core 源码编译出的 raw blob，并用 clang/LLVM 参考实现做差分验证。
@@ -14,20 +16,20 @@
 
 - 用 `jj` 管理提交，不用 `git` 直接提交。
 - 文档遵循 `docs/doc-style.md`：不用比喻、行话、emoji，不压缩词语。
-- allocator body 不得调用 `alloc`、`println`、`str_*` 或任何可能分配的函数。
-- allocator body 编译为 raw 语义；不得依赖 tagged BigInt 转换。
-- 生成器遇到未定义全局、未定义调用、绝对重定位、TLS、GOT 必须失败，不能静默跳过。
-- 不为变绿放宽判据；失败路径必须 trap 并保留 `g_alloc_fail_*` 见证。
+- allocator body 不能调用 `alloc`、`println`、`str_*` 或任何可能分配的函数。
+- allocator body 编译为 raw 语义；不能依赖 tagged BigInt 转换。
+- 生成器遇到未定义全局、未定义调用、绝对重定位、TLS、GOT 需要失败，不能静默跳过。
+- 不为变绿放宽判据；失败路径需要 trap 并保留 `g_alloc_fail_*` 见证。
 - canary 只按编译器身份位移重新锁定，并在值表记录旧值、新值、归因、提交出处。
-- 旧的手写 allocator body 在 Task 5 之前保留为 fallback；切换默认前必须完成 simple 和 arena 两套差分测试。
+- 旧的手写 allocator body 在 Task 5 之前保留为 fallback；切换默认前需要完成 simple 和 arena 两套差分测试。
 
 ## Review Focus
 
 - `alloc(0)`、`alloc(8)`、`alloc(4088)`、`alloc(4096)`、`alloc(1MB)`、`alloc(64MB)` 的返回地址、隐藏长度头和首尾可写性。
-- 1TB 边界：`1TB-1` 走正常路径；`1TB` 和 `1TB+1` 必须 trap，不得返回 0。
+- 1TB 边界：`1TB-1` 走正常路径；`1TB` 和 `1TB+1` 需要 trap，不能返回 0。
 - arena 的 pool 上限、slot 64/128 边界、三个以上 mmap extent 的 reset。
 - tagged 用户程序中的 BigInt 值经过 allocator 返回的指针和 cell_store/cell_load 后仍保持数学语义。
-- trampoline 的 `rsi=heap_start` 和 `jmp body` 在第二次发射后必须指向最终地址；任何一条路径不得少弹或多弹寄存器。
+- trampoline 的 `rsi=heap_start` 和 `jmp body` 在第二次发射后需要指向最终地址；任何一条路径不能少弹或多弹寄存器。
 
 ---
 

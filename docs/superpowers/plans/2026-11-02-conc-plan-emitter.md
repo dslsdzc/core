@@ -1,5 +1,7 @@
 # CP-2: 编译器 plan emitter + runtime plan loader Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让编译器从现有 `go`/`chan` 源码生成 target-neutral `ConcurrencyPlan` 文本 artifact，并让 CP-1 runtime 解析、加载、在 CPU/SIMT 上执行同一份 plan。
@@ -15,7 +17,7 @@
 - 不新增源码语法；plan 是旁路 artifact，不进入 `.ccr`。
 - 默认 `go`/`chan` 编译器 lowering 不变；CP-2 只新增显式子命令/显式 loader。
 - plan 只携带结构事实（body/channel/edge），不携带 CPU/GPU/slot/memory 具体值。
-- 模式不支持时 fail-closed：报错、零 artifact，不得静默生成残缺 plan。
+- 模式不支持时 fail-closed：报错、零 artifact，不能静默生成残缺 plan。
 - runtime 对象继续走 owner region；不落 compiler function arena。
 - 长编译/测试用 `nice -n 19`；版本控制只用 `jj`。
 
@@ -58,7 +60,7 @@
 - [ ] **Step 2: 实现 loader**
 
 - 增加一个轻量 tokenizer（`str_sub`/`str_len`/`get_char`/`str_int`），按 token 读取 `v/body/channel/edge`。
-- `body` token 的 kind 只接受 `TASK`/`PAR`；entry index 必须 `< 8` 且 table 项非 0。
+- `body` token 的 kind 只接受 `TASK`/`PAR`；entry index 需要 `< 8` 且 table 项非 0。
 - `channel` 只接受 `SPSC`；`edge` 只接受 `SPAWN`/`SEND`/`JOIN`/`RECV`。
 - 未知 token、缺失版本、重复 id、越界 id 一律返回 `-1`。
 - `conc_run_body` 只执行指定 body；TASK 按 params 0/1 分派，PAR 遍历 `0..params`。

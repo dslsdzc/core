@@ -1,5 +1,7 @@
 # CP-4: default conc runtime + cooperative scheduler Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把默认 `go`/`chan` 路径切到 conc runtime：单线程 fiber 调度、阻塞 send/recv、多 channel plan 绑定、worker body send/recv edge。
@@ -14,7 +16,7 @@
 
 - 不新增源码语法；默认 surface 仍是 `go`/`chan_make`/`chan_send`/`chan_recv`/`chan_close`。
 - CP-4 的 CPU mapping 单线程、协作式、无锁；不做 multi-M/抢占/原子等待协议。
-- `go`/`chan` 默认路径必须保持现有语料行为；range go 的 `IR_SPAWN` 仍是旧同步近似，留 CP-5。
+- `go`/`chan` 默认路径需要保持现有语料行为；range go 的 `IR_SPAWN` 仍是旧同步近似，留 CP-5。
 - runtime 对象走 activation arena / 全局 heap；不落 compiler function arena。
 - 长编译/测试用 `nice -n 19`；版本控制只用 `jj`。
 

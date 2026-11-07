@@ -1,5 +1,7 @@
 # LSP 生产化设计（corelsp 到生产可用，以及语义可视化差异化）
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 日期：2026-08-28
 状态：设计已批准（brainstorming 会话，五节决策确认）
 关联：`docs/superpowers/specs/2026-08-08-lsp-design.md`（原设计）、`src/lsp/`（实现）、`docs/editor-setup.md`（接入文档）

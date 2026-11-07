@@ -1,5 +1,7 @@
 # Bare Pointer Model 完整实现设计
 
+> 定位：受众 = 历史读者；状态 = 历史记录；出处 = 本页。
+
 > 当前指针模型见 [pointer-model.md](../maintainer/design/pointer-model.md)。本文是 2026-07-28 的早期实现设计，部分阶段已经演进，保留作为历史基线。
 
 ## 概述

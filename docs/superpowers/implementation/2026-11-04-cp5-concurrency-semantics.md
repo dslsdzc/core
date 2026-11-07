@@ -1,9 +1,11 @@
 # CP-5 实现记录：range go / true multi-M / zero-cap / formal MessageRef
 
-**日期：** 2026-11-04
-**状态：** CP-5 的 1/2/4/5 完成。第 2 项现在是真实 OS 线程 multi-M（per-M worker + per-M ready queue + home M 固定），不是 logical multi-activation，也不是用假 worker 顶替。抢占与跨线程原子等待协议仍留 CP-6。
-**计划：** `docs/superpowers/plans/2026-11-04-cp5-concurrency-semantics.md`
-**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+> 定位：受众 = 维护者；状态 = 未完成；出处 = 本页。
+
+日期：2026-11-04
+状态：CP-5 的 1/2/4/5 完成。第 2 项现在是真实 OS 线程 multi-M（per-M worker + per-M ready queue + home M 固定），不是 logical multi-activation，也不是用假 worker 顶替。抢占与跨线程原子等待协议仍留 CP-6。
+计划：`docs/superpowers/plans/2026-11-04-cp5-concurrency-semantics.md`
+规格：`docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
 ## 1. Range go
 
@@ -21,7 +23,7 @@ CP-5 第 2 项完成，映射如下：
 
 - `sched_init_n(n)` 不再把 `n` 收敛到 1，而是保留 `n` 个 M，并额外预留 1 个 arena 分区给共享运行时元数据（见 §2.30）。
 - 每个 M 一个 worker 线程；worker 由 `m_start_workers` 用 `clone` 启动，TLS 中带 `m_idx`/`current_arena`/`suspend`。
-- 每个 M 一条 ready queue。activation 在 spawn 时按 round-robin 绑定 home M，之后**不迁移**：arena、fiber stack、TLS 只由 home M 的线程访问。
+- 每个 M 一条 ready queue。activation 在 spawn 时按 round-robin 绑定 home M，之后不迁移：arena、fiber stack、TLS 只由 home M 的线程访问。
 - activation 的 arena 与 fiber stack 在 home M 第一次调度它时惰性创建（`conc_schedule` 的 prepare 段），因此 spawner 不会写别的 M 的 slot 池。
 - 控制块、ready queue、channel wait list、scheduler 数组由一把全局 spinlock 保护。锁只覆盖元数据操作，绝不跨 `fiber_switch` 持有。
 - worker 空闲时 `sched_yield`；main 线程（M0）在阻塞 send/recv 时也会跑本 M 的 ready queue，因此单 M 与多 M 走同一条调度路径。
@@ -29,16 +31,16 @@ CP-5 第 2 项完成，映射如下：
 
 ### 2.30 本次修掉的三个真实阻断
 
-1. **slot 分区不一致（旧 0A 根因）**
+1. slot 分区不一致（旧 0A 根因）
    `src/stdlib/arena.cr` 的 `SLOTS_PER_M=1024 / SEGMENTS_PER_M=16` 与 allocator blob（`src/runtime/alloc_body.cr`）编译死的 `slot = m * 256 + count` 不一致。M1 的 slot 256 落在 M0 的 segment 4 上，两个 M 写同一块 1MiB slot，导致随机 segfault / `alloc_fail`。现在 arena.cr 与 blob 统一为 256 slots / 4 segments per M，并在两处加了对齐注释。
 
-2. **worker 上的共享元数据分配**
+2. worker 上的共享元数据分配
    allocator 对 `current_arena < 0 && m_idx != 0` 是 fail-closed（exit 132）。旧 conc scheduler 用 `current_arena=-1` 从全局 heap 分配 ready queue / free list / channel state 扩容，这些扩容在 worker 上必然失败。现在新增共享 arena：
    - `sched_init_n(n)` 用 `arena_init_m(..., n + 1)` 预留最后一个分区；
    - `arena_shared_init/arena_shared_alloc` 只在这个分区分配；
    - `conc_sched` 的共享数组、channel region 扩容都走它，调用方已在 conc lock 内。
 
-3. **`g_current_arena` 全局读**
+3. `g_current_arena` 全局读
    `ir_gen` 在 merge-plan 里读全局 `g_current_arena`。多 M 下每个 M 的 `arena_set_current` 都写这个全局，读到的是别的 M 的 arena id。现在改为读 TLS `rt_current_arena`。allocator blob 本身早已读 TLS，不受影响。
 
 ## 3. Zero-cap rendezvous + MPMC
@@ -49,7 +51,7 @@ CP-5 第 2 项完成，映射如下：
   - recv 遇到 send waiter：直接读 sender 的 handoff 并唤醒；
   - 无对端时阻塞当前 activation；main 线程无 ready 且无对端时返回 0（fail-closed）。
 - 多个 waiter 由 per-channel wait queue 支持；`test_conc_sched_rendezvous` 与 `test_conc_sched_mpmc` 覆盖。
-- activation 死亡后 arena/stack 回收，id 进入 free list；新 activation 复用 id 与 96B 控制块（不重复分配）。1000 次 `go` 不再撞 arena slot 上限。
+- activation 结束后 arena/stack 回收，id 进入 free list；新 activation 复用 id 与 96B 控制块（不重复分配）。1000 次 `go` 不再撞 arena slot 上限。
 
 ## 4. Formal MessageRef descriptor
 
@@ -69,7 +71,7 @@ descriptor 48B：
 ```
 
 - `conc_ref_ok` 校验 region 活性、epoch、offset/size 边界、消息头 magic/region/epoch/size。
-- `conc_region_reset` 后旧 ref 的 epoch 不匹配 → `conc_ref_ok == 0`；同 offset 的新 alloc 不会让旧 ref 复活（epoch 不同）。
+- `conc_region_reset` 后旧 ref 的 epoch 不匹配 → `conc_ref_ok == 0`；同 offset 的新 alloc 不会让旧 ref 重新生效（epoch 不同）。
 - 旧的 raw pointer `conc_alloc/conc_send/conc_recv` 保留兼容；descriptor 是正式身份路径。
 
 ## 5. 验证

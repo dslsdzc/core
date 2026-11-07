@@ -1,7 +1,7 @@
 # 数值类型实现计划：dex + apx（float 移除，手动迁移）
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
-> 执行性质：手动迁移。每个 float 站点逐点判断语义归属（dex 或 dex,apx），禁止机械替换（sed 或全局替换）。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 执行性质：手动迁移。每个 float 站点逐点判断语义归属（dex 或 dex,apx），不做机械替换（sed 或全局替换）。
 
 目标：实现 dex（精确小数，默认实数语义）与 apx（近似授权标签，后端变换许可），移除 float 类型，全仓库手动迁移。
 
@@ -13,11 +13,11 @@
 
 ## 全局约束
 
-- 禁止 git，全部用 `jj`；提交信息中文
-- 长时间编译/构建必须 `nice -n 19` 或 `cpulimit -l 10`（铁律 #6）
-- 手动迁移：每个 float 站点逐点判断，禁止全局替换；分类表（任务 1 产出）是迁移契约，人工审
+- 不使用 git，全部用 `jj`；提交信息中文
+- 长时间编译/构建需要 `nice -n 19` 或 `cpulimit -l 10`（铁律 #6）
+- 手动迁移：每个 float 站点逐点判断，不做全局替换；分类表（任务 1 产出）是迁移契约，人工审
 - 语义归属规则：编译器内部浮点路径（运算、打印、指令编码）使用 `dex, apx`（保留 binary64 行为，即 apx 快路径）；用户可见的 `float` 类型改为 `dex`（默认精确，这是语义变更，不是改名）；`_f32`/`_f64` 后缀保留（apx 的 CPU 位宽标注）
-- 构建测试：`python3 build_selfhost_native.py`（自举编译是回归的基本要求，编译器自身迁移后必须能自举）
+- 构建测试：`python3 build_selfhost_native.py`（自举编译是回归的基本要求，编译器自身迁移后需要能自举）
 - 现有 API 保持不变（print/println/read_file 等），float 移除是设计确定的唯一例外
 
 ---
@@ -94,7 +94,7 @@ cd /home/DslsDZC/core && python3 tests/selfhost/test_apx_tag.py
 - checker.cr：apx 标签认可（不报错）；类型信息或变量记录携带 apx 位（执行时按 mut 位的存储方式加 apx 位）
 - ir_gen.cr：在 apx 变量的运算处发射 `IR_APPROX`（无操作数注解，执行时确认 ir_gen 里读取变量标签的位置）
 - ast.cr：IR_APPROX 常量（执行时按 IR 指令编号段分配，先查现有最大 opcode 号）
-- dataflow、dump、ccr_io、interp、ELF：IR_APPROX 注册（dump 打印、ccr 序列化、interp 跳过、ELF 不生成代码。执行时按现有个别 IR 指令的注册点清单逐一核对，interp 必须跳过，不能崩溃）
+- dataflow、dump、ccr_io、interp、ELF：IR_APPROX 注册（dump 打印、ccr 序列化、interp 跳过、ELF 不生成代码。执行时按现有个别 IR 指令的注册点清单逐一核对，interp 需要跳过，不能崩溃）
 
 - [ ] 步骤 4：测试通过并回归
 
@@ -314,6 +314,6 @@ cd /home/DslsDZC/core && jj commit -m "docs: EBNF 同步 + 数值类型迁移终
 ## 执行前自查记录
 
 - 规格覆盖：第二节的 dex 类型对应任务 3/4；第三节的 apx 标签对应任务 2；第四节的落点（字面量、检查器、IR、后端）对应任务 3/4/5；第五节的 float 移除迁移对应任务 1/5/6；第七节的命名对应任务 3/6；EBNF 对应任务 7。YAGNI（第六节）：隐式转换、字面量重载、扩展类型注册不做，计划未包含。
-- 占位符：任务 4 的定点实现细节（内部精度常量、溢出规则）标注为「执行时定」。这是设计决策点，不是占位（计划给出建议值 10^9 与文档化要求）；各任务的「执行时按现有模式」标注表示现有代码的具体行号需要执行者读代码确认（与 LSP 计划同一惯例）。
+- 占位符：任务 4 的定点实现细节（内部精度常量、溢出规则）标注为“执行时定”。这是设计决策点，不是占位（计划给出建议值 10^9 与文档化要求）；各任务的“执行时按现有模式”标注表示现有代码的具体行号需要执行者读代码确认（与 LSP 计划同一惯例）。
 - 类型一致性：TY_FLOAT 改为 TY_DEX 在任务 3 定义，任务 5/6 使用；apx 标签与 IR_APPROX 在任务 2 定义，任务 5 使用；分类表（任务 1）是任务 5/6 的逐点契约。
-- 手动迁移性质：计划没有 sed 或全局替换步骤，每个站点单独列出、单独判定；编译器自举（任务 5 步骤 3）是迁移正确性必须通过的验收。
+- 手动迁移性质：计划没有 sed 或全局替换步骤，每个站点单独列出、单独判定；编译器自举（任务 5 步骤 3）是迁移正确性需要通过的验收。

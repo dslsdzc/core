@@ -26,7 +26,7 @@ python3 tests/bootstrap/test_generics.py
 核心文件有三个：
 
 - test_compile.py：自举管线的基本检查（拼接编译器源码并编译，执行示例程序并比对结果）
-- test_impl.py：impl/方法接收者/self 字段。CHECK_CASES（check 必须通过）和 NATIVE_CASES（编译成 ELF 运行，断言退出码）
+- test_impl.py：impl/方法接收者/self 字段。CHECK_CASES（check 通过）和 NATIVE_CASES（编译成 ELF 运行，断言退出码）
 - test_borrow.py：借用检查的 7 条规则（分类见第二节）。用例是 `(名称, 内联源码, 期望是否报借用错)`，测试写临时 `.cr` 文件并运行 `corec check`。约定：期望有诊断时退出码为 1，无诊断时为 0（check 命令按“有诊断即失败”处理；断言以当前约定为准，见文件内注释）
 
 运行方法：
@@ -69,8 +69,8 @@ chmod +x /tmp/core_suite_bin && /tmp/core_suite_bin
   5. borrow released after block scope exit
   6. normal copy use
   7. mutable then immutable borrow
-- selfhost impl/编译（test_impl.py）：CHECK_CASES 添加 `(名称, 源码)`（check 必须通过）；NATIVE_CASES 添加 `(名称, 源码, 期望退出码)`（运行原生 ELF）。
-- suite 集成：新建 `tests/suite/xxx_test.cr`，`fn main() -> int` 的正常路径 `return 0`；崩溃或非零退出为失败。注意不要使用 `*_mini*.cr` 命名（CI 会跳过）。
+- selfhost impl/编译（test_impl.py）：CHECK_CASES 添加 `(名称, 源码)`（check 通过）；NATIVE_CASES 添加 `(名称, 源码, 期望退出码)`（运行原生 ELF）。
+- suite 集成：新建 `tests/suite/xxx_test.cr`，`fn main() -> int` 的正常路径 `return 0`；崩溃或非零退出为失败。`*_mini*.cr` 命名会被 CI 跳过。
 
 ## 三、回归流程
 
@@ -106,7 +106,7 @@ nice -n 19 python3 tests/selfhost/test_compile.py
 # 或安装 cpulimit 后包住整条命令：cpulimit -l 10（等效）
 ```
 
-CI 环境没有此约束；本地桌面环境必须遵守。本地复现 CI job 时也要在命令前加限制：在 `nice -n 19 src/ci/run.sh` 的场景下，使用 `nice -n 19 env CI_JOB_NAME=full-bootstrap src/ci/run.sh`。
+该约束适用于本地桌面环境，CI 环境没有此约束。本地复现 CI job 时在命令前加限制：在 `nice -n 19 src/ci/run.sh` 的场景下，使用 `nice -n 19 env CI_JOB_NAME=full-bootstrap src/ci/run.sh`。
 
 ## 四、常见失败定位
 
@@ -123,7 +123,7 @@ CI 环境没有此约束；本地桌面环境必须遵守。本地复现 CI job 
 
 ### ELF 字节不一致或产物错乱
 
-- 先检查指令编码层，再怀疑逻辑：[src/arch/x86_64/](../../src/arch/x86_64/) 下的 instr.cr（指令发射编码）、sizes.cr（`sz_*` 字节数预估，label 前向引用依赖它）；[src/format/elf/](../../src/format/elf/) 下的 resolve.cr（label 解析后的填充）。修改指令发射时必须同步修改 instr 和 sizes 两处。
+- 先检查指令编码层，再怀疑逻辑：[src/arch/x86_64/](../../src/arch/x86_64/) 下的 instr.cr（指令发射编码）、sizes.cr（`sz_*` 字节数预估，label 前向引用依赖它）；[src/format/elf/](../../src/format/elf/) 下的 resolve.cr（label 解析后的填充）。修改指令发射时同步修改 instr 和 sizes 两处。
 - 比对方法：O0 下 corec2 与 corec3 不一致，说明编译不自洽。排除输出差异（路径或环境）后缩小到最小复现，修复后先运行 suite，再运行 full-bootstrap。
 
 ### trap 类测试挂起（桌面环境）

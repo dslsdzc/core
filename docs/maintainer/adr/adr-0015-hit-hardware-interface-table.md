@@ -1,5 +1,7 @@
 # ADR-0015: HIT 硬件接口表：跨平台硬件访问（取代 .crasm 汇编层）
 
+> 定位：受众 = 维护者；状态 = accepted；出处 = 本页。
+
 - 日期：2026-09-05
 - 状态：accepted（设计定稿；M1 最小核推进中）
 - 决策者：DslsDZC
@@ -13,7 +15,7 @@
 - HIT 是表驱动的硬件接口：最小核提供 4 事件契约 {sub, nand, load, store} 加投影表，更换投影表即可更换平台。
 - 跨平台使用 HIT 事件加投影表；MMIO/特权/中断使用 `.cr` unsafe 加 HIT extern 接口事件。
 - 事件的可读形态是 v6 NOD 文本 dump；`NOD op` 与 HIT `event_id` 的对齐是实施期事项。
-- 硬件访问进图后获得 `provenance`（声明式进图路径，与 `alloc_at` 同构）。
+- 硬件访问进图后带有 `provenance`（声明式进图路径，与 `alloc_at` 同构）。
 
 ## 后果
 

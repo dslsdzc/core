@@ -1,9 +1,11 @@
 # CP-3 实现记录：plan body/channel binding
 
-**日期：** 2026-11-03
-**状态：** CP-3 host 切片完成：plan body 参数可以绑定到 channel descriptor，runtime 通过绑定表执行 body。
-**计划：** `docs/superpowers/plans/2026-11-03-cp3-plan-binding.md`
-**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
+日期：2026-11-03
+状态：CP-3 host 切片完成：plan body 参数可以绑定到 channel descriptor，runtime 通过绑定表执行 body。
+计划：`docs/superpowers/plans/2026-11-03-cp3-plan-binding.md`
+规格：`docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
 ## 1. 范围
 

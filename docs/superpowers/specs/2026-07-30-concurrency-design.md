@@ -1,5 +1,7 @@
 # 并发实现设计
 
+> 定位：受众 = 维护者；状态 = superseded；出处 = 本页。
+
 ## 概述
 
 在 Core 中实现 M:N 协程并发模型。`go f()` 启动新的 goroutine，goroutine 之间通过 channel 传值，不共享内存。每个 goroutine 拥有独立 arena，值在 channel 边界拷贝。

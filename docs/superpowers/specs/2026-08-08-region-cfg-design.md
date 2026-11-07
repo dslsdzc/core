@@ -1,5 +1,7 @@
 # RVSDG 式 Region 化控制流设计
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 > 术语注记（2026-08-15）：本规格中的"RVSDG 式"为当时设计路线的真实记录（参考 RVSDG 的嵌套 region 特征）；该结构后定名为 HDFG（Holographic Dataflow Graph），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 日期：2026-08-08
@@ -23,7 +25,7 @@
 - VDG 把循环建模为尾递归 λ 节点，会丢失终止性（图可能终止而程序不终止）
 - VSDG 增加 state edges（顺序执行依赖 + 循环终止依赖），补上了终止语义，但平面图中的副作用节点不受保护
 - RVSDG 使用嵌套 region（loop/conditional 结构节点包含子区域），形成无环层次图；结构就是语义，副作用由 region 保护；可以回归 CFG，并行性完全暴露
-- LAU 系统验证了「无环图 + 注入迭代」路线可行，但明确放弃循环体并行展开；RVSDG 没有这个限制
+- LAU 系统验证了“无环图 + 注入迭代”路线可行，但明确放弃循环体并行展开；RVSDG 没有这个限制
 
 ### 目标
 
@@ -71,7 +73,7 @@ ELF 后端零改动。`label`/`jump` 保留给后端线性化（`res_labels`）�
 - 执行到 `SG_LOOP`/`SG_FOR` region 的 enter 节点时，进入迭代模式（记录 region id 与 enter/exit 序号）
 - 循环体按序执行；`IR_BREAK` 的 `label` 目标等于当前 region exit 时，跳出 region，继续执行 region 外的下一个节点
 - `IR_JUMP` 回跳且 `label` 目标等于 region header 时，重新开始迭代（回到 region enter）
-- `IR_BRANCH`（for/while 条件）仍然按 `label` 跳转，但目标的归属会识别为「区域内」或「region 出口」，并据此判断迭代是否继续
+- `IR_BRANCH`（for/while 条件）仍然按 `label` 跳转，但目标的归属会识别为“区域内”或“region 出口”，并据此判断迭代是否继续
 - 到达 region exit 序号时，正常结束迭代
 
 效果：循环场景不再依赖全局 `g_label_poses` 位置表；`break`/`continue` 成为 region 语义操作；嵌套时 `break` 可以跳出多层（`label` 目标属于外层 region 时直接跳到该 region exit）；early return 和异常路径不受影响。
@@ -85,7 +87,7 @@ ELF 后端零改动。`label`/`jump` 保留给后端线性化（`res_labels`）�
 ### 两条来源
 
 1. 副作用链：每个函数维护一条 state 链。`STORE`/`STORE_FIELD`/`STORE_INDEX`/非纯 `CALL` 按指令顺序连接 state 边（从 prev 到 cur）
-2. 循环终止依赖：`SG_LOOP`/`SG_FOR` 的 exit 节点，从循环体最后一条副作用指令连一条 state 边到 exit，保证「循环不终止则图不终止」
+2. 循环终止依赖：`SG_LOOP`/`SG_FOR` 的 exit 节点，从循环体最后一条副作用指令连一条 state 边到 exit，保证“循环不终止则图不终止”
 
 构建位置：`df_connect_srcs` 内（emit 同步建图处），按 `opcode` 判定副作用；`df_end_func` 闭合链。
 
@@ -142,6 +144,6 @@ ELF 后端零改动。`label`/`jump` 保留给后端线性化（`res_labels`）�
 
 ## 文档同步（随各阶段）
 
-- `docs/project-book.md` 5.2 / `docs/execution-model.md`：「带反馈环的静态图」目标改为 region 迭代语义
+- `docs/project-book.md` 5.2 / `docs/execution-model.md`：“带反馈环的静态图”目标改为 region 迭代语义
 - `docs/ir-schema/coreir-schema.md`：SG 段 + edge kind + v2 版本
 - `CLAUDE.md` 架构段：dataflow.cr 职责描述更新

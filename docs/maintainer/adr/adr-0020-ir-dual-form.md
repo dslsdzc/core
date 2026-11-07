@@ -1,5 +1,7 @@
 # ADR-0020: IR 双形态确立：.cir 图形态 + .ccr 格形态
 
+> 定位：受众 = 维护者；状态 = accepted；出处 = 本页。
+
 - 日期：2026-05-28（.cir/.ccr 格式与 spec 文档）
 - 状态：accepted（演进中：.cir 图形态保持，.ccr 经历 v2-v6 段表升级，见 ADR-0002）
 - 决策者：DslsDZC

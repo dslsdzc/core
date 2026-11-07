@@ -1,6 +1,6 @@
 # McTT 到 Core 的验证内核移植实现计划（M1）
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 > 注意：任务 6（src/kernel/ 内核本体移植）由项目维护者 DslsDZC 手工执行，不由 agent 代做。其余任务（1–5、7）由 agent 执行。
 
 目标：将 McTT（ICFP'25 全验证 MLTT 内核）按原样移植为 Core 实现，通过与 OCaml 参考的术语级差分测试验证逐位一致，作为语义保留验证管线的信任根。
@@ -13,8 +13,8 @@
 
 ## 全局约束
 
-- 禁止 git，全部用 `jj`（仓库铁律 #2）；提交信息中文
-- 长时间编译/构建必须 `cpulimit -l 10` 或 `nice -n 19` 包裹（仓库铁律 #6）。本计划中所有 dune 构建命令都已加上限流前缀
+- 不使用 git，全部用 `jj`（仓库铁律 #2）；提交信息中文
+- 长时间编译/构建需要 `cpulimit -l 10` 或 `nice -n 19` 包裹（仓库铁律 #6）。本计划中所有 dune 构建命令都已加上限流前缀
 - Core 编译：`./build/corec build FILE.cr -o OUT --static`（工作目录 = 仓库根）
 - McTT 参考代码克隆到仓库外 `~/mctt`（不提交）；本仓的 harness 在仓库内 `tools/mctt_ref/`
 - 术语表示契约（任务 5/6 共同遵守）：扁平节点布局 `{kind, a, b, c, d}`（int），节点存全局 arena `g_kernel_nodes: [int; 8192]`，kind 常量与布局定义在 `src/kernel/term_io.cr`（任务 5 产出），内核代码 import 它
@@ -86,7 +86,7 @@ cd /home/DslsDZC/core && jj commit -m "tools: McTT 参考侧构建记录（Task 
 - Read（对照源，转写不二手）：`~/mctt/theories/Core/Syntactic/Syntax.v`、`~/mctt/theories/Core/Syntactic/System.v`、`~/mctt/theories/Core/Syntactic/System/Definitions.v`、`~/mctt/theories/Algorithmic/Typing/Definitions.v`、`~/mctt/theories/Algorithmic/Subtyping/Definitions.v`、`~/mctt/theories/Core/Semantic/{Domain,Evaluation,Readback}/Definitions.v`
 
 接口：
-- 产出：`docs/verifier/kernel-spec.md`，内容为类型规则、算法规则、NbE 结构、子类型规则的逐条转写，每条带 `源文件:行号` 交叉引用；上下文与 de Bruijn 约定必须在本任务确认并固定（任务 3 协议与任务 6 移植都以它为准）
+- 产出：`docs/verifier/kernel-spec.md`，内容为类型规则、算法规则、NbE 结构、子类型规则的逐条转写，每条带 `源文件:行号` 交叉引用；上下文与 de Bruijn 约定需要在本任务确认并固定（任务 3 协议与任务 6 移植都以它为准）
 
 - [ ] 步骤 1：通读 Syntax.v 与 System.v，写出术语、子术语、正规形、中性形的构造子清单
 
@@ -110,7 +110,7 @@ cd /home/DslsDZC/core && jj commit -m "tools: McTT 参考侧构建记录（Task 
 
 - [ ] 步骤 6：自检
 
-对 spec 全文核对：每个构造子、每条规则都有来源行号；无「待定」「类似上面」类描述；de Bruijn/上下文约定明确写出。修正后，在 spec 头部注明「本文件由任务 2 生成，行号对应 McTT icfp25 分支」。
+对 spec 全文核对：每个构造子、每条规则都有来源行号；无“待定”“类似上面”类描述；de Bruijn/上下文约定明确写出。修正后，在 spec 头部注明“本文件由任务 2 生成，行号对应 McTT icfp25 分支”。
 
 - [ ] 步骤 7：提交
 
@@ -171,7 +171,7 @@ cd ~/mctt/driver && cat dune && ls extracted/*.mli 2>/dev/null && grep -n "modul
 
 结构：读取行，解析（手写约 80 行 S-表达式解析器，产出提取模块的术语值），分发到 check/infer/convert/subtype，打印规范输出（类型结果经读出或正规化后打印）。关键接线点：
 - 解析器把 `(typ N)` 映射到提取模块的宇宙构造子，`(natrec A mz ms n)` 映射到 NatRec 构造子（构造子字段顺序以提取代码为准，步骤 2 侦查确认）
-- 推断输出必须正规化：用提取的求值+读出函数（或转换判定自带的正常化路径）把结果化为 nf 再打印
+- 推断输出需要正规化：用提取的求值+读出函数（或转换判定自带的正常化路径）把结果化为 nf 再打印
 - 上下文：解析 `(ctx e1 e2 ...)` 为提取模块的 context 类型（顺序按 kernel-spec.md 约定）
 - 拒绝路径统一打印 `reject`；convert/subtype 打印 `yes|no`
 
@@ -234,7 +234,7 @@ cd /home/DslsDZC/core && jj commit -m "tools: 参考侧 harness + 共享格式�
 - 创建：`tests/kernel/README.md`（语料说明与固定种子）
 
 接口：
-- 使用：协议（任务 3 的 protocol.md），生成器输出必须能被 harness 与 term_io 解析
+- 使用：协议（任务 3 的 protocol.md），生成器输出需要能被 harness 与 term_io 解析
 - 产出：三个语料文件；期望值在任务 7 由参考 harness 生成并固化
 
 - [ ] 步骤 1：编写穷举生成器（完整代码）
@@ -573,7 +573,7 @@ cd /home/DslsDZC/core && python3 tests/kernel/run_diff.py
 
 - [ ] 步骤 4：修复至全部通过
 
-循环执行：修改、重新运行，直到 `total=… ok=… fail=0`。注意规则：不许改期望值迁就 Core。期望 = McTT ground truth，唯一可改的是内核。
+循环执行：修改、重新运行，直到 `total=… ok=… fail=0`。注意规则：不要改期望值迁就 Core。期望 = McTT ground truth，唯一可改的是内核。
 
 - [ ] 步骤 5：验收清单
 
@@ -589,12 +589,12 @@ cd /home/DslsDZC/core && python3 tests/kernel/run_diff.py
 cd /home/DslsDZC/core && jj commit -m "tests: 差分对拍全部通过，M1 内核完成（McTT 验证继承实施）"
 ```
 
-在 `docs/verifier/kernel-spec.md` 头部追加「M1 完成：差分全部通过 N 条（日期）」一行（先改后提交，随步骤 6 一起提交）。
+在 `docs/verifier/kernel-spec.md` 头部追加“M1 完成：差分全部通过 N 条（日期）”一行（先改后提交，随步骤 6 一起提交）。
 
 ---
 
 ## 执行前自查记录
 
 - 规格覆盖：设计文档第三节架构对应任务 5/6；第四节分工对应各任务的分工注记；第五节数据流与格式对应任务 3 协议和任务 7；第六节语料对应任务 4；第七节错误处理对应任务 3/5 的实现约定；第八节阶段对应任务 1–7；第九节验收对应任务 7 步骤 5。
-- 占位符：任务 3 harness 的具体接线留到侦查后确定（步骤 2 有明确的侦查命令与验收标准，不是 TBD）；任务 5 的解析函数体标注为「执行中补齐」，但测试先行、协议固定，已尽量收紧。
+- 占位符：任务 3 harness 的具体接线留到侦查后确定（步骤 2 有明确的侦查命令与验收标准，不是 TBD）；任务 5 的解析函数体标注为“执行中补齐”，但测试先行、协议固定，已尽量收紧。
 - 类型一致性：协议格式在任务 3 固定，任务 4/5/6/7 全部引用同一协议；kind 常量在任务 5 定义，任务 6 使用；`kernel_parse`/`kernel_print` 的签名在任务 5 到任务 6 之间一致；`harness.exe` 路径在任务 3 到任务 7 之间一致。

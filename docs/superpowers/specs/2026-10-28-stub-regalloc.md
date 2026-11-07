@@ -1,5 +1,7 @@
 # 运行时 stub 与编译器的共享 CAG 寄存器分配
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 > 状态：已实施
 > 日期：2026-10-28
 > 关联：`docs/maintainer/design/regalloc-cache-mapping.md` 第 5 节 · `docs/maintainer/design/regalloc-consistency.md` · `src/lattice/regalloc_cag.cr`

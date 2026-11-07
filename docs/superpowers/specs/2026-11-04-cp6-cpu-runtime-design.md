@@ -1,9 +1,11 @@
 # CP-6 设计：CPU 运行时 1–14 项
 
-**日期：** 2026-11-04
-**状态：** 已实施（1–14，host CPU）。实现记录见 `docs/superpowers/implementation/2026-11-04-cp6-cpu-runtime.md`。
-**范围：** host CPU（x86-64 Linux 裸 ELF）。真实 GPU/FPGA/集群不在本设计内。
-**上位规格：** `2026-11-01-cross-paradigm-concurrency-design.md`、`2026-09-17-concurrency-model-design.md`
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
+日期：2026-11-04
+状态：已实施（1–14，host CPU）。实现记录见 `docs/superpowers/implementation/2026-11-04-cp6-cpu-runtime.md`。
+范围：host CPU（x86-64 Linux 裸 ELF）。真实 GPU/FPGA/集群不在本设计内。
+上位规格：`2026-11-01-cross-paradigm-concurrency-design.md`、`2026-09-17-concurrency-model-design.md`
 
 ## 1. 意图与边界
 
@@ -21,7 +23,7 @@
 
 | # | 交付 | 验收 |
 |---|---|---|
-| 1 | 抢占与强制让出 | 用户并发程序的循环回边插 `conc_preempt_tick`；长循环 activation 不再饿死同 M 的其他 activation；可选的 SIGALRM pending flag 提供异步请求 |
+| 1 | 抢占与强制让出 | 用户并发程序的循环回边插 `conc_preempt_tick`；长循环 activation 不再使同 M 的其他 activation 长期得不到调度；可选的 SIGALRM pending flag 提供异步请求 |
 | 2 | futex 等待 | 空闲 worker 用 `futex(202)` park；wake 精确唤醒 home M；无 lost wakeup；忙轮询从热路径移除 |
 | 3 | MPMC plan | plan v2 `channel ... MPMC` 可加载/执行；多生产者/多消费者 e2e |
 | 4 | descriptor 绑定 | `conc_send_ref`/`conc_recv_ref` 走 MessageRef；旧 raw `conc_send/recv` 与 `chan_send/recv` 保持兼容 |
@@ -33,23 +35,23 @@
 | 10 | 预算/证书 | 编译期义务 + plan 状态 `proved/unknown/violated/measured`；explain 可见；`unknown` 不当通过 |
 | 11 | 确定性执法 | 通道顺序/边冲突检查；违反确定性拒绝或 serial fallback |
 | 12 | DATA_PARALLEL | 显式 range go 生成 PAR plan 并由 conc_run_range 执行；普通 for 在没有独立性证明时 serial fallback |
-| 13 | PIPELINE | `yield` 是真实 conc yield；PIPE body + executor 落地；emitter 检测 go 目标中的 yield 输出 v2 PIPE plan |
-| 14 | 旧 runtime 退役 | 删除 goroutine.cr/g_new/g_free/wrapper/死 sched 队列；保留兼容入口，IR_SPAWN 仅保留 wire 兼容 |
+| 13 | PIPELINE | `yield` 是真实 conc yield；PIPE body + executor 实现；emitter 检测 go 目标中的 yield 输出 v2 PIPE plan |
+| 14 | 旧 runtime 退役 | 删除 goroutine.cr/g_new/g_free/wrapper/废弃 sched 队列；保留兼容入口，IR_SPAWN 仅保留 wire 兼容 |
 
 ## 3. 关键设计决定
 
 ### 3.1 抢占
 
-- `ir_gen` 在**用户库**（`lib_kind == LIB_KIND_USER`）且程序 import 了 `sched/chan/conc` 时，于 `loop`/`while`/`for` 回边前发射 `IR_CALL conc_preempt_tick`。
+- `ir_gen` 在用户库（`lib_kind == LIB_KIND_USER`）且程序 import 了 `sched/chan/conc` 时，于 `loop`/`while`/`for` 回边前发射 `IR_CALL conc_preempt_tick`。
 - `conc_preempt_tick` 每 M 一个 quantum 计数；到 0 调 `conc_yield`。无 activation 上下文直接返回。
-- 允许 SIGALRM handler 只写 `g_conc_preempt_flag`；tick 看到 flag 立即让出。handler 不切 fiber。
+- 允许 SIGALRM handler 只写 `g_conc_preempt_flag`；tick 检测到 flag 立即让出。handler 不切 fiber。
 - `conc_preempt_tick` 对纯度分析是透明的（mark pure），避免污染 region plan。
 - 编译器/stdlib 自身不插 tick，避免锁内重入。
 
 ### 3.2 futex
 
 - 每 M 一个 64-bit sequence word，位于 shared arena。
-- worker 无活时：加锁检查 ready queue；空则读取 seq，解锁，`futex_wait(seq_addr, seq)`。
+- worker 空闲时：加锁检查 ready queue；空则读取 seq，解锁，`futex_wait(seq_addr, seq)`。
 - waker 在 ready push 后（仍在锁内）递增 seq，再 `futex_wake(seq_addr, 1)`。
 - main 在阻塞 send/recv 无 ready 可跑时同样 park 到 M0 的 seq。
 - 不使用 `sched_yield` 忙等；`syscall3(24)` 只保留给 spinlock 的短暂退让。
@@ -86,15 +88,15 @@ cert <id> <kind> <status>
 ### 3.6 旧 runtime 退役
 
 - 保留 `m_start_workers`；`sched_worker_run` 直接委托 `conc_worker_run`。
-- 删除 `g_new`/`g_free`/`goroutine.cr`、`goroutine_entry_wrapper`、backend 的 `goroutine_wrapper_addr` 特判、死 `sched_enqueue/dequeue/reap/yield/schedule/push_spawn/process_spawns/sched_go_direct` 与旧 G 队列全局。
+- 删除 `g_new`/`g_free`/`goroutine.cr`、`goroutine_entry_wrapper`、backend 的 `goroutine_wrapper_addr` 特判、废弃的 `sched_enqueue/dequeue/reap/yield/schedule/push_spawn/process_spawns/sched_go_direct` 与旧 G 队列全局。
 - 保留 `sched_init/sched_init_n/sched_init_slots/sched_go/sched_get_curg` 作为兼容入口。
 - `IR_SPAWN` 保留 wire/解释器兼容，但编译器不再发射。
 
 ## 4. 实施批次
 
-- **批次 A（1–2）**：抢占 tick + futex park/wake。测试：`test_conc_preempt.py`。
-- **批次 B（3–9）**：plan v2、MPMC、range plan、descriptor 绑定、layout/identity、transfer、slot、target 格式。测试：扩 `test_conc_plan*.py`、`test_conc_runtime.py`。
-- **批次 C（10–14）**：预算/证书、确定性、DATA_PARALLEL、PIPELINE、旧 runtime 退役。测试：`test_conc_plan_v2.py`、`test_conc_preempt.py`、`test_conc_transfer.py` + 既有 gate。
+- 批次 A（1–2）：抢占 tick + futex park/wake。测试：`test_conc_preempt.py`。
+- 批次 B（3–9）：plan v2、MPMC、range plan、descriptor 绑定、layout/identity、transfer、slot、target 格式。测试：扩 `test_conc_plan*.py`、`test_conc_runtime.py`。
+- 批次 C（10–14）：预算/证书、确定性、DATA_PARALLEL、PIPELINE、旧 runtime 退役。测试：`test_conc_plan_v2.py`、`test_conc_preempt.py`、`test_conc_transfer.py` + 既有 gate。
 
 每批完成后跑 CP-1..CP-5 gate，再跑 `selfhost-tests` 的对应子集；只有已知 p41/三例基线红允许保留。
 

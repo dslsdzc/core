@@ -1,5 +1,7 @@
 # v10 多路分支 / match 决策 Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 v10 `.ccr` 上实现多路 `MATCH` 节点和 CASE 表：corec 把 `match` 降为多路分支，corearch 映射为比较链/二分/跳转表，interp 与 ELF 语义一致。
@@ -15,7 +17,7 @@
 - CASE 值只进入 v10 CASE 段；字符串模式后续归一化为 `str_eq`，不把字符串指针放进 CASE。
 - 每个任务单独提交；先 CASE/IR_MATCH 读写，再 corec，再 corearch/interp。
 - 自举要求 stage2/stage3 逐字节一致；`test_bootstrap` 和 canary 不因中间态长时间红。
-- `jj` only；子代理每个任务新开，禁止并行实现同一文件。
+- `jj` only；子代理每个任务新开，不允许并行实现同一文件。
 - 所有长命令 `nice -n 19`。
 
 ---

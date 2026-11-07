@@ -1,6 +1,6 @@
 # @ 内建原语实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：在 parser、type checker、IR gen 和后端实现编译器内建原语（`@sizeOf`、`@alignOf`、`@typeInfo`、`@fields`、`@field`、`@hasField`、`@comptime`、`@inline`、`@no_bounds_check`、`@fast`）。
 

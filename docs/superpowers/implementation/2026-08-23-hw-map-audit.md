@@ -1,5 +1,7 @@
 # 硬件映射设计：决策记录与实施细节
 
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
+
 > 对应设计：[2026-08-23-hw-map-design.md](../specs/2026-08-23-hw-map-design.md)
 
 本文保存决策记录、检查规则细节、裸机输出对照、测试阶段和边界。设计正文只保留三层结构、语义表、投影表、检查和发射。
@@ -93,7 +95,7 @@ mmio_read(0x3F200000) // 投影解析得到 UART.DATA，执行四项检查
 mmio_read(addr_var) // 解析不到，属于 unsafe 边界（检查不适用）
 ```
 
-`volatile` 实现：IR 节点带 `volatile` 标记；`pass.cr`（常量折叠）、`opt.cr`（CSE/regalloc/调度）一律不消除、不重排、不合并 MMIO 读写。每个 MMIO 读都是副作用，读后不用也必须保留。发射为普通 `load`/`store` 到解析地址；跨核和跨硬件的顺序保障由 `crasm` 的 `barrier` 负责，不混入本层。
+`volatile` 实现：IR 节点带 `volatile` 标记；`pass.cr`（常量折叠）、`opt.cr`（CSE/regalloc/调度）一律不消除、不重排、不合并 MMIO 读写。每个 MMIO 读都是副作用，读后不用也需要保留。发射为普通 `load`/`store` 到解析地址；跨核和跨硬件的顺序保障由 `crasm` 的 `barrier` 负责，不混入本层。
 
 错误报告：走现有 `diag` 体系，新增错误码（`E_MMIO_UNKNOWN_REG` / `E_MMIO_WIDTH_MISMATCH` / `E_MMIO_PERM` / `E_MMIO_VOLATILE`），实现时在 `error-codes` 规格里确定归属。
 

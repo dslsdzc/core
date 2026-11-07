@@ -1,5 +1,7 @@
 # Backend linearization: register lookup and Rule 2 verification
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 日期：2026-11-07
 分支：`perf/backend-direct-index`
 

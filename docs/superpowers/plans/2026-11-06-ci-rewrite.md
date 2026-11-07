@@ -1,5 +1,7 @@
 # CI Rewrite Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the flat nine-job CI with a build-once, area-selected, layered pipeline that keeps the existing test scripts unchanged.

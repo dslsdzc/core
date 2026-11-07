@@ -11,7 +11,7 @@
 
 | 文档 | 内容 | 读者 |
 |---|---|---|
-| [materialization-space.md](materialization-space.md) | 层定义：存在格（Materialization Space）。内容包括格层回答的四个问题、`Semantic Entry -> Materialization`、七个字段（recipe、identity、version、authority、location、persistence、replicability）、归类表和不变量改写 | 适用于所有内存讨论；验证器实现者 |
+| [materialization-space.md](materialization-space.md) | 层定义：存在格（Materialization Space）。内容包括格层涉及的四个问题、`Semantic Entry -> Materialization`、七个字段（recipe、identity、version、authority、location、persistence、replicability）、归类表和不变量改写 | 适用于所有内存讨论；验证器实现者 |
 | [cache-semantics.md](../../academic/cache-semantics.md) | 规则 1 到 7（权威规则）、细读和范式映射表推论。缓存映射是该层最直接的一类实例，不是层本体 | 验证器实现者 |
 | [existence-structure.md](existence-structure.md) | 存在结构：ENT、NOD 如何表示规则；v11 起 REG 不落盘 | ccr_io、分配器、验证器实现者 |
 | [region-model.md](region-model.md) | 经典映射：以图为依据的区域、Arena、字节权限和逃逸规则 | 内存管理实现者 |

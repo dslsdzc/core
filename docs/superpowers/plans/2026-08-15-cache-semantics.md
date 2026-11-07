@@ -1,19 +1,19 @@
 # 缓存语义定稿实施计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 已完成；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：将五份文档（memory-model.md 重构为核心、pointer-model.md / z-vision.md / project-book.md 更新、execution-model.md 一致性检查）改写为缓存语义表述，完成全仓库术语一致性扫描，不改代码。
 
 架构：语义本体（缓存：值=方法、条目、驱逐/再生、边界公理、赋值=版本化、地址=映射）是与范式无关的层；区域、arena、字节权限（CompCert v2）降为经典映射实例。文档需要纠正：实现（HDFG）早已采用缓存语义，落后的是文档。
 
-技术栈：Markdown、grep（验证）、jj（提交，仓库铁律 #2：全面使用 jj，禁止 git）
+技术栈：Markdown、grep（验证）、jj（提交，仓库铁律 #2：全面使用 jj，不使用 git）
 
 ## 全局约束
 
-- 零代码改动：每个任务提交后 `jj status` 必须只显示 `docs/` 下文件
-- 版本控制用 jj，任何一步都不得出现 `git` 命令（铁律 #2）
-- 七条规则与术语对照表逐字采用规格 `docs/archive/2026-08-15-cache-semantics-design.md` 第 2、5 节（本计划已内嵌，不得改写）
-- 术语契约（写作用词强制）：语义本体词 = 条目、方法、驱逐、再生、边界、映射实例、条目标识；经典映射词 = 区域、Arena、字节权限、地址、字节序列、偏移。文档中两者身份不可混淆。字节内存始终表述为"映射实例/经典投影"，不得表述为"语义本体/语义面"
+- 零代码改动：每个任务提交后 `jj status` 需要只显示 `docs/` 下文件
+- 版本控制用 jj，任何一步都不能出现 `git` 命令（铁律 #2）
+- 七条规则与术语对照表逐字采用规格 `docs/archive/2026-08-15-cache-semantics-design.md` 第 2、5 节（本计划已内嵌，不能改写）
+- 术语契约（写作用词强制）：语义本体词 = 条目、方法、驱逐、再生、边界、映射实例、条目标识；经典映射词 = 区域、Arena、字节权限、地址、字节序列、偏移。文档中两者身份不可混淆。字节内存始终表述为"映射实例/经典投影"，不能表述为"语义本体/语义面"
 - 文件名不变：memory-model.md、pointer-model.md 等一律不重命名，避免全仓库链接断裂
 - 无编译任务：铁律 #6（CPU 限制）不适用，全程只做文档编辑与 grep 验证
 
@@ -118,7 +118,7 @@ Core 采用图绑定区域的统一内存管理方案：区域（Region）绑定
 grep -n "^# \|^## " docs/memory-model.md
 ```
 
-预期输出（必须全部出现）：
+预期输出（需要全部出现）：
 
 ```
 # 存储语义：缓存（Cache Semantics）与经典映射（图绑定区域）
@@ -233,7 +233,7 @@ jj commit -m "docs: pointer-model：& 所指更新（条目标识+偏移是语�
 
 - [ ] 步骤 1：更新目标一的状态行
 
-将 `## 目标一` 节的状态行（原句的「状态」原文为粗体：`状态：语义保留已实现（HDFG + region/state edge/provenance）；范式映射表未做（设计上每范式一张表）。`）改为：
+将 `## 目标一` 节的状态行（原句的“状态”原文为粗体：`状态：语义保留已实现（HDFG + region/state edge/provenance）；范式映射表未做（设计上每范式一张表）。`）改为：
 
 ```markdown
 状态：语义保鲜已实现（HDFG + region/state edge/provenance）；范式映射表：存储半边已定稿（语义本体 = 缓存语义，字节内存 = 经典映射实例，见 `docs/memory-model.md` 第一节），执行半边设计态（每范式一张表）。
@@ -352,7 +352,7 @@ grep -rn "内存模型 = 图 + 字节权限层\|语义面（验证器）的范�
 grep -rln "缓存语义\|条目标识" docs/*.md
 ```
 
-预期输出（必须全部包含）：
+预期输出（需要全部包含）：
 
 ```
 docs/memory-model.md

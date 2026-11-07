@@ -1,7 +1,8 @@
 # 增量缓存设计
 
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
 
-> 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
+> 术语注记（2026-08-15）：本规格为历史设计记录，其中“数据流图”（及“RVSDG 式”）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 

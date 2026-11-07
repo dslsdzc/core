@@ -1,5 +1,7 @@
 # CP-5: range go / zero-cap / formal MessageRef Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 补齐 CP-5 的并发语义：range go 走 conc scheduler、零容量 rendezvous + MPMC、activation id 复用、正式 MessageRef `(region, offset, size, layout, epoch)` 与 reset/reuse ABA。

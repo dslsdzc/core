@@ -1,9 +1,11 @@
 # CP-4 实现记录：默认 conc runtime + 协作调度
 
-**日期：** 2026-11-03
-**状态：** CP-4 前四项完成：多 channel plan binding、worker send/recv edge、阻塞 send/recv + fiber 协作调度、默认 `go`/`chan` 切换。
-**计划：** `docs/superpowers/plans/2026-11-03-cp4-default-conc-runtime.md`
-**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+> 定位：受众 = 维护者；状态 = 未完成；出处 = 本页。
+
+日期：2026-11-03
+状态：CP-4 前四项完成：多 channel plan binding、worker send/recv edge、阻塞 send/recv + fiber 协作调度、默认 `go`/`chan` 切换。
+计划：`docs/superpowers/plans/2026-11-03-cp4-default-conc-runtime.md`
+规格：`docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
 ## 1. 交付
 
@@ -24,7 +26,7 @@
 - 每个 activation 有独立 fiber stack、arena、entry、arg、result channel。
 - `conc_spawn` 入 ready queue；`conc_schedule` 在 scheduler/fiber 之间用 `fiber_switch` 切换。
 - 每个 activation 保存/恢复 `arena_current_unchecked()`；`test_go_arena` 验证主 arena 不被 activation 改写。
-- activation 死亡后 scheduler 立即 `arena_reset(aid)`，释放 fiber stack/arena slot；1000 次 `go` 不再撞 arena slot 上限。
+- activation 结束后 scheduler 立即 `arena_reset(aid)`，释放 fiber stack/arena slot；1000 次 `go` 不再撞 arena slot 上限。
 - `sched_init_n(n>1)` 在 CP-4 单线程 conc mapping 下收敛为 `n=1`，不再启动旧 multi-M worker 线程。
 - channel 满/空时，当前 activation 进入 per-channel wait queue；对端 send/recv 唤醒一个 waiter。
 - `close` 标记 closed 并唤醒所有 waiter；recv 先排空再返回 0。

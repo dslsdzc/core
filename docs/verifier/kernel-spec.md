@@ -1,8 +1,10 @@
 # McTT 到 Core 内核移植规范
 
-本文件把 McTT 的类型系统、算法类型检查、算法子类型和 NbE 语义映射到 Core 内核实现。每条规则给出 Coq 源文件行号，实现时以本文件和源文件为准；有歧义时回到源文件核对。
+> 定位：受众 = 验证者（内核实现者，兼维护者）；状态 = active；出处 = McTT 源文件（`~/mctt`，`icfp25` 分支），行号见正文。
 
-源文件在 `~/mctt`，对应 `icfp25` 分支。所有行号是源文件的实际行号，格式为“文件基名:行号”，完整路径见下表。行号只在对应快照上有效。换机器或换快照前，要重新核对 `~/mctt` 的版本。
+本文件是 McTT 类型系统、算法类型检查、算法子类型和 NbE 语义到 Core 内核实现的移植规范。每条规则给出 Coq 源文件行号，实现时以本文件和源文件为准；有歧义时核对源文件。
+
+源文件在 `~/mctt`，对应 `icfp25` 分支。所有行号是源文件的实际行号，格式为“文件基名:行号”，完整路径见下表。行号只在对应快照上有效。换机器或换快照时，重新核对 `~/mctt` 的版本。
 
 ## 源文件清单
 
@@ -24,7 +26,7 @@
 
 ---
 
-## 0. 全局约定（移植前阅读）
+## 0. 全局约定
 
 ### 0.1 de Bruijn 索引方向与上下文序（Task 3/6 以此为唯一基准）
 
@@ -68,7 +70,7 @@
 | `Π A B` | `a_pi A B`（B 的上下文 = A 延长后的上下文） | Syntax.v:138 |
 | `λ A M` | `a_fn A M` | Syntax.v:134 |
 | `succ e` | `a_succ e` | Syntax.v:140 |
-| `rec M return A \| zero -> MZ \| succ -> MS end` | `a_natrec A MZ MS M`（注意参数序） | Syntax.v:141 |
+| `rec M return A \| zero -> MZ \| succ -> MS end` | `a_natrec A MZ MS M`（参数序不同） | Syntax.v:141 |
 | `M [σ]` | `a_sub M σ` | Syntax.v:130 |
 | `⇑ M`（nf 层） | `nf_neut M` | Syntax.v:166 |
 | `⇑ a m`（domain 层） | `d_neut a m` | Domain.v:64 |
@@ -85,12 +87,12 @@
 ### 0.4 移植边界提示
 
 - 记号 `Γ , A ⊢ …` 中 `A` 是头部（0.1），因此 `Γ , A ⊢ M : B` 意为“M 在
-  上下文 Γ 延长 A 后良型”。Core 移植时若用自身上下文表示（如右扩展 list），
-  需将“头部扩展”映射为 Core 的“尾部/头部扩展”并固定一个方向（本文件全部以
+  上下文 Γ 延长 A 后良型”。Core 移植时若使用自身上下文表示（如右扩展 list），
+  把“头部扩展”映射为 Core 的“尾部/头部扩展”，并固定一个方向（本文件全部以
   McTT 头部扩展为准）。
 - `a_natrec` 的参数序为 `A MZ MS M`（motif、zero 分支、succ 分支、被归纳项），
   与记号 `rec M return A | zero -> MZ | succ -> MS end` 中 M 的位置不同，移植时
-  注意按构造子序（Syntax.v:27）。
+  按构造子序处理（Syntax.v:27）。
 - d_var 的编号不是 de Bruijn 索引，而是绝对名（Domain.v:16-19 注释）。读出时
   通过深度 s 转换为 de Bruijn 索引：`Rne !x in s ↘ #(s - x - 1)`（Readback/Definitions.v:39）。
 
@@ -628,8 +630,8 @@ wf_subtyp_pi :
     Γ ⊢ Π A B ⊆ Π A' B'
 ```
 
-注意：Π 子型的域要求等价（`A ≈ A'`），不是逆变子型；余域协变
-（`Γ , A' ⊢ B ⊆ B'`）。这是 McTT 子类型的设计，移植时要保持一致
+注：Π 子型的域要求等价（`A ≈ A'`），不是逆变子型；余域协变
+（`Γ , A' ⊢ B ⊆ B'`）。这是 McTT 子类型的设计，移植时保持一致
 （算法层 asnf_pi 同样，见 4.2；语义层 per_subtyp_pi 同，见 5.6）。
 `wf_subtyp` 传递（System/Definitions.v:414-417）。
 
@@ -786,9 +788,9 @@ asnf_pi :
     ⊢anf Π A B ⊆ Π A' B'
 ```
 
-注意：asnf_pi 的域要求语法相等（`A = A'`），没有逆变前提；余域协变。与
-System/Definitions.v:341-348 的 wf_subtyp_pi 一致（域等价 + 余域协变）。
-McTT 没有 Π 逆变子类型规则，移植时不要添加。
+注：asnf_pi 的域要求语法相等（`A = A'`），没有逆变前提；余域协变。与
+System/Definitions.v:341-348 的 wf_subtyp_pi 一致（域等价、余域协变）。
+McTT 没有 Π 逆变子类型规则，移植时保持一致。
 
 ### 4.3 算法子类型 alg_subtyping（AlgSub/Definitions.v:29-35），共 1 条
 
@@ -1050,13 +1052,12 @@ soundness :     ∀ Γ M A,      Γ ⊢ M : A  ⟹  ∃ W, nbe Γ M A W ∧ Γ �
 
 即：两个表达式转换，当且仅当它们在初始环境下求值并读出到同一个正规形
 （completeness 给出从左到右的推导，soundness 通过 nf 与原表达式的语法等价给出从右到左的推导。二者合起来是充要条件）。
-算法实现中，转换判定就是两侧分别做 `nbe` 或 `nbe_ty`，再比较 nf 的语法相等
+算法实现中，转换判定是两侧分别做 `nbe` 或 `nbe_ty`，再比较 nf 的语法相等
 （nf_eq_dec，Syntax.v:104-111）。
 
 ### 5.7 语义子类型 per_subtyp（PER/Definitions.v:237-258，soundness 侧，4 条）
 
-除算法子类型（4.3）外，还定义语义子类型（用于 PER 逻辑关系/健全性证明。移植 kernel
-时如果不做证明，可以只作参考）：
+除算法子类型（4.3）外，还定义语义子类型。语义子类型用于 PER 逻辑关系和健全性证明。移植内核时如果不做证明，可以只作参考：
 
 ```
 per_subtyp_neut :  Dom b ≈ b' ∈ per_bot  ⟹  Sub ⇑ a b <: ⇑ a' b' at i            (PER/Definitions.v:238-240)
@@ -1076,7 +1077,7 @@ per_subtyp_pi :    DF a ≈ a' ∈ per_univ_elem i ↘ in_rel
 - `per_top_typ : relation domain`：`∀ s, ∃ C, Rtyp a in s ↘ C ∧ Rtyp b in s ↘ C`
 
 （per_nat PER/Definitions.v:62-70、per_ne PER/Definitions.v:74-78、
-per_univ_elem PER/Definitions.v:161-164 为逻辑关系构造，移植 kernel 算法本身不需要。）
+per_univ_elem PER/Definitions.v:161-164 为逻辑关系构造，移植内核算法本身不需要。）
 
 ---
 
@@ -1086,6 +1087,6 @@ per_univ_elem PER/Definitions.v:161-164 为逻辑关系构造，移植 kernel �
 2. 每条规则有来源行号：System/Definitions.v（69 条推导规则 + 2 条查找 + 判定形式）、
    AlgTyp/Definitions.v（10 条）、AlgSub/Definitions.v（4 条）、Eval/Definitions.v（19 条）、
    Readback/Definitions.v（12 条）、NbE.v（2 条 + initial_env 2 条）、PER/Definitions.v（4 条）。
-3. 正文没有“待定”或“类似上面”的描述。
+3. 正文不使用“待定”或“类似上面”的描述。
 4. de Bruijn/上下文约定在第 0.1 节明确写出（var 0 = 上下文头部 = 最右元素；
    `Γ , A := cons A Γ`；d_var 为绝对名，读出时 `s - x - 1` 转换）。

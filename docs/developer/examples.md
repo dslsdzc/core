@@ -35,14 +35,14 @@
 | 内存/指针 | ptr_arith.cr、ptr_ref_first.cr、arena_test.cr |
 | FFI/热补丁/惰性 | ffi_test.cr、hotpatch_test.cr、lazy_test.cr |
 
-> 注：套件文件可能依赖测试驱动（检查点和期望输出）。作为示例阅读时关注语言用法；运行这些文件请使用测试入口（见 `../maintainer/testing.md`）。
+> 注：套件文件可能依赖测试驱动（检查点和期望输出）。作为示例阅读时关注语言用法；运行这些文件时使用测试入口（见 `../maintainer/testing.md`）。
 
 ## 配套
 
 - 每个示例目录可能带有 `.cir`、`.ccr`、`.s` 或 `prog`，这些是构建副产物，手工分步调试时可以对照使用
 - 完整编译产物序列：`.cr` 经 corec 生成 `.cir`（图形态）和 `.ccr`（格形态），再经 corearch 生成 ELF
 
-## 建议下一步
+## 下一步
 
 写自己的程序时，先用 `check` 做类型检查，再用 `run` 试运行小段代码，最后用 `build` 生成产物。
 语法速查见 [syntax.md](syntax.md)；构建与命令见 [quickstart.md](quickstart.md)。

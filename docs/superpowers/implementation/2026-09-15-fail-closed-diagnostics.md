@@ -1,5 +1,7 @@
 # fail-closed 诊断阶段实施记录
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 对应计划：[plans/2026-09-15-fail-closed-diagnostics.md](../plans/2026-09-15-fail-closed-diagnostics.md)
 
 ## 概述
@@ -10,7 +12,7 @@
 
 ### 2026-09-14 TC02 勘误
 
-本条只动表 1 第 10 行，即 TC02。处置由“① 必须阻断”改判为“已修（真误报）”。归因报告为 `/tmp/fct1/tc02_attribution.md`，设计稿为 `/tmp/fct2/tc02_minibatch.md`。实现为 `checker.cr` 新增 `stmt_diverges` 和 `EXPR_IF` 合并点守卫。P3 规则为仅 else 支发散时不报，这种不对称是有意设计。
+本条只动表 1 第 10 行，即 TC02。处置由“① 需要阻断”改判为“已修（真误报）”。归因报告为 `/tmp/fct1/tc02_attribution.md`，设计稿为 `/tmp/fct2/tc02_minibatch.md`。实现为 `checker.cr` 新增 `stmt_diverges` 和 `EXPR_IF` 合并点守卫。P3 规则为仅 else 支发散时不报，这种不对称是有意设计。
 
 对“表 2 变为失败面”的影响：`test_native_float` 从“裸反转 6 档红套件”中移出。CI `selfhost-tests` 的裸反转真红面由 6 档改为 5 档，包括 `test_ccr_types` 的 [TF07+TB01]、`test_interp_float` 的 [B04]、`test_interp_parity` 的 [B04]、`test_match_exhaust` 的 [TM04]、`test_xcut_iface` 的 [TK01]。
 
@@ -27,7 +29,7 @@
 1. `diag_gate_exempt` 落在 `diag.cr`，表内 9 条。`scope` 常量落在 `globals.cr`。照设计稿执行，零清单改动。`main.cr`、`globals.cr`、`diag.cr` 都在 corec 清单内，`corearch_files` 不含 `diag.cr`。
 2. 类型面检查反转，位于 `main.cr` 的硬判定循环。判断条件为 `diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0`，成立时 `hard = 1`。旧的 6 语句行和 11 码名单整体退役。语法面 `:134/:135` 和安全检查面 `:594-603` 不动，照设计稿。
 3. 零产物删除点位于 `exit_code := system(cmd2)` 之后。代码为 `if exit_code != 0 { system("rm -f \"<ccr_path>\"") }`。只删除本次写下的文件，既有旧 `<out>` 不删，裁-FC-6。
-4. 设计稿未包含的进度行保真修正：`[5/5] frontend done` 原仅在 `hard==0` 路径打印，改为诊断之后、返回之前一律打印。72 档语料日志因此除纯行号偏移外零差异。否则 25 档会缺该行。唯一可见差异为探针 `n05_recursive.cr` 多一行，其 `TS03` 属旧硬名单，所以 S0 提前返回时没有该行。
+4. 设计稿未包含的进度行保真修正：`[5/5] frontend done` 原仅在 `hard==0` 路径打印，改为诊断之后、返回之前一律打印。72 档语料日志因此除纯行号偏移外零差异。不满足时，25 档会缺该行。唯一可见差异为探针 `n05_recursive.cr` 多一行，其 `TS03` 属旧硬名单，所以 S0 提前返回时没有该行。
 5. 新套件为 `tests/selfhost/test_diag_gate.py`，共 17 例，包含正控 9、负控 6、零产物 3。接入点为 `run.sh`。设计稿要求至少 14 例，实际为 17 例。
 
 对表结论：无表外命中。T1 `would_block.tsv` 的 7 条 build 面行全部通过，34 条 check 面行逐条不变。T1 的 6 档红套件全部通过。豁免表为 9 条，即 10 减 TC02。TC02 已在 `7f53305d` 修掉。

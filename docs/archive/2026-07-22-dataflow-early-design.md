@@ -9,7 +9,7 @@
 > 定位：受众 = 维护者；状态 = superseded（由 execution-model.md 取代，留档）。
 
 > 注（2026-08-15）：本文档记录 HDFG 的早期设计（07-22 前）；v2 执行模型已演进为 region 嵌套 + state edges（RVSDG 风格结构化控制流，见 [execution-model.md](execution-model.md) 与 docs/superpowers/specs/2026-08-08-region-cfg-design.md）。本文档的 HDFG 基本结构（节点/边/子图）仍成立，region 化细节以 v2 为准。
-> 留档范围（2026-09）：第 1 节至第 7 节与结论 = 早期设计稿(第 7 节指针安全已由 [pointer-model.md](pointer-model.md) 取代）；第 8 节环语义标注（ITER/FIXPT/超图灵/模糊/共归纳）= 仍权威，执行标注空间是 `docs/academic/cache-semantics.md` 规则 4b「图内不可重算」(`recipe = unrecomputable`)与 glossary 的出处，修改需先改规则。
+> 留档范围（2026-09）：第 1 节至第 7 节与结论 = 早期设计稿（第 7 节指针安全已由 [pointer-model.md](pointer-model.md) 取代）；第 8 节环语义标注（ITER/FIXPT/超图灵/模糊/共归纳）= 仍为权威，执行标注空间是 `docs/academic/cache-semantics.md` 规则 4b“图内不可重算”（`recipe = unrecomputable`）与 glossary 的出处，修改需先改规则。
 
 ---
 
@@ -88,7 +88,7 @@ flow load_balancer() {
 
 一个 `flow` 实例同时具有三种性质：
 
-- 执行流：拥有自己的栈和指令指针。
+- 执行流：包含独立的栈和指令指针。
 - 数据流节点：通过 `recv` 消费输入，通过 `yield` 或 `return` 产出输出。
 - 图中的顶点：可以连接到其他节点（通道/句柄）。
 
@@ -164,7 +164,7 @@ Core 的 HDFG 可以高效映射到多种底层硬件：
 - 分布式：节点映射为远程执行器，边映射为网络消息。
 - 无 MMU 嵌入式：节点与边静态分配，无动态分配。
 
-语言自身不规定映射策略，由后端根据目标平台决定。
+语言不规定映射策略，由后端根据目标平台决定。
 
 ---
 
@@ -194,7 +194,7 @@ FIXPT = 一致解语义（非因果环）：环上算子的不动点，值使环
 ```
 
 - FIXPT 语义 = 图上的 μ/ν 算子（Knaster-Tarski 最小/最大不动点），验证内核既有理论（W-类型/不动点）的图实现，非新理论
-- 验证契约：不动点性质，「此值是不动点」可证书核验（契合证书内核：计算在外、健全性在内）
+- 验证契约：不动点性质，“此值是不动点”可证书核验（契合证书内核：计算在外、健全性在内）
 - 执行：FIXPT 环无当前后端（计算不动点 PSPACE 难），区域是声明性的（语义定义，执行后置，同规约层）
 - 设计依据：Deutsch CTC 一致性条件（1991）、非因果图灵机（arXiv 1601.06522），非因果计算的图描述标准形式 = 环 + 不动点语义
 - 未来范式的建模细节不在本文档范围，本节的唯一职责是让图框架今天就能描述非因果结构（语义标注已定义，映射表未来接入）
@@ -232,7 +232,7 @@ FUZZY 标注 = {
 
 - 与概率的边界：概率是可加测度（测度论），模糊是格值隶属度（格论，min/max 结构），两个独立语义
 - 无专属硬件：历史模糊芯片（Fujitsu/Togai，80-90 年代）已停止生产；模糊无物理动机（对比量子/模拟），执行 = 通用设备软件实现，同概率先例（语义标注的价值不依赖专属硬件，模糊控制/推理程序在通用 CPU 上运行）
-- 存储侧对应（2026-08-27 v4）：本节不可重算标注（FIXPT / 神谕 / BSS / 模糊融合）= 图内无方法条目（`recipe = unrecomputable`），统一规则见 `docs/academic/cache-semantics.md` 规则 4b + 2′（必须有 home、驱逐必走 `PreserveRequiredState` 支、身份 = 图节点；不按范式枚举）；映射实例侧（寄存器分配 = 缓存语义映射实例）见 `docs/maintainer/design/regalloc-cache-mapping.md` 第 3 节 / 第 3.1 节
+- 存储侧对应（2026-08-27 v4）：本节不可重算标注（FIXPT、神谕、BSS、模糊融合）= 图内无方法条目（`recipe = unrecomputable`），统一规则见 `docs/academic/cache-semantics.md` 规则 4b + 2′（需要 home，驱逐走 `PreserveRequiredState` 支，身份 = 图节点；不按范式枚举）；映射实例侧（寄存器分配 = 缓存语义映射实例）见 `docs/maintainer/design/regalloc-cache-mapping.md` 第 3 节与第 3.1 节
 
 ### 共归纳/非良基语义（CORE 标注，已存在的范式，非预留）
 

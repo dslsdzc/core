@@ -1,5 +1,7 @@
 # RVSDG Region 化控制流实现计划
 
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
+
 > 术语注记（2026-08-15）：本计划中的"RVSDG 式"是当时方案的原始记录；该结构后定名为 HDFG（Holographic Dataflow Graph），术语变化见 docs/project-book.md。正文保留历史原样。
 
 > 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
@@ -12,7 +14,7 @@
 
 ## 全局约束
 
-- 版本控制用 `jj`，禁止 `git`（项目铁律 2）；提交只包含本任务文件
+- 版本控制用 `jj`，不使用 `git`（项目铁律 2）；提交只包含本任务文件
 - 任何编译/测试命令用 `nice -n 19` 前缀限制 CPU（项目铁律 6）；快速单文件测试（<30s）可不加
 - 不绕过问题，不还原文件（铁律 1/3/5）
 - 常量/关键字以源码为准（`src/compiler/ast.cr`、`src/compiler/dyn_arr.cr` 的 ESZ_*/OFF_* 定义）
@@ -193,7 +195,7 @@ fn sg_pop():
     g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT)
 ```
 
-验证修复（dump 断言）：if 后跟尾代码的函数，`Region: if nodes A..B` 的 B 必须等于 merge label 处节点数（不覆盖尾部代码）。测试：`tests/selfhost/test_region_cfg.py` 的 if/for 用例改为断言区域边界在函数指令跨度内（sanity 检查）。
+验证修复（dump 断言）：if 后跟尾代码的函数，`Region: if nodes A..B` 的 B 需要等于 merge label 处节点数（不覆盖尾部代码）。测试：`tests/selfhost/test_region_cfg.py` 的 if/for 用例改为断言区域边界在函数指令跨度内（sanity 检查）。
 
 （`sg_alloc_push/sg_alloc_pop` 与 `g_sg_alloc_total/g_sg_arena_var` 并行表按 push/pop 配对索引，不受"弹出最后 open"影响。arena 用例 `tests/suite/arena_test.cr` 回归验证。）
 

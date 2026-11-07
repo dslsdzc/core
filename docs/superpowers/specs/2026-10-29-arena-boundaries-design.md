@@ -1,5 +1,7 @@
 # Arena 边界处理设计
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 > 状态：①②③ 完成
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-28-arena-size-classes.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
@@ -88,7 +90,7 @@
 
 ### 表示
 
-arena 的元数据数组和标量缓冲区都保存 **raw 机器字**。库和 stub 读取同一份
+arena 的元数据数组和标量缓冲区都保存 raw 机器字。库和 stub 读取同一份
 cell：
 
 - stub 直接按 raw 读写标量缓冲区和元数据数组。
@@ -100,8 +102,8 @@ cell：
 
 ### 初始化和 reset
 
-- `g_arena_scalars_ready` 在标量缓冲区建立期间为 0；allocator body 看到 0 时走全局堆。
-- `g_arena_suspend` 在 `arena_init` 和 `arena_reset` 期间为 1；stub 看到非 0 时
+- `g_arena_scalars_ready` 在标量缓冲区建立期间为 0；allocator body 读取到 0 时走全局堆。
+- `g_arena_suspend` 在 `arena_init` 和 `arena_reset` 期间为 1；stub 读取到非 0 时
   走全局堆。这样 tagged 算术产生的 big-int 装箱不会进入半初始化或正在重置的
   arena。
 - `arena_init` 分配标量缓冲区后立即把当前 arena 写成 -1，再继续分配元数据。
@@ -169,7 +171,7 @@ class/slot 规则：
   `emit_start` 一致。
 - `IR_BINARY` 的 dex 分流按操作数类型触发，而不是只看结果槽：任一操作数为
   `TI_DEX`/`TI_DEX_S` 时使用 raw 字运算，比较结果写 raw 0/1，SHL/SHR 也走
-  raw 移位。`ir_gen` 已在节点前完成 int→scaled 的转换，解释器不再二次 untag
+  raw 移位。`ir_gen` 已在节点前完成 int 到 scaled 的转换，解释器不再二次 untag
   （`dex_scale_int` 依赖原始除 2 去掉 BigInt tag）。
 - `arena_alloc` 的清零走 `_memzero`。解释器在 `ir_interp_call` 里用编译后的
   循环执行它，不再逐节点解释 1MiB 的清零循环；仅在解释 arena body
@@ -183,7 +185,7 @@ class/slot 规则：
 - 2MB + 100MB 分配程序在 `corec run` 与 native ELF 下返回 0，隐藏头和首
   个 payload cell 一致。
 - `tests/selfhost/test_arena_interp.py` 覆盖上述套件、2MB/100MB parity，以及
-  static 超限、`>1TB`、pool limit 三条失败路径；失败必须输出
+  static 超限、`>1TB`、pool limit 三条失败路径；失败时输出
   `arena allocation failed` 且返回非 0。
 - 同一套件检查 reset 复用后 1MiB 和 64B 分配仍然全零，并用 32 次 1MiB
   分配在 30 秒内完成守住 `_memzero` 的快速路径。

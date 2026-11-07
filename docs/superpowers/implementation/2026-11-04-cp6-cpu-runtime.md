@@ -1,9 +1,11 @@
 # CP-6 实现记录：CPU 运行时 1–14 项
 
-**日期：** 2026-11-04
-**状态：** 1–14 全部完成（host CPU / x86-64 Linux 裸 ELF）。真实 GPU/FPGA/集群与跨 memory space 物理搬运不在本记录范围。
-**设计：** `docs/superpowers/specs/2026-11-04-cp6-cpu-runtime-design.md`
-**规格：** `2026-11-01-cross-paradigm-concurrency-design.md`、`2026-09-17-concurrency-model-design.md`
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
+日期：2026-11-04
+状态：1–14 全部完成（host CPU / x86-64 Linux 裸 ELF）。真实 GPU/FPGA/集群与跨 memory space 物理搬运不在本记录范围。
+设计：`docs/superpowers/specs/2026-11-04-cp6-cpu-runtime-design.md`
+规格：`2026-11-01-cross-paradigm-concurrency-design.md`、`2026-09-17-concurrency-model-design.md`
 
 ## 1. 交付总览
 
@@ -18,7 +20,7 @@ CP-6 分三批提交：
 
 ### 2.1 抢占与强制让出
 
-- `ir_gen` 在**用户库**且程序 `import sched/chan/conc_sched` 时，于 loop/while/for 回边前发射 `conc_preempt_tick`。
+- `ir_gen` 在用户库且程序 `import sched/chan/conc_sched` 时，于 loop/while/for 回边前发射 `conc_preempt_tick`。
 - 无回边的 straight-line 函数每 512 条 IR 指令也插一个 tick；IR 与 DF 节点顺序保持一致（tick 在当前指令前发射）。
 - `conc_preempt_tick` 每 M 一个 quantum（默认 2000）；到 0 调 `conc_yield`。
 - `conc_sched_init` 安装 SIGALRM + `setitimer`（5 ms）；handler 只写 `g_conc_preempt_flag`，下一次 tick 看到后让出。handler 不拿锁、不分配、不切 fiber。

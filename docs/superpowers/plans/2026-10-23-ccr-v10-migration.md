@@ -1,5 +1,7 @@
 # v10 目标无关 `.ccr` 迁移 Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 `.ccr` 从 v9.1 槽格式迁移到 v10 格形态：格式只表达存在、版本、区域、边和语义域；前端不再计算目标布局；corearch 从 v10 + target layout 生成投影。
@@ -14,12 +16,12 @@
 
 - 每个任务单独提交；前一个任务的验收通过后才开始下一个。
 - 不使用全局字符串替换修改语义代码；移动或重命名时保留函数名、参数名和注释中的技术事实。
-- v10 完成前，`CCR_VERSION` 保持 v9.1；不得产生“v10 header + v9 字段”的混合文件。
+- v10 完成前，`CCR_VERSION` 保持 v9.1；不能产生“v10 header + v9 字段”的混合文件。
 - 除任务 4 的格式切换外，任何任务都不能同时改变 wire 版本和 IR 语义。
-- 前端语义文件（`src/compiler` 的 lexer/parser/checker/ir_gen/ccr_lower）不得出现 `mp_*`、字节偏移、步长、对齐、寄存器、栈和 ABI。
-- `.ccr` 不得依赖 `.coi`；删除全部 `.coi` 后 v10 文件仍能加载、验证和投影。
+- 前端语义文件（`src/compiler` 的 lexer/parser/checker/ir_gen/ccr_lower）不能出现 `mp_*`、字节偏移、步长、对齐、寄存器、栈和 ABI。
+- `.ccr` 不能依赖 `.coi`；删除全部 `.coi` 后 v10 文件仍能加载、验证和投影。
 - 所有新增 wire 字段只使用角色名：`count/kind/opcode/flags/offset/size/version/id/imm/word`，不写 `u32/i32` 作为语言类型。
-- v4 语法没有 `<T>` 或 `[T]` 泛型参数语法；文档和测试不得引入这两种写法。
+- v4 语法没有 `<T>` 或 `[T]` 泛型参数语法；文档和测试不能引入这两种写法。
 - 任务 1 到 3 的中间态仍使用 v9 writer；只有在 NOD/ENT 语义和 corearch 消费面同时准备好后，任务 4 才 bump 版本。
 - 每个任务结束运行：
   ```bash
@@ -131,7 +133,7 @@ jj commit -m "test: add ccr v10 wire oracle and negative fixtures"
 
 - [ ] **Step 1: 先写编译期断言 fixture**
 
-在 `tests/selfhost/test_ccr_v10_format.py` 增加一个不依赖 Core 的常量对照测试：从 `ccr_schema.cr` 文本中读取 `CCR_V10_*` 常量，和 Python oracle 的 tag/size 比较。测试必须失败，因为文件尚未创建。
+在 `tests/selfhost/test_ccr_v10_format.py` 增加一个不依赖 Core 的常量对照测试：从 `ccr_schema.cr` 文本中读取 `CCR_V10_*` 常量，和 Python oracle 的 tag/size 比较。测试需要失败，因为文件尚未创建。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -258,7 +260,7 @@ jj commit -m "ccr: derive semantic type ids for v10 nod"
   - `CCR_SEG_COUNT := 9`
   - `calc_ccr_size`、`save_ccr`、`load_ccr` 使用 canonical order：`STR TYPE IFACE SYM NOD ENT REG EDG CASE`
   - v9 版本 `589825` 一律拒绝。
-  - corearch 只从 `type_id` + target DataLayout 重建宽度/stride；不得从 `.ccr` 读回宽度。
+  - corearch 只从 `type_id` + target DataLayout 重建宽度/stride；不能从 `.ccr` 读回宽度。
   - NOD 的 `flags` 只接收语义节点特性，不接收宽度、字节偏移或 ABI。
 
 - [ ] **Step 1: 写失败测试**
@@ -294,11 +296,11 @@ Expected: 版本/段表断言失败。
 - ENT：`ESZ_ENTRY_DISK = 24`，字段序 `var_id/version/def_nod/live_start/live_end/flags`；不再读 `home`。
 - NOD：写 `op/dest/src1/src2/src3/type_id/flags/first_edge/edge_count`；`type_id` 来自 Task 3；`flags` 只写语义特性。
 - loader：拒绝 v9、8 段、重复/缺失/重叠/尾随；按段表 offset 解析（顺序流式在 Task 6 收紧）。
-- corearch：`nod_tk`/访问宽度改为从 `type_id` 和 target layout 重建；`IR_DEREF`、`IR_ALLOC_ARRAY`、`IR_STORE_PTR` 不再依赖盘上宽度。所有旧 `tk` 辅码必须先分类：语义特性进 `flags`，目标事实留给 corearch，不可分类的码在保存时拒绝。
+- corearch：`nod_tk`/访问宽度改为从 `type_id` 和 target layout 重建；`IR_DEREF`、`IR_ALLOC_ARRAY`、`IR_STORE_PTR` 不再依赖盘上宽度。所有旧 `tk` 辅码需要先分类：语义特性进 `flags`，目标事实留给 corearch，不可分类的码在保存时拒绝。
 
 - [ ] **Step 4: 迁移测试常量**
 
-`test_ccr_v7.py` 改名为语义测试但保留文件名；把 `V7 = 589825` 改为 `V10 = 0x000A0000`，段 tag/顺序、ENT 24B、`CASE` 断言全部更新。旧 v9 fixture 保留在负向测试中，必须继续拒绝。
+`test_ccr_v7.py` 改名为语义测试但保留文件名；把 `V7 = 589825` 改为 `V10 = 0x000A0000`，段 tag/顺序、ENT 24B、`CASE` 断言全部更新。旧 v9 fixture 保留在负向测试中，需要继续拒绝。
 
 - [ ] **Step 5: 运行完整回归**
 
@@ -313,7 +315,7 @@ nice -n 19 python3 tests/selfhost/test_bigint_arith.py
 nice -n 19 bash tools/baseline/canary_check.sh
 ```
 
-Expected: 全绿；`.ccr` canary 四条的尺寸/哈希重锁，ELF canary 保持 `826d74cf...`。重锁必须在 `tools/baseline/canary_values.tsv` 注释中写归因：v10 header/段序/ENT/NOD 字段变化。
+Expected: 全绿；`.ccr` canary 四条的尺寸/哈希重锁，ELF canary 保持 `826d74cf...`。重锁需要在 `tools/baseline/canary_values.tsv` 注释中写归因：v10 header/段序/ENT/NOD 字段变化。
 
 - [ ] **Step 6: 提交**
 
@@ -416,7 +418,7 @@ jj commit -m "ccr: move layout out of frontend into target projection"
 
 - [ ] **Step 1: 写失败测试**
 
-构造一个段表合法但段体顺序为 `STR/SYM/.../TYPE` 的文件；流式 loader 必须拒绝，随机访问 loader 可以接受。测试同时验证 canonical order 文件两种模式语义一致。
+构造一个段表合法但段体顺序为 `STR/SYM/.../TYPE` 的文件；流式 loader 需要拒绝，随机访问 loader 可以接受。测试同时验证 canonical order 文件两种模式语义一致。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -476,7 +478,7 @@ jj commit -m "ccr: make v10 loader consume canonical segment order"
 
 - [ ] **Step 2: 实现打包/解包**
 
-用固定顺序 `manifest` -> `program.ccr` -> `coi/<target>.coi`、固定 tar 元数据（uid/gid=0、mtime=0、mode 0644）、zstd 单帧输出。`.coi` 不解析，只作为可选不透明 payload；解包后 raw `.ccr` 必须逐字节等于输入。
+用固定顺序 `manifest` -> `program.ccr` -> `coi/<target>.coi`、固定 tar 元数据（uid/gid=0、mtime=0、mode 0644）、zstd 单帧输出。`.coi` 不解析，只作为可选不透明 payload；解包后 raw `.ccr` 需要逐字节等于输入。
 
 - [ ] **Step 3: 运行测试**
 
@@ -507,19 +509,19 @@ jj commit -m "dist: add ccrb bundle with optional coi sidecar"
 **Interfaces:**
 - Consumes: Task 4 至 7 的 v10 路径。
 - Produces:
-  - v9 wire 常量 `589825`、`ESZ_ENTRY_DISK : int = 28`、v9 段 tag/顺序在源码中不再作为有效路径出现；负向 fixture 可保留 `589825`，但必须标注为历史 fixture。
-  - `ccr_io.cr` 的 v10 写侧/读侧不再写/读 `home`；`OFF_ENTRY_HOME` 如仍在 corearch 实例侧使用，必须改名为 runtime/instance 字段并注释“不进入 `.ccr`”。
+  - v9 wire 常量 `589825`、`ESZ_ENTRY_DISK : int = 28`、v9 段 tag/顺序在源码中不再作为有效路径出现；负向 fixture 可保留 `589825`，但需要标注为历史 fixture。
+  - `ccr_io.cr` 的 v10 写侧/读侧不再写/读 `home`；`OFF_ENTRY_HOME` 如仍在 corearch 实例侧使用，需要改名为 runtime/instance 字段并注释“不进入 `.ccr`”。
   - `x86_frontend_abi.cr` 不再注册 `w64/r64`（已移除）；现有 `cell_*`/`load8`/`store8`/`load64`/`w32`/`load_str_ptr`/`store_str_ptr`/`_dyncpy` 暂作为 `SYSTEM` runtime ABI 保留，因为 stdlib scheduler/arena 仍依赖它们。新增注释说明这是 SYSTEM/raw 边界，不是普通语言 API。
   - canary 只保留 v10 值；ELF canary 保持 `826d74cf...`。
 
-**Ruling:** “普通语言 API 彻底删除 fixed-width/raw 内建”需要先实现 `Bytes` 公共层并迁移 stdlib，属于独立任务；本任务不做半删。保留的 raw 内建必须显式标为 `SYSTEM`/runtime ABI，并让使用它们的程序在 header 中标 SYSTEM。
+**Ruling:** “普通语言 API 彻底删除 fixed-width/raw 内建”需要先实现 `Bytes` 公共层并迁移 stdlib，属于独立任务；本任务不做半删。保留的 raw 内建需要显式标为 `SYSTEM`/runtime ABI，并让使用它们的程序在 header 中标 SYSTEM。
 
 - [ ] **Step 1: 写失败测试**
 
 静态断言：
 - `src/compiler/ccr_io.cr` 不出现有效路径的 `589825` 或 `ESZ_ENTRY_DISK : int = 28`；历史负向 fixture 中的 `589825` 豁免。
 - `src/compiler/ccr_io.cr` 的 v10 writer/reader 不写/读 `home`。
-- `src/arch/x86_64/x86_frontend_abi.cr` 不注册 `w64`/`r64`；保留的 raw 内建必须带 `SYSTEM` 注释。
+- `src/arch/x86_64/x86_frontend_abi.cr` 不注册 `w64`/`r64`；保留的 raw 内建需要带 `SYSTEM` 注释。
 - `test_ccr_v10_format.py` 继续断言 v10 header/段序/ENT 24B/CASE。
 
 - [ ] **Step 2: 删除并运行**
@@ -591,4 +593,4 @@ NOD opcode/operand 域由 loader 拒绝、非类型面 `type_id` 补齐语义域
 cmp /tmp/corec2 /tmp/corec3
 ```
 
-`cmp` 必须无输出。
+`cmp` 需要无输出。

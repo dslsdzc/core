@@ -1,9 +1,11 @@
 # Core 跨范式并发底层设计
 
-**状态：** 设计定稿（2026-11-01，待实施）
-**范围：** 执行体、区域、通信、传输计划、目标能力与映射的底层抽象。本文不定义新的源码语法。
-**上位规格：** `docs/superpowers/specs/2026-09-17-concurrency-model-design.md`（语义、确定性、传输 primitive、预算与证书）
-**替换关系：** 本文替换 2026-09-17 规格中把 `M = OS 线程 / CPU 核数` 当作地基的实现假设；语义与不变量仍以上位规格为准。
+> 定位：受众 = 维护者；状态 = 设计态；出处 = 本页。
+
+状态：设计定稿（2026-11-01，待实施）
+范围：执行体、区域、通信、传输计划、目标能力与映射的底层抽象。本文不定义新的源码语法。
+上位规格：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md`（语义、确定性、传输 primitive、预算与证书）
+替换关系：本文替换 2026-09-17 规格中把 `M = OS 线程 / CPU 核数` 当作基础的实现假设；语义与不变量仍以上位规格为准。
 
 ## 1. 问题
 
@@ -21,15 +23,15 @@
 
 ## 2. 设计原则
 
-1. **并发是结构，不是硬件。** 并发关系由 ExecutionBody 与 ConcurrencyEdge 描述，不由线程/核心描述。
-2. **编译期已知的事实是契约。** 布局、region owner、生命周期、传输义务、独立性由编译器给出；运行时不重新推导。
-3. **目标期绑定资源能力。** slot 种类/数量、memory space、传输路径、同步机制由 TargetProfile 给出，不进入源码/语义 IR。
-4. **运行期只知道动态事实。** 实际可用 slot、拓扑、负载、动态大小、实际竞争、调度时机；运行时不定义语义。
-5. **mapping 不能改变语义。** 同一份计划在 CPU/GPU/FPGA/集群上执行，值、效应、控制去向、终止类别和已声明预算必须保持一致。
-6. **不支持就 fail-closed。** 目标能力不足时拒绝或回退到语义等价方案；不得生成“看起来能跑”的映射。
-7. **不新增源码语法。** 不引入泛型通道语法、lock/mutex/atomic/ownership 关键字，也不引入 CPU/GPU 专用关键字。并发 surface 仍是现有 `go`、channel、`await`、`yield`、`flow`。
-8. **执行资源是逻辑 slot。** 一个核心可以有多个 slot，一个 slot 可以串行承载多个 body；核心数只是 slot provider 的一种默认来源。
-9. **预算在 mapping 定稿时闭合。** 编译期给出可判定的预算义务；目标期/映射期把实际能力代入，状态必须可见。
+1. 并发是结构，不是硬件。并发关系由 ExecutionBody 与 ConcurrencyEdge 描述，不由线程/核心描述。
+2. 编译期已知的事实是契约。布局、region owner、生命周期、传输义务、独立性由编译器给出；运行时不重新推导。
+3. 目标期绑定资源能力。slot 种类/数量、memory space、传输路径、同步机制由 TargetProfile 给出，不进入源码/语义 IR。
+4. 运行期只知道动态事实。实际可用 slot、拓扑、负载、动态大小、实际竞争、调度时机；运行时不定义语义。
+5. mapping 不能改变语义。同一份计划在 CPU/GPU/FPGA/集群上执行，值、效应、控制去向、终止类别和已声明预算保持一致。
+6. 不支持就 fail-closed。目标能力不足时拒绝或回退到语义等价方案；不生成表面可运行但语义不等价的映射。
+7. 不新增源码语法。不引入泛型通道语法、lock/mutex/atomic/ownership 关键字，也不引入 CPU/GPU 专用关键字。并发 surface 仍是现有 `go`、channel、`await`、`yield`、`flow`。
+8. 执行资源是逻辑 slot。一个核心可以有多个 slot，一个 slot 可以串行承载多个 body；核心数只是 slot provider 的一种默认来源。
+9. 预算在 mapping 定稿时闭合。编译期给出可判定的预算义务；目标期/映射期把实际能力代入，状态可见。
 
 ## 3. 三分：编译期、目标期、运行期
 
@@ -39,13 +41,13 @@
 | 目标期 | slot 种类/层级/数量范围、memory space、传输路径与成本、同步能力、是否支持阻塞/动态创建、拓扑 | TargetProfile（版本化） |
 | 运行期 | 实际可用 slot、实际拓扑、负载、动态 extent、实际竞争、调度时机 | MappingPlan 的实例与执行 |
 
-编译期对象只携带 **约束**（如 `space_constraint`、`home_constraint`），不携带具体 space/slot。具体值由 mapping 绑定。
+编译期对象只携带约束（如 `space_constraint`、`home_constraint`），不携带具体 space/slot。具体值由 mapping 绑定。
 
 ## 4. 六个核心抽象
 
 ### 4.1 ExecutionBody / Activation
 
-**ExecutionBody** 是并发结构的模板；**Activation** 是它在一次运行中的实例。
+ExecutionBody 是并发结构的模板；Activation 是它在一次运行中的实例。
 
 | body kind | 含义 | 典型映射 |
 |---|---|---|
@@ -100,11 +102,11 @@ Region {
 }
 ```
 
-- Region 图是 **树 + outlives 边**，不是任意共享所有权图；每个 region 有唯一 owner。
-- **运行时对象（Task、Channel、Message、等待节点）必须属于某个 owner region，永远不落进 compiler function arena。** 用户局部变量才走函数 arena。
+- Region 图是树 + outlives 边，不是任意共享所有权图；每个 region 有唯一 owner。
+- 运行时对象（Task、Channel、Message、等待节点）属于某个 owner region，永远不落进 compiler function arena。用户局部变量才走函数 arena。
 - 实际 memory space 由 `MappingPlan` 绑定；编译期只写约束。
 - 默认 share-nothing：跨 body 没有共享可变 region。只读共享是 mapping 优化，不是新 primitive。
-- `scope=GROUP` 只允许在同一个 DATA_PARALLEL group 内共享；跨 group 的可变共享必须走 TransferPlan 或共享映射实验，且带等价性/死锁证明。
+- `scope=GROUP` 只允许在同一个 DATA_PARALLEL group 内共享；跨 group 的可变共享走 TransferPlan 或共享映射实验，且带等价性/死锁证明。
 
 ### 4.3 ConcurrencyEdge
 
@@ -117,9 +119,9 @@ Edge 描述 body/activation 之间的关系，不是物理时序：
 - `DATA`：数据依赖；
 - `ORDER`：显式顺序约束。
 
-Edge 携带：顺序种类、是否可交换、channel FIFO 语义、传输义务引用。**producer/consumer 数量是 channel 级属性，不是 edge 级属性。**
+Edge 携带：顺序种类、是否可交换、channel FIFO 语义、传输义务引用。producer/consumer 数量是 channel 级属性，不是 edge 级属性。
 
-可观察顺序只来自显式 edge、state 链和图上的顺序源；调度器的物理顺序不得升格为语义。单产单消 channel 的 FIFO 是语义序；多产/多消没有跨发送者全局序，除非 `ordered(src)` 这类 **图标注**（不是源码语法）或等价证明。
+可观察顺序只来自显式 edge、state 链和图上的顺序源；调度器的物理顺序不升格为语义。单产单消 channel 的 FIFO 是语义序；多产/多消没有跨发送者全局序，除非 `ordered(src)` 这类图标注（不是源码语法）或等价证明。
 
 ### 4.4 TransferPlan
 
@@ -147,14 +149,14 @@ TransferPlan {
 
 关键规则：
 
-- Plan 是 target-neutral 的；物理上可以 DMA、RDMA、COW、kernel 直写，但不得改变所有者/可见性语义。
+- Plan 是 target-neutral 的；物理上可以 DMA、RDMA、COW、kernel 直写，但不改变所有者/可见性语义。
 - 跨 memory space 的 `MOVE` 可以在物理上发生拷贝，但逻辑上源侧仍然失效；物理搬运字节单独记预算，不能把 MOVE 的逻辑 0 当成物理 0。
-- **MOVE 不能无条件降级为 COPY。** 只有当源侧在 plan 中确实 dead（或显式记录失效）时，才允许把 MOVE 的实现改成分离副本；否则必须拒绝或串行。
-- LOAN 不能用 COPY 冒充：COPY 不会归还所有权，也不会恢复源侧访问禁令。
-- SPLIT 不能用 COPY 冒充，除非复制后的子区域仍然满足“互不重叠 + 各自 owner”且源侧不再使用；否则拒绝。
+- MOVE 不能无条件降级为 COPY。只有当源侧在 plan 中确实 dead（或显式记录失效）时，才允许把 MOVE 的实现改成分离副本；否则拒绝或串行。
+- LOAN 不能用 COPY 替代：COPY 不会归还所有权，也不会恢复源侧访问禁令。
+- SPLIT 不能用 COPY 替代，除非复制后的子区域仍然满足“互不重叠 + 各自 owner”且源侧不再使用；否则拒绝。
 - FILL 在目标 region 已存在且语义等价时可以回退 COPY；否则拒绝。
 - COPY 永远可行，但只允许复制 CopySet；分析不精确只增加复制量，不产生错误拒绝。
-- `SHARE` 不是 primitive；只读共享是 mapping 优化。可变共享只属于实验 shared mapping，必须带等价性与死锁证书。
+- `SHARE` 不是 primitive；只读共享是 mapping 优化。可变共享只属于实验 shared mapping，带等价性与死锁证书。
 
 ### 4.5 TargetCapabilities / TargetProfile
 
@@ -188,37 +190,37 @@ TargetProfile {
 }
 ```
 
-- slot 是 **层级**：CPU thread/fiber、GPU lane→warp→workgroup、pipeline stage 都是父子关系，不是扁平同义词。
+- slot 是层级：CPU thread/fiber、GPU lane 到 warp 到 workgroup、pipeline stage 都是父子关系，不是扁平同义词。
 - `count_min/count_max` 是逻辑 slot 的范围；CPU 核数只是提供者，不是含义。
 - 一个 core 可以有多个 slot；一个 slot 可以串行承载多个 activation。
-- 目标可以声明“不支持任意阻塞通信”“不支持动态 activation 创建”等限制；mapping 必须据此拒绝或改映射。
-- `TargetProfile` 必须版本化；运行期探测只能 **收窄** 已知能力，不能建立新的合法性。
+- 目标可以声明“不支持任意阻塞通信”“不支持动态 activation 创建”等限制；mapping 据此拒绝或改映射。
+- `TargetProfile` 版本化；运行期探测只能收窄已知能力，不能建立新的合法性。
 
 ### 4.6 MappingPlan
 
 MappingPlan 把 ExecutionPlan 落到具体 target：
 
-- body/activation → slot kind / instance；
-- region → memory space；
-- transfer → 物理机制（DMA/RDMA/COW/kernel copy）；
-- schedule → 允许的交错与同步；
+- body/activation 映射到 slot kind / instance；
+- region 映射到 memory space；
+- transfer 映射到物理机制（DMA/RDMA/COW/kernel copy）；
+- schedule 映射到允许的交错与同步；
 - body 的 home/slot 选择只在这里出现。
 
 合法性规则：
 
-1. body kind、requirements 必须被 slot kind 支持；
-2. region 的 space_constraint 必须存在且满足容量/可见性/一致性；
-3. transfer 必须有路径，或能回退到 **语义等价** 的 primitive（见 4.4，不是无条件 COPY）；
-4. sync 必须能满足 edge 的顺序/等待语义；
-5. 阻塞/动态创建等限制必须满足；
-6. 任何生成的 sync/阻塞等待必须有无环证书；不能证明则 SERIAL/语义等价回退或拒绝；
+1. body kind、requirements 被 slot kind 支持；
+2. region 的 space_constraint 存在且满足容量、可见性和一致性；
+3. transfer 有路径，或能回退到语义等价的 primitive（见 4.4，不是无条件 COPY）；
+4. sync 能满足 edge 的顺序和等待语义；
+5. 阻塞或动态创建等限制满足；
+6. 任何生成的 sync 或阻塞等待有无环证书；不能证明则 SERIAL、语义等价回退或拒绝；
 7. 任何一步不能证明，fail-closed。
 
 MappingPlan 不是 `.ccr` 内容。transfer/sync 决策与证书走决策记录旁路（承 2026-09-17 evidence §16 G5/G6）。
 
 ### 4.7 Plan artifact 与 runtime ABI
 
-同一份 plan 要能在 CPU/SIMT 上执行，plan 不能只活在编译器进程里：
+同一份 plan 要能在 CPU/SIMT 上执行，plan 不能只存在于编译器进程里：
 
 ```text
 ConcurrencyPlan {
@@ -232,7 +234,7 @@ ConcurrencyPlan {
 }
 ```
 
-- plan 是 **旁路 artifact**（版本化二进制/结构化元数据），不写进 `.ccr`；代码只携带 plan id / descriptor id。
+- plan 是旁路 artifact（版本化二进制/结构化元数据），不写进 `.ccr`；代码只携带 plan id / descriptor id。
 - MappingPlan 单独存放，绑定 TargetProfile 版本；同一 plan 可以有多个 MappingPlan。
 - runtime entry ABI 至少包含：注册 plan、创建 activation、channel 操作、transfer 执行、完成/等待。具体 ABI 由实施计划定。
 - plan 版本不匹配时 fail-closed，不允许“尽量解析”。
@@ -242,16 +244,16 @@ ConcurrencyPlan {
 - 调度器只消费 body/activation 图和 Edge，不假设线程/栈/fiber。
 - slot 是逻辑执行上下文；一个 core 上可以有多个 slot，一个 slot 可以串行跑多个 activation。
 - 调度可以改变执行时机，不能改变可观察语义：值、效应、控制去向、终止类别、已声明预算。
-- 独立性由编译器证明；没有证明且没有显式顺序，**拒绝编译**，不得让调度器决定结果。
+- 独立性由编译器证明；没有证明且没有显式顺序，拒绝编译，不让调度器决定结果。
 - CPU 协作调度、GPU warp 调度、FPGA 静态调度、集群网络调度都是 mapping；语义相同。
-- 多 slot/多实例不是“地基”以外的第二套语义；它是 MappingPlan 的参数。
+- 多 slot/多实例不是“基础”以外的第二套语义；它是 MappingPlan 的参数。
 
 ### 5.1 目标期预算闭包
 
 - 编译期产生预算义务（B-渐进/B-计数/B-等待）和可判定的 bound；无法判定记 `unknown`。
 - MappingPlan 定稿时，用 TargetProfile 的传输成本/同步成本/slot 数计算每条预算，状态写 `proved | unknown | violated | measured`。
-- `measured` 只作报告证据，不能解除义务；`unknown` 不得渲染为通过。
-- 运行期 remap/负载变化只能在预计算预算包络内选择；超包络必须报告或按 policy 拒绝。
+- `measured` 只作报告证据，不能解除义务；`unknown` 不渲染为通过。
+- 运行期 remap/负载变化只能在预计算预算包络内选择；超包络时报告或按 policy 拒绝。
 - 预算证书走决策记录旁路，不写 `.ccr`。
 
 ### 5.2 确定性判定
@@ -295,7 +297,7 @@ MessageRef {
 - CPU mapping 可以用环形缓冲 + 等待 activation；GPU mapping 可以用 device queue/stream；集群可以用网络消息；语义不变。
 - 目标不能阻塞时，mapping 可以用缓冲/流式/宿主代理；不能因此改变 FIFO/顺序语义。
 - 零容量 channel 是 rendezvous：发送方和接收方在边界会合；`cap=0` 的第一批切片可以不做，但一旦支持，语义按 rendezvous 定义。
-- close 后 send 是显式 panic/abort；close 后 recv 先排空缓冲，再返回零值。第一批实现若暂不支持 close/零容量，必须明确报错，不得静默。
+- close 后 send 是显式 panic/abort；close 后 recv 先排空缓冲，再返回零值。第一批实现若暂不支持 close/零容量，明确报错，不静默。
 - 多产/多消不是默认承诺；需要显式图约束或编译器证明，否则 fail-closed。
 - `ordered(src)` 是图标注（`.ccr` 语义标注可承载），不是新增源码语法。
 
@@ -304,8 +306,8 @@ MessageRef {
 | 对象 | 关系 |
 |---|---|
 | 2026-09-17 并发模型规格 | 语义权威：确定性、五 primitive、预算、证书、不变量 |
-| 2026-07-30 GMP 设计 / ADR-0017 | **降级为 CPU mapping 参考**，不再是语义模型 |
-| `src/stdlib/{sched,chan,goroutine,arena}.cr` | 当前 CPU 后端原型；只作参考，**不作为首批 CPU slice 的实现** |
+| 2026-07-30 GMP 设计 / ADR-0017 | 降级为 CPU mapping 参考，不再是语义模型 |
+| `src/stdlib/{sched,chan,goroutine,arena}.cr` | 当前 CPU 后端原型；只作参考，不作为首批 CPU slice 的实现 |
 | 2026-09-04 消息边界标签 | SHARE 降级为 mapping 优化；消息子区域/身份重指并入 MessageLayout |
 | S-A / S-E / S-D | 义务分级、确定性执法、决策记录与 explain 的既有机制 |
 | `.ccr` | 只允许语义标注；transfer/sync 决策与证书不进 |
@@ -314,8 +316,8 @@ MessageRef {
 
 - 新 runtime 独立目录；旧 runtime 仅用于 self-host 编译器过渡和 CPU mapping 对照。
 - 新底层先以 plan + descriptor ABI 为稳定接口，不先重写 scheduler。
-- CPU mapping 与 SIMT mapping 必须共用同一份 ConcurrencyPlan/TransferPlan。
-- self-host 编译器仍由旧编译器构建，新 runtime 不得依赖新语法。
+- CPU mapping 与 SIMT mapping 共用同一份 ConcurrencyPlan/TransferPlan。
+- self-host 编译器仍由旧编译器构建，新 runtime 不依赖新语法。
 
 ## 8. 首批映射切片
 
@@ -330,10 +332,10 @@ MessageRef {
 
 ### SIMT slice（GPU-like）
 
-- slot 层级：lane → warp → workgroup；
+- slot 层级：lane、warp、workgroup 的父子层级；
 - memory：DEVICE_GLOBAL / DEVICE_SHARED / LOCAL，host 通过显式传输路径；
 - TASK 只映射 `kernelizable` 子集；`needs_stack`/任意阻塞的 TASK 用 host proxy 或 fail-closed；
-- DATA_PARALLEL：索引域 → lane/workgroup；
+- DATA_PARALLEL：索引域映射到 lane/workgroup；
 - 阻塞 channel：device queue/stream 或宿主代理；不支持时 fail-closed；
 - Region scope：INSTANCE 默认私有，GROUP 仅限同一 workgroup。
 
@@ -367,11 +369,11 @@ for i in 0..64:
     a[i] = i * i
 ```
 
-编译器证明迭代独立后，将 `for` 映射为 DATA_PARALLEL body；不新增语法。第一批若识别不了，必须在 plan 中标 `serial_fallback`，不得假装并行。
+编译器证明迭代独立后，将 `for` 映射为 DATA_PARALLEL body；不新增语法。第一批若识别不了，在 plan 中标 `serial_fallback`，不假装并行。
 
 ### 验收
 
-- 同一份 ConcurrencyPlan 在 CPU/SIMT 上产生相同的值/效应/顺序/终止类别；
+- 同一份 ConcurrencyPlan 在 CPU/SIMT 上产生相同的值、效应、顺序和终止类别；
 - 目标能力不足时拒绝，不生成静默错误的映射；
 - 不新增源码语法；
 - runtime 对象不落进 compiler function arena；
@@ -379,16 +381,16 @@ for i in 0..64:
 
 ## 9. 不变量
 
-**本文继承 2026-09-17 规格的全部不变量 I1–I9，不弱化、不替换。** 包括：确定性、零用户锁、默认 share-nothing、保守 COPY、语义优先、锁不进 IR、fail-closed、共享不能冒充 COPY、预算可见。以下仅列增量：
+本文继承 2026-09-17 规格的全部不变量 I1–I9，不弱化、不替换。包括：确定性、零用户锁、默认 share-nothing、保守 COPY、语义优先、锁不进 IR、fail-closed、共享不能替代 COPY、预算可见。以下仅列增量：
 
-1. **无硬件绑定**：语义层没有线程、核心、warp、节点；只有 body/activation/region/edge/plan。
-2. **编译期事实不复算**：运行时不得重新推导布局、owner、生命周期、独立性。
-3. **目标事实不进入语义层**：具体 space/slot/同步机制只在 TargetProfile/MappingPlan。
-4. **运行时对象 owner region**：Task/Channel/Message 永不进入函数 arena。
-5. **plan 旁路**：transfer/sync 决策与证书不落 `.ccr`。
-6. **data-parallel 是一等 body**：并发不只等于 `go` 任务；独立索引域可以被编译器映射为并行实例。
-7. **预算闭包**：MappingPlan 定稿必须给出每条预算的 `proved/unknown/violated/measured`；运行期 remap 不得超出包络。
-8. **目标描述版本化**：TargetProfile/ConcurrencyPlan 版本不匹配时 fail-closed。
+1. 无硬件绑定：语义层没有线程、核心、warp、节点；只有 body/activation/region/edge/plan。
+2. 编译期事实不复算：运行时不重新推导布局、owner、生命周期、独立性。
+3. 目标事实不进入语义层：具体 space/slot/同步机制只在 TargetProfile/MappingPlan。
+4. 运行时对象 owner region：Task/Channel/Message 永不进入函数 arena。
+5. plan 旁路：transfer/sync 决策与证书不落 `.ccr`。
+6. data-parallel 是一等 body：并发不只等于 `go` 任务；独立索引域可以被编译器映射为并行实例。
+7. 预算闭包：MappingPlan 定稿给出每条预算的 `proved/unknown/violated/measured`；运行期 remap 不超出包络。
+8. 目标描述版本化：TargetProfile/ConcurrencyPlan 版本不匹配时 fail-closed。
 
 ## 10. 未决问题
 

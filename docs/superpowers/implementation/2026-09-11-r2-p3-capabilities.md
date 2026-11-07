@@ -1,5 +1,7 @@
 # R2 P3 能力阶段实施记录
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 对应计划：[plans/2026-09-11-r2-p3-capabilities.md](../plans/2026-09-11-r2-p3-capabilities.md)
 
 ## 概述
@@ -14,7 +16,7 @@ R2 P3 能力阶段分 P3a 和 P3b 两个阶段。P3a 交付 Task 0、Task 1、Ta
 
 ### Task 1 定长移除结束
 
-用例从 229 增加到 249。本任务收紧 6 项，放宽 0 项。修复的问题是「切片到固定长」被不报错地放宽。提交为 `ef61f002`。报告在 `docs/archive/sdd/p3-task1-report.md`。
+用例从 229 增加到 249。本任务收紧 6 项，放宽 0 项。修复的问题是“切片到固定长”被不报错地放宽。提交为 `ef61f002`。报告在 `docs/archive/sdd/p3-task1-report.md`。
 
 ### Task 0b（P3b）`iface_satisfies` 契约回补
 
@@ -67,13 +69,13 @@ R2 P3 能力阶段分 P3a 和 P3b 两个阶段。P3a 交付 Task 0、Task 1、Ta
 
 ### 自检记录
 
-spec 覆盖：第 5.1 节定长、序列和长度约束对应 Task 0、Task 1、Task 2。第 5.2 节泛型对应 Task 5。第 5.3 节 impl 对应 Task 6。第 5.4 节穷尽性、联合和可选对应 Task 3、Task 4。第 9 节 P3 行的五项目标能力逐项有对应任务。`TODO.md:446` 的 fixed-array-retire「未办 = 类型身份移除本身」由 Task 1 结束，Task 1 枚举了 5 条读码事实，不是推测。
+spec 覆盖：第 5.1 节定长、序列和长度约束对应 Task 0、Task 1、Task 2。第 5.2 节泛型对应 Task 5。第 5.3 节 impl 对应 Task 6。第 5.4 节穷尽性、联合和可选对应 Task 3、Task 4。第 9 节 P3 行的五项目标能力逐项有对应任务。`TODO.md:446` 的 fixed-array-retire“未办 = 类型身份移除本身”由 Task 1 结束，Task 1 枚举了 5 条读码事实，不是推测。
 
-占位符扫描：无 TBD。两处决策点显式登记，分别是 Task 4 的 `null` 原子表示和 Task 5 的 MAX_GENERICS 解除或登记。记录注明两者都属于「实施前须定」，不属于「稍后填」。
+占位符扫描：无 TBD。两处决策点显式登记，分别是 Task 4 的 `null` 原子表示和 Task 5 的 MAX_GENERICS 解除或登记。记录注明两者都属于“实施前须定”，不属于“稍后填”。
 
 命名一致性：`sh_struct_term`、`sh_enum_domain_term`、`sh_variant_term`、`sh_iface_shape_term`、`ty_variance_of`、`sh_seq_term` 和 `iface_satisfies` 在任务间一致。`iface_satisfies` 是 P2b 交接契约名。
 
-数字约定：95 为实测值，命令是 `grep -c "fails = fails + ts_check("`，结果为 95。26,989 和 67 文件是 findings 第 11 节的实测值。pA 到 pD 四个探针是本计划在 2026-09-11 的实测值。其余「≥N 例」是计划下限，可以增加，不可以减少。
+数字约定：95 为实测值，命令是 `grep -c "fails = fails + ts_check("`，结果为 95。26,989 和 67 文件是 findings 第 11 节的实测值。pA 到 pD 四个探针是本计划在 2026-09-11 的实测值。其余“≥N 例”是计划下限，可以增加，不可以减少。
 
 ## 遗留问题
 
@@ -81,7 +83,7 @@ spec 覆盖：第 5.1 节定长、序列和长度约束对应 Task 0、Task 1、
 
 计划登记的风险项和缓解措施如下。
 
-1. 展开层裁定涉及 Task 0 的「仅满足判定展开、等价不展开」边界。裁错会导致判定全面变化，并推翻 P2a 基线。缓解措施是影子对拍逐任务归零，加名义不变量用例。
+1. 展开层裁定涉及 Task 0 的“仅满足判定展开、等价不展开”边界。裁错会导致判定全面变化，并推翻 P2a 基线。缓解措施是影子对拍逐任务归零，加名义不变量用例。
 2. pA 类不报错地放宽已经实测在库，形态是切片到数组。本次收紧即修，须走收紧清单加 report-only。
 3. 穷尽性硬错误会影响用户返回码。缓解措施是语料零 match 加 report-only 先行。
 4. monomorph 实例键变更会使 `.ccr` 和 SYM 随之变化。折叠缺陷修复可能改变既有实例数，须实测报告。

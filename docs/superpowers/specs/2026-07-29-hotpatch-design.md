@@ -1,5 +1,7 @@
 # @hotpatch 滚动更新设计
 
+> 定位：受众 = 维护者；状态 = 设计态；出处 = 本页。
+
 ## 概述
 
 Core 编译器的滚动更新（hotpatch）机制。`@hotpatch` 注解支持同一函数的多版本共存、按比例分发流量、逐步 rollout 和 drain 回收。
@@ -8,7 +10,7 @@ Core 编译器的滚动更新（hotpatch）机制。`@hotpatch` 注解支持同�
 
 ## 核心原则
 
-- 同名函数多版本共存：带 `@hotpatch(ver=N)` 标记的函数允许同名，签名必须一致
+- 同名函数多版本共存：带 `@hotpatch(ver=N)` 标记的函数允许同名，签名一致
 - 编译期路由节点：调用点 emit `IR_HOTPATCH_ROUTE`，运行时根据配置选择版本
 - 运行时配置：读取 `.hotpatch.toml` 配置文件，收到 SIGHUP 信号后重新读取
 - drain 安全：用 `in_flight` 计数追踪进行中的请求，drain 完成后回收旧版本

@@ -1,9 +1,11 @@
 # CP-2 实现记录：编译器 plan emitter + runtime plan loader
 
-**日期：** 2026-11-02
-**状态：** CP-2 host 纵向切片完成；真实 GPU/FPGA/集群、transfer 全 primitive、多 slot、预算/证书留 CP-3+。
-**计划：** `docs/superpowers/plans/2026-11-02-conc-plan-emitter.md`
-**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
+日期：2026-11-02
+状态：CP-2 host 纵向切片完成；真实 GPU/FPGA/集群、transfer 全 primitive、多 slot、预算/证书留 CP-3+。
+计划：`docs/superpowers/plans/2026-11-02-conc-plan-emitter.md`
+规格：`docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
 ## 1. 范围
 
@@ -40,7 +42,7 @@ edge 0 1 SPAWN -1
 - `main` 内恰好一个 `sched_go`，且 `main` 自身没有参数；
 - `main` 内恰好一个 `chan_make`；多 channel 的 handle 绑定尚未建模，CP-3。
 - `chan_make` 的 `elem_size`/`cap` 在调用点有唯一 reaching definition，且该定义是整数字面量（调用后的重赋值不影响；分支/多定义/函数调用/全局读一律拒绝）；
-- `go` 目标函数有 0/1 个参数；1 个参数时必须是 `string`（channel handle）；
+- `go` 目标函数有 0/1 个参数；1 个参数时要求是 `string`（channel handle）；
 - `sched_go`/`chan_make` 不在 loop/if/flow/unsafe 子图内；
 - 输出 body 0 = main placeholder（entry index 0，不执行）、body 1 = spawned body（entry index 1）。
 
@@ -119,7 +121,7 @@ PASS conc_plan_e2e
 - `conc_plan_load`：手写 plan 文本 + entry table，加载后 `conc_run_body` 执行 worker；短 entry table、巨大 `entries`、entry=0、edge channel 越界/SEND -1 等负例均返回 `-1`。
 - `conc_plan_simt`：PAR plan 在 CPU 和 host-SIMT 上逐项对拍。
 - `conc_plan_negative`：body entry 越界、未知 token、非 SPSC、版本 2 均返回 `-1`。
-- `conc_plan_e2e`：`corec conc-plan` 生成 plan → 读回文本 → 生成 Core fixture（entry table + `conc_plan_load`）→ 用 plan 的 channel descriptor 创建 `chan_make(8,1)` → `conc_run_body` 调用**原始 `chan_recv` worker** → 返回 41。body 0 与 SPAWN edge 仍未执行，属于 CP-3；该测试证明的是“compiler plan 的 body/channel 描述被真实消费”，不是完整调度图执行。
+- `conc_plan_e2e`：`corec conc-plan` 生成 plan → 读回文本 → 生成 Core fixture（entry table + `conc_plan_load`）→ 用 plan 的 channel descriptor 创建 `chan_make(8,1)` → `conc_run_body` 调用原始 `chan_recv` worker → 返回 41。body 0 与 SPAWN edge 仍未执行，属于 CP-3；该测试证明的是“compiler plan 的 body/channel 描述被真实消费”，不是完整调度图执行。
 
 ### 4.3 默认 lowering 回归
 
@@ -127,7 +129,7 @@ CP-2 不修改 `go`/`chan` lowering；`test_conc_runtime.py` 13/13、`test_chan_
 
 ### 4.4 完整 selfhost-tests
 
-完整套件仍会在既存 p41 处变红（CP-1 基线 `1e47f93f` 已复现，与本阶段无关）。CI 中 CP-1/CP-2 测试排在 `test_merge_copy.py` 之前，实测 gate 先执行：
+完整套件仍会在既存 p41 处变为失败（CP-1 基线 `1e47f93f` 已复现，与本阶段无关）。CI 中 CP-1/CP-2 测试排在 `test_merge_copy.py` 之前，实测 gate 先执行：
 
 ```text
 PASS conc_region ... PASS conc_negative

@@ -1,6 +1,8 @@
 # R2 P1（影子对拍）实施计划：旧判定与新引擎并行，产出差异清单
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
+
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 目标： 把 P0 的类型项引擎以影子模式挂到检查器的类型判定上，旧判定照常生效。对真实语料并跑两套判定，产出分类差异清单，使收紧面（旧接受变为新拒绝 / 旧拒绝变为新接受）在 P1 暴露，而不改任何行为。
 
@@ -17,11 +19,11 @@
 
 ## Global Constraints
 
-- 只使用 jj。提交必须路径限定（多 agent 共用工作副本）。
-- 所有编译/测试命令加 `nice -n 19` 前缀。改编译器源码后必须重建。
+- 只使用 jj。提交需要路径限定（多 agent 共用工作副本）。
+- 所有编译/测试命令加 `nice -n 19` 前缀。改编译器源码后需要重建。
 - P1 行为零变化（强检查）：`--type-shadow` 关（默认）时，产物与 P0 基线逐字节相同；开时产物同样逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
 - 检查前清缓存：执行 `nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
-- 文件永久不允许还原；不得绕过；引擎 UNKNOWN（-1）不得计入差异（未覆盖面 ≠ 收紧面，单列统计）。
+- 文件永久保留，不做还原；不能绕过；引擎 UNKNOWN（-1）不能计入差异（未覆盖面 ≠ 收紧面，单列统计）。
 - diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`。环境陷阱：noclobber（用 `>|`）、变量不分词。
 - 新文件三处注册：`src/compiler/_import.cr`、`build_selfhost_native.py` 的 corec 清单（checker 段后）、`tests/selfhost/test_compile.py`。
 
@@ -47,12 +49,12 @@ fn sh_map_entries() -> int     // 已翻译条目数
 
 | checker | 引擎项 |
 |---|---|
-| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽）。注：必须按语义逐项分派，不得按数值直传：`TI_BOOL=2/TI_STR=3` 与 `AK_STRING=2/AK_BOOL=3` 下标互换（Task 1 实测：照抄数值直传会把 bool 与 string 不报错地错标，且两侧同错自洽，差异清单全成错误信号）；`TY_DEX_S`（精确缩放 dex，占位标记值行）同样归 `AK_DEX` |
+| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽）。注：需要按语义逐项分派，不能按数值直传：`TI_BOOL=2/TI_STR=3` 与 `AK_STRING=2/AK_BOOL=3` 下标互换（Task 1 实测：照抄数值直传会把 bool 与 string 不报错地错标，且两侧同错自洽，差异清单全成错误信号）；`TY_DEX_S`（精确缩放 dex，占位标记值行）同样归 `AK_DEX` |
 | `TYP_DYN` | `AK_DYN` |
 | `TYP_ARRAY`（data=元素, extra=N） | `AK_SEQUENCE`，参数链 `[elem]`（N 不入身份，R1 裁决） |
 | `TYP_SLICE` | `AK_SEQUENCE`，参数链 `[elem]` |
 | `TYP_PTR` / `TYP_REF` | `AK_PTR` / `AK_REF`，参数链 `[inner]` |
-| `TYP_TUPLE`（实读布局：`data` = 字段数、`extra` = `g_gen_apply_data` 起始下标；checker.cr:118 与 :2041 两处消费点同证；计划初稿的「`g_tuple_*`」全仓不存在，Task 1 实测） | `AK_PRODUCT`，参数链 = 逐字段项 |
+| `TYP_TUPLE`（实读布局：`data` = 字段数、`extra` = `g_gen_apply_data` 起始下标；checker.cr:118 与 :2041 两处消费点同证；计划初稿的“`g_tuple_*`”全仓不存在，Task 1 实测） | `AK_PRODUCT`，参数链 = 逐字段项 |
 | `TYP_NAMED` | `AK_NAMED`（`ti` 存 `b` 槽；引擎不展开，多为 UNKNOWN，P1 预期） |
 | `TYP_GENERIC_PARAM` / `TYP_GENERIC_APPLY` | `AK_NAMED`（同上，未知类） |
 
@@ -263,8 +265,8 @@ nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest
 接口：
 
 > Task 1 评审实施注记（M1/M4，Task 2 一并办）：
-> 1 native 分派改用 `get_type_data` 显式比对 `TY_*` 码（而非 `TI_*` 行号）。现状「`init_types` 行号序恰与 `TY_*` 码序一致」属隐式依赖（当前真、不保证），显式化后不随表布局变化而坏。
-> 2 `ty_shadow.cr` 头注点明「`AK_*` 与 `TI_*` 下标不 1:1（bool/str 互换）」这一反直觉事实，防后人照数值直传（Task 1 已留校验用例 `bridge.str_ak`/`bridge.bool_ak`）。
+> 1 native 分派改用 `get_type_data` 显式比对 `TY_*` 码（而非 `TI_*` 行号）。现状“`init_types` 行号序恰与 `TY_*` 码序一致”属隐式依赖（当前真、不保证），显式化后不随表布局变化而坏。
+> 2 `ty_shadow.cr` 头注点明“`AK_*` 与 `TI_*` 下标不 1:1（bool/str 互换）”这一反直觉事实，防后人照数值直传（Task 1 已留校验用例 `bridge.str_ak`/`bridge.bool_ak`）。
 
 ```
 // 影子判定：翻译两侧，调用 ty_equiv，再分类计数（old = 旧判定的结果）
@@ -290,7 +292,7 @@ fn type_equal(t1: int, t2: int) -> bool:
 （`r ? 1 : 0`：本语言无三元运算符，用 `ok : ., mut = 0; if r { ok = 1; }` 显式写。）
 
 - [ ] Step 2: 站点标注：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前执行 `sh_site_begin(<id>)`。
-  实读修正（Task 2 实施，取代初稿标签）：8 个外部点无一是 match 路径；站点 4 = 泛型匹配（pattern 侧恒 `TI_UNIT`，难以产生差异）；站点 6 = `EXPR_BINARY+OP_ASSIGN` 遗留路径（当前不可达。parser 已把 `=` 统一降为 `EXPR_ASSIGN`，接入点保留但永不产样本，去留待 P2 裁决）；站点 8 = `EXPR_ASSIGN` 节点（非「索引」）。站点与语义以 `ty_shadow.cr` 头注（实读表）为准。
+  实读修正（Task 2 实施，取代初稿标签）：8 个外部点无一是 match 路径；站点 4 = 泛型匹配（pattern 侧恒 `TI_UNIT`，难以产生差异）；站点 6 = `EXPR_BINARY+OP_ASSIGN` 遗留路径（当前不可达。parser 已把 `=` 统一降为 `EXPR_ASSIGN`，接入点保留但永不产样本，去留待 P2 裁决）；站点 8 = `EXPR_ASSIGN` 节点（非“索引”）。站点与语义以 `ty_shadow.cr` 头注（实读表）为准。
 
 - [ ] Step 3: 分类核心（`ty_shadow.cr`）
 
@@ -351,7 +353,7 @@ nice -n 19 ./build/corec check src/compiler/checker.cr --type-shadow | tail -3  
 文件：
 - Create: `docs/superpowers/implementation/2026-09-10-type-shadow-findings.md`
 
-- [ ] Step 0（前置，评审硬性要求）：未知桶拆两因（先改代码再采数）。`sh_compare` 里把「任一侧翻译失败（`sh_term_of_ti` 返回 -1）」与「引擎三态负值（-1/-2，含预算耗尽）」分记两个 kind（如 `kind=3` = 桥接 -1 / `kind=0` = 引擎负值）。理由（Task 2 评审）：dump 现存条已混记，若只做文档不拆代码，Task 3 的归因不可恢复。
+- [ ] Step 0（前置，评审硬性要求）：未知桶拆两因（先改代码再采数）。`sh_compare` 里把“任一侧翻译失败（`sh_term_of_ti` 返回 -1）”与“引擎三态负值（-1/-2，含预算耗尽）”分记两个 kind（如 `kind=3` = 桥接 -1 / `kind=0` = 引擎负值）。理由（Task 2 评审）：dump 现存条已混记，若只做文档不拆代码，Task 3 的归因不可恢复。
 
 - [ ] Step 1: 三档语料跑影子（各自 clean-cache + cwd=仓库根）
 
@@ -366,9 +368,9 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 （`check` 路径若不带影子通道穿透，改用 `build … --type-shadow` 并丢弃产物；实现者按实际可用路径落，报告写明。）
 
 - [ ] Step 2: 汇总差异：从日志抽 `[type-shadow]` 摘要行；若有 dump 文件则按 `kind` 分类统计 Top 差异（优先 `old_looser`，那是真正的收紧面）。
-  未知桶须拆两因（Task 2 实施时同记 `kind=0`）：1 任一侧无法翻译（桥接返回 -1，如未支持的 kind）；2 引擎三态 -1（AK_NAMED 未展开 / 预算耗尽 / 未覆盖面）。Task 3 归因前必须先把这两类分开统计，否则「设计预期的 AK_NAMED 未知」会与「桥接缺口」混在一起。
-  dyn 类必须单列：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属潜在过宽近似（Task 1 评审：全仓仅 row 7 一处且今日被快路径截获、无位图 dyn 构造点）。凡两侧任一带 dyn 条目的差异一律归入「近似噪声」类，不得计入收紧面/宽松面，报告中单列计数与样本。
-  `&T` vs `&mut T` 必须单列：桥接把 `TYP_REF` 译为 `AK_REF[inner]`（丢 mut），而旧 `type_equal` 比较 mut，该对会稳定产出差异；归「已知 by-design（引用可变性 = P3「条目化 + 变型」面）」，不得计入收紧面（同款：PTR 的 `address_space` 旧亦不比，无差异，无需处理）。
+  未知桶须拆两因（Task 2 实施时同记 `kind=0`）：1 任一侧无法翻译（桥接返回 -1，如未支持的 kind）；2 引擎三态 -1（AK_NAMED 未展开 / 预算耗尽 / 未覆盖面）。Task 3 归因前需要先把这两类分开统计，否则“设计预期的 AK_NAMED 未知”会与“桥接缺口”混在一起。
+  dyn 类需要单列：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属潜在过宽近似（Task 1 评审：全仓仅 row 7 一处且今日被快路径截获、无位图 dyn 构造点）。凡两侧任一带 dyn 条目的差异一律归入“近似噪声”类，不能计入收紧面/宽松面，报告中单列计数与样本。
+  `&T` vs `&mut T` 需要单列：桥接把 `TYP_REF` 译为 `AK_REF[inner]`（丢 mut），而旧 `type_equal` 比较 mut，该对会稳定产出差异；归“已知 by-design（引用可变性 = P3“条目化 + 变型”面）”，不能计入收紧面（同款：PTR 的 `address_space` 旧亦不比，无差异，无需处理）。
 
 - [ ] Step 3: 写 findings 文档（`docs/superpowers/implementation/2026-09-10-type-shadow-findings.md`）：逐语料的计数表 + 差异样本（site/t1/t2/旧/新）+ 初步归因（结构性、未覆盖面、真正的收紧面）+ 后续裁决建议（哪些进 P2 的替换清单、哪些需补引擎规则）。
 
@@ -383,19 +385,19 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] Step 3: 自举链（`corec2` 与 `corec3` 的 `cmp` 均为 IDENTICAL + N06=0 + 快速验证 rc=42）
 - [ ] Step 4: 文档：spec 第 9 节 P1 行标为已完成，并记录位置；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；清单
 - [ ] Step 4c: Task 3 评审遗留（4 Minor + 5 登记，随本步一并办）：
-  - M1 文档精度：`type-shadow-findings.md` TL;DR「71 个文件」改为「67 有效（71 候选 − 4 排除）」；第 3.1 节「不变式在全部 71 行成立」改为「67 条摘要行」。注意：工作副本里已有 2 行未提交修正（`jj diff` 可见），先核其正确性，与其余修正一并提交。
-  - M2：report 第 1.1 节 / findings 第 1.1 节 / 源码注释的「前 6 字段前缀不变」改为「前 5 组 key=value」（评审从 `28fed09` 的 `sh_report` 逐字比对）。
-  - M3（注释与关态开销）：`ty_shadow.cr` 注释称「影子关时 wrapper 不调本函数」不成立。8 站点无条件调 `sh_site_begin`（全仓仅 `type_equal` 内一处 `g_shadow_on` 判断），关态每次多一次调用 + 一次性 64B alloc + RMW 自增。产物仍逐字节相同（已实测），但注释理由错误且关态开销未测。二选一并记录：1 改注释如实描述；2 给 `sh_site_begin` 加 `if g_shadow_on == 0 { return; }` 早退（推荐 2，兼消除关态开销）。
+  - M1 文档精度：`type-shadow-findings.md` TL;DR“71 个文件”改为“67 有效（71 候选 − 4 排除）”；第 3.1 节“不变式在全部 71 行成立”改为“67 条摘要行”。注意：工作副本里已有 2 行未提交修正（`jj diff` 可见），先核其正确性，与其余修正一并提交。
+  - M2：report 第 1.1 节 / findings 第 1.1 节 / 源码注释的“前 6 字段前缀不变”改为“前 5 组 key=value”（评审从 `28fed09` 的 `sh_report` 逐字比对）。
+  - M3（注释与关态开销）：`ty_shadow.cr` 注释称“影子关时 wrapper 不调本函数”不成立。8 站点无条件调 `sh_site_begin`（全仓仅 `type_equal` 内一处 `g_shadow_on` 判断），关态每次多一次调用 + 一次性 64B alloc + RMW 自增。产物仍逐字节相同（已实测），但注释理由错误且关态开销未测。二选一并记录：1 改注释如实描述；2 给 `sh_site_begin` 加 `if g_shadow_on == 0 { return; }` 早退（推荐 2，兼消除关态开销）。
   - M4：dump 的 kind 名从 `unknown` 改为 `unknown_engine`（brief Step 0 契约变更，仓内无消费者），在 findings 里注明读 dump 者须知。
   - 登记 TODO（5 条）：1 F1 = P2 强制前置（同名 named 多行未规范化，换判定后从有判定变为无法判定；P2 第一项 + 校验用例）；2 F2 = P2 裁决（数组长度 N 旧比引擎不比：现状 `error[TF01]`，替换后不报错地通过）；3 F3（调用位点实参类型不匹配无诊断，`unify_types` 返回值被丢弃 `checker.cr:1053`）；4 F4（泛型函数后续形参声明类型在推断中不生效）；5 仓库卫生（`tests/suite/test_control_flow.cr` / `test_generics.cr` 0 字节；`src/compiler/elf.cr` 陈旧 parse 不过；`linker.cr` 空文件）
-  - 登记 harness 缺口（新，评审发现）：`.claude` 的 `block-git.py` 只拒「以 `git` 开头」的命令 ，复合或管道命令可以绕过（项目规则第 2 条的自动拦截存在缺口）。建议单开修复（按 shell 分隔符分词后做词边界匹配）；本轮只登记不改 harness。
+  - 登记 harness 缺口（新，评审发现）：`.claude` 的 `block-git.py` 只拒“以 `git` 开头”的命令 ，复合或管道命令可以绕过（项目规则第 2 条的自动拦截存在缺口）。建议单开修复（按 shell 分隔符分词后做词边界匹配）；本轮只登记不改 harness。
 
 - [ ] Step 4b: 待办清理（按 Task 1/Task 2 评审实际状态更新）：
   - 1 `build_selfhost_native.py:309` 注释更正：已由 Task 2 提交完成，确认即可（Task 2 评审 M2 提示勿重复劳动）
-  - 2 Task 1 评审「>1024 条目第二次重建无实测」，补一条校验用例或如实登记
+  - 2 Task 1 评审“>1024 条目第二次重建无实测”，补一条校验用例或如实登记
   - 3 既有缺陷登记（最小复现已由 Task 2 评审更正）：函数体内嵌套 `fn` 声明会导致编译 rc=139（min4/min6 同族；mini6 无 `@inline`，原报告措辞有误）；崩溃点在 parse 到 checker 之间（日志止于 `[3/5] parse...`）；两版编译器均复现（非并行的对照实现引入），TODO #2026-09-10-12
-  - 4 Task 2 评审 M3：`src/compiler/type_terms.cr:73` 头注「corearch/corelsp 不受影响」半句陈旧（corelsp 自 Task 2 起必须链接引擎层），予以更正
-  - 5 Task 2 评审 M5：站点 4 因 `res_call_type` 无 `EXPR_ARRAY`/tuple 分支将恒 agree，Task 3 findings 中不得据「站点 4 零差异」判该面收敛（写入 findings 文档的限制说明）
+  - 4 Task 2 评审 M3：`src/compiler/type_terms.cr:73` 头注“corearch/corelsp 不受影响”半句陈旧（corelsp 自 Task 2 起需要链接引擎层），予以更正
+  - 5 Task 2 评审 M5：站点 4 因 `res_call_type` 无 `EXPR_ARRAY`/tuple 分支将恒 agree，Task 3 findings 中不能据“站点 4 零差异”判该面收敛（写入 findings 文档的限制说明）
 - [ ] Step 5: 提交（路径限定）
 
 ---
@@ -403,6 +405,6 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 ## 自检记录
 
 - spec 覆盖：第 4 节步 2（旁挂对拍）对应 Task 1-2；第 8 节检查 3（对拍层：零差异门才允许替换）对应 Task 3（清单产出，替换门属 P2）；第 9 节 P1 行对应 Task 4。
-- 占位符扫描：无 TBD；`sh_tuple_to_product` 明确要求实现者按实际 tuple 访问器落并给签名（非「稍后填」）。
+- 占位符扫描：无 TBD；`sh_tuple_to_product` 明确要求实现者按实际 tuple 访问器落并给签名（非“稍后填”）。
 - 命名一致性：`sh_*`（影子）与 `tt_*`/`ty_*`（引擎）分工清晰；`type_equal_core` 改名后内部递归与外部调用边界在 Task 2 Step 1 写明。
-- 风险注记：1 影子必须不改变 `ty_budget_reset`/memo 的语义外溢，`sh_compare` 前后各重置一次预算；2 `check` 路径能否穿透旗标未验证，Task 3 Step 1 给了退路（`build` 加丢产物）并要求报告写明；3 差异量可能很大，使用环形缓冲上限 256 条加计数不封顶。
+- 风险注记：1 影子需要不改变 `ty_budget_reset`/memo 的语义外溢，`sh_compare` 前后各重置一次预算；2 `check` 路径能否穿透旗标未验证，Task 3 Step 1 给了退路（`build` 加丢产物）并要求报告写明；3 差异量可能很大，使用环形缓冲上限 256 条加计数不封顶。

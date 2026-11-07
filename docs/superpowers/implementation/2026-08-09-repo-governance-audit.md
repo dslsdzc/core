@@ -1,5 +1,7 @@
 # 仓库治理：实施偏差与当前状态
 
+> 定位：受众 = 维护者；状态 = 未完成；出处 = 本页。
+
 > 对应设计：[2026-08-09-repo-governance-design.md](../specs/2026-08-09-repo-governance-design.md)
 
 本文保存 ruleset 实施偏差、免费计划限制、逐项验证和当前状态。设计正文只保留治理模型、规则清单、CI、本地配置和工作流。
@@ -11,7 +13,7 @@
 
 ## 概述
 
-Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式验证）。开发流程按最终形态制定规则，执行按现状规模放宽。治理模型参考 Rust/Linux：`main` 就是 mainline，任何人（包括维护者）不得直接推送，全部改动经 PR、审查和合入要求进入 `main`。
+Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式验证）。开发流程按最终形态制定规则，执行按现状规模放宽。治理模型参考 Rust/Linux：`main` 就是 mainline，任何人（包括维护者）不能直接推送，全部改动经 PR、审查和合入要求进入 `main`。
 
 | 事实 | 值 |
 |---|---|
@@ -23,10 +25,10 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 ## 治理模型
 
 - GitFlow 标准：`main` 是正式版线（仅正式版内容，对应 semver 发布）；`develop` 是集成分支（日常 PR 目标）；feature 到 develop 走 PR（审查 + CI + merge queue）；develop 到 main 的合入只有维护者（DslsDZC）能做（GitFlow 的发布负责人语义）
-- 非对称：实际审查只有一项，你审查 RhineIris 的 PR，反向没有审查。你自己的改动也走 PR，合入使用 B 流程（临时豁免，见「机制限制与过渡」）
-- 结构按最终形态，执行按现状：规则按最终形态全部制定（将来贡献者增多时自动生效），执行上优先遵循互审约定。2026-08-09 实测修正：GitHub 原生禁止作者批准自己的 PR，「自阶段作为后备」不成立，维护者自己的 PR 合入使用 B 流程临时豁免，见「机制限制与过渡」
-- 机制限制（如实记录）：GitHub 没有原生开关禁止以 main 为 base 创建 PR。「PR 不能指向 main」由 main 规则组合强制（restrict pushes 仅 DslsDZC + required reviewers 仅 DslsDZC，指向 main 的 PR 没有维护者批准就无法合入），再加上 CONTRIBUTING 约定（PR 一律指向 develop）实现
-- 硬性规则由 hook 强制执行：`CLAUDE.md` 第 2 条（禁止 `git`，全部使用 `jj`）由 hook 拦截
+- 非对称：实际审查只有一项，你审查 RhineIris 的 PR，反向没有审查。你自己的改动也走 PR，合入使用 B 流程（临时豁免，见“机制限制与过渡”）
+- 结构按最终形态，执行按现状：规则按最终形态全部制定（将来贡献者增多时自动生效），执行上优先遵循互审约定。2026-08-09 实测修正：GitHub 原生不允许作者批准自己的 PR，“自阶段作为后备”不成立，维护者自己的 PR 合入使用 B 流程临时豁免，见“机制限制与过渡”
+- 机制限制（如实记录）：GitHub 没有原生开关限制以 main 为 base 创建 PR。“PR 不能指向 main”由 main 规则组合强制（restrict pushes 仅 DslsDZC + required reviewers 仅 DslsDZC，指向 main 的 PR 没有维护者批准就无法合入），再加上 CONTRIBUTING 约定（PR 一律指向 develop）实现
+- 硬性规则由 hook 强制执行：`CLAUDE.md` 第 2 条（不使用 `git`，全部使用 `jj`）由 hook 拦截
 
 ## GitHub 侧的 ruleset 最终清单（`main` 和 `develop` 两个 ruleset）
 
@@ -60,7 +62,7 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 
 ### 机制限制与过渡
 
-- GitHub 没有原生开关禁止以 main 为 base 创建 PR。`M4`（`required reviewers` 仅 DslsDZC）使指向 `main` 的 PR 无法由维护者以外的人合入。「PR 不能指向 `main`」由规则组合和 `CONTRIBUTING` 约定（PR 一律指向 `develop`）实现
+- GitHub 没有原生开关限制以 main 为 base 创建 PR。`M4`（`required reviewers` 仅 DslsDZC）使指向 `main` 的 PR 无法由维护者以外的人合入。“PR 不能指向 `main`”由规则组合和 `CONTRIBUTING` 约定（PR 一律指向 `develop`）实现
 - 实施过渡：两个 ruleset 先以 evaluate（试运行）模式启用，观察确认无干扰后转为 active
 - 2026-08-09 实施偏差（免费计划限制，已实测）：
   - `enforcement: evaluate` 仅 Enterprise 可用。免费计划已直接以 active 创建，没有试运行期，规则立即生效
@@ -68,7 +70,7 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
   - `pull_request` 参数 schema 实测：5 个必填布尔（含 `require_code_owner_review`）、`allowed_merge_methods: ["squash"]` 强制 squash-only
   - `required_status_checks` 参数数组字段名是 `required_status_checks`（非 `checks`）
   - 2026-08-09 实测（流程验证）：
-    - GitHub 原生禁止作者批准自己的 PR（"Can not approve your own pull request"），「自阶段作为后备」的前提不成立；管理员强制合并也会被 bypass_actors 空集拦截
+    - GitHub 原生不允许作者批准自己的 PR（"Can not approve your own pull request"），“自阶段作为后备”的前提不成立；管理员强制合并也会被 bypass_actors 空集拦截
     - B 流程（既定路径）：维护者自己的 PR 合入时，临时禁用对应 ruleset，squash 合并，然后恢复 active（PR #26 首次执行，2026-08-09）
     - RhineIris 的审阶段要计入 required approvals，需要 write 权限（fork 贡献者的审阶段不满足要求），待决策是否授予 collaborator
     - CI 工作流注册冻结持续（GitHub 侧，注册表包含已删文件、缺少新文件），`develop` 的 `required_status_checks` 暂时移除，注册恢复后回填
@@ -77,7 +79,7 @@ Core 的愿景是成为严肃系统语言（语义保留、内核路线、形式
 ## GitHub 侧的实施方式
 
 - 路径 A（gh 恢复后）：运行 `tools/gh_setup_ruleset.sh`，使用 `gh api` 按上述清单创建 ruleset（脚本内嵌规则 JSON）
-- 路径 B（现在可用）：在网页版 Settings 的 Rules 和 Rulesets 页面，按「GitHub 侧的 ruleset 最终清单」逐项配置
+- 路径 B（现在可用）：在网页版 Settings 的 Rules 和 Rulesets 页面，按“GitHub 侧的 ruleset 最终清单”逐项配置
 - 前置条件：SSH 签名密钥（`~/.ssh/id_ed25519.pub`）在 GitHub Settings 的 SSH keys 注册为 Signing key（仅注册为认证 key 会导致签名校验失败）
 
 ## CI（已实现，2026-08-09）
@@ -127,16 +129,16 @@ gh pr create --base main --fill       # develop 到 main 的 PR（required revie
 
 ## 验证清单（合入后端到端）
 
-- [ ] 直推 `main` 被拒（403）；推 `feature` 分支成功
-- [ ] 指向 `main` 的 PR（非维护者创建）无法被批准合入，`required reviewers` 仅 DslsDZC
-- [ ] `develop` 到 `main` 合并只有维护者执行成功
-- [ ] 维护者自有 `feature` PR：B 流程（临时豁免），squash 合入 `develop`，源分支自动删除
-- [ ] RhineIris fork PR：`base=develop`，完整流程，维护者审阶段后合入 `develop`
-- [ ] 未签名提交的 PR 被拒（签名规则生效）；`jj log --no-graph -T 'signature'` 可见签名
-- [ ] 管理员账号直推 `main` 同样被拒（绕过已关闭）
-- [ ] `git` 命令被 hook 拦截；`jj` 一切正常
-- [ ] `jj` main protect 生效（rebase 移不动 `main`）
-- [ ] PR 层 CI 通过；完整层 job 状态按实际情况标记
+- 未完成：直推 `main` 被拒（403）；推 `feature` 分支成功
+- 未完成：指向 `main` 的 PR（非维护者创建）无法被批准合入，`required reviewers` 仅 DslsDZC
+- 未完成：`develop` 到 `main` 合并只有维护者执行成功
+- 未完成：维护者自有 `feature` PR：B 流程（临时豁免），squash 合入 `develop`，源分支自动删除
+- 未完成：RhineIris fork PR：`base=develop`，完整流程，维护者审阶段后合入 `develop`
+- 未完成：未签名提交的 PR 被拒（签名规则生效）；`jj log --no-graph -T 'signature'` 可见签名
+- 未完成：管理员账号直推 `main` 同样被拒（绕过已关闭）
+- 未完成：`git` 命令被 hook 拦截；`jj` 一切正常
+- 未完成：`jj` main protect 生效（rebase 移不动 `main`）
+- 未完成：PR 层 CI 通过；完整层 job 状态按实际情况标记
 
 ## 社区协作基础设施（2026-08-09 补充）
 

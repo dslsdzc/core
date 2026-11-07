@@ -4,17 +4,17 @@
 
 > 状态：修复已完成（2026-08-16~17，维护者授权全修），F1-F20 全部修复合入，本清单转为修复记录参考。
 > 原始产出为只读审查（未修改任何 Core 代码），修复范围当时由维护者决定（反馈门）。
-> 修复记录见 `docs/archive/compcert-reference.md`「第四轮修复记录（2026-08-17）」；语义表已同步修复后状态
+> 修复记录见 `docs/archive/compcert-reference.md`“第四轮修复记录（2026-08-17）”；语义表已同步修复后状态
 > （通过标记 + BC 表状态列，见 `docs/maintainer/design/ir-op-semantics.md` 第 5/7 节）；遗留项见 `TODO.md`。
 > 契约：`docs/maintainer/design/ir-op-semantics.md`（IR 操作语义表，Task 1 产物）；方法：以 CompCert Coq 语义为真源，
 > 做三方对照（语义表、ELF 编码 instr.cr、解释器 interp.cr）。
 > 日期：2026-08-16。审查分组：算术/转换（A）、内存/安全（B）、控制流/调用/并发/动态（C）、未修复项复核（T）。
 
-## 0. 审查方法与环境（必须阅读）
+## 0. 审查方法与环境（阅读前提）
 
 - 四个只读审查 agent 并行执行，全部复现产物在 `/tmp/compcert-r4/`（临时目录，未触碰仓库）。
-- 环境发现（重要）：`build/corec`（13:24 构建）不是从当前 HEAD 源码构建的，含 dex 定点实验（float 字面量转为 S=10⁶ 缩放整数）的过时产物；当前 HEAD 源码是 TI_FLOAT + IR_I2F（binary64 位模式）路径。两个独立审查组均发现并规避（在 /tmp 重建，得到 HEAD 语义的编译器）。建议：重新构建 build/ 产物并清空 `.core/cache/`（缓存按源码路径做 key，会污染 cir dump）。同时说明语义表第 4 节「迁移后 dex」曾有实现痕迹。
-- import 解析依赖 cwd（须在仓库根运行）；`.core/cache/cir` 偶发陈旧缓存，复现时需要在仓库根作为 cwd，并使用新鲜路径。
+- 环境发现（重要）：`build/corec`（13:24 构建）不是从当前 HEAD 源码构建的，含 dex 定点实验（float 字面量转为 S=10⁶ 缩放整数）的过时产物；当前 HEAD 源码是 TI_FLOAT + IR_I2F（binary64 位模式）路径。两个独立审查组均发现并规避（在 /tmp 重建，得到 HEAD 语义的编译器）。建议重新构建 build/ 产物并清空 `.core/cache/`（缓存按源码路径做 key，会污染 cir dump）。同时说明语义表第 4 节“迁移后 dex”曾有实现痕迹。
+- import 解析依赖 cwd，运行位置需要是仓库根；`.core/cache/cir` 偶发陈旧缓存，复现时需要在仓库根作为 cwd，并使用新鲜路径。
 - CompCert 真源引用（Memory.v/Asm.v/Op.v/Values.v/Integers.v/Floats.v 全部文件:行号）经核实全部准确。
 
 ## 1. 确证 bug 清单（按优先级）
@@ -81,7 +81,7 @@
 | LAZY_THUNK/FORCE、AWAIT | eager 近似三方一致 | 一致（设计差异 D8） | lazy_test rc=0 |
 | IR_CALL vs CALL_EXTERN 约定 | 发射方和后端各自对齐（CALL_EXTERN 缺陷见 F16） | 一致 | ir_gen L1170/L1165 与 instr.cr L581/L800 |
 
-> 注：语义表第 2.1 节正文的 BC-CONST 标记（interp 对 TI_STR 存字符串表索引而非指针）未在第五节 BC 表内，本轮未核实，保持「解释器已知局限」，后续轮次可以补充。
+> 注：语义表第 2.1 节正文的 BC-CONST 标记（interp 对 TI_STR 存字符串表索引而非指针）未在第五节 BC 表内，本轮未核实，保持“解释器已知局限”，后续轮次可以补充。
 
 ## 4. Task 3：未修复项复核结论（迁移后状态）
 
@@ -96,7 +96,7 @@
 
 1. L154：`Val.cmpf_bool` 对 NaN 返回 `Some false`（IEEE 语义，Values.v L928-931），不是 `None`。`None` 只出现在非 float 值输入时；机器层分歧在 `compare_floats` 无序时 ZF=1，Asmgen 用 `Cond_and Cond_np Cond_e`（Asmgen.v L260）实现 IEEE 语义（BC5 结论方向不变）。
 2. L143：`sar` 是向下取整（floor），不是向零截断，仅在差为 8 的倍数时等价（实际发射场景恒满足，无 bug）。
-3. BC14：「[2³¹, 2³²) 的尺寸高 32 位丢失（按低 32 位取值）」不准确。`mov edi, imm32` 零扩展对该区间编码正确；应修正为「仅 ≥2³² 时按 mod 2³² 回绕」，并补充同族缺陷（F17 cmp imm32 符号扩展、sz 溢出为负且不报错）。
+3. BC14：“[2³¹, 2³²) 的尺寸高 32 位丢失（按低 32 位取值）”不准确。`mov edi, imm32` 零扩展对该区间编码正确；建议修正为“仅 ≥2³² 时按 mod 2³² 回绕”，并补充同族缺陷（F17 cmp imm32 符号扩展、sz 溢出为负且不报错）。
 4. 建议在 BC 表标注 BC-F2I 为未启用路径（当前无发射方）。
 
 ## 6. 修复优先级建议（原决策记录，已全部执行）
@@ -104,10 +104,10 @@
 > 完成状态：以下各档于 2026-08-16~17 全部修复并合入（维护者授权全修）；本节保留原优先级建议并标注完成状态。
 
 1. P0（安全），已修：F1+F2（直接索引越界：编译期常量界 + 运行时检查 + 写路径钩子）+ F17（大分配检查失效）
-2. P0（崩溃），已修：F3（DYN_DISPATCH 全崩溃）、F4（SPAWN 全崩溃）、F15（裸变体崩溃）
+2. P0（崩溃），已修：F3（DYN_DISPATCH 全崩溃）、F4（SPAWN 全崩溃）、F15（不带括号的变体崩溃）
 3. P1（正确性），已修：F7（I2F 高 32 位）、F8（NaN 比较）、F9/F12/F13（interp 错值）、F14（大尺寸回绕）
 4. P1（机制），已修：F5（YIELD 语义 + 堆下溢写）、F6（STORE_PTR 检查链路）、F16（CALL_EXTERN）
 5. P2（工具链），已修：F18（重建 build/ + 清缓存）、F19（check 退出码）、F20（dump 名表）
-6. P3（未启用路径），已确认，维持：BC3/BC15/BC17/BC-F2I/BC11。启用或实现时按契约补语义（BC11 已随第四轮波 2 补齐 interp 12 个 opcode；其余维持未启用状态）
+6. P3（未启用路径），已确认，维持：BC3/BC15/BC17/BC-F2I/BC11。启用或实现时需要按契约补语义（BC11 已随第四轮波 2 补齐 interp 12 个 opcode；其余维持未启用状态）
 
-> 修复完成（2026-08-16~17）。本清单转为修复记录参考；遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`「第四轮遗留项」。
+> 修复完成（2026-08-16~17）。本清单转为修复记录参考；遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`“第四轮遗留项”。

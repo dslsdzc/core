@@ -1,5 +1,7 @@
 # TODO 标识迁移实施记录
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 对应计划：[plans/2026-09-17-todo-id-migration.md](../plans/2026-09-17-todo-id-migration.md)
 
 ## 概述

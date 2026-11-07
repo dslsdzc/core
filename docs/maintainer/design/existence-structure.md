@@ -54,24 +54,24 @@ ENT 记录字段与规则 1–7 的对应：
 
 Core IR 非 SSA，变量每次定值切分一个新版本条目，相邻版本存在区间按定值点切割（版本 k 区间终点 = 版本 k+1 定值点）。
 
-定值点收集规则：扫 NOD,dest ≥ 0 的节点 = 该变量的定值点，两处 carve-out（GC 阶段 2 勘定）：
-- IR_STORE 单列：定值目标在 s1(ρ（s1）:=ρ（s2）),dest 恒 -1，不走 dest 列
+定值点收集规则：扫描 NOD 中 dest ≥ 0 的节点，即该变量的定值点，两处 carve-out（GC 阶段 2 勘定）：
+- IR_STORE 单列：定值目标在 s1（ρ(s1) := ρ(s2)），dest 恒为 -1，不走 dest 列
 - 三 op 排除：STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 的 dest ≥ 0 非定值（值 = 被存值源/基址标注/占位）
 
 参数/全局条目：def_nod = -1，区间 = [函数首节点，last_ref+1）。
 
 ### 无方法条目（规则 4/4b）
 
-ENT flags bit0 = 无方法(`recipe = unrecomputable`，图内不可重算），必须有 home。
+ENT flags bit0 = 无方法（`recipe = unrecomputable`，图内不可重算），需要 home。
 
 > 注意：实现状态（2026-09-20 核对）：该位已按此语义预留，但尚未实现，两个写侧
-> 硬编码 0(`src/lattice/ent_kernel.cr:295`、`:318`），读侧纯直通/回环
-> (`src/compiler/ccr_io.cr:473`，`:811`/`:820`，`:1431`/`:1447`），全仓零语义消费者；
-> 源码自述 `src/compiler/ccr_io.cr:85`“flags 恒 0（…零实例，位语义保留）”,
+> 硬编码 0（`src/lattice/ent_kernel.cr:295`、`:318`），读侧纯直通/回环
+> （`src/compiler/ccr_io.cr:473`，`:811`/`:820`，`:1431`/`:1447`），全仓零语义消费者；
+> 源码自述 `src/compiler/ccr_io.cr:85`“flags 恒 0（…零实例，位语义保留）”，
 > 记录见 TODO.md:2159。位已预留不等于语义已实现：`recipe=unrecomputable` 的生产者
 > （边界/执行标注）与判定目前都不存在。详见 materialization-space.md 第 7.1 节。
 
-匿名常量条目（var_id = -1）只在被判定逻辑消费时物化，否则常量内联于 NOD src1，避免条目数量增长。该形态尚未实现，在 `src/` 下没有命中。
+匿名常量条目（var_id = -1）只在被判定逻辑消费时物化，未被消费时常量内联于 NOD src1，避免条目数量增长。该形态尚未实现，在 `src/` 下没有命中。
 
 ---
 
@@ -94,9 +94,9 @@ v11 删除该段：函数 NOD 范围改由 SYM 的 `instr_start/instr_count` 给
 
 `entries_coexist` 不逐对枚举（消费侧现算）：
 
-1. 按 live_start 排序条目(O（n log n）)
+1. 按 live_start 排序条目（O(n log n)）
 2. 单遍扫描：维护活跃条目集（start < 当前点 ≤ end 的条目）；新条目进入时，与活跃集中 end > start 的条目即共存，按 end 排序的活跃集弹出（end ≤ start 移出）
-3. 判定四条消费此关系(共存互斥等：同 home 组内做 2 的扫描，O（k log k） per 组）
+3. 判定四条消费此关系（共存互斥等：同 home 组内做 2 的扫描，每组 O(k log k)）
 
 共存 = 对称、无传递性（最弱理论，最多模型）。无需输出全量共存表，判定四条都是存在性/∀ 检查，sweep 给出相交证据即止。
 
@@ -124,7 +124,7 @@ v11 删除该段：函数 NOD 范围改由 SYM 的 `instr_start/instr_count` 给
 
 ## 八、开放点（实现期确定，以实施计划为准）
 
-1. NOD 显式边表是否必须（v6.0 可省略，v6.1 按需），编码层问题
+1. NOD 显式边表是否必需（v6.0 可省略，v6.1 按需），编码层问题
 2. 变长记录/对齐/校验规则，编码层问题
 3. ENT home 回填方式（原地改写 vs 内存态）
 4. 预留段 tag 9+（驱逐标注段 v6.1、证书段）

@@ -1,5 +1,7 @@
 # CAG: per-register live/pinned index
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 日期：2026-11-07
 分支：`perf/cag-live-index`
 
