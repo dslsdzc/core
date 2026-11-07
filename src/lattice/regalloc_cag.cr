@@ -34,6 +34,11 @@ CAG_ERR_CALL_CLOBBER : int = -4
 struct CagAllocator:
     count: int
     reg_count: int
+    cap: int
+    live_ids: string
+    live_count: string
+    pin_ids: string
+    pin_count: string
     start: string
     end: string
     pin: string
@@ -55,6 +60,7 @@ struct CagAllocator:
     allow_evict: int
     error: int
     pin_bad: int
+    retry_mode: int
 
 fn cag_new(count: int, reg_count: int) -> CagAllocator:
     cap : ., mut = count
@@ -63,9 +69,15 @@ fn cag_new(count: int, reg_count: int) -> CagAllocator:
     rcap : ., mut = reg_count
     if rcap < 1:
         rcap = 1
+    lcap : ., mut = cap * 2
     a := CagAllocator {
         count = count,
         reg_count = reg_count,
+        cap = cap,
+        live_ids = alloc(rcap * lcap * 8),
+        live_count = alloc(rcap * 8),
+        pin_ids = alloc(rcap * cap * 8),
+        pin_count = alloc(rcap * 8),
         start = alloc(cap * 8),
         end = alloc(cap * 8),
         pin = alloc(cap * 8),
@@ -87,6 +99,7 @@ fn cag_new(count: int, reg_count: int) -> CagAllocator:
         allow_evict = 0,
         error = CAG_OK,
         pin_bad = 0,
+        retry_mode = 0,
     }
     i : ., mut = 0
     loop:
@@ -116,6 +129,8 @@ fn cag_new(count: int, reg_count: int) -> CagAllocator:
             break
         cell_store(a.regs, k * 8, -1)
         cell_store(a.reg_class, k * 8, CAG_REG_CALLEE)
+        cell_store(a.live_count, k * 8, 0)
+        cell_store(a.pin_count, k * 8, 0)
         k = k + 1
     return a
 
@@ -189,6 +204,45 @@ impl CagAllocator:
             k = k + 1
         return -1
 
+    fn list_reset(&mut self):
+        k : ., mut = 0
+        loop:
+            if k >= self.reg_count:
+                break
+            cell_store(self.live_count, k * 8, 0)
+            cell_store(self.pin_count, k * 8, 0)
+            k = k + 1
+
+    fn live_add(&mut self, k: int, id: int):
+        if k < 0 || k >= self.reg_count || id < 0:
+            return
+        n := cell_load(self.live_count, k * 8)
+        if n >= self.cap * 2:
+            return
+        cell_store(self.live_ids, (k * self.cap * 2 + n) * 8, id)
+        cell_store(self.live_count, k * 8, n + 1)
+
+    fn pin_rebuild(&mut self):
+        k : ., mut = 0
+        loop:
+            if k >= self.reg_count:
+                break
+            cell_store(self.pin_count, k * 8, 0)
+            k = k + 1
+        i : ., mut = 0
+        loop:
+            if i >= self.count:
+                break
+            ph := cell_load(self.pin, i * 8)
+            if ph >= 0:
+                k = self.reg_index(ph)
+                if k >= 0:
+                    n := cell_load(self.pin_count, k * 8)
+                    if n < self.cap:
+                        cell_store(self.pin_ids, (k * self.cap + n) * 8, i)
+                        cell_store(self.pin_count, k * 8, n + 1)
+            i = i + 1
+
     fn overlap(&self, a: int, b: int) -> int:
         sa := cell_load(self.start, a * 8)
         ea := cell_load(self.end, a * 8)
@@ -200,9 +254,7 @@ impl CagAllocator:
             return 1
         return 0
 
-    // True when physical register ph is held by a coexisting entry. Pins count
-    // before their entry is assigned.
-    fn location_taken(&self, id: int, ph: int) -> int:
+    fn location_taken_full(&self, id: int, ph: int) -> int:
         w : ., mut = 0
         loop:
             if w >= self.count:
@@ -215,7 +267,57 @@ impl CagAllocator:
             w = w + 1
         return 0
 
-    fn pick(&self, id: int) -> int:
+    // True when physical register ph is held by a coexisting entry. Pins count
+    // before their entry is assigned.
+    fn location_taken(&mut self, id: int, ph: int) -> int:
+        if self.retry_mode != 0:
+            return self.location_taken_full(id, ph)
+        if id < 0 || id >= self.count:
+            return 0
+        k := self.reg_index(ph)
+        if k < 0:
+            return 0
+        s := cell_load(self.start, id * 8)
+        if s < 0:
+            return 0
+
+        // Pinned entries are candidates before their own start. Keep them in a
+        // per-register list; entries whose interval already ended can never
+        // collide with this or a later id, so compaction drops them.
+        n : ., mut = cell_load(self.pin_count, k * 8)
+        j : ., mut = 0
+        p : ., mut = 0
+        loop:
+            if p >= n:
+                break
+            w := cell_load(self.pin_ids, (k * self.cap + p) * 8)
+            if cell_load(self.pin, w * 8) == ph:
+                if w != id && self.overlap(id, w) != 0:
+                    return 1
+                if cell_load(self.end, w * 8) >= s:
+                    cell_store(self.pin_ids, (k * self.cap + j) * 8, w)
+                    j = j + 1
+            p = p + 1
+        cell_store(self.pin_count, k * 8, j)
+
+        n = cell_load(self.live_count, k * 8)
+        j = 0
+        p = 0
+        loop:
+            if p >= n:
+                break
+            w := cell_load(self.live_ids, (k * self.cap * 2 + p) * 8)
+            if cell_load(self.assign, w * 8) == ph:
+                if w != id && self.overlap(id, w) != 0:
+                    return 1
+                if cell_load(self.end, w * 8) >= s:
+                    cell_store(self.live_ids, (k * self.cap * 2 + j) * 8, w)
+                    j = j + 1
+            p = p + 1
+        cell_store(self.live_count, k * 8, j)
+        return 0
+
+    fn pick(&mut self, id: int) -> int:
         k : ., mut = 0
         loop:
             if k >= self.reg_count:
@@ -356,6 +458,8 @@ impl CagAllocator:
                 return self.error
             vi = vi + 1
 
+        self.list_reset()
+        self.pin_rebuild()
         self.sort_order()
         self.sort_calls()
 
@@ -389,6 +493,7 @@ impl CagAllocator:
                     got : ., mut = self.pick(id)
                     if got >= 0:
                         cell_store(self.assign, id * 8, got)
+                        self.live_add(self.reg_index(got), id)
                     else:
                         target : ., mut = id
                         if self.allow_evict != 0:
@@ -410,6 +515,7 @@ impl CagAllocator:
                             got = self.pick(id)
                             if got >= 0:
                                 cell_store(self.assign, id * 8, got)
+                                self.live_add(self.reg_index(got), id)
                             else:
                                 self.evict(id)
             oi = oi + 1
@@ -426,7 +532,9 @@ impl CagAllocator:
         // Second chance: retry spilled entries once after the scan. A later
         // eviction may have released a register. An evicted entry is spilled
         // for its whole interval, so the retry is valid whenever the new
-        // holder's interval does not intersect it.
+        // holder's interval does not intersect it. Retry ids are visited in id
+        // order, not start order, so this phase uses the full scan.
+        self.retry_mode = 1
         w : ., mut = 0
         loop:
             if w >= self.count:
@@ -436,6 +544,8 @@ impl CagAllocator:
                 if got >= 0:
                     cell_store(self.assign, w * 8, got)
                     cell_store(self.spill, w * 8, -1)
+                    self.live_add(self.reg_index(got), w)
             w = w + 1
+        self.retry_mode = 0
 
         return self.error
