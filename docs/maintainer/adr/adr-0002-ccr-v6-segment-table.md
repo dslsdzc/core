@@ -1,7 +1,7 @@
 # ADR-0002: .ccr v6 段表架构 + ENT 存在结构段 + REG 坐标化
 
 - 日期：2026-09-05
-- 状态：accepted
+- 状态：accepted（v11 起 REG 不落盘；历史决策保留）
 - 决策者：DslsDZC
 - 关联提交：`3a287cd`（feat: v6 SYM 归并/REG 坐标化）、v6 spec（2026-09-05-lattice-ir-v6-format.md）
 

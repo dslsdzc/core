@@ -14,15 +14,15 @@ fn grow_ccr_case(needed: int):
         nc = 16
     if nc < needed:
         nc = needed + 16
-    nb := alloc(nc * CCR_V10_CASE_DISK)
-    cell_copy(g_ccr_case, g_ccr_case_cap * CCR_V10_CASE_DISK, nb)
+    nb := alloc(nc * CCR_V11_CASE_DISK)
+    cell_copy(g_ccr_case, g_ccr_case_cap * CCR_V11_CASE_DISK, nb)
     g_ccr_case = nb
     g_ccr_case_cap = nc
 
 fn ccr_case_append(value: int, kind: int, str_index: int, target: int, flags: int) -> int:
     idx := g_ccr_case_count
     grow_ccr_case(idx + 1)
-    base := idx * CCR_V10_CASE_DISK
+    base := idx * CCR_V11_CASE_DISK
     cell_store(g_ccr_case, base + CCR_CASE_VALUE, value)
     cell_store32(g_ccr_case, base + CCR_CASE_KIND, kind)
     cell_store32(g_ccr_case, base + CCR_CASE_STR, str_index)
@@ -128,7 +128,7 @@ fn lower_to_ccr():
                     loop:
                         if rj >= mn:
                             break
-                        cbase := (ms + rj) * CCR_V10_CASE_DISK
+                        cbase := (ms + rj) * CCR_V11_CASE_DISK
                         cval := cell_load(g_lat_case, cbase + CCR_CASE_VALUE)
                         ckind := cell_load32(g_lat_case, cbase + CCR_CASE_KIND)
                         csidx := cell_load_i32(g_lat_case, cbase + CCR_CASE_STR)

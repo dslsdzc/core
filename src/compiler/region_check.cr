@@ -555,7 +555,7 @@ fn rc_ctl_succ_at(ni: int, k: int) -> int:
         if base < 0 || k < 0 || base + k >= g_lat_case_count:
             return -1
         label := cell_load_i32(g_lat_case,
-            (base + k) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+            (base + k) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
         return rc_ctl_label_node(label)
     if ni + 1 < g_rc_ctl_nstart + g_rc_ctl_ncount:
         return ni + 1

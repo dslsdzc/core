@@ -72,8 +72,8 @@ paths = [
   "src/arch/",
 ]
 match = [
-  "test_ccr_v10_",
-  "test_multibranch_v10\\.py",
+  "test_ccr_v11_",
+  "test_multibranch_v11\\.py",
   "test_ccr_v7\\.py",
   "test_warm_cache_gate\\.py",
   "test_cache_identity\\.py",

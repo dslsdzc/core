@@ -15,33 +15,31 @@ OFF_TT_HASH : int = 40
 // Optimization metadata record: header plus up to five register pairs.
 OPT_META_STRIDE : int = 64
 
-// ── .ccr v10 wire schema (spec §3) ──────────────────────────────────────
+// ── .ccr v11 wire schema (spec §3; v11 drops REG) ───────────────────────
 // These constants name wire-format roles and fixed record sizes in the
 // carrier file. They are neither language types nor target widths, and they
-// imply no machine convention. ccr_io.cr writes this schema; v9 is rejected.
+// imply no machine convention. ccr_io.cr writes this schema; v10 and older are rejected.
 
-CCR_V10_VERSION : int = 655360      // 0x000A0000
-CCR_V10_SEG_COUNT : int = 9
-CCR_V10_SEG_STR : int = 1
-CCR_V10_SEG_TYPE : int = 2
-CCR_V10_SEG_IFACE : int = 3
-CCR_V10_SEG_SYM : int = 4
-CCR_V10_SEG_NOD : int = 5
-CCR_V10_SEG_ENT : int = 6
-CCR_V10_SEG_REG : int = 7
-CCR_V10_SEG_EDG : int = 8
-CCR_V10_SEG_CASE : int = 9
+CCR_V11_VERSION : int = 720896      // 0x000B0000
+CCR_V11_SEG_COUNT : int = 8
+CCR_V11_SEG_STR : int = 1
+CCR_V11_SEG_TYPE : int = 2
+CCR_V11_SEG_IFACE : int = 3
+CCR_V11_SEG_SYM : int = 4
+CCR_V11_SEG_NOD : int = 5
+CCR_V11_SEG_ENT : int = 6
+CCR_V11_SEG_EDG : int = 7
+CCR_V11_SEG_CASE : int = 8
 
 // Fixed on-disk record sizes for the graph segments.
-CCR_V10_NOD_DISK : int = 40
-CCR_V10_ENT_DISK : int = 24
-CCR_V10_REG_DISK : int = 24
-CCR_V10_EDG_DISK : int = 8
-CCR_V10_CASE_DISK : int = 24
+CCR_V11_NOD_DISK : int = 40
+CCR_V11_ENT_DISK : int = 24
+CCR_V11_EDG_DISK : int = 8
+CCR_V11_CASE_DISK : int = 24
 
 // CASE record (24B): value i64, kind u32, str index i32, target NOD id i32,
 // flags u32. The target names an IR_LABEL node; CASE carries no width, byte
-// extent, or target layout fact. CCR_V10_CASE_DISK is the one canonical record
+// extent, or target layout fact. CCR_V11_CASE_DISK is the one canonical record
 // size used by size calculation, writer, and loader.
 CCR_CASE_VALUE : int = 0
 CCR_CASE_KIND : int = 8
@@ -56,7 +54,7 @@ CCR_CASE_KIND_ENUM : int = 1
 CCR_CASE_KIND_STRING : int = 2
 CCR_CASE_KIND_DEFAULT : int = 3
 
-// v10 header flags (spec §3.1). They describe program properties only; no bit
+// v11 header flags (spec §3.1). They describe program properties only; no bit
 // carries raw-int, external-binary-interface, or target identity.
 //   bit 0 PORTABLE   no raw/FFI/external-binary boundary
 //   bit 1 SYSTEM     contains a system boundary node (or raw-int build mode)
@@ -67,7 +65,7 @@ CCR_FLAG_SYSTEM : int = 2
 CCR_FLAG_CONCURRENT : int = 4
 CCR_FLAG_KNOWN_MASK : int = 7
 
-// v10 NOD semantic flags. These are node features, not target facts: no bit
+// v11 NOD semantic flags. These are node features, not target facts: no bit
 // carries a machine extent or physical location. corearch reconstructs those
 // from the semantic type and the active target layout.
 //   bit 0  IR_BOUNDS_CHECK: bound is a runtime value (legacy tk == 1)

@@ -626,7 +626,7 @@ fn e2_match_nondefault_count(s2: int, s3: int) -> int:
     loop:
         if i >= s3:
             break
-        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V11_CASE_DISK + CCR_CASE_KIND)
         if kind != CCR_CASE_KIND_DEFAULT:
             n = n + 1
         i = i + 1
@@ -647,7 +647,7 @@ fn e2_match_two_way_zero(instr_idx: int, s2: int, s3: int) -> int:
     loop:
         if i >= s3:
             break
-        cbase := (s2 + i) * CCR_V10_CASE_DISK
+        cbase := (s2 + i) * CCR_V11_CASE_DISK
         kind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
         if kind == CCR_CASE_KIND_DEFAULT:
             ctd := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
@@ -698,8 +698,8 @@ fn e2_match_idx_less(s2: int, a: int, b: int) -> int:
     // Compare by value, then by original CASE-relative index. The index
     // tie-break makes the order total, so duplicate values deterministically
     // keep the first (lowest-index) case.
-    va := cell_load(g_ccr_case, (s2 + a) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
-    vb := cell_load(g_ccr_case, (s2 + b) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+    va := cell_load(g_ccr_case, (s2 + a) * CCR_V11_CASE_DISK + CCR_CASE_VALUE)
+    vb := cell_load(g_ccr_case, (s2 + b) * CCR_V11_CASE_DISK + CCR_CASE_VALUE)
     if va < vb:
         return 1
     if va > vb:
@@ -716,7 +716,7 @@ fn e2_match_sort_cases(s2: int, s3: int, idx: string) -> int:
     loop:
         if i >= s3:
             break
-        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V11_CASE_DISK + CCR_CASE_KIND)
         if kind != CCR_CASE_KIND_DEFAULT:
             cell_store(idx, n * 8, i)
             n = n + 1
@@ -753,7 +753,7 @@ fn e2_match_sort_cases(s2: int, s3: int, idx: string) -> int:
         keep : ., mut = 1
         if uniq > 0:
             prev_i := cell_load(idx, (uniq - 1) * 8)
-            if cell_load(g_ccr_case, (s2 + ci) * CCR_V10_CASE_DISK + CCR_CASE_VALUE) == cell_load(g_ccr_case, (s2 + prev_i) * CCR_V10_CASE_DISK + CCR_CASE_VALUE):
+            if cell_load(g_ccr_case, (s2 + ci) * CCR_V11_CASE_DISK + CCR_CASE_VALUE) == cell_load(g_ccr_case, (s2 + prev_i) * CCR_V11_CASE_DISK + CCR_CASE_VALUE):
                 keep = 0
         if keep != 0:
             cell_store(idx, uniq * 8, ci)
@@ -835,7 +835,7 @@ fn e2_emit_match_binary(buf: string, p: int, s2: int, idx: string, n: int, defau
 
         q := tree_base + k * E2_MATCH_NODE_SZ
         ci : ., mut = cell_load(idx, mid * 8)
-        cbase := (s2 + ci) * CCR_V10_CASE_DISK
+        cbase := (s2 + ci) * CCR_V11_CASE_DISK
         cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
         imm : ., mut = cval
         if tagged != 0:
@@ -900,7 +900,7 @@ fn e2_match_default_label(s2: int, s3: int) -> int:
     loop:
         if ci >= s3:
             break
-        cbase := (s2 + ci) * CCR_V10_CASE_DISK
+        cbase := (s2 + ci) * CCR_V11_CASE_DISK
         if cell_load32(g_ccr_case, cbase + CCR_CASE_KIND) == CCR_CASE_KIND_DEFAULT:
             lbl := e2_match_case_label(cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
             if lbl >= 0:
@@ -909,7 +909,7 @@ fn e2_match_default_label(s2: int, s3: int) -> int:
     return -1
 
 fn e2_match_case_value(s2: int, ci: int) -> int:
-    return cell_load(g_ccr_case, (s2 + ci) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+    return cell_load(g_ccr_case, (s2 + ci) * CCR_V11_CASE_DISK + CCR_CASE_VALUE)
 
 // Return the table width (max-min+1) when the dense predicate holds, else 0.
 // This is the single predicate shared by the plan channel, the emitter, and the
@@ -929,7 +929,7 @@ fn e2_match_table_span(s2: int, s3: int) -> int:
         if vi >= n:
             break
         vci := cell_load(idx, vi * 8)
-        vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+        vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
         if e2_match_case_label(vt) < 0:
             return 0
         vi = vi + 1
@@ -1059,7 +1059,7 @@ fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
                         if vi < n:
                             vci := cell_load(idx, vi * 8)
                             if e2_match_case_value(s2, vci) == v:
-                                vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                                vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
                                 ta := e2_label_abs_pos(e2_match_case_label(vt))
                                 if ta >= 0:
                                     target_abs = ta
@@ -2338,7 +2338,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         loop:
             if fk >= s3:
                 break
-            fk_kind := cell_load32(g_ccr_case, (s2 + fk) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+            fk_kind := cell_load32(g_ccr_case, (s2 + fk) * CCR_V11_CASE_DISK + CCR_CASE_KIND)
             if fk_kind != CCR_CASE_KIND_DEFAULT:
                 first_kind = fk_kind
                 break
@@ -2360,7 +2360,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         loop:
             if ci >= s3:
                 break
-            cbase := (s2 + ci) * CCR_V10_CASE_DISK
+            cbase := (s2 + ci) * CCR_V11_CASE_DISK
             ckind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
             if ckind == CCR_CASE_KIND_DEFAULT:
                 ctarget := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
@@ -2377,7 +2377,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 loop:
                     if vi >= s3:
                         break
-                    vbase := (s2 + vi) * CCR_V10_CASE_DISK
+                    vbase := (s2 + vi) * CCR_V11_CASE_DISK
                     if cell_load32(g_ccr_case, vbase + CCR_CASE_KIND) == CCR_CASE_KIND_VALUE:
                         value_lbl = e2_match_case_label(
                             cell_load_i32(g_ccr_case, vbase + CCR_CASE_TARGET))
@@ -2429,7 +2429,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 if vi >= uniq:
                     break
                 vci := cell_load(idx, vi * 8)
-                vtarget := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                vtarget := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V11_CASE_DISK + CCR_CASE_TARGET)
                 if e2_match_case_label(vtarget) < 0:
                     labels_ok = 0
                 vi = vi + 1
@@ -2445,7 +2445,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         loop:
             if ci >= s3:
                 break
-            cbase := (s2 + ci) * CCR_V10_CASE_DISK
+            cbase := (s2 + ci) * CCR_V11_CASE_DISK
             ckind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
             ctarget := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
             if ckind == CCR_CASE_KIND_DEFAULT:

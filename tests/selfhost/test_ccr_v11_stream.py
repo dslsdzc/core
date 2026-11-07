@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Task 6: the v10 loader consumes segment bodies in canonical order, forward only.
+"""Task 6: the v11 loader consumes segment bodies in canonical order, forward only.
 
 Wire contract (docs/superpowers/specs/2026-10-23-lattice-ccr-v10-design.md §3):
 
-    STR -> TYPE -> IFACE -> SYM -> NOD -> ENT -> REG -> EDG -> CASE
+    STR -> TYPE -> IFACE -> SYM -> NOD -> ENT -> EDG -> CASE
 
 The segment table may validate boundaries and contiguity, but the parser cursor
 starts at the first body and only moves forward. There is no second
@@ -39,9 +39,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ccr_v10_model import (
+from ccr_v11_model import (
     BODY_START,
-    CcrV10Error,
+    CcrV11Error,
     FLAG_PORTABLE,
     FLAG_SYSTEM,
     MAGIC,
@@ -62,9 +62,9 @@ COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
 CCR_IO = BASE / "src" / "compiler" / "ccr_io.cr"
 
-CANONICAL_ORDER = ("STR", "TYPE", "IFACE", "SYM", "NOD", "ENT", "REG", "EDG", "CASE")
+CANONICAL_ORDER = ("STR", "TYPE", "IFACE", "SYM", "NOD", "ENT", "EDG", "CASE")
 # Pre-v10 loader dependency order (the order this task removes).
-LEGACY_ORDER = ("STR", "SYM", "REG", "NOD", "ENT", "EDG", "TYPE", "IFACE", "CASE")
+LEGACY_ORDER = ("STR", "SYM", "NOD", "ENT", "TYPE", "IFACE", "EDG", "CASE")
 
 TAG_OF = {name: tag for tag, name in SEG_TAGS.items()}
 
@@ -149,7 +149,7 @@ def _assert_rejected(data, tmp, name, wire_valid):
     else:
         try:
             validate(data)
-        except CcrV10Error:
+        except CcrV11Error:
             pass
         else:
             raise AssertionError(f"{name}: expected the wire table check to reject")
@@ -189,11 +189,11 @@ def _truncated_nod(data, cut=4):
 def _permuted_offset_image(data):
     """Legacy body placement with offsets that form a contiguous partition.
 
-    Tags stay canonical (1..9), every size is truthful, and the offset set
+    Tags stay canonical (1..8), every size is truthful, and the offset set
     covers [124, EOF) with no gap or overlap, but offsets are not ascending in
     table order. The loader's pre-existing `soff != cursor` check rejects this
     image before any body is parsed, so it is not evidence for the streaming
-    cursor. Under the v10 table rule an ascending table forces canonical body
+    cursor. Under the v11 table rule an ascending table forces canonical body
     order, so no wire-valid legacy-order image exists.
     """
     bodies = _split(data)
@@ -253,13 +253,13 @@ def test_loader_parse_structure_is_canonical_forward_only():
     first_seen = {}
     for match in _BODY_CHECK.finditer(body):
         first_seen.setdefault(int(match.group(1)), match.start())
-    assert sorted(first_seen) == list(range(1, 10)), (
-        f"load_ccr does not guard all nine segment bodies: {sorted(first_seen)}"
+    assert sorted(first_seen) == list(range(1, 9)), (
+        f"load_ccr does not guard all eight segment bodies: {sorted(first_seen)}"
     )
     read_order = [
         seg for seg, _pos in sorted(first_seen.items(), key=lambda item: item[1])
     ]
-    assert read_order == list(range(1, 10)), (
+    assert read_order == list(range(1, 9)), (
         "load_ccr first reads segment ends out of canonical order: "
         + " -> ".join(f"seg_end{n}" for n in read_order)
     )
@@ -320,7 +320,7 @@ def test_canonical_file_loads():
         tmp = Path(td)
         data = _build_ccr(tmp)
         r, out = _elf_result(data, tmp, "canonical")
-        assert r.returncode == 0, f"canonical v10 rejected: {r.stdout}\n{r.stderr}"
+        assert r.returncode == 0, f"canonical v11 rejected: {r.stdout}\n{r.stderr}"
         assert out.exists(), "corearch produced no ELF"
 
         run = subprocess.run([str(out)], capture_output=True, text=True, timeout=10)

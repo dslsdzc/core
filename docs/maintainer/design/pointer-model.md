@@ -135,7 +135,7 @@ p := mmio + 4096        // 越界，编译错误或运行时检查
 Freeable > Writable > Readable > Nonempty > Empty
 ```
 
-实现只保留两个独立位：`readable` 和 `writable`，状态为 none / read-only / write-only / read-write，只允许下降。`Nonempty`/`Empty` 归 ENT/REG，`Freeable` 归区域所有权。
+实现只保留两个独立位：`readable` 和 `writable`，状态为 none / read-only / write-only / read-write，只允许下降。`Nonempty`/`Empty` 归 ENT/REG（REG 在 v11 起仅内存态），`Freeable` 归区域所有权。
 
 - 表示：当前按分配和槽位保存状态（每个 pts 分配一格、每个 IR 变量一格）。没有操作降低子区间，因此不需要每字节覆盖表；以后加稀疏区间表即可扩展，不改权限格。
 - 推断：字符串字面量为 read-only；Core 分配（`IR_ALLOC_ARRAY/STRUCT`、`alloc()` 缓冲区）与未知值为 read-write。全局槽字节可写，`mut` 只限制按名赋值（TA06），不进入字节权限；`&g` 取到的是可写存储。带到达定义的值逐定义取 meet，因此可变全局重新赋值为可写缓冲区后可以写，而仍指向字面量时不能写。

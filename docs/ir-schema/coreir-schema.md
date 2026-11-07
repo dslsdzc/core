@@ -4,7 +4,7 @@
 
 格式以源码为准：`.cir` 和 `.ccr` 的字段与版本以 `src/compiler/ccr_io.cr` 和 `src/compiler/ast.cr` 为准；`.csr` 当前没有实现，见 `docs/ir-schema/corespecir-schema.md` 头部的说明。
 
-`.ccr` 的当前版本是 9，版本常量在 `src/compiler/ccr_io.cr`。本文件第六节保留段表架构的说明，里面的 `v7` 是架构代号，不是当前文件版本号。
+`.ccr` 的当前版本是 11，版本常量在 `src/compiler/ccr_schema.cr`。本文件第六节保留段表架构的说明，里面的 `v7` 是架构代号，不是当前文件版本号。
 
 ## 概述
 
@@ -258,37 +258,32 @@ struct 类型关联布局描述符。默认由编译器推导自然布局（字�
 
 `lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端消费。当前文件序是生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），执行序是图的投影，不再是文件唯一的语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
 
-### `.ccr` 二进制序列化（v7，2026-09；v7-only，v6 中间态已退役）
+### `.ccr` 二进制序列化（v11，2026-11）
 
-> 注：本节“v7”是段表架构代号，不是当前版本字段值。当前 `version = 9`，段数 8，新增 TYPE(7) 和 IFACE(8)。NOD 记录从 36B 扩为 40B，用于 TYPE 段项索引。版本以 `ccr_io.cr` 为准；下面的 v7 布局是快照示例，不能用于逐字节比对。loader 只接受 `version = 9`。
-
-`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图实现方式（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释为准）：
+v11 的字节布局以 `src/compiler/ccr_io.cr` 头注释为准。与 v10 的差异是删除
+REG 段，并把函数 NOD 范围直接放进 SYM 函数头：
 
 ```
-[header 16B]: magic u32="CCR1" | version u32=7 | seg_count u32=6 | reserved u32=0
-[seg table 6×12B]: {tag u32, offset u32, size u32}，规范序（tag=行号 1..6）
+[header 16B]: magic u32="CCR1" | version u32=0x000B0000 | seg_count u32=8 | flags u32
+[seg table 8×12B]: {tag u32, offset u32, size u32}，规范序（tag=行号 1..8）
 [seg bodies]:
   STR(1) 字符串表：   [str_count] [× {len u32, data}]
-  SYM(2) 符号表：      globals(16B {name,type,init}) + funcs（内嵌 var 声明区、
-                      param_ents、first_ent/last_ent、root_region）+ str_consts
-                      /structs/enums/opt_meta 自描述拼接
-  NOD(3) 节点表：      [nod_count] [×36B {op i32,dest i32,src1 i64,src2 i32,
-                      src3 i32,tk i32,first_edge u32,edge_count u32}]，28B
-                      语义字段 + 邻接索引；NOD id = 文件序 = 图坐标（D1）
-  ENT(4) 条目表：      [ent_count] [×28B {var_id i32,version u32,def_nod i32,
-                      live_start u32,live_end u32(半开:最后使用点+1),home i32,
-                      flags u32}]，存在结构（corec 产实记录；home 恒 -1
-                      直通 = 实例层注记）
-  REG(5) region 表：   [sg_count] [×24B kind/parent/enter_nod/exit_nod/
-                      first_ent/last_ent]（enter/exit = NOD id，nstart/ncount
-                      由 span 派生）
-  EDG(6) 边表（v7 必落）：[edg_count] [×8B {to_nod u32, kind u32}]，节点出边
-                      连续成段（first_edge = 前缀累计）；每条边 to_nod > 所属
-                      节点（前向拓扑）；kind 0=数据 1=state（branch/jump 目标
-                      = 操作数字段非边）
+  TYPE(2) 类型表：    [row_count][24B rows][term_count][40B terms]
+  IFACE(3) 接口表：   五小节（native/shape/iface/impl/method）
+  SYM(4) 符号表：     globals(16B) + funcs + str_consts/structs/enums/opt_meta
+                      函数头 28B = {name, param_count, ret_type,
+                      instr_start, instr_count, first_ent, last_ent}
+                      instr_start/count 连续铺满 NOD 空间
+  NOD(5) 节点表：     [nod_count][40B {op,dest,src1,src2,src3,type_id,flags,
+                      first_edge,edge_count}]
+  ENT(6) 条目表：     [ent_count][24B {var_id,version,def_nod,live_start,
+                      live_end,flags}]
+  EDG(7) 边表：       [edg_count][8B {to_nod,kind}]，前向拓扑
+  CASE(8) 分支表：    [case_count][24B {value,kind,str_index,target_nod,flags}]
 ```
 
-v7-only：load 校验 `version == 9`。没有 v6 或 v8 兼容转换；`.ccr` 是管线中间产物，每次生成，旧版整类拒收。v6 中间态（5 段、NOD 28B、ENT 恒空、DFEdge 不落盘，边仅在内存与 `.cir` 缓存中）已被取代：v7 架构起 EDG 段必落（P3 修复），ENT 携带实记录（P2 修复）。
+REG 不在 v11 落盘。`g_sgs` 仍是前端 region 表和 `.cir` 缓存的结构，但不再由
+`.ccr` loader 重建。v10 及更早版本整类拒收；没有自动迁移。
 
 ---
 

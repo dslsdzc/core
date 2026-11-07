@@ -29,7 +29,7 @@
 |---|---|---|
 | `.cr` | Core 源码，实现和规约写在同一个文件 | grammar/core.ebnf |
 | `.cir` | 图形态：HDFG 加规约约束的验证表示 | maintainer/design/execution-model.md |
-| `.ccr` | 格形态的落盘格式。当前 v10，共 9 段：STR、TYPE、IFACE、SYM、NOD、ENT、REG、EDG、CASE | src/compiler/ccr_io.cr |
+| `.ccr` | 格形态的落盘格式。当前 v11，共 8 段：STR、TYPE、IFACE、SYM、NOD、ENT、EDG、CASE；REG 已移出盘面 | src/compiler/ccr_io.cr |
 | `.csr` | 规约约束的序列化格式，设计态，当前零实现 | ir-schema/corespecir-schema.md |
 | `.coi` | 可选、非权威的优化知识附属文件，保存通用和目标特定的优化知识。删除它不改变 `.ccr` 和产物字节。设计定稿，当前零实现 | maintainer/design/coi-optimization-knowledge-sidecar.md |
 | `.ccrb` | 分发包：一个 zstd 帧包裹确定性 tar，固定包含 `manifest` 和 `program.ccr`，可选 `coi/<target>.coi`。打包和解包由 `tools/ccrb.py` 完成，`corearch` 不读 `.ccrb` | tools/ccrb.py |
@@ -38,7 +38,7 @@
 | state edges | 顺序约束（副作用序列和循环终止依赖） | maintainer/design/execution-model.md |
 | 线性投影 | v5 格形态：从图线性化得到的投影。v6 起改为存在结构本体，该术语仅用于历史文档 | archive/2026-09-05-lattice-ir-v6-format.md |
 | 部署配置 | 执行方式由部署配置声明决定，图语义不变 | maintainer/design/execution-model.md |
-| CASE 段 | `.ccr` 第 9 段，`IR_MATCH` 的分支表：值、类别、字符串索引、目标节点、旗标 | src/compiler/ccr_io.cr |
+| CASE 段 | `.ccr` 第 8 段，`IR_MATCH` 的分支表：值、类别、字符串索引、目标节点、旗标 | src/compiler/ccr_io.cr |
 | 决策 DAG | 模式匹配编译后形成的分支结构，CASE 段是它的序列化 | maintainer/design/frontend-semantics.md |
 
 > 注：`.corespec` 独立规约格式已退役（2026-09-06），规约使用 `.cr` 语法表达，见 `maintainer/adr/adr-0001`。`.csr` 是 `.cir` 的约束 sidecar，设计态，尚未实现，见 `ir-schema/corespecir-schema.md`。
@@ -122,4 +122,4 @@
 ## 九、收录规则
 
 - 一个术语进入本表，需要跨文档引用至少 2 处，且语义唯一。否则留在出处文档。
-- 版本：v3（2026-08-27）全量扩充，v4（2026-09-06）校准，v5（2026-10-24）更新 `.ccr` v10、McTT 信任根、自举阶段和执行标注术语。
+- 版本：v3（2026-08-27）全量扩充，v4（2026-09-06）校准，v5（2026-10-24）更新 `.ccr` v10、McTT 信任根、自举阶段和执行标注术语；v11（2026-11-07）删除 REG 落盘。

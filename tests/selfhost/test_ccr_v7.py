@@ -23,7 +23,7 @@ Task 3 吸收说明（v6 专属断言退役去向）：
 字节真相 = docs/superpowers/specs/2026-10-23-lattice-ccr-v10-design.md
 （Task 4 起 = v10 lattice container；文件名保留「v7」= 段表架构代号）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 0x000A0000
+  [4]   version u32 = 0x000B0000
   [8]   seg_count u32 = 9
   [12]  flags u32（仅 bit 0..2；bit 0 现阶段兼作 raw-int 选择）
   [16]  段表 9 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..9）
@@ -83,22 +83,20 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V10 = 0x000A0000  # v10 lattice container
-SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # STR TYPE IFACE SYM NOD ENT REG EDG CASE
+V11 = 0x000B0000  # v11 lattice container
+SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR TYPE IFACE SYM NOD ENT EDG CASE
 SEG_STR = 1
 SEG_TYPE = 2
 SEG_IFACE = 3
 SEG_SYM = 4
 SEG_NOD = 5
 SEG_ENT = 6
-SEG_REG = 7
-SEG_EDG = 8
-SEG_CASE = 9
+SEG_EDG = 7
+SEG_CASE = 8
 NOD_REC = 40
 ENT_REC = 24
-REG_REC = 24
 EDG_REC = 8
-HEADER_TABLE = 16 + 9 * 12  # 124
+HEADER_TABLE = 16 + 8 * 12  # 112
 
 # 源程序 span 内（pure_add + main 两函数，节点 0..44）期望 EDG 内容——见
 # test_v7_edge_content_small_program 的派生说明。
@@ -140,8 +138,8 @@ class V7File:
         assert len(data) >= HEADER_TABLE, f"file too small for v7 header+table: {len(data)}"
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
-        assert ver == V10, f"expected version {V10}, got {ver}"
-        assert seg_count == 9, f"expected 9 segments, got {seg_count}"
+        assert ver == V11, f"expected version {V11}, got {ver}"
+        assert seg_count == 8, f"expected 8 segments, got {seg_count}"
         assert reserved <= 0x7, f"reserved/reserved-flag bits set: {reserved}"
         # Segment table: canonical order, contiguous layout
         self.segs = {}
@@ -196,8 +194,8 @@ class V7File:
         n = u32()
         funcs = []
         for _ in range(n):
-            (name, pc, rt, root, fe, le) = struct.unpack_from('<IIiiii', b, pos)
-            pos += 24
+            (name, pc, rt, start, count, fe, le) = struct.unpack_from('<IIIIIII', b, pos)
+            pos += 28
             param_ents = []
             for _ in range(pc):
                 param_ents.append(struct.unpack_from('<i', b, pos)[0])
@@ -209,7 +207,8 @@ class V7File:
                 pos += 8
                 decls.append({'name': vn, 'type': vt})
             funcs.append({'name': name, 'param_count': pc, 'ret_type': rt,
-                          'root_region': root, 'first_ent': fe, 'last_ent': le,
+                          'instr_start': start, 'instr_count': count,
+                          'first_ent': fe, 'last_ent': le,
                           'param_ents': param_ents, 'var_count': vc,
                           'var_decls': decls})
         scn = u32()
@@ -268,18 +267,6 @@ class V7File:
         for _ in range(n):
             out.append(struct.unpack_from('<iIiII I'.replace(' ', ''), b, pos))
             pos += ENT_REC
-        return out
-
-    def reg(self):
-        b = self.body(SEG_REG)
-        (n,) = struct.unpack_from('<I', b, 0)
-        assert (len(b) - 4) % REG_REC == 0, "REG body size not a multiple of 24"
-        assert n == (len(b) - 4) // REG_REC, f"REG count {n} != bytes/24"
-        pos = 4
-        out = []
-        for _ in range(n):
-            out.append(struct.unpack_from('<6i', b, pos))
-            pos += REG_REC
         return out
 
     def edg(self):
@@ -393,7 +380,7 @@ ENT_SRC = (
     "fn identity(n: int) -> int:\n    return n\nfn main() -> int:\n    x : ., mut = 1\n    x = x + 1\n    x = x + 2\n    return x\n")
 
 
-def model_compute_entries(nod, funcs, gcount, regs):
+def model_compute_entries(nod, funcs, gcount):
     """v6 §4.1 条目重建规则（regalloc.cr compute_live_ranges/compute_entries
     镜像）的 Python 独立实现——.cr 侧 compute_entries_v7 无共享代码，同为
     regalloc.cr 规则文本转写，测试即交叉验证。
@@ -424,9 +411,8 @@ def model_compute_entries(nod, funcs, gcount, regs):
         row_no += 1
     var_start = gcount
     for k, f in enumerate(funcs):
-        root = regs[f['root_region']]
-        ist, ex = root[2], root[3]
-        ic = ex - ist
+        ist = f['instr_start']
+        ic = f['instr_count']
         vc = f['var_count']
         pc = f['param_count']
         vs = var_start
@@ -600,11 +586,6 @@ def test_v7_ent_hand_expected_small():
         assert (f1['first_ent'], f1['last_ent']) == (base + 2, base + 11), \
             f"main range {f1['first_ent']}..{f1['last_ent']}"
         assert f1['param_count'] == 0
-        # REG 根行（SG_FUNC）first/last 与 SYM func 记录双写一致
-        regs = v7.reg()
-        roots = [i for i, r in enumerate(regs) if r[0] == 0]
-        assert regs[roots[0]][4] == base and regs[roots[0]][5] == base + 1
-        assert regs[roots[1]][4] == base + 2 and regs[roots[1]][5] == base + 11
     finally:
         try:
             os.unlink(ccr_path)
@@ -619,8 +600,7 @@ def test_v7_ent_model_replay_pure_add():
     对照面：
       · ENT 段逐行 == 模型行（var_id/version/def/ls/le 半开/home/flags）；
       · SYM func first_ent/last_ent/param_ents == 模型块界/参数条目派生；
-      · REG 每行 first/last == 模型派生（根行 = 函数块含 def=-1；嵌套 =
-        定值点 def ∈ [enter, exit) 的连续段，无 = -1）。"""
+      · 函数 NOD 范围由 SYM instr_start/instr_count 直接给出。"""
     ccr_path = os.path.join(BASE, 'build/test_v7_ent_model.ccr')
     try:
         os.unlink(ccr_path)
@@ -632,10 +612,9 @@ def test_v7_ent_model_replay_pure_add():
         sym = v7.sym_parse()
         funcs = sym['funcs']
         nod = v7.nod()
-        regs = v7.reg()
         ents = v7.ent()
-        rows, blocks = model_compute_entries(nod, funcs, len(sym['globals']),
-                                             regs)
+        rows, blocks = model_compute_entries(nod, funcs,
+                                             len(sym['globals']))
         assert rows == ents, \
             f"ENT rows != independent model:\n  file {ents[:8]}...\n  model {rows[:8]}..."
         # func 名对照（模型按 SYM func 序——须 = 期望序）
@@ -652,24 +631,6 @@ def test_v7_ent_model_replay_pure_add():
                 f"({f['first_ent']},{f['last_ent']}) != model ({fe},{le})"
             assert f['param_ents'] == pes, \
                 f"func {k} param_ents {f['param_ents']} != model {pes}"
-        # REG first/last 对照（根行 = 函数块；嵌套 = def ∈ span 连续段）
-        rfc = -1
-        for rid, r in enumerate(regs):
-            kind, par, en, ex, rfe, rle = r
-            if kind == 0:
-                rfc += 1
-            st, cnt = blocks[rfc]
-            if kind == 0:
-                me = st if cnt else -1
-                ml = st + cnt - 1 if cnt else -1
-            else:
-                in_span = [i for i in range(st, st + cnt)
-                           if rows[i][2] >= en and rows[i][2] < ex]
-                me = min(in_span) if in_span else -1
-                ml = max(in_span) if in_span else -1
-            assert (rfe, rle) == (me, ml), \
-                f"REG row {rid} (kind {kind}) range ({rfe},{rle}) " \
-                f"!= model ({me},{ml})"
         # loader 语义不变量显式断言（与 load_ccr ENT 校验同面）
         instr_cnt = len(nod)
         for k, (ev, evr, ed, els, ele, efl) in enumerate(ents):
@@ -910,7 +871,7 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
 
 
 def test_v7_layout_and_walk():
-    """段表架构：magic/version=0x000A0000/9 段规范序（EDG=tag 8 必落；TYPE=2/IFACE=3
+    """段表架构：magic/version=0x000B0000/9 段规范序（EDG=tag 8 必落；TYPE=2/IFACE=3
     空壳——R2 P4 Task 1）/offset 连续/NOD 40B（P6 T3 起）+ 邻接域/EDG 段完整走查 ==
     文件大小。"""
     src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
@@ -929,7 +890,11 @@ def test_v7_layout_and_walk():
         assert len(sym['funcs']) >= 1 and len(sym['globals']) >= 1
         n = v7.nod()
         assert len(n) > 4, f"expected nodes, got {len(n)}"
-        assert len(v7.reg()) >= 2
+        prev = 0
+        for f in sym['funcs']:
+            assert f['instr_start'] == prev, (f, prev)
+            prev += f['instr_count']
+        assert prev == len(n), (prev, len(n))
         e = v7.ent()
         # Task 2: ENT 实记录（corec 产条目）——函数有 var 即有条目（参数/本地
         # 引用 + _arena 定值），本程序条目数 > 0；全行字段自洽
@@ -1064,17 +1029,16 @@ def test_v7_edge_content_small_program():
         strs = v7.str_table()
         sym = v7.sym_parse()
         funcs = sym['funcs']
-        regs = v7.reg()
         # 源函数定位（SYM func 记录按声明序：pure_add = func0、main = func1）
         names = [strs[f['name']] for f in funcs]
         assert names[0] == 'pure_add', f"func0 = {names[0]!r}"
         assert names[1] == 'main', f"func1 = {names[1]!r}"
-        # root region 行（kind=0）按函数序 1:1 —— span = 节点范围
-        roots = [i for i, r in enumerate(regs) if r[0] == 0]
-        assert roots[0] == funcs[0]['root_region']
-        assert roots[1] == funcs[1]['root_region']
-        span_pure = (regs[roots[0]][2], regs[roots[0]][3])  # pure_add
-        span_main = (regs[roots[1]][2], regs[roots[1]][3])  # main
+        # Function node ranges come from SYM in v11.
+        span_pure = (funcs[0]['instr_start'],
+                     funcs[0]['instr_start'] + funcs[0]['instr_count'])
+        span_main = (funcs[1]['instr_start'],
+                     funcs[1]['instr_start'] + funcs[1]['instr_count'])
+        assert span_pure[0] == 0
         assert span_pure[1] == span_main[0] == 5
         assert span_main[1] == EXPECT_SRC_SPAN, \
             f"main span {span_main} != expected end {EXPECT_SRC_SPAN}"
@@ -1329,14 +1293,6 @@ def test_v7_ent_real_optmeta_absent():
         assert pos == len(ents), "block partition did not cover all entries"
         assert all(ents[g][0] == g and ents[g][2] == -1 and ents[g][5] == 4
                    for g in range(base)), "global prefix rows malformed"
-        # REG 根行 first/last 与 SYM func 记录双写一致（实值）
-        regs = v7.reg()
-        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
-        for k, (rid, r) in enumerate(roots[:len(funcs)]):
-            assert r[4] == funcs[k]['first_ent'], \
-                f"root {rid} first_ent {r[4]} != SYM {funcs[k]['first_ent']}"
-            assert r[5] == funcs[k]['last_ent'], \
-                f"root {rid} last_ent {r[5]} != SYM {funcs[k]['last_ent']}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -1344,15 +1300,12 @@ def test_v7_ent_real_optmeta_absent():
             pass
 
 
-def test_v7_sym_reg_target_shape():
-    """（迁移 test_sym_reg_target_shape）SYM 归并/REG 坐标化目标形状
-    （v7 spec §3.2/§3.5 落地）：
-    - SYM func 记录 = {name/param_count/ret_type/root_region/first_ent/last_ent}
-      + param_ents + var 声明区；globals 记录带 type；
-    - REG 记录 = {kind, parent, enter_nod, exit_nod, first_ent, last_ent}；
-    - 根 region（SG_FUNC）行与 func 记录 1:1，span 连续铺满 NOD 空间，
-      first/last = 本函数条目块；嵌套 region 条目范围 = 定值点 ∈ [enter, exit)
-      （文件条目序连续一段）；变量命名空间行数覆盖 ENT/NOD 引用。"""
+def test_v7_sym_target_shape():
+    """SYM target shape (v11):
+    - SYM func 记录 = {name/param_count/ret_type/instr_start/instr_count/
+      first_ent/last_ent} + param_ents + var 声明区；globals 记录带 type；
+    - 函数 NOD 范围连续铺满 NOD 空间；
+    - 变量命名空间行数覆盖 ENT/NOD 引用。"""
     src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_symreg.ccr')
     try:
@@ -1368,7 +1321,6 @@ def test_v7_sym_reg_target_shape():
         strs = v7.str_table()
         nod_cnt = len(v7.nod())
         ents = v7.ent()
-        regs = v7.reg()
         # func 记录
         assert len(funcs) >= 1
         f = funcs[0]
@@ -1383,42 +1335,14 @@ def test_v7_sym_reg_target_shape():
                 f"local {want} missing from func var decls: {decl_names}"
         # 全局记录：>=1 条，全局行数 = var 行序前缀（func0 var 基准）
         assert len(globs) >= 1
-        # REG: 根行（kind=0）与 func 1:1；span 连续铺满 NOD 空间
-        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
-        assert len(roots) == len(funcs), \
-            f"SG_FUNC rows {len(roots)} != func records {len(funcs)}"
+        # v11: SYM func ranges tile the NOD space.
         prev_end = 0
-        for k, (rid, r) in enumerate(roots):
-            assert funcs[k]['root_region'] == rid, \
-                f"func {k} root_region {funcs[k]['root_region']} != row {rid}"
-            assert r[2] == prev_end, \
-                f"root {k} enter {r[2]} != previous end {prev_end}"
-            prev_end = r[3]
-            # 根 region 条目范围 == 函数条目块（SYM func 记录同值）
-            assert funcs[k]['first_ent'] == r[4] and funcs[k]['last_ent'] == r[5]
-            assert (r[4] == -1) == (r[5] == -1)
+        for f in funcs:
+            assert f['instr_start'] == prev_end, \
+                f"func start {f['instr_start']} != prev end {prev_end}"
+            prev_end += f['instr_count']
         assert prev_end == nod_cnt, \
-            f"root spans end at {prev_end}, nod_count {nod_cnt}"
-        # 嵌套 region：first/last = def_nod ∈ [enter, exit) 的文件序连续段
-        for rid, r in enumerate(regs):
-            if r[0] == 0:
-                assert r[1] == -1, f"root {rid} parent != -1: {r}"
-                continue
-            if r[1] >= 0:
-                p = regs[r[1]]
-                assert r[2] >= p[2] and r[3] <= p[3], \
-                    f"region {rid} escapes parent span: {r} vs {p}"
-            exp = {ei for ei, en in enumerate(ents)
-                   if en[2] >= 0 and r[2] <= en[2] < r[3]}
-            if not exp:
-                assert r[4] == -1 and r[5] == -1, \
-                    f"empty region {rid} has range {r[4]}..{r[5]}"
-            else:
-                assert r[4] == min(exp) and r[5] == max(exp), \
-                    f"region {rid} range {r[4]}..{r[5]} != expected {min(exp)}..{max(exp)}"
-                got = set(range(r[4], r[5] + 1))
-                assert got == exp, \
-                    f"region {rid} run not exactly the def'd-in-range set"
+            f"SYM ranges end at {prev_end}, nod_count {nod_cnt}"
         # 变量命名空间（globals + 各 func var_count）覆盖 ENT var id / NOD dest
         total_vars = len(globs) + sum(fn['var_count'] for fn in funcs)
         for en in ents:
@@ -1437,8 +1361,8 @@ def test_v7_sym_reg_target_shape():
 
 def test_v7_sym_func_shapes():
     """（迁移 test_sym_func_shapes）SYM func 记录形状：add/main 行序 = 声明序；
-    参数 = var 声明区前 param_count 个（行序 = 参数序，类型 int）；root_region
-    行序 1:1、span 连续铺满 NOD 空间；first/last_ent 实回填（add 参数 a/b 从未
+    参数 = var 声明区前 param_count 个（行序 = 参数序，类型 int）；
+    instr_start/instr_count 连续铺满 NOD 空间；first/last_ent 实回填（add 参数 a/b 从未
     定值 → def=-1 条目 → param_ents = 其条目 id；main 无参；条目范围 = 块界）。"""
     src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    x : ., mut = 1\n    x = x + 1\n    x = x + 2\n    return x\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_symparams.ccr')
@@ -1452,7 +1376,6 @@ def test_v7_sym_func_shapes():
         sym = v7.sym_parse()
         funcs = sym['funcs']
         strs = v7.str_table()
-        regs = v7.reg()
         nod_cnt = len(v7.nod())
         ents = v7.ent()
         assert strs[funcs[0]['name']] == 'add'
@@ -1497,19 +1420,13 @@ def test_v7_sym_func_shapes():
             assert ed == -1 and ev == g0 + p, \
                 f"add param_ents[{p}] -> row {pid} var {ev} (want {g0 + p})"
         assert funcs[1]['param_count'] == 0 and funcs[1]['param_ents'] == []
-        # 根 region（kind=0）行序 = 函数序 1:1；span 连续铺满 NOD 空间
-        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
-        assert len(roots) == len(funcs)
+        # v11: SYM ranges tile the NOD space.
         prev_end = 0
-        for k, (rid, r) in enumerate(roots):
-            assert funcs[k]['root_region'] == rid
-            assert r[2] == prev_end, f"root {k} enter {r[2]} != prev end {prev_end}"
-            prev_end = r[3]
-            # 根行 first/last = 函数块界（与 SYM 双写一致）
-            assert (r[4], r[5]) == (funcs[k]['first_ent'],
-                                    funcs[k]['last_ent'])
+        for f in funcs:
+            assert f['instr_start'] == prev_end
+            prev_end += f['instr_count']
         assert prev_end == nod_cnt, \
-            f"root spans end at {prev_end}, nod_count {nod_cnt}"
+            f"SYM ranges end at {prev_end}, nod_count {nod_cnt}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -1517,16 +1434,10 @@ def test_v7_sym_func_shapes():
             pass
 
 
-def test_v7_loader_rejects_root_span_beyond_nod_space():
-    """（迁移 GC-3——SYM 评审 M1）REG root span 对 NOD 空间上界校验。
-
-    loader 解析序 REG → NOD：root region（SG_FUNC 行）的 enter/exit 在 REG
-    段解析时就回填成函数指令边界，但 instr_cnt 直到 NOD 段才可知——彼时
-    无上界校验（ENT 有 ele > instr_cnt 拒绝先例）。损坏文件把末函数 root
-    region 的 exit_nod 推出 NOD 空间（exit == instr_cnt + 1）→ corearch 必须
-    拒绝（'invalid .ccr'）。"""
+def test_v7_loader_rejects_sym_range_beyond_nod_space():
+    """v11 SYM function ranges must stay inside the NOD space."""
     src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
-    ccr_path = os.path.join(BASE, 'build/test_v7_rootspan.ccr')
+    ccr_path = os.path.join(BASE, 'build/test_v7_symrange.ccr')
     try:
         os.unlink(ccr_path)
     except FileNotFoundError:
@@ -1535,31 +1446,26 @@ def test_v7_loader_rejects_root_span_beyond_nod_space():
         corec_ccr(src, ccr_path)
         data = bytearray(read_ccr(ccr_path))
         v7 = V7File(bytes(data))
-        regs = v7.reg()
+        sym = v7.sym_parse()
         nod_cnt = len(v7.nod())
-        # 末函数 root region（最后一个 kind==0 行）：span 末 = NOD 空间末
-        # （根行 span 连续铺满 NOD 空间的不变量），exit_nod += 1 → 越界
-        roots = [i for i, r in enumerate(regs) if r[0] == 0]
-        assert roots, f"no SG_FUNC rows in REG: {regs}"
-        rid = roots[-1]
-        assert regs[rid][3] == nod_cnt, \
-            f"last root exit {regs[rid][3]} != nod_count {nod_cnt}: {regs[rid]}"
-        reg_off, _ = v7.segs[SEG_REG]
-        patch_at = reg_off + 4 + rid * REG_REC + 12  # exit_nod field (+12 in row)
-        struct.pack_into('<i', data, patch_at, regs[rid][3] + 1)
+        sym_off, _ = v7.segs[SEG_SYM]
+        gc = len(sym['globals'])
+        first_func = sym_off + 4 + gc * 16 + 4
+        # instr_count is at +16 in the 28B function header.
+        struct.pack_into('<I', data, first_func + 16, nod_cnt + 1)
         bad_path = ccr_path + '.oob'
         with open(bad_path, 'wb') as fh:
             fh.write(bytes(data))
         r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
-                            '-o', os.path.join(BASE, 'build/test_v7_rootspan.out')],
+                            '-o', os.path.join(BASE, 'build/test_v7_symrange.out')],
                            capture_output=True, text=True, cwd=BASE, timeout=60)
         assert r.returncode != 0, \
-            f"corearch accepted root span beyond NOD space: rc={r.returncode} {r.stdout!r}"
+            f"corearch accepted SYM range beyond NOD space: rc={r.returncode} {r.stdout!r}"
         assert 'invalid' in (r.stdout + r.stderr), \
             f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
     finally:
         for p in (ccr_path, ccr_path + '.oob',
-                  os.path.join(BASE, 'build/test_v7_rootspan.out')):
+                  os.path.join(BASE, 'build/test_v7_symrange.out')):
             try:
                 os.unlink(p)
             except FileNotFoundError:
@@ -1912,15 +1818,12 @@ def _cname(strs, ni):
 
 
 def _func_span(v7, name):
-    """按名取函数节点区间 (lo, hi)（SYM func 记录 root_region → REG 根行 span）。"""
+    """按名取函数节点区间 (lo, hi) from the v11 SYM header."""
     strs = v7.str_table()
     sym = v7.sym_parse()
-    regs = v7.reg()
     for f in sym['funcs']:
         if strs[f['name']] == name:
-            r = regs[f['root_region']]
-            assert r[0] == 0, f"root_region row {f['root_region']} not SG_FUNC: {r}"
-            return (r[2], r[3])
+            return (f['instr_start'], f['instr_start'] + f['instr_count'])
     raise AssertionError(f"function {name!r} not found in SYM")
 
 
@@ -1935,8 +1838,9 @@ def _state_in(edges):
 
 
 def _reg_spans(v7):
-    """REG 根行（SG_FUNC）节点区间表 [enter, exit)（函数序 = SYM func 序）。"""
-    return [(r[2], r[3]) for r in v7.reg() if r[0] == 0]
+    """函数节点区间表 [start, end)（v11: SYM func 序）。"""
+    return [(f['instr_start'], f['instr_start'] + f['instr_count'])
+            for f in v7.sym_parse()['funcs']]
 
 
 def _func_of(spans, n):
@@ -2137,7 +2041,7 @@ if __name__ == '__main__':
              test_v7_ent_hand_expected_pure_add_block,
              test_v7_ent_model_replay_pure_add,
              test_v7_ent_real_optmeta_absent,
-             test_v7_sym_reg_target_shape,
+             test_v7_sym_target_shape,
              test_v7_sym_func_shapes,
              test_v7_loader_rejects_bad_ent_version,
              test_v7_loader_rejects_ent_liveend_oob,
@@ -2147,7 +2051,7 @@ if __name__ == '__main__':
              test_v7_loader_rejects_ent_def_nod_oob,
              test_v7_loader_rejects_ent_def_ne_live_start,
              test_v7_loader_rejects_sym_ent_block_mismatch,
-             test_v7_loader_rejects_root_span_beyond_nod_space,
+             test_v7_loader_rejects_sym_range_beyond_nod_space,
              test_v7_loader_rejects_version_ne_7,
              test_v7_loader_rejects_backward_edge,
              test_v7_loader_rejects_edg_count_mismatch,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R2 P4 Task 1/2/3 + v10 cutover：`.ccr` TYPE=2 / IFACE=3 段（机制面 + 内容面）断言套件。
+"""R2 P4 Task 1/2/3 + v11 cutover：`.ccr` TYPE=2 / IFACE=3 段（机制面 + 内容面）断言套件。
 
 本套件 = **机制面**（Task 1：段表/版本/loader 三闸）+ **TYPE 内容面**（Task 2：
 行表 + 项 DAG 序列化 / D13 确定性装填 / corearch 读回重建 / 判定原语跨进程同值）
@@ -8,7 +8,7 @@ impl 边 + 方法表 / corearch 读回 / 跨段引用域 / 扩列与命名化守
 
 Task 1（机制面）：
   ① 段表 = 9 段、tag 序 = 1..9、offset 连续、末段尾 == 文件大小；
-  ② header: version = 0x000A0000、seg_count = 9、flags bits 0..2；
+  ② header: version = 0x000B0000、seg_count = 8、flags bits 0..2；
   ③ TYPE(2)/IFACE(3) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
      静默当空表**——三态纪律 C.5-3）：
@@ -79,9 +79,9 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-VER = 0x000A0000         # v10 lattice container
-SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # STR TYPE IFACE SYM NOD ENT REG EDG CASE
-HEADER_TABLE = 16 + 9 * 12  # 124
+VER = 0x000B0000         # v11 lattice container
+SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR TYPE IFACE SYM NOD ENT EDG CASE
+HEADER_TABLE = 16 + 8 * 12  # 112
 TYPE_TAG = 2
 IFACE_TAG = 3
 ENT_TAG = 6
@@ -110,7 +110,7 @@ V7_VER = 7
 
 
 class CcrFile:
-    """`.ccr` 全段解析（9 段规范序契约；违反 = AssertionError）。"""
+    """`.ccr` 全段解析（8 段规范序契约；违反 = AssertionError）。"""
 
     def __init__(self, data: bytes):
         self.d = data
@@ -119,7 +119,7 @@ class CcrFile:
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
         assert ver == VER, f"expected version {VER}, got {ver}"
-        assert seg_count == 9, f"expected 9 segments, got {seg_count}"
+        assert seg_count == 8, f"expected 8 segments, got {seg_count}"
         assert reserved <= 0x7, f"reserved flag bits set: {reserved}"
         self.segs = {}
         cur = HEADER_TABLE  # 段体紧随段表
@@ -229,7 +229,7 @@ def _shell_fixture(name: str):
 
 def test_p4t1_layout_nine_segments():
     """① 段表 = 9 段规范序（tag 1..9）+ offset 连续 + 末段尾 == 文件大小；
-    header version = 0x000A0000 / seg_count = 9 / flags bits 0..2。"""
+    header version = 0x000B0000 / seg_count = 9 / flags bits 0..2。"""
     src_path, ccr_path = _shell_fixture('layout')
     try:
         c = CcrFile(read_ccr(ccr_path))
@@ -575,8 +575,9 @@ def sym_type_refs(data: bytes):
     (fc,) = struct.unpack_from('<I', data, p)
     p += 4
     for _ in range(fc):
-        _nm, pc, _rt, _root, _ffe, _fle = struct.unpack_from('<6i', data, p)
-        p += 24 + 4 * pc
+        _nm, pc, _rt, _start, _count, _ffe, _fle = struct.unpack_from(
+            '<IIIIIII', data, p)
+        p += 28 + 4 * pc
         (vc,) = struct.unpack_from('<I', data, p)
         p += 4
         for _ in range(vc):
@@ -2542,8 +2543,8 @@ def test_v10_ent_24b_without_home():
     out = os.path.join(BASE, 'build', 'test_p7t4_ent.out')
     try:
         data = read_ccr(ccr_path)
-        c = CcrFile(data)        # 内含 version == 0x000A0000 + 9 段规范序断言
-        assert VER == 0x000A0000, "CCR_VERSION is not v10"
+        c = CcrFile(data)        # 内含 version == 0x000B0000 + 9 段规范序断言
+        assert VER == 0x000B0000, "CCR_VERSION is not v10"
         body = c.body(ENT_TAG)
         (cnt,) = struct.unpack_from('<I', body, 0)
         assert cnt > 0, "fixture produced no ENT records (vacuous)"

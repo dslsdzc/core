@@ -727,7 +727,7 @@ fn interp_match_target(scrutinee: int, scrutinee_ti: int, case_start: int, case_
     loop:
         if ci >= case_count:
             break
-        base := (case_start + ci) * CCR_V10_CASE_DISK
+        base := (case_start + ci) * CCR_V11_CASE_DISK
         kind := cell_load32(g_ccr_case, base + CCR_CASE_KIND)
         val := cell_load(g_ccr_case, base + CCR_CASE_VALUE)
         target := cell_load_i32(g_ccr_case, base + CCR_CASE_TARGET)

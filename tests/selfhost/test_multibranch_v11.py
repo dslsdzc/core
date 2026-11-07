@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""v10 multibranch wire tests: IR_MATCH opcode and the CASE segment (tag 9).
+"""v11 multibranch wire tests: IR_MATCH opcode and the CASE segment (tag 8).
 
-CASE is the last v10 segment. Its body is:
+CASE is the last v11 segment. Its body is:
 
     case_count u32
     case_count x 24B {
@@ -9,7 +9,7 @@ CASE is the last v10 segment. Its body is:
         kind       u32 @8    // 0=value 1=enum 2=string 3=default
         str_index  i32 @12   // STR index, or -1 when unused
         target_nod i32 @16   // NOD id of an IR_LABEL node
-        flags      u32 @20   // reserved; zero in v10
+        flags      u32 @20   // reserved; zero in v11
     }
 
 The tests below check the physical layout with an independent parser, then
@@ -17,7 +17,7 @@ prove the real loader accepts IR_MATCH (54) and nonempty CASE bodies and rejects
 out-of-domain case records. Synthetic CASE bodies are installed into a real
 `corec` image so the rest of the container stays authoritative.
 
-Runs standalone (`python3 tests/selfhost/test_multibranch_v10.py`) and is also
+Runs standalone (`python3 tests/selfhost/test_multibranch_v11.py`) and is also
 pytest-discoverable (stdlib only).
 """
 
@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ccr_v10_model import (  # noqa: E402
+from ccr_v11_model import (  # noqa: E402
     BODY_START,
     SEG_TAGS,
     encode,
@@ -60,7 +60,7 @@ KIND_ENUM = 1
 KIND_STRING = 2
 KIND_DEFAULT = 3
 
-CASE_TAG = 9
+CASE_TAG = 8
 NOD_TAG = 5
 
 # Two independent ifs give several LABEL nodes and a nonempty STR table, so a
@@ -78,7 +78,7 @@ EXPECTED_EXIT = 7
 
 
 class CaseParseError(ValueError):
-    """Raised when a CASE body is not the exact 24B table v10 defines."""
+    """Raised when a CASE body is not the exact 24B table v11 defines."""
 
 
 def _run(cmd, timeout=180, cwd=None):
@@ -181,7 +181,7 @@ def _load_result(data, tmp, name, args=("--dump-nod-types",)):
 def _assert_loads(data, tmp, name):
     r = _load_result(data, tmp, name)
     assert r.returncode == 0, (
-        f"{name}: corearch rejected a valid v10 image: {r.stdout}\n{r.stderr}"
+        f"{name}: corearch rejected a valid v11 image: {r.stdout}\n{r.stderr}"
     )
     assert "invalid .ccr file" not in (r.stdout + r.stderr), r.stdout + r.stderr
 
@@ -463,7 +463,7 @@ def test_case_segment_is_last_after_edg():
 
 
 # ---------------------------------------------------------------------------
-# 2. IR_MATCH is a known v10 opcode
+# 2. IR_MATCH is a known v11 opcode
 # ---------------------------------------------------------------------------
 
 
@@ -615,7 +615,7 @@ def test_malformed_case_records_rejected():
 
 
 def test_duplicate_value_cases_are_allowed_by_the_reader():
-    """v10 stores order; dedupe/priority is corec's job (plan Task 2)."""
+    """v11 stores order; dedupe/priority is corec's job (plan Task 2)."""
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _strip_matches(_build_ccr(tmp))
@@ -1798,9 +1798,6 @@ def _table_region(data, span):
 
 STR_TAG = 1
 SYM_TAG = 4
-REG_TAG = 7
-
-
 def _str_table(data):
     body = segment(data, STR_TAG)
     (count,) = struct.unpack_from("<I", body, 0)
@@ -1829,37 +1826,22 @@ def _sym_funcs(data):
     func_count = u32()
     funcs = []
     for _ in range(func_count):
-        name, param_count, _ret, root = struct.unpack_from("<IIii", body, pos)
-        pos += 24
+        name, param_count, _ret, start, count = struct.unpack_from("<IIIII", body, pos)
+        pos += 28
         pos += param_count * 4
         var_count = u32()
         pos += var_count * 8
-        funcs.append({"name": name, "root_region": root})
+        funcs.append({"name": name, "instr_start": start, "instr_count": count})
     return funcs
 
 
-def _reg_records(data):
-    body = segment(data, REG_TAG)
-    (count,) = struct.unpack_from("<I", body, 0)
-    assert len(body) == 4 + count * 24, f"REG body {len(body)} != 4 + {count}*24"
-    return [
-        struct.unpack_from("<Iiiiii", body, 4 + i * 24)
-        for i in range(count)
-    ]
-
-
 def _function_ranges(data):
-    """Return [(name, enter_nod, exit_nod)] using SYM funcs and their REG roots."""
+    """Return [(name, enter_nod, exit_nod)] from the v11 SYM header."""
     names = _str_table(data)
-    funcs = _sym_funcs(data)
-    regs = _reg_records(data)
     out = []
-    for func in funcs:
-        root = func["root_region"]
-        if root < 0 or root >= len(regs):
-            continue
-        _kind, _parent, enter, exit, _fe, _le = regs[root]
-        out.append((names[func["name"]], enter, exit))
+    for func in _sym_funcs(data):
+        start = func["instr_start"]
+        out.append((names[func["name"]], start, start + func["instr_count"]))
     return out
 
 

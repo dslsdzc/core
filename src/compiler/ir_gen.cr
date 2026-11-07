@@ -1249,15 +1249,15 @@ fn grow_lat_case(needed: int):
         nc = 16
     if nc < needed:
         nc = needed + 16
-    nb := alloc(nc * CCR_V10_CASE_DISK)
-    cell_copy(g_lat_case, g_lat_case_cap * CCR_V10_CASE_DISK, nb)
+    nb := alloc(nc * CCR_V11_CASE_DISK)
+    cell_copy(g_lat_case, g_lat_case_cap * CCR_V11_CASE_DISK, nb)
     g_lat_case = nb
     g_lat_case_cap = nc
 
 fn lat_case_append(value: int, kind: int, str_index: int, target_label: int, flags: int) -> int:
     idx := g_lat_case_count
     grow_lat_case(idx + 1)
-    base := idx * CCR_V10_CASE_DISK
+    base := idx * CCR_V11_CASE_DISK
     cell_store(g_lat_case, base + CCR_CASE_VALUE, value)
     cell_store32(g_lat_case, base + CCR_CASE_KIND, kind)
     cell_store32(g_lat_case, base + CCR_CASE_STR, str_index)
@@ -1269,7 +1269,7 @@ fn lat_case_append(value: int, kind: int, str_index: int, target_label: int, fla
 fn lat_case_set_target(idx: int, label: int):
     if idx < 0 || idx >= g_lat_case_count:
         return
-    cell_store32(g_lat_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, label)
+    cell_store32(g_lat_case, idx * CCR_V11_CASE_DISK + CCR_CASE_TARGET, label)
 
 // One nonzero-test decision node: false is CASE 0, true is DEFAULT. If the true
 // target is next, the backend emits test/je to false and falls through to true;

@@ -176,7 +176,7 @@ state_chain(graph, function) -> [DFEdge kind=1]
 effect_equiv(a, b) -> bool | unknown
 ```
 
-- `.ccr` v10 没有 EFF 段；效应事实从既有 NOD/EDG/ENT/REG 推导，新增持久化字段需要升版本。
+- `.ccr` v11 没有 EFF 段；效应事实从既有 NOD/EDG/ENT 推导，REG 已不落盘；新增持久化字段需要升版本。
 
 ## 并发
 
