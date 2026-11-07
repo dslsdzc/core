@@ -1,7 +1,7 @@
-# 文档 vs 现实审计（2026-09-16），「声称了但不成立」的文档断言全表
+# 文档 vs 现实审计（2026-09-16），“声称了但不成立”的文档断言全表
 
 > 定位：受众 = 维护者 / 后续 agent（改文档或照文档设计之前先查此表）；状态 = 记录（审计产物，快照）；真源 = 本表的实核命令（每条带命令 + 结果；行号为 2026-09-16 实读值）。
-> 缘起：验证切片调查（`/tmp/verslice/plan-draft.md`）发现四处「文档称已定义、实为零实现」；本表为全仓系统扫描 + 逐条实核的结果，并逐条登记修订去向。
+> 缘起：验证切片调查（`/tmp/verslice/plan-draft.md`）发现四处“文档称已定义、实为零实现”；本表为全仓系统扫描 + 逐条实核的结果，并逐条登记修订去向。
 > 规则：本次审计零构建/零编译/零测试（`ps` 实查后仅只读 grep/sed/Read）· 未跑 `jj`（故本表行号无提交定位点，复跑以文本/符号为准）。
 
 ---
@@ -23,17 +23,17 @@
 
 ## 1. 危险 7 条（会误导设计/实现；逐条 = 断言 / 实核 / 修订去向）
 
-### D1 `spec-design.md` 称变体/量词「EBNF 已有」（4 处）
+### D1 `spec-design.md` 称变体/量词“EBNF 已有”（4 处）
 
-- 断言：`:46`「变体标注（EBNF 已有）」· `:260`「EBNF 已定义（2026-09 起归属 grammar/core.ebnf；corespec.ebnf 为迁移期残留）」· `:283`「变体标注（EBNF 已有）」· `:301`「loop variant，EBNF 已有」。
-- 实核：`grep -nE "variant|forall|exists|#check|#ensure|spec " grammar/core.ebnf` 到 0 命中；`grammar/core.ebnf:12` `FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`（无标注槽）；`grammar/corespec.ebnf:1` 自述「2026-09-06 退役…规约语法并入 `grammar/core.ebnf`（迁移事项）」。
-- 修订去向：4 处改「EBNF 尚未定义，待实现」；`:260` 处改为修订块（含两条实核 + 「量词属待实现语法」）；原文以引用形式保留在注内。得到 `d2265f7b`。
+- 断言：`:46`“变体标注（EBNF 已有）”· `:260`“EBNF 已定义（2026-09 起归属 grammar/core.ebnf；corespec.ebnf 为迁移期残留）”· `:283`“变体标注（EBNF 已有）”· `:301`“loop variant，EBNF 已有”。
+- 实核：`grep -nE "variant|forall|exists|#check|#ensure|spec " grammar/core.ebnf` 到 0 命中；`grammar/core.ebnf:12` `FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`（无标注槽）；`grammar/corespec.ebnf:1` 自述“2026-09-06 退役…规约语法并入 `grammar/core.ebnf`（迁移事项）”。
+- 修订去向：4 处改“EBNF 尚未定义，待实现”；`:260` 处改为修订块（含两条实核 + “量词属待实现语法”）；原文以引用形式保留在注内。得到 `d2265f7b`。
 
-### D2 `.csr` 的「真源」声称不成立（两处 schema 文档）
+### D2 `.csr` 的“真源”声称不成立（两处 schema 文档）
 
-- 断言：`docs/ir-schema/corespecir-schema.md:3`「状态 = active；真源 = `src/compiler/ccr_io.cr`（.csr 读写）」；`docs/ir-schema/coreir-schema.md:36/38`（同族叙述）。
+- 断言：`docs/ir-schema/corespecir-schema.md:3`“状态 = active；真源 = `src/compiler/ccr_io.cr`（.csr 读写）”；`docs/ir-schema/coreir-schema.md:36/38`（同族叙述）。
 - 实核：`grep -c "csr\|CSR1\|TagNode" src/compiler/ccr_io.cr` 到 0；`grep -rn "csr\|TagNode\|CSR1" --include='*.cr' src/` 到 0（零实现）。
-- 修订去向：`corespecir-schema.md` 状态改设计态（未实现） + 「（拟）…当前零实现」 + 前置决定提示；`coreir-schema.md` 头部加「真源效力分半」注（`.cir/.ccr` 半成立、`.csr` 半不成立）。得到 `d2265f7b`。
+- 修订去向：`corespecir-schema.md` 状态改设计态（未实现） + “（拟）…当前零实现” + 前置决定提示；`coreir-schema.md` 头部加“真源效力分半”注（`.cir/.ccr` 半成立、`.csr` 半不成立）。得到 `d2265f7b`。
 
 ### D3 `CLAUDE.md` 的 `src/compiler/` 清单缺 8+ 文件
 
@@ -45,22 +45,22 @@
 
 - 断言：8 文件 + `_import.cr`。
 - 实核：`ls src/stdlib/*.cr` 到 19（缺 `arena/assert/chan/dex/goroutine/hotpatch/sched/scheduler/trace/variadic`）。
-- 修订去向：全 19 条重写 + 标注「不在任何清单」的 7 件 + 「单元归属真源」指引。得到 `820648bc`。
+- 修订去向：全 19 条重写 + 标注“不在任何清单”的 7 件 + “单元归属真源”指引。得到 `820648bc`。
 
 ### D5 `project-book.md 3.2 节` 按已退役的独立 `.corespec`/`.corespecir` 叙述
 
-- 断言：`:70-82`「形式规约…是独立的源文件」「规约文件（`.corespec`）」「规约层 IR（`.corespecir`）」。
-- 实核：`adr-0001-corespec-crasm-retired.md:16`「.corespec 退役（2026-09-06, `582a1e1`）：规约 = `.cr` 语法唯一表达」；`spec/*.corespec` ×4 仅剩 7 行退役标注。
-- 修订去向：3.2 节整段改写为「规约层：行为约束的图上标注」（`.cr` 内联到 图 TagNode；`.csr` 标零实现）；原叙述以删除线保留。得到 `43427334`。
+- 断言：`:70-82`“形式规约…是独立的源文件”“规约文件（`.corespec`）”“规约层 IR（`.corespecir`）”。
+- 实核：`adr-0001-corespec-crasm-retired.md:16`“.corespec 退役（2026-09-06, `582a1e1`）：规约 = `.cr` 语法唯一表达”；`spec/*.corespec` ×4 仅剩 7 行退役标注。
+- 修订去向：3.2 节整段改写为“规约层：行为约束的图上标注”（`.cr` 内联到 图 TagNode；`.csr` 标零实现）；原叙述以删除线保留。得到 `43427334`。
 
-### D6 `onboarding.md:57` 把已退役 `corespec.ebnf` 列为「语法唯一真源」
+### D6 `onboarding.md:57` 把已退役 `corespec.ebnf` 列为“语法唯一真源”
 
 - 实核：该行原文列 `core.ebnf`（全语言）/`corespec.ebnf`（规约）/`tokens.ebnf`；`grammar/corespec.ebnf` 头部自述已退役。
-- 修订去向：改「`core.ebnf`（唯一真源）/`tokens.ebnf`；`corespec.ebnf` = 已退役（ADR-0001）…归未完成的迁移事项，因此勿引」。得到 `43427334`。
+- 修订去向：改“`core.ebnf`（唯一真源）/`tokens.ebnf`；`corespec.ebnf` = 已退役（ADR-0001）…归未完成的迁移事项，因此勿引”。得到 `43427334`。
 
-### D7 仓外真源：`verifier/kernel-spec.md:3`「真源 = `~/mctt` 源文件」
+### D7 仓外真源：`verifier/kernel-spec.md:3`“真源 = `~/mctt` 源文件”
 
-- 实核：`ls -d ~/mctt` 到存在（本机可达），因此断言本机成立；但无版本定位点（仅「`icfp25` 分支」），因此行号对照跨机/跨会话不可复现、外部树变动后无提示不一致。
+- 实核：`ls -d ~/mctt` 到存在（本机可达），因此断言本机成立；但无版本定位点（仅“`icfp25` 分支”），因此行号对照跨机/跨会话不可复现、外部树变动后无提示不一致。
 - 修订去向：加修订注（无版本定位点 + 补定位点要求 + 跨机复核前置 + 同类问题互引 `ir-op-semantics 0 节`）。得到 `43427334`。
 
 ---
@@ -146,8 +146,8 @@ EOF
 
 ## 6. 已知边界
 
-1. 零构建/零测试（`ps` 实查时他方在编译，因此明确不占构建面），因此行为类断言只到静态证据级：S3 的「不复现」由「CI 链会挂死 vs P6 T6 实测 rc=0」推理得出，未本地重跑 corec2 链；U1 明确标未复核。
+1. 零构建/零测试（`ps` 实查时他方在编译，因此明确不占构建面），因此行为类断言只到静态证据级：S3 的“不复现”由“CI 链会挂死 vs P6 T6 实测 rc=0”推理得出，未本地重跑 corec2 链；U1 明确标未复核。
 2. 未跑 `jj`（审计期规则），因此本表行号为 2026-09-16 快照，无提交定位点。
-3. 取样范围：状态词 + 真源 + 计数筛；`docs/archive/`、`docs/pseudocode/`、`docs/superpowers/` 的历史快照未逐条审（按仓例不追改），若需要把 `superpowers/specs/` 的「现状」段也纳入，另开一轮。
-4. 零「不改」：13 条不成立项全部已修（无一条因「实核后发现其实成立」而撤回），因此本审计无已知误判；若后续发现误判，按本文件头部「状态 = 记录」追加勘误段，勿无提示改写历史。
-5. 修订风格：全部按仓内勘误惯例，保留原断言原文（注内引用/删除线）+ 标注「谁改的（2026-09-16 文档审计）/为何改/实核证据」；不会无提示抹掉旧断言。
+3. 取样范围：状态词 + 真源 + 计数筛；`docs/archive/`、`docs/pseudocode/`、`docs/superpowers/` 的历史快照未逐条审（按仓例不追改），若需要把 `superpowers/specs/` 的“现状”段也纳入，另开一轮。
+4. 零“不改”：13 条不成立项全部已修（无一条因“实核后发现其实成立”而撤回），因此本审计无已知误判；若后续发现误判，按本文件头部“状态 = 记录”追加勘误段，勿无提示改写历史。
+5. 修订风格：全部按仓内勘误惯例，保留原断言原文（注内引用/删除线）+ 标注“谁改的（2026-09-16 文档审计）/为何改/实核证据”；不会无提示抹掉旧断言。

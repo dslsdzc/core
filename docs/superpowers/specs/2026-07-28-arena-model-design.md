@@ -1,5 +1,7 @@
 # Arena 内存模型
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 ## 概述
 
 Core 使用 Arena 管理内存。每个子图，包括函数、`loop`、`for`、`unsafe` 和后续的 `flow`、`go`，关联一个独立 Arena。分配从当前 Arena 的 bump 指针取内存，子图退出时整体重置游标。

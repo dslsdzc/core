@@ -1,8 +1,10 @@
 # Graph Composition `>|` Design (v1)
 
+> 定位：受众 = 维护者；状态 = 设计态；出处 = 本页。
+
 ## Goal
 
-Add `f >| g` as a **pending graph closure**: it does not execute anything when
+Add `f >| g` as a pending graph closure: it does not execute anything when
 defined; calling it executes `f` then `g`.
 
 ```text

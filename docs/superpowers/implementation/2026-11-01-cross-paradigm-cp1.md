@@ -1,9 +1,11 @@
 # CP-1 实现记录：跨范式并发 runtime 基底
 
-**日期：** 2026-11-01
-**状态：** CP-1 runtime substrate 完成；compiler plan emitter 与真实目标映射留 CP-2。
-**计划：** `docs/superpowers/plans/2026-11-01-cross-paradigm-cp1-runtime-substrate.md`
-**规格：** `docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
+日期：2026-11-01
+状态：CP-1 runtime substrate 完成；compiler plan emitter 与真实目标映射留 CP-2。
+计划：`docs/superpowers/plans/2026-11-01-cross-paradigm-cp1-runtime-substrate.md`
+规格：`docs/superpowers/specs/2026-11-01-cross-paradigm-concurrency-design.md`
 
 > 计划更新说明：实现时把 `conc_run_cpu` 的 `arg` 固定为 `string`（TASK）并使用 `params=0/1` 分派 `sched_call_0/1`；SIMT 测试从“只查 index 3”加强为 `0..15` 全量对拍。计划文件已同步这些接口与测试，属于 plan update，不是原始计划。
 
@@ -46,7 +48,7 @@
 - `conc_plan_new()` 返回 target-neutral plan id。
 - body/channel/edge 描述符只存结构事实：kind、entry、params、elem size/cap/PC、edge kind；不存 CPU/GPU/slot/memory space。
 - `CONC_BODY_TASK=1`、`CONC_BODY_DATA_PARALLEL=2`；`CONC_EDGE_SPAWN=1`、`CONC_EDGE_SEND=2`、`CONC_EDGE_JOIN=3`；`CONC_PC_SPSC=1`。
-- 校验：`entry >= 0`；TASK 的 `params` 只能是 0 或 1（CPU 按 0/1 分派 `sched_call_0/1`，更多参数留给 CP-2 的 param layout）；channel `cap > 0` 且 `pc == CONC_PC_SPSC`；edge 端点必须在 body 范围内。
+- 校验：`entry >= 0`；TASK 的 `params` 只能是 0 或 1（CPU 按 0/1 分派 `sched_call_0/1`，更多参数留给 CP-2 的 param layout）；channel `cap > 0` 且 `pc == CONC_PC_SPSC`；edge 端点需要在 body 范围内。
 - 描述符数组按需增长，全部在全局 heap。
 
 ### 2.4 执行器
@@ -56,15 +58,15 @@
   - DATA_PARALLEL：串行 fallback，遍历 `0..params` 调 `entry(i)`；
   - 未知 kind / entry <= 0 / TASK params > 1：返回 `-1`。
 - `conc_run_simt(plan, start, end)`：只接受 DATA_PARALLEL body，遍历 `start..end` 调 `entry(i)`；TASK/PIPELINE 返回 `-1`，不静默串行。
-- CPU 与 SIMT 消费同一份 plan 的 **body list**；测试先 CPU 后 SIMT，逐项检查 `0..15`，并显式把数组改写成 `-1` 后再跑 SIMT，避免“SIMT 什么都没做”也能通过。CP-1 的 plan channel/edge 描述符只做结构校验，尚未驱动执行；完整 channel/edge 执行留 CP-2。
+- CPU 与 SIMT 消费同一份 plan 的 body list；测试先 CPU 后 SIMT，逐项检查 `0..15`，并显式把数组改写成 `-1` 后再跑 SIMT，避免“SIMT 什么都没做”也能通过。CP-1 的 plan channel/edge 描述符只做结构校验，尚未驱动执行；完整 channel/edge 执行留 CP-2。
 
 ## 3. 后端前提修正
 
 CP-1 需要 `sched_call_N` 真正能调用 `@addr(fn)`。实测发现两处既有缺陷（此前没有调用者，因此未暴露）：
 
-1. **Trampoline 取错寄存器**：`emit_sched_call` 生成 `mov (%rax,%rsi,8),%rax`，但调用约定把 table 放在 `rdi`。`sched_call_1(table, 0, arg)` 会跳到未定义地址。
+1. Trampoline 取错寄存器：`emit_sched_call` 生成 `mov (%rax,%rsi,8),%rax`，但调用约定把 table 放在 `rdi`。`sched_call_1(table, 0, arg)` 会跳到未定义地址。
    - 修正：`mov (%rdi,%rsi,8),%rax`。
-2. **Phase 3 偏移未更新**：Phase 2 用估计偏移预登记 `sched_call_*`，Phase 3 又追加一份实际偏移；call patching 取第一项，于是调用落到估计地址（指令中间）。
+2. Phase 3 偏移未更新：Phase 2 用估计偏移预登记 `sched_call_*`，Phase 3 又追加一份实际偏移；call patching 取第一项，于是调用落到估计地址（指令中间）。
    - 修正：`sched_reg_one` 先按名字更新已有项，找不到才追加。
 
 这两处只影响 `sched_call_*` 这类 runtime trampoline，不修改 `go`/`chan` 的 compiler lowering，也不改变 CP-1 的“新 runtime 不改旧 runtime”边界。
@@ -152,7 +154,7 @@ nice -n 19 python3 build_selfhost_native.py
 - `close`、零容量 rendezvous、MPMC channel。
 - 预算/证书/explain 接线。
 - CP-1 的 `conc_recv` 每收一条消息就在 owner region 分配一份副本；region 没有回收/释放，长跑会耗尽。`conc_last_error` 能报告 `CONC_ERR_NOMEM`，但不会自动回收；生命周期回收留 CP-2。
-- MessageRef 在 CP-1 中是裸 payload 指针 + epoch；region reset 后如果新分配复用同一地址，旧指针会重新“看起来有效”。正式 MessageRef 必须使用 `(region_id, offset, layout)` 身份，而不是裸地址；这是 CP-2 的必做项。CP-1 的 `conc_is_ok`/send/recv 在“未复用地址”的 reset 场景下会拒绝 stale ref。
+- MessageRef 在 CP-1 中是裸 payload 指针 + epoch；region reset 后如果新分配复用同一地址，旧指针会重新“看起来有效”。正式 MessageRef 需要使用 `(region_id, offset, layout)` 身份，而不是裸地址；这是 CP-2 的必做项。CP-1 的 `conc_is_ok`/send/recv 在“未复用地址”的 reset 场景下会拒绝 stale ref。
 - plan body 的 `params` 在 CP-1 fixture 中兼作 DATA_PARALLEL 的索引域长度；正式 schema 在 CP-2 拆分 `param_layout` 与 `index_domain`。
 - plan body 的 `entry` 在 CP-1 中直接存 `@addr(fn)`，只对 host CPU/SIMT 模拟有效；target-neutral artifact 在 CP-2 改为 body/entry 引用。
 - `_conc_global_alloc` 走现有 `alloc` 的 `current_arena = -1` 全局路径，该路径在非 M0 上会 trap；CP-1 的执行器都跑在 M0。多 slot 需要独立的全局 heap allocator，这是 CP-2 的 runtime 前提。

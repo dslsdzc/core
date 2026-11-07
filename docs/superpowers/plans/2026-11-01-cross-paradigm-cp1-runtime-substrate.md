@@ -1,5 +1,7 @@
 # CP-1：跨范式并发 runtime 基底 Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** 用一份手工 fixture plan 验证新的 runtime 基底：owner region、typed message/channel、CPU 单 slot 执行器和 SIMT host 执行器共用同一份 plan。
@@ -17,7 +19,7 @@
 - 不新增源码语法；不引入 `Chan<T>`、lock/mutex/atomic/ownership 关键字。
 - 不修改现有 `go`/`chan` 的 compiler lowering；CP-1 只验证新 runtime。
 - 不绑定 CPU 核数；plan 只有 body/channel/edge/region；CPU/SIMT 是 mapping。
-- runtime 对象必须属于 owner region，不能落进 compiler function arena。
+- runtime 对象需要属于 owner region，不能落进 compiler function arena。
 - 只实现 CP-1 fixture；transfer primitive 先只做 typed COPY/MOVE 的显式 fixture，不做 SPLIT/FILL/LOAN。
 - 长编译/测试用 `nice -n 19`；版本控制只用 `jj`。
 
@@ -258,7 +260,7 @@ jj commit -m "conc: plan fixture descriptors (CP-1)"
 - `conc_run_cpu(plan: int, arg: string) -> int`
 - CPU mapping：单 slot，按 plan 的 body 顺序执行；TASK `params=0` 调 `sched_call_0`，`params=1` 调 `entry(arg)`；DATA_PARALLEL body 先按串行 fallback 遍历 `0..params`。
 - 用 `sched_call_1` 调 body entry；entry 的地址由 `@addr` 给出。
-- `sched_call_1` 是 CP-1 的必要后端原语；实现前必须修正 `src/format/elf/elf.cr` 的两处缺陷：trampoline 从 `rdi+rsi*8` 取表项（不是 `rax`），且 Phase 3 必须更新 Phase 2 预登记的偏移而不是追加重复项。
+- `sched_call_1` 是 CP-1 的必要后端原语；实现前需要修正 `src/format/elf/elf.cr` 的两处缺陷：trampoline 从 `rdi+rsi*8` 取表项（不是 `rax`），且 Phase 3 需要更新 Phase 2 预登记的偏移而不是追加重复项。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -370,7 +372,7 @@ fn main() -> int:
 
 - `conc_run_simt` 只处理 DATA_PARALLEL body：对 `start..end` 每个 index 调用 `entry(index)`。
 - 目标能力不足（body 需要 stack/may_suspend/不是 DATA_PARALLEL）时返回 `-1`，不静默串行。
-- CPU 对 DATA_PARALLEL 的 serial fallback 与 SIMT 结果必须逐项一致。
+- CPU 对 DATA_PARALLEL 的 serial fallback 与 SIMT 结果需要逐项一致。
 
 - [ ] **Step 3: 运行测试**
 
@@ -378,7 +380,7 @@ fn main() -> int:
 nice -n 19 python3 tests/selfhost/test_conc_runtime.py
 ```
 
-Expected: `PASS conc simt`（该 case 内先 CPU 后 SIMT，逐项检查 `0..15`；同一份 plan 的 CPU/SIMT 输出必须相等）。
+Expected: `PASS conc simt`（该 case 内先 CPU 后 SIMT，逐项检查 `0..15`；同一份 plan 的 CPU/SIMT 输出需要相等）。
 
 - [ ] **Step 4: 提交**
 
@@ -400,9 +402,9 @@ jj commit -m "conc: host SIMT plan executor, same plan as CPU (CP-1)"
 
 - [ ] **Step 2: 生命周期负例**
 
-- region reset 前分配的 MessageRef 在 reset 后再用必须失败（不可读/不可发送）；
-- channel 满 send 必须返回错误，不覆盖旧元素；
-- plan 不合法类型必须返回 -1。
+- region reset 前分配的 MessageRef 在 reset 后再用需要失败（不可读/不可发送）；
+- channel 满 send 需要返回错误，不覆盖旧元素；
+- plan 不合法类型需要返回 -1。
 
 - [ ] **Step 3: 跑测试**
 

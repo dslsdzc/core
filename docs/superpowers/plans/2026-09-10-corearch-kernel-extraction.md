@@ -1,7 +1,9 @@
 # corearch 内核抽取实施计划（范式无关内核 + 实例定制，演进序步骤 2）
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 状态：实施完成（2026-09-10）。Task 1-4 对应提交：Task 1 语义侧纯迁移（b0d24b1b：ent_kernel.cr = 内核 32 函数逐字迁移加 LOC_HOME_BASE 单份随判定入内核；regalloc.cr 从 1560 行减到 844 行，只留机器侧；检查通道 sha256 逐字节同）。Task 2 写侧单源化（edc70fbe 加 c138c44c：删除 compute_entries_v7/ccr_grow_* 镜像、RPT_MAX/ir_op_kind_name 迁到内核、ent_kernel 进双 concat 加 src/compiler import ent_kernel；full-bootstrap 面 N06/SIGSEGV 缺口闭合，全链 N06=0 加 corec2/corec3 cmp=0）。Task 3 注册契约最小面（6413dd80：g_instance_decl 两行实例声明表加表驱动 dispatch，评审独立 48/48 通道 base 和 head 逐字节全同）。Task 4 结束（本提交：全量回归通过，compile/backend_bootstrap 链/hit_table 24/24/region_cfg 22/22/mw1-6/slice_bounds 7/7/live_ranges 13/13/ccr_v7 23/23/bootstrap 三套加 full-bootstrap guard 加自举重建快速验证；方案步骤 2 完成注记；cir cache 指纹缺陷列入 TODO 预存 Bug #5）。
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 目标：从 corearch 的 regalloc.cr 抽出范式无关内核（语义判定引擎加条目/区间数据面加注册契约最小面），机器侧（CAG 分配/meta 写入）留在 x86 实例。行为零变化，判定语义不动，只迁移代码。
 
@@ -16,7 +18,7 @@
 - 版本控制用 `jj`，见项目规则第 2 条，git 被 hook 拦截。每任务用 `jj commit -m '<msg>'`。
 - 构建 `nice -n 19 python3 build_selfhost_native.py`，约 2-3 分钟；测试加 `nice -n 19` 前缀，见项目规则第 6 条；清 .core/cache 跑测试。
 - 行为零变化硬约束：判定语义不动，只迁移代码。检查 = test_live_ranges.py 13/13（判定通过和失败路径加 dump 通道输出不变）加 test_ccr_v7.py 23/23（写侧单源化后产物 byte-identical）加回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/bootstrap 三套加 run.sh full-bootstrap corec 链。Task 结束做全量。ent_kernel 双 concat 共享后，src/compiler 单源自编译单元也是回归面成员：Task 2 评审发现该面 N06/SIGSEGV 缺口，src/compiler/_import.cr import ent_kernel 加 module.cr 跨树回退补齐）。
-- 迁移纪律：逐函数迁移零改动（函数体 byte-identical 迁入新文件，除去重收敛点）；禁止顺手改语义或加接口抽象（方案要求「判定语义不动只迁移代码」，资源域参数化和双向注册契约属于后续步骤，不在本计划）。
+- 迁移纪律：逐函数迁移零改动（函数体 byte-identical 迁入新文件，除去重收敛点）；不允许顺手改语义或加接口抽象（方案要求“判定语义不动只迁移代码”，资源域参数化和双向注册契约属于后续步骤，不在本计划）。
 - 共享文件约束：globals.cr/dyn_arr.cr/ast.cr/ccr_io.cr 进双二进制；regalloc.cr 只在 corearch concat；新内核文件若需 corec 侧（写侧单源化），进双 concat。
 - 判定34 无实现（文档化 TODO：静态放置无驱逐事件，callee-saved 平凡满足），本计划不补实现。
 - src/arch/linux/ld/main.cr 是死代码遗留（零 concat 引用），本计划不处理，删除待核列入待办。
@@ -84,7 +86,7 @@
 - 实例声明表最小形态（Core 无高阶函数，使用数据表加 switch 分派）：
   - `g_instance_decl : {id i32, name str_idx, opt_min i32, opt_max i32, allow_table i32, allow_link i32, needs_alloc i32, needs_verify i32}` × n（表数据 = x86 实例声明加表模式路径声明。表模式是独立实例路径的雏形，见方案第 2 节表裁决）
   - 引导：corearch_main 读 flag，查表选实例（现三路分派逻辑收敛为表查询加 switch 调用）
-  - 内核入口：现有函数名加 kern_ 别名，或直接以现名作为内核 API。裁决：现名即 API，加头注「内核接口面 = 本文件函数集」，不加包装层（YAGNI）
+  - 内核入口：现有函数名加 kern_ 别名，或直接以现名作为内核 API。裁决：现名即 API，加头注“内核接口面 = 本文件函数集”，不加包装层（YAGNI）
 - 行为检查：flag 测试通道输出逐字节不变（dump-entries/coexist/check-regalloc 全同），纯形式化重构
 - 范围克制注：本任务只做最小面（声明表加引导收敛）。资源域代数参数化（判定读 g_opt_meta 的耦合）和双向契约（判定结果回填 home）属于方案后续步骤，本计划不做（见全局约束的迁移纪律）。
 

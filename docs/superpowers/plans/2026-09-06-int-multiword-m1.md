@@ -1,8 +1,10 @@
 # int 多字表示 M1 实施计划（add/sub 全链：64 快路径 + 溢出 2-limb 扩展）
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 状态：M1 六任务全部完成（2026-09-07，Task 6 结束）。Task 2-6 各自回归加结束全量回归均通过。快路径 64 位内程序逐字节零变化，证据是 task2 z 用例和 backend_bootstrap stage1 到 3 byte-identical。M2 待办清单见 Task 6 执行记录与 spec 第 8 节。
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 目标：后端表示策略 B 的 M1。int 算术 add/sub 在 64 位快路径零开销直算，溢出时自动提升到固定 2-limb（128 位）多字表示。语义层（前端、图、格）零改动，只在编码层投影。
 
@@ -27,18 +29,18 @@
 
 - int 变量是 64 位栈槽，g2_slot 偏移布局由 init_backend_arrays/opt 定。寄存器分配使用负编码，CAG 后才是真实分配。
 - IR_BINARY(OP_ADD/SUB) 后端发射：e2_load_var(r10,s1) 加 e2_load_var(r11,s2) 加 opcode 加 modrm 加 e2_st(r10, slot d)。这是 instr.cr 的双寄存器累加形，x86 sub 为 4D 29 DA，add 为 4D 01 DA。
-- x86 溢出检测：add/sub 后接 jo。实现为 0F 80 rel32 6B。Task 2 决策：rel8 的 ±127 对大函数不可达，下文「rel8」括注同义。
+- x86 溢出检测：add/sub 后接 jo。实现为 0F 80 rel32 6B。Task 2 决策：rel8 的 ±127 对大函数不可达，下文“rel8”括注同义。
 - HIT 常量池先例：rodata 尾追加 8B/槽，加 rip 位移回填（lower_to_core.cr + elf.cr）。
 - IR_CONST s1 是 i64 槽（64 位）。超 64 字面量目前在 lexer 被拒，P2 守卫是编码层限制错误，见 int-unbounded 定稿。
 
 ## M1 设计决策（依草案倾向）
 
-- D1a：值槽 64 位（现状不变），加旁路 tag 表。每函数潜在多字变量一个 tag 槽位。栈帧扩展：函数 var_count 不变，tag 区是栈帧尾附加区域，按「可能溢出变量」位图或每变量 1 槽。
+- D1a：值槽 64 位（现状不变），加旁路 tag 表。每函数潜在多字变量一个 tag 槽位。栈帧扩展：函数 var_count 不变，tag 区是栈帧尾附加区域，按“可能溢出变量”位图或每变量 1 槽。
 - D2b：纯后端发射。快路径 add/sub 后接 jo 到慢路径块，块内是 2-limb 例程，代码内联或调用。
 - D3：2-limb 128 位固定，低 limb 是快值，高 limb 是符号扩展。超 128 溢出报运行时错误，即编码层 128 限制，M1。
 - D4：超 64 字面量是词素。.ccr 是否已存需要查：NOD 的 src1 是 i64，装不下，是否扩展 ccr_io 常量？最小方案是 lexer 不再拒绝，但 IR_CONST 无法表示。M1 决策：超 64 字面量仍由前端拒绝，保留编码层错误消息。常量多字属于 M2。D4 推迟，因为 IR_CONST 的 64 位槽是格层表示，扩展需要 v6 常量段，与 dex 精度同族，待 v6 处理。M1 只做运行时溢出，即运行时值运算结果超 64。编译期超 64 常量留 M2。
 - D5：add/sub。
-- D6：可能溢出的变量（慢路径可达）不进入寄存器。分配器静态标记：函数中含可能大值运算的变量只放栈。保守 M1 曾考虑「含 add/sub 结果的所有 int 变量都是潜在多字，因此只放栈」，这个范围太宽。M1 精化为慢路径输出变量 tagged，分配器对 tagged 槽变量不分配寄存器，保守性能可以接受。Task 5 定案修订为不排除，实证见 Task 5 节。
+- D6：可能溢出的变量（慢路径可达）不进入寄存器。分配器静态标记：函数中含可能大值运算的变量只放栈。保守 M1 曾考虑“含 add/sub 结果的所有 int 变量都是潜在多字，因此只放栈”，这个范围太宽。M1 精化为慢路径输出变量 tagged，分配器对 tagged 槽变量不分配寄存器，保守性能可以接受。Task 5 定案修订为不排除，实证见 Task 5 节。
 
 ## 慢路径形态（M1 设计）
 
@@ -58,7 +60,7 @@
 
 - 潜在多字变量（慢路径可达，即本函数有 add/sub 且变量处于其结果链）在栈帧附带 tag 字节和值槽 64，值为快值或 2-limb 堆指针。
 - 慢路径：jo 后走内联修正代码。数学值等于 r10 环绕值加 OF 判定的 ±2^64。用 jo 后的 r10 和 CF 重建高 limb，保证数学正确。然后从 arena 分配 16B 堆，写 2-limb，值槽存指针，tag 置位。
-- 消费者（后续 add/sub/return）必须读 tag：tag=0 时快值直用；tag=1 时解指针取 2-limb。M1 中慢路径结果再参与算术需要 2-limb 算术原语。是否限制慢路径结果只能 return 或比较而不再次算术？这个限制不可取。真正的 2-limb add 原语是 M1 必需的，包括 2-limb 与快值混合 add。实现者按最小正确方案处理：提供 2-limb add/sub 例程，值等于 a+b 的数学结果，低加低带进位链，高加高。例程放 rt.s 或内联。
+- 消费者（后续 add/sub/return）需要读 tag：tag=0 时快值直用；tag=1 时解指针取 2-limb。M1 中慢路径结果再参与算术需要 2-limb 算术原语。是否限制慢路径结果只能 return 或比较而不再次算术？这个限制不可取。真正的 2-limb add 原语是 M1 必需的，包括 2-limb 与快值混合 add。实现者按最小正确方案处理：提供 2-limb add/sub 例程，值等于 a+b 的数学结果，低加低带进位链，高加高。例程放 rt.s 或内联。
 
 M1 完整性边界，实现者执行时若超界要披露：add/sub 结果超 64 后 2-limb 表示正确；后续 add/sub、比较、return 正确处理 2-limb；打印（int_str）超 64 值正确。M1 是否包含打印？不含则 return 大值时 exit 码截断，仍可视为正确（低 8 位），打印多字属于 M2。M1 验收标准是运算链正确，最终值数学正确，经 return 低 8 位或测试钩子验证全 128。
 
@@ -119,7 +121,7 @@ M1 完整性边界，实现者执行时若超界要披露：add/sub 结果超 64
 
 - 边界套件 `tests/selfhost/test_mw_task6.py`（8 用例 × O0/O1/O2 = 24 组全部通过）。task3/4 已覆盖 CF/op 判别矩阵和消费者判别，本套件补边界值组合。e1 是 i64max+1，恰好一步越界。e2 是上边界三步越界链，然后降级回 i64max，再越界，fits 检查看 lo 符号位往返。e3 是下边界邻域，−(2^63−1)+−1 = −2^63，快值不溢出；负 OF 只发生在 < −2^63，字面量 −2^63 被 lexer 拒绝，所以须用此构造。另含 add/sub 连续越界和回升降级。e4 是 sub 形式（i64max − −1）。e5 是上下边界同函数双站，加 2L 与 2L 的高 limb 判别。e6 是 i64max 边界 fast 与 2L 比较真值表（LT/GT 双分派，EQ/GE 假性 −10 标记值）。e7 是 −2^63 快值与 −2^63−1 2L 比较，同 hi 时低 limb 无符号判别。e8 是循环携带越上边界。期望值由 Python 独立计算（limb_bytes），16B 通道验全 128，exit 验数学低字节。
 - 结束全量回归（本任务一次性全套）：mw task1-6 + hit_table + compile + backend_bootstrap（stage1 到 3 byte-identical，是快路径零变化最强的确定性证明）+ ccr_v6 + region_cfg + slice_bounds + `corec check src/compiler`，全部通过。各任务期间各自回归通过之外，结束全量记录在案。
-- 文档同步：本 plan（状态行和本执行记录）、spec（第 8 节 M2 待办加状态行）、TODO.md（新节「int 多字 M1（2026-09-07 M1 完成，M2 待办）」）。
+- 文档同步：本 plan（状态行和本执行记录）、spec（第 8 节 M2 待办加状态行）、TODO.md（新节“int 多字 M1（2026-09-07 M1 完成，M2 待办）”）。
 - 验收报告：`docs/archive/sdd/mw-m1-task-6-report.md`（M1 六任务全链证据）。
 
 M2 待办（M1 边界外清单，详见 spec 第 8 节）：mul/div 溢出链与 2L 参与；2L 值打印（int_str 超 64）；D4 超 64 编译期常量（IR_CONST 64 位槽是格层表示，需要 v6 常量段，与 dex 精度同族）；超 128 码域动态增长（现在报编码层错）；D1c 静态区间免 tag（保守 tagged 集每变量行 1 字节栈开销加 jo 和块的静态代价）；共享块/模板压缩（jo/2L 块约 45-160B，每站点在函数尾冷区线性增长）；表（HIT）模式与运行时 2L 组合验证（现在 tagged 路径整条走旧路径，语义正确，组合未验证）；arena 生命周期遗留问题（2L 对象跨 arena_reset）；return 全 128 内部传递（现在确定性截断低 64）；UOP_NEG −2^63 环绕链；出逃写和跨函数 2L（全局/堆/数组/调用实参返回值）。

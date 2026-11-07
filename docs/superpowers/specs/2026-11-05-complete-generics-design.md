@@ -1,5 +1,7 @@
 # Complete Generics Design (V4+)
 
+> 定位：受众 = 维护者；状态 = 设计态；出处 = 本页。
+
 ## Goal
 
 Make Core generics complete for closed-world programs without reintroducing
@@ -56,10 +58,10 @@ Dictionary     static evidence passed to a monomorphized instance
 
 Generate constraints while checking a generic body:
 
-- method call `x.m()` on a generic `x` → `x: InterfaceWithM`
-- call to another generic function → merge its constraint set
-- operators/index/deref → built-in constraints or dedicated rules
-- `print(x)` / `println(x)` → `Printable(x)` once print is generic
+- method call `x.m()` on a generic `x` maps to `x: InterfaceWithM`
+- call to another generic function merges its constraint set
+- operators/index/deref map to built-in constraints or dedicated rules
+- `print(x)` / `println(x)` map to `Printable(x)` once print is generic
 
 If a method name matches more than one interface, require an explicit
 boundary annotation or reject as ambiguous. Never silently choose one.

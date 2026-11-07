@@ -1,6 +1,6 @@
 # 原始指针模型实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：按 `docs/pointer-model.md` 将 `TYP_REF`（借用检查引用）替换为 `TYP_PTR`（原始指针），由数据流验证 pass 支撑。
 
@@ -12,9 +12,9 @@
 
 ## 全局约束
 
-- 所有改动必须能通过 Python bootstrap（`build_selfhost_native.py`）编译，并且经自举管线产出可运行的 ELF
-- 每个阶段结束后既有测试必须全部通过：`tests/bootstrap/test_pipeline.py`、`tests/selfhost/test_compile.py`
-- 新增指针操作必须在 `tests/suite/` 或同等位置有测试通过
+- 所有改动需要能通过 Python bootstrap（`build_selfhost_native.py`）编译，并且经自举管线产出可运行的 ELF
+- 每个阶段结束后既有测试需要全部通过：`tests/bootstrap/test_pipeline.py`、`tests/selfhost/test_compile.py`
+- 新增指针操作需要在 `tests/suite/` 或同等位置有测试通过
 - 版本控制使用 `jj`，不使用 `git`
 - 构建限 CPU：长时间编译使用 `nice -n 19`
 

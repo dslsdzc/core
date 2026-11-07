@@ -1,10 +1,12 @@
 # 寄存器分配移后端实施计划
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 实施记录：[implementation/2026-09-07-regalloc-backend.md](../implementation/2026-09-07-regalloc-backend.md)
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
-目标：寄存器分配（数据面加 CAG 分配加判定）从 corec（opt.cr）移到 corearch，让编码层资源决策回到后端；.ccr opt_meta REG_ASSIGN 不再跨进程传输；取消「纯机械映射」这一表述。
+目标：寄存器分配（数据面加 CAG 分配加判定）从 corec（opt.cr）移到 corearch，让编码层资源决策回到后端；.ccr opt_meta REG_ASSIGN 不再跨进程传输；取消“纯机械映射”这一表述。
 
 结构：按层拆 opt.cr（R1a）。语义优化（CSE 等）留在 corec；编码决策（compute_live_ranges/compute_entries/共存/alloc_registers/verify）迁到 corearch 的新模块。分配结果不再写入 .ccr（R2），corearch load 后自算，输入是 v6 ENT 段内存态加 IR。判定 verify 随分配移到 corearch，在 O2 自检（R3）。corec 的 `-O` 门语义调整（R5：O1 的 CSE 留在 corec；O2 的分配在 corearch）。
 
@@ -105,8 +107,8 @@ corearch:
 ### 待决策点（Task 2 动工前问用户）
 
 - D-1 .ccr ENT 段去留（R2 细化，决定数据面单主机还是双主机）：
-  - 方案 X（ENT 保留传输）：数据面生成留在 corec（lower 尾不变、cir 通道不动）；corearch 分配输入是载入 ENT 加自算 live ranges（盘上没有 var 级区间表），alloc 首行 compute_live_ranges 迁入即重算；数据面计算双主机，有语义变化风险，与「归属调整」目标相悖。
-  - 方案 Y（推荐）：ENT 段始终为空或移出格式（loader 已支持段缺失等于空，pcnt=0 与 SYM first/last_ent=-1 对照；格式结构零改动，无 version bump）；数据面计算单主机 corearch（compute_live_ranges/entries/grow/访问器迁 regalloc.cr）；corec lower 尾摘除调用；save 侧 ENT 计数 0；SYM/REG first/last_ent 落 -1；「发射不依赖 ENT」见 ccr_io.cr:74 注，已确认。
+  - 方案 X（ENT 保留传输）：数据面生成留在 corec（lower 尾不变、cir 通道不动）；corearch 分配输入是载入 ENT 加自算 live ranges（盘上没有 var 级区间表），alloc 首行 compute_live_ranges 迁入即重算；数据面计算双主机，有语义变化风险，与“归属调整”目标相悖。
+  - 方案 Y（推荐）：ENT 段始终为空或移出格式（loader 已支持段缺失等于空，pcnt=0 与 SYM first/last_ent=-1 对照；格式结构零改动，无 version bump）；数据面计算单主机 corearch（compute_live_ranges/entries/grow/访问器迁 regalloc.cr）；corec lower 尾摘除调用；save 侧 ENT 计数 0；SYM/REG first/last_ent 落 -1；“发射不依赖 ENT”见 ccr_io.cr:74 注，已确认。
 - D-2 调试通道联动（随 D-1=Y）：corec `cir` 的 dump-entries/dump-coexist/check-regalloc/inject-* 实现方式与 test_live_ranges.py 改道 corearch（新 flag 组：--dump-entries/--dump-coexist/--check-regalloc/--inject-*，corearch load .ccr 后内存态即数据面）；corec 侧分支删除。D-1=X 则通道不动（数据面留 corec），仅判定注入随判定迁移面另行处置。
 - D-3 pass_stack_share 处置：(a) 随迁并启用（行为新变：帧缩小。现状产物无共享，启用有行为差异风险，需要独立验证）；(b) 停用（推荐：产物零差异，调用摘除加 optimize_all 未使用代码同步清理；恢复列入未来 corearch 内以 alloc 同 seam 实现）；(c) 留 corec 空跑（现状，不调整归属）。
 
@@ -135,7 +137,7 @@ corearch:
 
 ### Task 5: 表述清除 + CLI 语义（R5）
 
-文件：opt.cr/g2_slot 注释「pure mechanical translation」清除，g2_slot 改述为后端槽解析 seam；corec `-O` 帮助和门语义（O1 留 corec CSE；O2 分配已在 corearch，corec -O 只影响 CSE；CLI 文案）；regalloc-consistency.cr 参考实现指针更新。
+文件：opt.cr/g2_slot 注释“pure mechanical translation”清除，g2_slot 改述为后端槽解析 seam；corec `-O` 帮助和门语义（O1 留 corec CSE；O2 分配已在 corearch，corec -O 只影响 CSE；CLI 文案）；regalloc-consistency.cr 参考实现指针更新。
 
 ### Task 6: 回归 + 文档收尾
 

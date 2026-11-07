@@ -1,8 +1,10 @@
 # 核心维护文档重组与首批重写 实现计划
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
 
-目标：把 `docs/` 下平铺的 156 份 md 按「主题 × 读者 × 状态」重组为分类树，并完成首批新增和重写范本，包括 jj 提交策略，遵守仓库规则。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+
+目标：把 `docs/` 下平铺的 156 份 md 按“主题 × 读者 × 状态”重组为分类树，并完成首批新增和重写范本，包括 jj 提交策略，遵守仓库规则。
 
 结构：机械性重组（目录移动加链接修复）先做并独立提交；内容性工作（新建手册、ADR、重写范本）逐个任务产出，每个任务可独立验收。全程用 `jj`，不用 `git`，见 CLAUDE.md 项目规则第 2 条。
 
@@ -12,13 +14,13 @@
 
 ## 全局约束
 
-1. 版本控制只用 `jj`，禁用 `git`，见项目规则第 2 条。提交必须经用户许可。计划中的提交步骤执行前，先向用户确认工作副本 src 改动的归属。
-2. 文件永久不允许还原，见项目规则第 3 条。移动时不复制，mv 前确认目标不存在。
-3. 每份文档头部必须加定位声明：受众（users/maintainers/contributors）、状态（active/superseded/deprecated/archive/proposal）和出处声明。
+1. 版本控制只用 `jj`，禁用 `git`，见项目规则第 2 条。提交需要经用户许可。计划中的提交步骤执行前，先向用户确认工作副本 src 改动的归属。
+2. 文件永久保留，不做还原，见项目规则第 3 条。移动时不复制，mv 前确认目标不存在。
+3. 每份文档头部需要加定位声明：受众（users/maintainers/contributors）、状态（active/superseded/deprecated/archive/proposal）和出处声明。
 4. 一份文档一个职责。状态与内容冲突时更新文档，不添加免责段。
 5. docs/README.md 是唯一导航索引，与目录树一致。
 6. docs/pseudocode/ 与 docs/superpowers/ 不修改；coq/、ir-schema/、verifier/ 原样保留，只加头注。
-7. 文档互链一律用相对路径，指向新位置。旧路径引用必须在引用方同步更新，包括 CLAUDE.md、README.md、TODO.md、CHANGELOG.md，验收用 grep 做断链检查。
+7. 文档互链一律用相对路径，指向新位置。旧路径引用需要在引用方同步更新，包括 CLAUDE.md、README.md、TODO.md、CHANGELOG.md，验收用 grep 做断链检查。
 
 ---
 
@@ -120,7 +122,7 @@ grep -rl 'docs/\(language-syntax\|project-book\|memory-model\|pointer-model\|exe
 # 逐文件替换对应映射(可用 sed -i 循环;注意 .corespec 后缀文件不在本次范围)
 ```
 
-注意：执行顺序必须先于 Task 1 之外的所有读者可见产出。Task 1 的移动和这一步必须同一次验收。
+注意：执行顺序需要先于 Task 1 之外的所有读者可见产出。Task 1 的移动和这一步需要同一次验收。
 
 - [ ] Step 2: 验证零残留旧路径
 
@@ -132,7 +134,7 @@ grep -rn 'docs/\(language-syntax\|project-book\|memory-model\|pointer-model\|exe
 
 - [ ] Step 3: CLAUDE.md Key Conventions 与 Known Issues 段同步
 
-CLAUDE.md 中若出现已移动的路径，例如「Spec files in `spec/`」段、Architecture 段内的 `docs/superpowers/specs/...` 引例，逐处按新路径更新。同时把 docs/ 分类树的一句话说明加入 CLAUDE.md，说明 docs 区定位：language/ 面向用户，design/ 是定稿，proposals/ 是讨论，archive/ 是任务产物，maintainer/ 是手册，adr/ 是决策记录，pseudocode/ 和 superpowers/ 是工具链目录。
+CLAUDE.md 中若出现已移动的路径，例如“Spec files in `spec/`”段、Architecture 段内的 `docs/superpowers/specs/...` 引例，逐处按新路径更新。同时把 docs/ 分类树的一句话说明加入 CLAUDE.md，说明 docs 区定位：language/ 面向用户，design/ 是定稿，proposals/ 是讨论，archive/ 是任务产物，maintainer/ 是手册，adr/ 是决策记录，pseudocode/ 和 superpowers/ 是工具链目录。
 
 - [ ] Step 4: 断链复查
 
@@ -222,7 +224,7 @@ jj commit -m "docs: docs/README.md 导航索引(分类规则 + 目录树)"   # �
 2. 仓库地图：`src/compiler/*.cr` 各模块一句话职责（ast/lexer/parser/checker/ir_gen/dataflow/ccr_io/opt/pass/diag/module/project/interp/dump/dyn_arr/globals/entry/main/corearch/_import）；`src/arch/linux/ld/`（elf/instr/sizes/resolve/ld）；`src/stdlib/`、`src/runtime/`（rt.s/rt.cr）；`bootstrap/corec/` 定位；tests 三套；grammar/；docs/ 分类树（链接 README.md）。
 3. 构建管线：三条命令（`build_selfhost_native.py` 得到 build/corec 和 corearch；`./build/corec build FILE.cr`；`./build/corearch FILE.ccr`），以及三级自举 Stage0/1/2 的含义。
 4. 分支模型与 jj 速查：feature、develop、main 的顺序；`jj bookmark create feature/x`、`jj git push -b feature/x`、`jj git fetch && jj bookmark move develop -r develop@origin`；SSH 自动签名说明。
-5. 已知问题：corec2 tokenizer 死循环（9 个全局变量未注册，详见 TODO.md）；pass_cse 与 O1 的稳定性；core_pattern 与 trap 测试禁止 core dump（近期修复）。
+5. 已知问题：corec2 tokenizer 死循环（9 个全局变量未注册，详见 TODO.md）；pass_cse 与 O1 的稳定性；core_pattern 与 trap 测试不允许 core dump（近期修复）。
 6. 贡献清单：读 README，挑 TODO，开 feature 分支，开发和测试，提 PR，合入 develop（检查列表）。
 
 - [ ] Step 2: 验证全部互链路径真实存在

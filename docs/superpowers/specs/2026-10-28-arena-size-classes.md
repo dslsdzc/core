@@ -1,5 +1,7 @@
 # Arena size class 规格
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 > 状态：已实施
 > 日期：2026-10-28
 > 关联：`docs/maintainer/design/region-model.md` 第 4 节 · `docs/superpowers/specs/2026-07-28-arena-model-design.md`
@@ -19,7 +21,7 @@ Arena 库按机器整数工作。编译器在源文件含 `fn arena_init` 时把
 4. 超过最后一档（3361 字节）的对象走档位 25。档位 25 不切 4KB 块；它直接使用当前 slot 的剩余空间。
 5. 档位 0 到 24 从所属 Arena 的 slot 余量切 4KB 块；块用尽后再切一块。slot 余量不足时申请新 slot。档位 25 用尽当前 slot 余量后同样申请新 slot。
 6. 回收只有一种：`arena_reset(ai)` 清空该 Arena 的全部档位子区域和大对象区，并把专用 mmap extent 逐个 `munmap`。
-7. 分配失败触发 trap，带四个值：请求字节数、档位、当前游标、当前上限。禁止返回 0，禁止静默降级到全局堆。
+7. 分配失败触发 trap，带四个值：请求字节数、档位、当前游标、当前上限。不返回 0，不静默降级到全局堆。
 8. 全局堆只服务 `arena_init` 和 chunk 链的扩展；它的耗尽同样是 trap。
 9. 超过 1MB 的对象从最新的 64MB segment 取连续 slot，最多 64 个 slot（64MB）。
 10. 超过 64MB 的对象走独立 `mmap` extent。extent 头记录链指针和长度，`arena_reset` 时 `munmap`。

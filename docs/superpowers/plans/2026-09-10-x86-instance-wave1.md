@@ -1,8 +1,10 @@
 # x86 实例化批次 1（结构批次）实施计划
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > 状态：实施完成（2026-09-10 批次 1 结构批次 Task 1-7 结束）。对应提交：Task 0 盘点 327c2cf01af3（设计定稿 6694f358f376）、Task 1 三轴迁移加组合根 29d177ac49a5（加补正 c927525baf35、docs 58e6be3a1c18）、Task 2 entry.cr 整体迁移 b23f008000cf（加 docs 8dcfaeca52b2）、Task 3 frame.cr 抽取 b0ba8c1c9b01、Task 4 tag2l.cr 整体迁移 d65fc1b8f3c3（加 docs c6b6cbfe9a75）、Task 5 callseq.cr 抽取 3ab39f6eaa16（加 docs 525a872a0ba7）、Task 6 syscall.cr 抽取 94d1cac15359（加 docs d2f3e0968d8c）、Task 7 为结束提交。检查全部通过：行为零变化（每任务 stage 链 byte-identical 加结束全量回归逐套计数）、自举重建快速验证、full-bootstrap guard（corec2/corec3 cmp 相同加 N06=0）、syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）。逐套计数与未做项见设计 spec `2026-09-10-x86-instance-design.md` 第 8 节执行注记。
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 目标：完成三轴目录重组（架构 × 格式 × OS）、序列算法文件化、表数据迁到架构轴、构建清单分段守卫。行为零变化，只做迁移和文件化，stage 链 byte-identical。
 
@@ -17,16 +19,16 @@
 - 版本控制用 `jj`，见项目规则第 2 条；每任务用 `jj commit -m '<msg>'`。
 - 构建 `nice -n 19 python3 build_selfhost_native.py`；测试加 `nice -n 19` 前缀，见项目规则第 6 条；清 .core/cache。
 - 行为零变化严格约束：每任务检查 = `test_backend_bootstrap.py` 11/11（stage 链 run 内 byte-identical）加相关套件（hit_table 24/24 表路径保持、ccr_v7 24/24、live_ranges 13/13、compile）；结束做全量。
-- 抽取纪律（H1）：每抽一段独立提交加 stage 链验证；抽段时 cp/pos/buf 三参数显式传递。帧公式双源（H2）必须单入口。`sizes.cr:4-10` 头注明令「NEVER hardcode byte counts」；`test_mw_task1.py` 的 sub rsp 立即数断言是帧专项检查。
+- 抽取纪律（H1）：每抽一段独立提交加 stage 链验证；抽段时 cp/pos/buf 三参数显式传递。帧公式双源（H2）需要单入口。`sizes.cr:4-10` 头注明令“NEVER hardcode byte counts”；`test_mw_task1.py` 的 sub rsp 立即数断言是帧专项检查。
 - 归属裁决（H3）：`g2_tag_off`/`mw_frame_size` 归 `frame.cr`；`tag2l.cr` 依赖 frame（同轴内）；mw 族 e2_mw_* 纯编码归 tag2l；e2_* 通用编码原语（640-985）留在 instr.cr。
-- stage0 硬编码点 `test_backend_bootstrap.py:13` 必须先改后迁移（H6）。
-- TODO #2026-09-10-2（双入口 flag 分歧）不与批次 1 混合。结构批次只迁移，并同步修改「两入口行为同构」注记措辞（H7）；flag 收敛留批次 2。
+- stage0 硬编码点 `test_backend_bootstrap.py:13` 需要先改后迁移（H6）。
+- TODO #2026-09-10-2（双入口 flag 分歧）不与批次 1 混合。结构批次只迁移，并同步修改“两入口行为同构”注记措辞（H7）；flag 收敛留批次 2。
 
 ---
 
 ## Task 0: 盘点（基准已备，本计划附注）
 
-文件：分析产出（勘探已完成，基准并入本计划文末「盘点结果」节）。
+文件：分析产出（勘探已完成，基准并入本计划文末“盘点结果”节）。
 - 交付：文末三张表（切分映射、迁移影响面、路径改点清单），Task 1-6 依此执行。
 
 ---

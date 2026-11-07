@@ -1,5 +1,7 @@
 # Allocator 代码生成设计
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 > 状态：已实施（Core simple/arena blob 是唯一 allocator body）
 > 日期：2026-10-29
 > 关联：`docs/superpowers/specs/2026-10-29-arena-boundaries-design.md` · `docs/superpowers/specs/2026-10-28-stub-regalloc.md`
@@ -30,8 +32,8 @@
 - 改造前 `src/format/elf/elf.cr` 的 `emit_alloc_body` / `emit_alloc_body_simple`
   直接写 x86-64 字节，所有跳转、寄存器保存、RIP 位移都在这里手工维护。这两
   个函数已经删除。
-- `src/runtime/bigint_blob.cr` 已经证明“Python bootstrap → `.o` → 抽取
-  `.text/.rodata/.data` → 拷进代码段”的路线可用。
+- `src/runtime/bigint_blob.cr` 已经证明“Python bootstrap 到 `.o`，再抽取
+  `.text/.rodata/.data`，再拷进代码段”的路线可用。
 
 手写字节的问题是编码和帧维护错误不会被编译器发现。最近修复的 SIB、栈上多压
 寄存器、tagged/raw 偏移都属于这一类。
@@ -81,7 +83,7 @@ src/runtime/alloc_blob.cr        （字节 + 符号表 + 重定位表）
    call relocation，`elf_gen` 回填到现有函数地址。
 6. `heap_start` 作为第二个参数传入，不在 body 内计算 `bss_va`。
 7. 失败路径先写 `g_alloc_fail_*` 见证，再用
-   `syscall3(60, 132, 0, 0)` 退出。shell 看到的退出码与 SIGILL 相同，都是
+   `syscall3(60, 132, 0, 0)` 退出。shell 观察到的退出码与 SIGILL 相同，都是
    132；后续如果增加 `@trap` 内建再替换。
 
 `alloc_simple` 只引用 `g_heap_ptr` / `g_heap_end`，`alloc_arena` 引用全部
@@ -171,7 +173,7 @@ alloc_blob_global_off(i)
 
 - `objdump -d` 检查 trampoline 是 `movabs rsi; jmp`，body 入口没有 `ud2`。
 - `tools/asm_check.py` 检查生成的 `.s` 栈帧平衡。
-- 生成器必须拒绝含 `call alloc` 的 body。
+- 生成器拒绝含 `call alloc` 的 body。
 
 ### 现有回归
 
@@ -182,7 +184,7 @@ alloc_blob_global_off(i)
 
 ## 实施结果
 
-已落地：
+已实现：
 
 - `src/runtime/alloc_body.cr`：`alloc_simple`、`alloc_global`、`alloc_arena`、
   `alloc_arena_extent`、`arena_get_slot`、`arena_slot_base`，全部 raw Core，
@@ -190,7 +192,7 @@ alloc_blob_global_off(i)
 - ABI 为三个参数：`rdi = size`、`rsi = heap_start`、`rdx = heap_end`。
   trampoline 先 `movabs rsi, heap_start`、再 `movabs rdx, bss_va + 1GiB`，
   然后跳到选中的 body。初始堆不会越过数据段 `PT_LOAD` 的 `P_MEMSZ`。
-- `tools/gen_alloc_blob.py`：Python bootstrap → `.o` → 字节 + 外部全局/调用
+- `tools/gen_alloc_blob.py`：Python bootstrap 到 `.o`，再生成字节和外部全局/调用
   重定位表；拒绝未授权顶层全局、带初值的 allocator 全局、本地/匿名 `.data`
   符号、未授权外部调用、绝对/TLS/GOT 重定位，以及非空 `.rela.*`
   （除 `.rela.text`）。生成器支持 `--check`，CI 用它防止 blob 过期。
@@ -243,12 +245,12 @@ class/slot 路径有独立 C 模型；extent mmap 失败写 class `-2` 并 trap�
    再扩到 arena。
 2. Core 循环清零大块内存比 `rep stosb` 慢。大块已有 `madvise` 快路径，
    失败时回退到字节循环；性能优化另开任务。
-3. 外部全局名必须和 `g_ir_globals` 完全一致。生成器和 `elf_gen` 在名字
+3. 外部全局名与 `g_ir_globals` 完全一致。生成器和 `elf_gen` 在名字
    找不到时失败，不能静默跳过。
 4. Python bootstrap 的栈对齐不保证 16 字节。body 不调用 SSE 代码；如果以后
    调用 C 参考或 `memcpy`，需要先修对齐。
 5. canary 会因代码布局变化再次位移；只按编译器身份位移重新锁定。`.ccr`
-   的变化必须能归因到 allocator 元数据，不能混入无关语料变化。
+   的变化能归因到 allocator 元数据，不能混入无关语料变化。
 
 ## 风险
 
@@ -256,7 +258,7 @@ class/slot 路径有独立 C 模型；extent mmap 失败写 class `-2` 并 trap�
    再扩到 arena。
 2. Core 循环清零大块内存比 `rep stosb` 慢。正确性优先；性能优化另开任务，
    可以用一个同样是 Core/汇编生成的 `zero_bytes` helper。
-3. 外部全局名必须和 `g_ir_globals` 完全一致。生成器和 `elf_gen` 都需要在
+3. 外部全局名与 `g_ir_globals` 完全一致。生成器和 `elf_gen` 都需要在
    名字找不到时失败，不能静默跳过。
 4. Python bootstrap 的栈对齐不保证 16 字节。body 不调用 SSE 代码；如果以后
    调用 C 参考或 `memcpy`，需要先修对齐。

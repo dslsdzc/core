@@ -1,7 +1,8 @@
 # 概率编程 pass 实现设计
 
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
 
-> 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
+> 术语注记（2026-08-15）：本规格为历史设计记录，其中“数据流图”（及“RVSDG 式”）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
@@ -13,7 +14,7 @@
 
 - 概率以 pass 形态实现，不新增语言特性。
 - 数据流图本身记录了所有依赖关系。Mappl 需要借助信息流类型系统与 CPS 变换才能分析的信息，Core 的数据流图已经具备。
-- `random()` 是库函数。编译器不做特殊对待，pass 看到的是 `IR_CALL random` 节点。
+- `random()` 是库函数。编译器不做特殊对待，pass 读取的是 `IR_CALL random` 节点。
 - 观测即条件分支。`if sensor > 30` 时，pass 在该分支边上标注观察约束。
 
 ## ProbabilityPass 架构
@@ -79,7 +80,7 @@ IR_BRANCH 的 false_edge (weight=0.7)
 
 ## Step 3：权重传播
 
-沿值流传播概率权重。原理与数据流分析相同，每个值的「可能概率」沿分支边和数据边传播：
+沿值流传播概率权重。原理与数据流分析相同，每个值的“可能概率”沿分支边和数据边传播：
 
 ```core
 fn propagate_weights():

@@ -1,5 +1,7 @@
 # 函数值、Lambda 与 callable 设计
 
+> 定位：受众 = 维护者；状态 = 设计态；出处 = 本页。
+
 ## 概述
 
 Core 目前没有函数类型、命名函数值和 lambda。本文给出三者的语法、类型表示、IR 表示、捕获语义、诊断和实施清单。
@@ -50,7 +52,7 @@ Primary += LambdaExpr
 规则：
 
 - `->` 右结合。`fn(int) -> fn(int) -> int` 等价于 `fn(int) -> (fn(int) -> int)`。
-- 函数类型与 `?`、`[]`、元组组合时必须加括号。`(fn(int) -> int)?` 合法，裸 `fn(int) -> int?` 报错。
+- 函数类型与 `?`、`[]`、元组组合时加括号。`(fn(int) -> int)?` 合法，裸 `fn(int) -> int?` 报错。
 - 本轮 `fn.name` 只支持非泛型顶层函数。方法和泛型函数的取值留给后续。
 - lambda 的参数类型可以省略。有 expected type 时从上下文推导；没有足够上下文时报“无法推导”，不猜类型。
 - lambda 不写捕获列表。捕获哪些变量、只读还是修改、是否需要转移，由编译器分析。
@@ -81,7 +83,7 @@ Primary += LambdaExpr
 
 - `iface_kind_of(TYP_FN)` 返回 `AK_FN`。
 - `sh_term_of_ti` 和 `sh_sig_term_of_ti` 两个构造点都要处理 `TYP_FN`，构造 `tt_atom(AK_FN, -1, [返回项, 参数项…])`，返回项在链首。
-- 不给分支时，未知 kind 会回退成命名类，类型引擎得到 `-1`。结果是不报错但判不了，因此两个构造点必须同阶段修改。
+- 不给分支时，未知 kind 会回退成命名类，类型引擎得到 `-1`。结果是不报错但判不了，因此两个构造点同阶段修改。
 
 ## IR 与后端
 
@@ -89,12 +91,12 @@ Primary += LambdaExpr
 - 新增间接调用 opcode。建议槽序为 `s1=callable 变量, s2=第一个实参, s3=实参个数`。
 - x86-64 后端发射 `call r/m64`。如果捕获环境需要作为隐藏参数传递，在 `callseq.cr` 中统一处理。
 - 需要同步修改的分析面：
-  - 纯度与效应：`purity_op_effect` 必须把间接调用列为有副作用。
+  - 纯度与效应：`purity_op_effect` 把间接调用列为有副作用。
   - 图与 DOT：`dataflow.cr` 的 use-def 和 opcode 名字表。
   - 格层：`ent_kernel.cr` 的 opcode 名字表。
   - 优化器：`opt.cr` 的跳过模式。
-  - 解释器：实现新 op，或明确报“不支持”，不能不报错地算错。
-  - 尺寸表：`sizes.cr` 的字节数必须与实际发射一致。
+  - 解释器：实现新 op，或明确报“不支持”，不静默算错。
+  - 尺寸表：`sizes.cr` 的字节数与实际发射一致。
   - 寄存器分配：`regalloc.cr` 的寄存器类和冲突位。
   - 链接：`elf.cr` 的 `IR_FNADDR` 回填。
 
@@ -108,7 +110,7 @@ Primary += LambdaExpr
 
 - 捕获默认按引用。
 - 捕获环境放在外层栈帧。
-- 逃逸由 region 分析判定。判不了就报错，不猜，不不报错地改为堆分配。
+- 逃逸由 region 分析判定。判不了就报错，不猜，不静默改为堆分配。
 - 无捕获 lambda 不创建空环境，`env = 0`。
 - 不引入 `Fn`、`FnMut`、`FnOnce`，也不引入显式 closure object 类型。
 - 不写捕获列表。
@@ -119,8 +121,8 @@ Primary += LambdaExpr
 
 - 建议族号 18，前缀 `U`。
 - 同阶段修改 `error_cat_prefix`、`ast.cr` 的错误码注释表、`docs/developer/errors.md` 的族节和统计表。
-- 新码必须在 `diag_gate_exempt` 中有明确归属：要么有真实 raise 点，要么按豁免表格式登记。
-- 未知 `@` 内建仍然报 `N01`，不能不报错地忽略。
+- 新码在 `diag_gate_exempt` 中有明确归属：要么有真实 raise 点，要么按豁免表格式登记。
+- 未知 `@` 内建仍然报 `N01`，不静默忽略。
 
 ## 实施清单
 

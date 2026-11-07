@@ -1,12 +1,14 @@
 # 格形态 IR v6（存在结构）实施计划
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 定位：受众 = 维护者；状态 = 历史记录；出处 = 本页。
+
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 目标：把 `.ccr` 从 v5（格层线性投影）升级为 v6，新增存在结构段，包含条目版本、存在区间、共存、home 和无方法标记，供寄存器分配判定直接消费。
 
-执行顺序（2026-09-05 定）：格数据面先行。Task 1-3（存在区间、版本化、共存推导）属于 Phase 1，立即执行，只做编译器内推导，不依赖格式 IO。v6 格式 IO（Task 4）与 HIT（`2026-09-05-hit-minimal-core-m1.md`）在数据面实施后推进。HIT 事件流与 v6 NOD 同构对齐，交汇点是事件层。坐标说明：现管线中 DF 节点序等于 IR 指令序，即 `lower_to_ccr` 的 node i 对应 instruction i。本计划所说的「指令序」就是 v6 格式定稿的「NOD 坐标」，实施后同一坐标不需要迁移。
+执行顺序（2026-09-05 定）：格数据面先行。Task 1-3（存在区间、版本化、共存推导）属于 Phase 1，立即执行，只做编译器内推导，不依赖格式 IO。v6 格式 IO（Task 4）与 HIT（`2026-09-05-hit-minimal-core-m1.md`）在数据面实施后推进。HIT 事件流与 v6 NOD 同构对齐，交汇点是事件层。坐标说明：现管线中 DF 节点序等于 IR 指令序，即 `lower_to_ccr` 的 node i 对应 instruction i。本计划所说的“指令序”就是 v6 格式定稿的“NOD 坐标”，实施后同一坐标不需要迁移。
 
-结构：v6 等于 v5 的全部基础段加新增存在结构段，version 字段从 5 升到 6，magic（`CCR1`）、扩展名和 CLI 保持不变（方案 A 定案）。存在结构的数据（版本化条目乘存在区间）由新的推导 pass 从线性 IR 重建，把 `alloc_registers` 的 live-interval 雏形升级为独立 pass。共存按设计文档的「推导规则优先，避免冗余存储」处理。ELF 后端只消费线性段（v6 保留），因此后端改动面小。存在段是分配的判定输入，对应 `docs/regalloc-cache-mapping.md` 第 4 节的一致性四条。
+结构：v6 等于 v5 的全部基础段加新增存在结构段，version 字段从 5 升到 6，magic（`CCR1`）、扩展名和 CLI 保持不变（方案 A 定案）。存在结构的数据（版本化条目乘存在区间）由新的推导 pass 从线性 IR 重建，把 `alloc_registers` 的 live-interval 雏形升级为独立 pass。共存按设计文档的“推导规则优先，避免冗余存储”处理。ELF 后端只消费线性段（v6 保留），因此后端改动面小。存在段是分配的判定输入，对应 `docs/regalloc-cache-mapping.md` 第 4 节的一致性四条。
 
 技术栈：Core 自举编译器（`src/compiler/`）、Python bootstrap（`bootstrap/corec/`）、x86-64 ELF 后端（`src/arch/linux/ld/`）。无外部依赖。
 
@@ -37,7 +39,7 @@
 
 ## v6 格式布局（2026-09-05 定案：以格式定稿 spec 为唯一依据）
 
-> 本文档早前的「追加式 24B」布局是草案残留，已废弃。权威布局见 `docs/archive/2026-09-05-lattice-ir-v6-format.md`，采用 B 方向，即存在结构主体：
+> 本文档早前的“追加式 24B”布局是草案残留，已废弃。权威布局见 `docs/archive/2026-09-05-lattice-ir-v6-format.md`，采用 B 方向，即存在结构主体：
 >
 > - Header 16B（magic `CCR1` / version 6 / seg_count）加段表（每段 {tag, offset, size}），段序自由
 > - 段：STR（字符串）、SYM（符号表，函数含 first_ent/last_ent）、NOD（图事件 + 显式边）、ENT（条目表 28B/条：var_id, version, def_nod, live_start, live_end(半开), home, flags）、REG（region，NOD 坐标）
@@ -144,7 +146,7 @@ fn live_last(func_i: int, var_i: int) -> int:
 
 - [ ] Step 4: 补真实测试断言
 
-把 `test_live_ranges.py` 的 main 替换为真实校验。用 `cir` dump 的指令序计算期望区间不现实，容易失效，改为用 O1 编译快速验证加回归套件验证行为不变：直接跑现有 `test_compile.py` 和 `test_dex_arith.py`，O1 路径覆盖 alloc_registers，现在改为读新表。测试文件保留为「smoke: 编译和运行通过即区间表不破坏分配」：
+把 `test_live_ranges.py` 的 main 替换为真实校验。用 `cir` dump 的指令序计算期望区间不现实，容易失效，改为用 O1 编译快速验证加回归套件验证行为不变：直接跑现有 `test_compile.py` 和 `test_dex_arith.py`，O1 路径覆盖 alloc_registers，现在改为读新表。测试文件保留为“smoke: 编译和运行通过即区间表不破坏分配”：
 
 ```python
 def build_and_run(source: str) -> int:
@@ -200,7 +202,7 @@ jj commit -m 'feat: 存在区间推导 pass：compute_live_ranges 独立表，al
 
 接口：
 - 读取：Task 1 的 `compute_live_ranges`
-- 产出：`fn compute_entries(func_i) -> int`，返回该函数条目数。填充全局条目表 `g_ir_entries`（24B/条内存表：var_idx(全局), def_instr(全局), live_start, live_end, home, flags；盘上 28B，含 version，由 Task 4 转换，见「v6 格式布局」）。另有 `fn entry_count(func_i) -> int`。
+- 产出：`fn compute_entries(func_i) -> int`，返回该函数条目数。填充全局条目表 `g_ir_entries`（24B/条内存表：var_idx(全局), def_instr(全局), live_start, live_end, home, flags；盘上 28B，含 version，由 Task 4 转换，见“v6 格式布局”）。另有 `fn entry_count(func_i) -> int`。
 
 - [ ] Step 1: 设计确认（读代码）
 
@@ -208,13 +210,13 @@ jj commit -m 'feat: 存在区间推导 pass：compute_live_ranges 独立表，al
 
 - [ ] Step 2: 写失败测试
 
-`test_live_ranges.py` 追加一个程序 `x := 1; x = x + 1; x = x + 2; return x;`，期望 x 有 4 个条目。真实 IR 里 LET 初始化 `x := 1` 会发射 `IR_ALLOC` + `IR_STORE` 两条定值（ir_gen EXPR_LET 路径），所以 x 有 ALLOC 定值加 3 次 STORE，共 4 个版本。2026-09-05 勘误：原写 3，是按「LET 只发 ALLOC」的错误 IR 模型估算；规则原文含 ALLOC 定值，实现按规则得 4，测试断言 4。
+`test_live_ranges.py` 追加一个程序 `x := 1; x = x + 1; x = x + 2; return x;`，期望 x 有 4 个条目。真实 IR 里 LET 初始化 `x := 1` 会发射 `IR_ALLOC` + `IR_STORE` 两条定值（ir_gen EXPR_LET 路径），所以 x 有 ALLOC 定值加 3 次 STORE，共 4 个版本。2026-09-05 勘误：原写 3，是按“LET 只发 ALLOC”的错误 IR 模型估算；规则原文含 ALLOC 定值，实现按规则得 4，测试断言 4。
 
-定值识别假设注记（评审 Important）：「函数段内 var 只被 ALLOC/STORE 写」这一假设成立范围有限。`IR_ALLOC_ARRAY/IR_ALLOC_STRUCT` 的 dest 也直接写 var，`x : [3]int;` 这种无初值声明不发 IR_ALLOC。若此类 var 后续被 STORE 重定值，且其间有读，窗口内没有条目覆盖。当前影响小，因为内存对象不是寄存器候选。Task 5 判定读点前需要处理，格式定稿第 4.1 节的「dest≥0 = 定值点」规则可以消除该问题。
+定值识别假设注记（评审 Important）：“函数段内 var 只被 ALLOC/STORE 写”这一假设成立范围有限。`IR_ALLOC_ARRAY/IR_ALLOC_STRUCT` 的 dest 也直接写 var，`x : [3]int;` 这种无初值声明不发 IR_ALLOC。若此类 var 后续被 STORE 重定值，且其间有读，窗口内没有条目覆盖。当前影响小，因为内存对象不是寄存器候选。Task 5 判定读点前需要处理，格式定稿第 4.1 节的“dest≥0 = 定值点”规则可以消除该问题。
 
 - [ ] Step 3: 实现 compute_entries
 
-扫描函数指令：对每条 `IR_STORE`/`IR_ALLOC` 的 dest（函数内 var）登记新版本条目，版本号递增。版本存在区间的端点是定值指令号与「下一版本定值前最后引用」，实现时用 Task 1 区间表和定值点表合并。版本间切割：条目 k 的 [start,end] = [def_k, def_{k+1}-1]，再与变量全局 last_ref 截断。
+扫描函数指令：对每条 `IR_STORE`/`IR_ALLOC` 的 dest（函数内 var）登记新版本条目，版本号递增。版本存在区间的端点是定值指令号与“下一版本定值前最后引用”，实现时用 Task 1 区间表和定值点表合并。版本间切割：条目 k 的 [start,end] = [def_k, def_{k+1}-1]，再与变量全局 last_ref 截断。
 
 - [ ] Step 4: 跑测试
 
@@ -287,7 +289,7 @@ Run: `nice -n 19 python3 tests/selfhost/test_live_ranges.py`
 
 - [ ] Step 3: save 前计算 + 落盘
 
-save_ccr 按 spec 段表写各段（STR/SYM/NOD/ENT/REG）。ENT 条目为 28B/条：var_id/version/def_nod/live_start/live_end/home/flags。version 是组内定值升序序数，半开 live_end 等于最后使用点加 1，由 Task 2 的内存表转换。调用点：save_ccr 由 corec/corearch 调用，条目表必须在 save 前就绪。在 `lower_to_ccr()` 尾部（dataflow.cr:351 函数末尾）显式调用 `compute_live_ranges()` 和各函数的 `compute_entries()`。compute 与 opt 门控解耦，无条件在 lower 尾部计算。
+save_ccr 按 spec 段表写各段（STR/SYM/NOD/ENT/REG）。ENT 条目为 28B/条：var_id/version/def_nod/live_start/live_end/home/flags。version 是组内定值升序序数，半开 live_end 等于最后使用点加 1，由 Task 2 的内存表转换。调用点：save_ccr 由 corec/corearch 调用，条目表需要在 save 前就绪。在 `lower_to_ccr()` 尾部（dataflow.cr:351 函数末尾）显式调用 `compute_live_ranges()` 和各函数的 `compute_entries()`。compute 与 opt 门控解耦，无条件在 lower 尾部计算。
 
 - [ ] Step 4: load_ccr 读 entries
 
@@ -303,7 +305,7 @@ Run: `nice -n 19 python3 tests/selfhost/test_ccr_v6.py && nice -n 19 python3 tes
 ### Task 5: 判定消费的最小实现（.corespec + checker 自检）
 
 文件：
-- 新建：`spec/regalloc-consistency.corespec`（判定四条规约，先写规格后实现，对应 TODO 检查「判定规约：一致性四条写成 .corespec」）
+- 新建：`spec/regalloc-consistency.corespec`（判定四条规约，先写规格后实现，对应 TODO 检查“判定规约：一致性四条写成 .corespec”）
 - 修改：`src/compiler/checker.cr`（debug 自检钩子）或独立 pass 文件
 - 测试：`tests/selfhost/test_live_ranges.py`（追加判定用例）
 
@@ -320,7 +322,7 @@ Run: `nice -n 19 python3 tests/selfhost/test_ccr_v6.py && nice -n 19 python3 tes
 
 - [ ] Step 3: 实现 verify_regalloc_consistency
 
-对每函数：1 遍历条目对（同 home 且非 -1），entries_coexist 为真则违反；2 读点（使用指令）所在条目的版本必须是活跃版本，即无陈旧；34 按驱逐和调用点标注处理。v6 先以 home=-1 与调用点指令列表近似，标注字段 flags 预留，精确驱逐语义与贪心放置同批做。范围控制：本任务只做 1（共存互斥）和 2 的框架，34 留 TODO 注记，按 YAGNI 处理。四条规约先落文档，代码验证主路径。
+对每函数：1 遍历条目对（同 home 且非 -1），entries_coexist 为真则违反；2 读点（使用指令）所在条目的版本需要是活跃版本，即无陈旧；34 按驱逐和调用点标注处理。v6 先以 home=-1 与调用点指令列表近似，标注字段 flags 预留，精确驱逐语义与贪心放置同批做。范围控制：本任务只做 1（共存互斥）和 2 的框架，34 留 TODO 注记，按 YAGNI 处理。四条规约先落文档，代码验证主路径。
 
 - [ ] Step 4: 测试 + 提交
 
@@ -334,23 +336,23 @@ Run: `nice -n 19 python3 tests/selfhost/test_live_ranges.py`
 文件：
 - 修改：`docs/ir-schema/coreir-schema.md`（v6 段布局加 ENT 记录 28B 字段表，按格式定稿 spec）
 - 修改：`CLAUDE.md`（`.ccr` 描述从 v5 改为 v6：格层存在结构）
-- 修改：`docs/archive/2026-08-27-lattice-form-ir-design.md`（状态从执行中改为按实施结果复核第 4.2、5 节；第 4.2、5 节的「v5 到 v6 一次性转换工具」按计划定稿取消，.ccr 为管线中间产物、零持久生态，同步删除该事项并注记）
+- 修改：`docs/archive/2026-08-27-lattice-form-ir-design.md`（状态从执行中改为按实施结果复核第 4.2、5 节；第 4.2、5 节的“v5 到 v6 一次性转换工具”按计划定稿取消，.ccr 为管线中间产物、零持久生态，同步删除该事项并注记）
 - 修改：`docs/project-book.md`、`docs/compcert-reference.md`（如提及 .ccr v5 线性投影描述处）
-- 修改：`TODO.md`（v6 事项标注完成：见「格形态 IR 升级」节 8 事项逐条核对）
+- 修改：`TODO.md`（v6 事项标注完成：见“格形态 IR 升级”节 8 事项逐条核对）
 - 验证：`bootstrap/corec/ir/ccr.py`（Python bootstrap 的 .ccr 读写，查它是否真的读写 .ccr 还是仅占位）
 
 - [ ] Step 1: 核对 bootstrap 侧 .ccr 参与度
 
 Run: `grep -n "ccr\|CCR_MAGIC\|save\|load" bootstrap/corec/ir/ccr.py | head -20`
-判定：Python bootstrap 是否实际产出或消费 .ccr。若仅定义未接线，标注「自举管线不受 v6 影响」并跳过该迁移面；若接线则同步格式。
+判定：Python bootstrap 是否实际产出或消费 .ccr。若仅定义未接线，标注“自举管线不受 v6 影响”并跳过该迁移面；若接线则同步格式。
 
 - [ ] Step 2: 更新 coreir-schema.md
 
-按本文「v6 格式布局」写入 entries 段字段表和 version 6 说明，附共存推导规则（不落盘）注记。
+按本文“v6 格式布局”写入 entries 段字段表和 version 6 说明，附共存推导规则（不落盘）注记。
 
 - [ ] Step 3: 更新 CLAUDE.md / 设计文档状态 / TODO
 
-CLAUDE.md 的 `.ccr` 描述更新，涉及 Architecture 节和 Key Conventions。lattice-form-ir-design.md 状态行改「执行中（2026-09 起）」，并在第 4.2 节标实施结果。TODO「格形态 IR 升级」8 事项按完成状态标注。
+CLAUDE.md 的 `.ccr` 描述更新，涉及 Architecture 节和 Key Conventions。lattice-form-ir-design.md 状态行改“执行中（2026-09 起）”，并在第 4.2 节标实施结果。TODO“格形态 IR 升级”8 事项按完成状态标注。
 
 - [ ] Step 4: 全量回归 + 自检 + 提交
 

@@ -1,6 +1,6 @@
 # 增量缓存实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：为编译器增加函数级 `.cir` 缓存。每个函数的数据流图状态序列化到文件，文件名由内容哈希决定。后续编译时，未改动的函数跳过 tokenize、parse、check、IR gen，直接从缓存恢复 DFG。
 

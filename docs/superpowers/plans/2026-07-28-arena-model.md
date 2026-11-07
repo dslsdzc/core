@@ -1,6 +1,6 @@
 # Arena 内存模型实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：将单一全局 bump 分配器替换为多 arena 系统。每个子图（function/loop/for/unsafe）持有独立 arena，分配自动使用当前 arena，子图退出时重置 arena 游标。
 

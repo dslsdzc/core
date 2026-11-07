@@ -1,10 +1,12 @@
 # corearch 内核组件完备化实施计划（步骤 2.5）
 
-> 面向执行本计划的 agent：必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
+> 面向执行本计划的 agent：需要使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans，按任务逐项实现。用复选框（`- [ ]`）跟踪进度。
 
 > 状态：实施完成（2026-09-10 Tasks 0-5 结束）。对应提交：Task 0 盘点 8c3e6ad1、Task 1 035ea289（加补正 72c40389）、Task 2 99fc6af3、Task 3 b4d8c74f、Task 4 b9685f5c、Task 5 为结束提交。中立性 guard A 组和 B 组全部通过（零残留），全量回归通过，自举重建快速验证通过，full-bootstrap guard 通过（corec2/corec3 cmp 相同加 N06=0），文档同步完成（设计 spec 状态改为已实施加执行注记第 7 节；方案步骤 2.5 完成注记加第 1.1 节三组件完成态）。执行注记为设计 spec `2026-09-10-corearch-kernel-completion-design.md` 第 7 节。
 
-目标：内核三组件按方案第 1.1 节补完，并做全量中立化。2026-09-10 用户原则：内核零经典概念，寄存器、栈、调度、内存布局、指令任一概念都不得出现。工作包括：语义对象模型（对象面 API 加调度重建移实例）、A 通道中立化（compute 系改 NOD 对象面，内核零线性流引用）、B 通道中立化（登记表不透明位置加 LOC_HOME_BASE 移除）、注册契约完整（34 形式声明）。行为零变化。
+目标：内核三组件按方案第 1.1 节补完，并做全量中立化。2026-09-10 用户原则：内核零经典概念，寄存器、栈、调度、内存布局、指令任一概念都不能出现。工作包括：语义对象模型（对象面 API 加调度重建移实例）、A 通道中立化（compute 系改 NOD 对象面，内核零线性流引用）、B 通道中立化（登记表不透明位置加 LOC_HOME_BASE 移除）、注册契约完整（34 形式声明）。行为零变化。
 
 结构：现状（步骤 2 结束态）是 ent_kernel.cr（判定引擎加数据面，双 concat）加 regalloc.cr（机器侧）加实例声明表。全量中立化审计（设计 spec 第 4.5 节）结论：全部经典残留来自一个原因族的两条通道。A 是线性流坐标派生读取，有 4 个函数 4 个 iri_* 使用点，涉及 compute 系、dump、rl_rule2。B 是位置通道，meta_reg_for_var 读实例布局，加 LOC_HOME_BASE 编码。本计划做中立化波：写侧 populate_nod_objects（corec 镜像对称），compute 系改 NOD 对象面（同 index，F5），登记表不透明化（实例双面同步责任在实例），输出面中性化加方法查询补体加 34 声明。检查是行为零变化（全回归加 byte-identical 面）加中立性静态 guard（A 组和 B 组 token 从失败改为通过）。
 
@@ -17,7 +19,7 @@
 - 版本控制用 `jj`，见项目规则第 2 条，git 被 hook 拦截。每任务用 `jj commit -m '<msg>'`。
 - 构建 `nice -n 19 python3 build_selfhost_native.py`，约 2-3 分钟；测试加 `nice -n 19` 前缀，见项目规则第 6 条；清 .core/cache 跑测试。
 - 行为零变化硬约束：全回归通过加 byte-identical 面（backend_bootstrap stage 链加 ccr_v7 产物）。重建移实例和登记表通道属于纯迁移加通道等价，产物不变。
-- 迁移和改动纪律：函数体迁移零改动；登记表通道切换是语义等价改写，禁止顺手改判定逻辑；禁止新增接口抽象（现名即 API 的裁决延续，新增面为 kern_loc_*/对象面访问器，且须是设计 spec 明列者）。
+- 迁移和改动纪律：函数体迁移零改动；登记表通道切换是语义等价改写，不允许顺手改判定逻辑；不允许新增接口抽象（现名即 API 的裁决延续，新增面为 kern_loc_*/对象面访问器，且须是设计 spec 明列者）。
 - 中立性目标（全量）：ent_kernel.cr 零经典概念引用，包括实例符号（g_opt_meta/寄存器名/ELF 段名）、线性流（g_ir_instrs/iri_*）、位置编码（LOC_HOME_BASE）。test_ent_kernel_neutrality.py 静态 guard 入回归面（A 组 Task 2 通过，B 组 Task 3 通过）。
 - corec 写侧不受影响（不经 loader）；interp 不经 loader。
 - 判定34 不实现（用户裁决，needs_* 形式声明字段落契约）。
@@ -33,7 +35,7 @@
 - 登记表接入面核对：alloc_registers phase 5（写 g_opt_meta 点）加注入钩子 6+1（写点清单）加 regalloc_debug_dispatch 各 flag 路径（判定何时读登记表：compute 后还是 alloc 后），形成登记 API 调用点清单。
 - 判定读 meta 面清单：verify_regalloc_consistency/rl_rule2_func/meta_reg_for_var 的 g_opt_meta 读点全集，作为登记表切换的精确函数面。
 - 中立性 guard 设计：扫描 ent_kernel.cr 现引用面（g_opt_meta 引用点即待切清单，其余实例符号即断言排除集）。
-- 交付：注记回填本 plan 附注「Task 0 盘点结果」节。
+- 交付：注记回填本 plan 附注“Task 0 盘点结果”节。
 
 ---
 
@@ -108,7 +110,7 @@
 ## Task 4: 输出面中性化 + 方法查询补体 + 注册契约完整化（34 声明）
 
 文件：
-- 修改：`src/arch/linux/ld/ent_kernel.cr`（rl_print_loc :589-595 中性化，不透明 loc 直印，去掉 reg/home slot 分类措辞；rl_report_rule1/2 措辞，「regalloc-consistency」前缀改为中性描述，保留 spec 文件名引用注记；方法查询封装补体（857-860 悬空注：nod_inputs(n) 薄封装函数，遍历 [first, first+count)，审计 API 缺口）；34 形式声明字段文档加 kern_verify_all 输出面注记）
+- 修改：`src/arch/linux/ld/ent_kernel.cr`（rl_print_loc :589-595 中性化，不透明 loc 直印，去掉 reg/home slot 分类措辞；rl_report_rule1/2 措辞，“regalloc-consistency”前缀改为中性描述，保留 spec 文件名引用注记；方法查询封装补体（857-860 悬空注：nod_inputs(n) 薄封装函数，遍历 [first, first+count)，审计 API 缺口）；34 形式声明字段文档加 kern_verify_all 输出面注记）
 - 修改：`src/compiler/corearch.cr`（g_instance_decl 行扩展：needs_eviction/needs_call_sites 字段加行数据（x86: {0, 0}）。home_base/reg_domain 已从范围删除（第 2.2 节修正））
 - 测试：`tests/selfhost/test_live_ranges.py`（13/13，flag 通道输出不变，措辞中性化不影响断言面确认；dump 文本断言如含 reg/home slot 字样则同步更新断言为中性措辞）加方法查询新断言（对象面遍历 = 现 dump_object_surface 内联逻辑的函数化）
 
@@ -170,7 +172,7 @@
 ### 2 region_of_nod 定夺（设计 spec 第 6 节待办 1 裁决 = 不包含）
 
 - v7 文件没有 g_df_node_region；loader 不重建节点到区域映射，REG 段只派生 nstart/ncount（:1172-1173，即 enter/exit 副本写回 g_sgs 行），不产映射数组。corec 构建侧映射是构建期快照（dataflow.cr df_create_node:110 写 g_df_node_region[nid] = g_cur_sg，-1 = 无），不落盘。
-- 零消费方事实：corearch concat 内 g_sgs 的唯一消费者是 ccr_io.cr loader 自身；ent_kernel/regalloc/instr/elf/resolve 全部零 g_sgs 读（判定12 不消费区域）。另注：设计第 1.2 节「现有 sg 访问器」表述不准确，corearch 侧没有 sg_* 访问器函数，读写全为 r64/w64 直偏移。
+- 零消费方事实：corearch concat 内 g_sgs 的唯一消费者是 ccr_io.cr loader 自身；ent_kernel/regalloc/instr/elf/resolve 全部零 g_sgs 读（判定12 不消费区域）。另注：设计第 1.2 节“现有 sg 访问器”表述不准确，corearch 侧没有 sg_* 访问器函数，读写全为 r64/w64 直偏移。
 - 推导可行性（后补注）：REG 行是压栈序加 parent 链加 enter/exit 节点坐标（层流嵌套区间；SG_FUNC 根 span = 函数指令范围，save :759-765/load GC-3 双侧校验过）。region_of_nod(n) 是包含 n 的最深行：每次查询 O(函数 REG 行数) 扫描，或 O(nodes) 栈扫预计算。数据无损，可以后补。
 - 定夺注记：对象面 API 不包含 region_of_nod，区域面只有 REG 行遍历。理由：零现消费方，预计算表是没有消费者的内核数据（YAGNI），EDG 方法可读承诺不依赖区域。因此 Task 1 不加区域推导访问器；Task 4 文档同步时在 spec 第 1.2 节表注 region_of_nod = 待办已决（不包含，按需后补）。
 
@@ -191,11 +193,11 @@
 - 调用点（切换 = meta_reg_for_var 函数体等价改写为登记表查询，3 个调用点不动）：rl_rule2_func :643（寄存器驻留过滤，须保持 var 级语义：var 有任一已登记条目即驻留）、verify_regalloc_consistency 计数遍 :726 加记录构建遍 :742（逐条目投影）。
 - LOC_HOME_BASE 代码面：常量 :500 加 rl_print_loc :590（分类打印）加 verify home 编码 :744（home 组投影 = LOC_HOME_BASE + ent_home(e)），属于域参数化替换面（kern_set_loc_domain 接 {home_base, reg_domain}）。注：reg_domain 现在没有分组消费点（规则1 组别 = meta 投影并上 ent_home 投影，天然不相交：reg 0..15 与 home ≥ 10⁶），reg_domain 是声明面参数加防相交护栏。
 - emit 面独立实现（已核）：instr.cr get_reg_for_var :34-53 是与 meta_reg_for_var 字节级同构的独立函数（g2_slot :55-73 消费；elf.cr:1309/resolve.cr:36-37 = get_reg_for_var/g2_slot 面）。通道切换不动 emit 面。
-- 计划假设被实证反驳（修正注，Task 2 必须同步）：plan Task 2 写「删掉 meta_reg_for_var，确认 emit 面无引用（instr.cr get_reg_for_var 是独立实现，已核）」，这只核了 emit 面。regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用了 meta_reg_for_var（实例侧读内核函数）。删除或改写时须同步这两处：换成实例侧直读 g_opt_meta 的私有扫描，或经登记表等价读。前者更贴近实例面语义。corec concat 无引用（定义随 concat 编译，未用不报错）。
+- 计划假设被实证反驳（修正注，Task 2 需要同步）：plan Task 2 写“删掉 meta_reg_for_var，确认 emit 面无引用（instr.cr get_reg_for_var 是独立实现，已核）”，这只核了 emit 面。regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用了 meta_reg_for_var（实例侧读内核函数）。删除或改写时须同步这两处：换成实例侧直读 g_opt_meta 的私有扫描，或经登记表等价读。前者更贴近实例面语义。corec concat 无引用（定义随 concat 编译，未用不报错）。
 
 ### 5 中立性 guard 设计（Task 4 前置设计）
 
-- ent_kernel.cr 实例相关符号面（代码级全集）：g_opt_meta/g_opt_meta_count 加 OPT_KEY_REG_ASSIGN/OPT_META_STRIDE（全经 meta_reg_for_var 体，Task 2 切换后清零）加 LOC_HOME_BASE（:500，Task 2 移除）。注释层实例提及（guard 剥注释后不拦，记录在案）：x86/机器侧/regalloc.cr（头注 :4-30）、instr.cr g2_slot/get_reg_for_var（:478/:502）、rl_print_loc x86 寄存器枚举注（:593「3=rbx, 12-15=r12-r15」）、alloc_registers() 前置条件注（:704）。
+- ent_kernel.cr 实例相关符号面（代码级全集）：g_opt_meta/g_opt_meta_count 加 OPT_KEY_REG_ASSIGN/OPT_META_STRIDE（全经 meta_reg_for_var 体，Task 2 切换后清零）加 LOC_HOME_BASE（:500，Task 2 移除）。注释层实例提及（guard 剥注释后不拦，记录在案）：x86/机器侧/regalloc.cr（头注 :4-30）、instr.cr g2_slot/get_reg_for_var（:478/:502）、rl_print_loc x86 寄存器枚举注（:593“3=rbx, 12-15=r12-r15”）、alloc_registers() 前置条件注（:704）。
 - 结构性守卫（现成）：ent_kernel.cr 双 concat 共享（corec concat 没有 regalloc/instr/elf/hit/corearch.cr），因此指向实例独有文件的符号会导致 corec 编译失败。文本 guard 真正防的是共享声明文件里的实例符号（g_opt_meta/opt 常量在 globals.cr/ast.cr，双 concat 都有，结构守卫拦不住，这正是静态 guard 的必要性）。
-- 断言排除集（代码面 token 级）：g_opt_meta、g_opt_meta_count、LOC_HOME_BASE、OPT_KEY_*/OPT_META_STRIDE、E2_REG_SLOT_BASE/E2_*、g_x86_*、寄存器名 token（rbx/r12-r15 等实例枚举名）、ELF 面（ELF/elf_gen 等）。NOD/EDG/ENT/REG 是文件格式语义名，不拦（第 4.3 节例外）。实现注：必须先剥注释（// 与 /* */）再扫 identifier；rl_print_loc 的 x86 注记在注释层，不剥会误报。可选强化：引用标识符与实例独有文件函数定义集的交集为空（结构守卫的文本镜像，成本低）。
+- 断言排除集（代码面 token 级）：g_opt_meta、g_opt_meta_count、LOC_HOME_BASE、OPT_KEY_*/OPT_META_STRIDE、E2_REG_SLOT_BASE/E2_*、g_x86_*、寄存器名 token（rbx/r12-r15 等实例枚举名）、ELF 面（ELF/elf_gen 等）。NOD/EDG/ENT/REG 是文件格式语义名，不拦（第 4.3 节例外）。实现注：需要先剥注释（// 与 /* */）再扫 identifier；rl_print_loc 的 x86 注记在注释层，不剥会误报。可选强化：引用标识符与实例独有文件函数定义集的交集为空（结构守卫的文本镜像，成本低）。
 - 测试文件：tests/selfhost/ 新文件 test_ent_kernel_neutrality.py（纯源码文本扫描，无 build 依赖，与 selfhost 套件同风格入回归面）。guard 设置点是 Task 2 Step 1（评审 Minor 3 修正，与登记表 API 失败测试同批前置写）。现态 meta_reg_for_var 仍在，失败；Task 2 切换后改为通过。若 Task 4 才首写，首跑即通过，失败状态验证丢失，而且坏剥注释或正则空转无法察觉。

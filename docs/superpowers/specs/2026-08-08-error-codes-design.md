@@ -1,5 +1,7 @@
 # 错误码系统重新设计
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 日期：2026-08-08
 状态：已批准（brainstorming 会话，含心理学/人因研究支撑）
 
@@ -17,7 +19,7 @@
 - [Dagstuhl 22052 研讨会](https://drops.dagstuhl.de/storage/04dagstuhl-reports/volume12/issue01/22052/html/DagRep.12.1.119/DagRep.12.1.119.html)：错误消息质量差会严重妨碍新手使用；呈现方式是首要设计问题
 - [可读性四因素](https://dlnext.acm.org/doi/fullHtml/10.1145/3555009.3555032)：消息长度、行话、句子结构、词汇显著影响可读性
 - [标识符研究](https://ieeexplore.ieee.org/document/1631100)：全词优于缩写（约等于全词），缩写优于单字母。类别位的用途是快速固定类别，理解依赖消息内容
-- [颜色不能唯一编码](https://www.nngroup.com/articles/hostile-error-messages/)：必须提供冗余线索；终端主题会重映射 ANSI 颜色
+- [颜色不能唯一编码](https://www.nngroup.com/articles/hostile-error-messages/)：提供冗余线索；终端主题会重映射 ANSI 颜色
 - [Google cosmetic changes](https://research.google/pubs/the-impact-of-cosmetic-changes-on-the-usability-of-error-messages/)：呈现方式改动带来大幅可用性提升
 
 ### 设计原则（brainstorming 定稿）
@@ -108,7 +110,7 @@ note[F00001] loop condition always true (match 100%)
 
 ### 归属原则
 
-- 语法/语义正确性错误归为 Error（编译必须失败）
+- 语法/语义正确性错误归为 Error（编译失败）
 - 设计警告和可运行代码的风格性问题归为 Warning
 - 编译器自身源码现存数百条诊断（`TC02` 等）归为 Warning（否则自举失败）
 - 提示类（未来图分析）归为 Note

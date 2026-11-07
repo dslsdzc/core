@@ -1,6 +1,8 @@
 # match 的决策树编译与统一分支节点
 
-> **v10 实现说明（2026-10-24）**：现行 `.ccr` 是 v10，不是本文写作时的 v9.1。
+> 定位：受众 = 维护者；状态 = superseded；出处 = 本页。
+
+> v10 实现说明（2026-10-24）：现行 `.ccr` 是 v10，不是本文写作时的 v9.1。
 > 多路分支在 v10 中使用 `IR_MATCH`（opcode 54）+ CASE 24B 记录
 > `{value, kind, str_index, target_nod, flags}`；`if`（含作为表达式返回值）、
 > `while`、`for`、`&&`/`||` 及内部条件分派都已走同一节点（`VALUE(0)` +
@@ -25,7 +27,7 @@
 3. 决策树在 corec。`match` 使用 Maranget 的模式矩阵算法生成决策树。测试归一化为整数比较、字段投影和 `str_eq` 调用。corearch 不感知模式种类。
 4. 机器映射在 corearch。case 数为 2 时发 `cmp/jcc`，密集 case 发跳转表，稀疏 case 发二分。阈值和布局只在 corearch。
 5. `.ccr` v9.1。主版本保持 9，header 的 reserved 字段改作 revision，写 1。CASE 段作为 tag 9 追加在 IFACE 之后，存 `int value -> label`。NOD 的 `IR_BRANCH` 存 default label、case 起点和 case 数量。v9.0 文件不再读取。
-6. 语义覆盖。string、char、struct、tuple、ident 模式必须有测试或绑定，不能静默命中。
+6. 语义覆盖。string、char、struct、tuple、ident 模式有测试或绑定，不静默命中。
 7. HDFG 参与。值域剪枝、纯度 body 共享、region 热度分阶段接入，不改变控制流形状。
 
 ## 现状
@@ -69,8 +71,8 @@ char 的运行期值当前是字符驻留字符串的索引。实测 `'A' as int
 
 - `compute_all_purity`：函数和指令级的纯度。
 - `ptr_analysis.cr`：过程间 Andersen 式 points-to，调用结果保守。
-- `region_check.cr`：DEREF 目标必须在活 region 内。
-- `provenance_verify.cr`：DEREF 偏移必须在 allocation size 内。
+- `region_check.cr`：DEREF 目标在活跃 region 内。
+- `provenance_verify.cr`：DEREF 偏移在 allocation size 内。
 - type engine：枚举和 optional 的穷尽性判定。
 
 这些信息可以在 match 编译时使用，但当前 `ir_gen` 没有读取。
@@ -210,25 +212,25 @@ corearch 只看 `IR_BRANCH` 的 case 数量和 value 分布，不看模式种类
 
 | 信息 | 用途 | 阶段 |
 |---|---|---|
-| 常量、`load8`、bool、enum tag 的值域 | 删除不可达 case，缩小跳转表范围 | 决策树落地后 |
+| 常量、`load8`、bool、enum tag 的值域 | 删除不可达 case，缩小跳转表范围 | 决策树实现后 |
 | `compute_all_purity` | 合并相同 body | 纯度计算后的延迟 pass |
-| `SG_LOOP`、`SG_FOR` | 给 corearch 热路径提示，优先跳转表 | 跳转表落地后 |
+| `SG_LOOP`、`SG_FOR` | 给 corearch 热路径提示，优先跳转表 | 跳转表实现后 |
 | points-to 和跨过程摘要 | 推断函数返回值的可能集合 | 后续 |
 | provenance | 不直接参与 match 编译 | 不在本次范围 |
 
-v10 时 HDFG 的 region 信息写在 `.ccr` 的 REG 段；v11 已删除 REG，若后续需要 corearch 热路径提示，必须另设载体（例如 `.coi` 或新的只读段），不能假设 `.ccr` 里仍有 region。
+v10 时 HDFG 的 region 信息写在 `.ccr` 的 REG 段；v11 已删除 REG，若后续需要 corearch 热路径提示，另设载体（例如 `.coi` 或新的只读段），不假设 `.ccr` 里仍有 region。
 
 ## 约束
 
-1. bootstrap desugar 前置。`bootstrap/corec/frontend/desugar.py` 的 `_desugar_match` 当前只支持 Wildcard 和 EnumPattern，其他模式抛 `NotImplementedError`。corec 源码一旦在 `match` 里使用 int、char、string、struct 模式，`build_selfhost_native.py` 的 stage 1 就会失败。实施前必须扩展 bootstrap desugar，覆盖 corec 源码实际用到的模式，或限制 corec 源码只使用 Wildcard 和 EnumPattern。
-2. 编译器源码禁用 `|`、`&` 和 `as`。决策树生成代码也遵守这条限制。
+1. bootstrap desugar 前置。`bootstrap/corec/frontend/desugar.py` 的 `_desugar_match` 当前只支持 Wildcard 和 EnumPattern，其他模式抛 `NotImplementedError`。corec 源码一旦在 `match` 里使用 int、char、string、struct 模式，`build_selfhost_native.py` 的 stage 1 就会失败。实施前扩展 bootstrap desugar，覆盖 corec 源码实际用到的模式，或限制 corec 源码只使用 Wildcard 和 EnumPattern。
+2. 编译器源码不使用 `|`、`&` 和 `as`。决策树生成代码也遵守这条限制。
 3. 自举要求 stage 2 和 stage 3 逐字节相同。stage 1 由 Python bootstrap 构建，可以和新决策树代码不同。
 4. 所有长编译和测试使用 `nice -n 19` 或 `cpulimit -l 10`。
-5. `cir_cache.cr` 必须同步。函数级缓存的记录只有 `op/dest/s1/s2/s3/tk`，不包含 CASE 表。含多路 `IR_BRANCH` 的函数如果命中缓存，恢复后 case 索引会指向空表或别的函数的表。阶段 1 必须扩展缓存记录，保存每个函数的 CASE 区间，或对含多路分支的函数禁用缓存。
+5. `cir_cache.cr` 同步。函数级缓存的记录只有 `op/dest/s1/s2/s3/tk`，不包含 CASE 表。含多路 `IR_BRANCH` 的函数如果命中缓存，恢复后 case 索引会指向空表或别的函数的表。阶段 1 扩展缓存记录，保存每个函数的 CASE 区间，或对含多路分支的函数关闭缓存。
 
 ## 实施清单
 
-阶段 1 和阶段 2 必须同阶段落地。阶段 1 单独切换 `.ccr` 和 corearch 时，`ir_gen` 还在发旧编码，`if` 和 `loop` 会被新后端误读，中间状态不能构建。
+阶段 1 和阶段 2 同阶段实现。阶段 1 单独切换 `.ccr` 和 corearch 时，`ir_gen` 还在发旧编码，`if` 和 `loop` 会被新后端误读，中间状态不能构建。
 
 | 阶段 | 文件 | 改动 | 验收 |
 |---|---|---|---|
@@ -250,7 +252,7 @@ v10 时 HDFG 的 region 信息写在 `.ccr` 的 REG 段；v11 已删除 REG，�
 3. `./build/corec check src/compiler` 返回 0，`error[` 计数为 0。
 4. if、loop、`&&`、`||` 的机器码和阶段 0 逐字节相同，确认二路特化没有回归。
 5. 16 路和 64 路整数 `match` 的基准不低于现有 if 链。64 路由 corearch 的二分实现达到约 6 次比较，corec 只生成一个多路节点。
-6. 合成字符分派基准：0 到 255 的字符值与 40 个 case 的分派，不低于现有线性链；密集 case 在跳转表落地后应明显低于线性链。`src/compiler/lexer.cr` 的改写是后续独立任务，不在本文实施范围。
+6. 合成字符分派基准：0 到 255 的字符值与 40 个 case 的分派，不低于现有线性链；密集 case 在跳转表实现后应明显低于线性链。`src/compiler/lexer.cr` 的改写是后续独立任务，不在本文实施范围。
 7. 编译时间和峰值内存不显著增加。决策树生成的复杂度为 O(n log n)，case 表大小与 arm 数线性相关。
 8. canary：ELF 和 `.ccr` 基准值会变化，更新 `tools/baseline/canary_values.tsv` 并在同一组记录原因。
 9. 语义覆盖：无 `_` 的 int/char/string match 报 `EC_TM_EXHAUST`；optional 裸值和装箱两种形态的结果与现有实现一致；char 的 match 值与当前 `'A' as int` 一致。
@@ -275,6 +277,6 @@ v10 时 HDFG 的 region 信息写在 `.ccr` 的 REG 段；v11 已删除 REG，�
 4. 字面量穷尽性。要求 `_` 或 irrefutable arm；缺少时 checker 报 `EC_TM_EXHAUST`。依据是 Rust 报 non-exhaustive patterns，Haskell 和 OCaml 也要求穷尽，Maranget 的 usefulness 算法把整数和字符串视为无限域。影响 checker，现有 match 需要扫一遍。
 5. 跳转表阈值。初始判定依据是 `s3 >= 8` 且 `max-min+1 <= 2*s3`，之后用 benchmark 调整。依据是 LLVM 的 switch lowering 按 case 密度在跳转表、位测试和二分之间选择。影响 corearch。
 6. 跳转表重定位。表项使用 32 位相对偏移，目标是静态 ELF；不支持 PIE 和动态链接。依据是 LLVM 的 PIC 跳转表普遍使用相对偏移。影响 corearch。
-7. bootstrap desugar 范围。覆盖 corec 源码实际使用的模式，不追求覆盖 parser 支持的全部模式。依据是 stage 0 只需要支持 bootstrap 源码。影响 bootstrap；lexer 重写前必须覆盖 int 和 char。
+7. bootstrap desugar 范围。覆盖 corec 源码实际使用的模式，不追求覆盖 parser 支持的全部模式。依据是 stage 0 只需要支持 bootstrap 源码。影响 bootstrap；lexer 重写前覆盖 int 和 char。
 8. `IR_JUMP`。保留，作为没有 case 的紧凑编码；语义上仍是统一决策节点的特例。依据是 LLVM 和 MIR 都保留无条件跳转 terminator。影响阶段 1 的改动面。
 9. `IR_DYN_DISPATCH`。不并入统一分支节点，保留独立。依据是 dyn 分派属于运行时类型的 vtable 语义，和静态 case 表不同；Rust 的 dyn Trait 也不走 switch。影响后续。

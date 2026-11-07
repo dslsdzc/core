@@ -1,5 +1,7 @@
 # CP-3: plan graph binding Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 plan body 的参数绑定到 channel descriptor，让 runtime 通过绑定表执行 body，而不是手写传 channel handle。
@@ -14,7 +16,7 @@
 
 - 不新增源码语法；plan 仍是旁路文本 artifact。
 - 不做多 channel 绑定、worker body 内 send/recv 全图、默认 lowering 切换；这些留 CP-4。
-- bind 的 body/param/channel 必须越界检查、重复检查；loader 失败返回 `-1`。
+- bind 的 body/param/channel 需要越界检查、重复检查；loader 失败返回 `-1`。
 - runtime 对象继续走 owner region / 全局 plan 表。
 - 长编译/测试用 `nice -n 19`；版本控制只用 `jj`。
 

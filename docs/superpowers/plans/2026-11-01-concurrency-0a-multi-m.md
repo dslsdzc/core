@@ -1,5 +1,7 @@
 # Core 并发 0A：多 M 无锁基础 Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Core 的 `go`/channel 在 2～4 个 M（OS 线程）上正确运行，且运行时**不引入锁**：TLS 保存线程本地状态，per-M run queue 用无锁栈，channel 用 SPSC 环形缓冲 + 单等待槽，arena 元数据按 M 分区并用原子操作。
@@ -13,26 +15,26 @@
 ## Global Constraints
 
 - 0A 只做“多 M 正确”，**不**做 Transfer Analysis、不实现 MOVE/LOAN/SPLIT/FILL/COPY、不实现预算/证书，不声称实现 2026-09-17 模型。
-- **运行时不得引入锁**。只用 TLS、原子 load/store/xchg/CAS/fetch-add、per-M 分区和无锁队列；源语言仍不新增 lock/mutex/atomic/ownership 语法。
+- **运行时不能引入锁**。只用 TLS、原子 load/store/xchg/CAS/fetch-add、per-M 分区和无锁队列；源语言仍不新增 lock/mutex/atomic/ownership 语法。
 - G 固定 `home_m`，不迁移。跨 M 只能 push 到目标 M 的 run queue，不能直接执行或改目标 M 的栈。
 - channel 以 SPSC 为前提：单生产者、单消费者。多生产者/多消费者不在 0A 承诺内（`TODO #2026-09-18-1`）；等待槽只有一个 sender/一个 receiver。
 - 默认仍保持 share-nothing 的设计方向；本阶段不新增跨 G 共享 API。
-- worker 上的 G 始终有 arena；**global bump heap 只由 M0/启动期使用**。若 worker 走到 global heap（current arena < 0），必须 fail-closed（测试断言），不能假装全局堆是线程安全的。
+- worker 上的 G 始终有 arena；**global bump heap 只由 M0/启动期使用**。若 worker 走到 global heap（current arena < 0），需要 fail-closed（测试断言），不能假装全局堆是线程安全的。
 - 不改 `.ccr` 的 transfer/sync 决策面；不把原子/并发策略写进 IR。
 - 版本控制只用 `jj`，不用 `git`。
 - 长编译/长测试用 `nice -n 19`（必要时 `cpulimit -l 10`）。
-- 当前分支必须基于 `feature/region-v2`；`develop` 缺少 per-G arena 绑定和 raw current-arena builtins。
+- 当前分支需要基于 `feature/region-v2`；`develop` 缺少 per-G arena 绑定和 raw current-arena builtins。
 
 ## Review Focus
 
-- run queue 的 ABA/重复入队：同一个 G 不能被 push 两次（Task 2/3 的等待槽 `xchg` 必须保证只有一个 waker）；Treiber stack 的 head 必须带 tag，不能只 CAS 裸指针。
-- channel 空/满与阻塞的丢失唤醒：发布等待槽和重查 head/tail 之间必须有屏障（Task 3）。
+- run queue 的 ABA/重复入队：同一个 G 不能被 push 两次（Task 2/3 的等待槽 `xchg` 需要保证只有一个 waker）；Treiber stack 的 head 需要带 tag，不能只 CAS 裸指针。
+- channel 空/满与阻塞的丢失唤醒：发布等待槽和重查 head/tail 之间需要有屏障（Task 3）。
 - blocking path 不能调用会重新入队的 `sched_yield`：waker 可能已经把 G push 回来，再入队会造成同一个 G 两次入队（Task 3）。
-- waker 在 recheck 窗口认领等待槽后，G 可能还在跑：G 必须走 `sched_schedule` 消费自己的 spurious queue entry；若 G 已 dead，schedule 必须丢弃 `next_g == old_g` 的 dead 条目，不能返回到 dead stack（Task 3/5）。
-- G 退出时在自己栈上 reset 自己的 arena：必须延迟到 home M 的调度器栈上（Task 2）。
+- waker 在 recheck 窗口认领等待槽后，G 可能还在跑：G 需要走 `sched_schedule` 消费自己的 spurious queue entry；若 G 已 dead，schedule 需要丢弃 `next_g == old_g` 的 dead 条目，不能返回到 dead stack（Task 3/5）。
+- G 退出时在自己栈上 reset 自己的 arena：需要延迟到 home M 的调度器栈上（Task 2）。
 - main G 被 worker 抢走：`home_m=0` 且 M0 只 pop 自己的栈（Task 2）。
-- arena 元数据跨 M 写：必须按 M 分区，不能让两个 M 写同一个 free list/counter（Task 4）。
-- `cell_store` 是逐字节写，不是原子 64 位写：共享字段必须用 `rt_atomic_load/store/xchg`（Task 1/3）。
+- arena 元数据跨 M 写：需要按 M 分区，不能让两个 M 写同一个 free list/counter（Task 4）。
+- `cell_store` 是逐字节写，不是原子 64 位写：共享字段需要用 `rt_atomic_load/store/xchg`（Task 1/3）。
 - worker 的 TLS 未在第一次 `alloc` 前建立（Task 1）。
 - worker 栈/TLS 未按 16 字节对齐（Task 5）。
 
@@ -390,7 +392,7 @@ fn g_free(g: string):
     cell_store(g_dead_head_m, hm * 8, g)
 ```
 
-所有跨 M 可见的 `G.status` 读写（`sched_yield`、`sched_schedule`、channel 阻塞/wake、`g_free`）必须用 `rt_atomic_load/store`；`cell_store` 是逐字节循环，不是原子 64 位写。G 的 `next(48)`/`dead_next(96)` 是单写者字段，可以继续用 `cell_store`。
+所有跨 M 可见的 `G.status` 读写（`sched_yield`、`sched_schedule`、channel 阻塞/wake、`g_free`）需要用 `rt_atomic_load/store`；`cell_store` 是逐字节循环，不是原子 64 位写。G 的 `next(48)`/`dead_next(96)` 是单写者字段，可以继续用 `cell_store`。
 
 `sched.cr`：
 
@@ -1077,7 +1079,7 @@ Expected: `corec2 == corec3` IDENTICAL，N06=0。
 bash tools/baseline/canary_check.sh
 ```
 
-若 ELF 因 runtime stub/queue/channel 改变布局而变化：按 `tools/baseline/REBUILD.md` 查明原因，留旧值、写新值，并在报告里说明。不得直接改值表匹配输出。
+若 ELF 因 runtime stub/queue/channel 改变布局而变化：按 `tools/baseline/REBUILD.md` 查明原因，留旧值、写新值，并在报告里说明。不能直接改值表匹配输出。
 
 - [ ] **Step 8: 最终提交**
 

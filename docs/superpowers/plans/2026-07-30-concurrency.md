@@ -1,6 +1,6 @@
 # 并发实现计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：实现 M:N 并发。`go f()` 在独立 arena 上创建 fiber，goroutine 之间通过 channel 传递值副本，在 channel 操作处协作式切换。
 

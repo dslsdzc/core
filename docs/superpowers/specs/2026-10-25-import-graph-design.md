@@ -1,5 +1,7 @@
 # Import Graph Design
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 Implementation record: `docs/superpowers/implementation/2026-10-25-import-graph.md`.
 
 ## Goal

@@ -1,8 +1,8 @@
 # R2 P0（建层）实施计划：类型项表 + 语义包含引擎 + 判定用例表
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-目标：为 R2 建立「类型项层 + 语义包含引擎」的基础，内容包括集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表，以及 `corec selftest-types` 自测通道（checker 零改动、产物零变化）。
+目标：为 R2 建立“类型项层 + 语义包含引擎”的基础，内容包括集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表，以及 `corec selftest-types` 自测通道（checker 零改动、产物零变化）。
 
 架构：本计划新增三个文件，其分工如下：
 
@@ -24,24 +24,24 @@
 ## 全局约束
 
 - 仅用 `jj`：版本控制一律使用 `jj`，`git` 由 hook 机械拦截。
-- 提交必须路径限定（多 agent 共用工作副本）：
+- 提交需要路径限定（多 agent 共用工作副本）：
   `jj commit <本次改动的精确文件...> -m '<中文，前缀 feat:/docs:/test:>'`
-- CPU 限速：所有编译与测试命令必须加 `nice -n 19` 前缀（项目规则第 6 条）。
-- 文件永久不允许还原。不得绕过问题，不得变通，一律做根因修复。
-- P0 零行为改动：`checker.cr`、`ir_gen.cr`、`interp.cr` 与后端、内核文件一行不动；现有程序的编译产物必须 byte-identical（检查见 Task 5）。
+- CPU 限速：所有编译与测试命令需要加 `nice -n 19` 前缀（项目规则第 6 条）。
+- 文件永久保留，不做还原。不能绕过问题，不能变通，一律做根因修复。
+- P0 零行为改动：`checker.cr`、`ir_gen.cr`、`interp.cr` 与后端、内核文件一行不动；现有程序的编译产物需要 byte-identical（检查见 Task 5）。
 - diff 校验规范式样：本机 `jj diff` 默认使用 color-words，输出无 `+` 前缀，因此 `grep '^+'` 始终为空输出，起不到校验作用；本机 `grep` 实为 ugrep。式样如下：
   ```bash
   jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'      # 逐行核新增
   jj diff --git <paths...> | grep -c '^[-]'                             # 期望 0（除计划性替换）
   ```
 - 环境陷阱：noclobber 下用 `>` 覆盖已存在文件会失败，须改用 `>|` 或先删；变量展开不分词。
-- 新文件必须注册三处，否则构建不报错地缺件：
+- 新文件需要注册三处，否则构建不报错地缺件：
   1. `src/compiler/_import.cr`，即 project-mode 解析链。
   2. `build_selfhost_native.py` 的 corec 清单（`corec_files`）。其顺序即行为定义面：置于 `src/compiler/checker.cr` 之后、`ir_gen.cr` 之前。
   3. `tests/selfhost/test_compile.py` 的 `concat_sources()` 清单，位置同上。
   （`corelsp` 与 `corearch` 清单 P0 不加：引擎尚无消费者。）
 - 检查要求：`corec selftest-types` 全 PASS，末行有计数断言，且无 `FAIL` 行；全回归绿；自举 `corec2/corec3` 的 `cmp` 结果为 IDENTICAL，且 N06=0。
-- 附加验证纪律（Task 1 实证教训，2026-09-10）：白盒与压力验证必须限时，禁止 `sleep` 式长等待，改用短超时或直接看日志。同一缺陷最多迭代 2 轮；达到 3 轮以上说明假设错了，须改为最小化失败用例并作 BLOCKED 上报。计划代码同样需要检查：本次 `h - (h/cap)*cap` 的负哈希取模越界即为计划缺陷，由压力测试发现。
+- 附加验证纪律（Task 1 实证教训，2026-09-10）：白盒与压力验证需要限时，不使用 `sleep` 式长等待，改用短超时或直接看日志。同一缺陷最多迭代 2 轮；达到 3 轮以上说明假设错了，须改为最小化失败用例并作 BLOCKED 上报。计划代码同样需要检查：本次 `h - (h/cap)*cap` 的负哈希取模越界即为计划缺陷，由压力测试发现。
 
 ---
 
@@ -68,7 +68,7 @@
 - 新建 `src/compiler/type_terms.cr`
 - 新建 `src/compiler/type_selftest.cr`
 - 修改 `src/compiler/globals.cr`（表全局声明）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
-  （不含 `dyn_arr.cr`：扩容函数放在 `type_terms.cr` 自行实现，理由见「文件结构」表注）
+  （不含 `dyn_arr.cr`：扩容函数放在 `type_terms.cr` 自行实现，理由见“文件结构”表注）
 - 新建 `tests/selfhost/test_type_engine.py`
 
 接口（本任务产出，后续任务依赖，签名不可改）：
@@ -218,8 +218,8 @@ fn grow_tt_index(needed: int):
 
 - [ ] Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）
 
-> Task 1 实施确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）：
-> 1 键 = 五字段全比，哈希不入键，哈希只负责槽位定位。理由：「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数，因此该等式恒假，引擎不报错地退化为「只插不查」（Task 1 实证）。
+> Task 1 实施确认的三条实现约定（Task 2/3/4 需要沿用，勿回退）：
+> 1 键 = 五字段全比，哈希不入键，哈希只负责槽位定位。理由：“存储哈希 == 重算哈希”只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数，因此该等式恒假，引擎不报错地退化为“只插不查”（Task 1 实证）。
 > 2 惰性 memo 用零初值加 ready 位（`g_tt_top_ok` 与 `g_tt_nil_ok`）。理由：全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74` 中 `constant_value` 只对 `Literal` 赋值，其余写 `.quad 0`；见 TODO #2026-09-10-10）。
 > 3 本语言无位异或算子，因此哈希采用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
 
@@ -480,7 +480,7 @@ jj commit src/compiler/type_terms.cr src/compiler/type_engine.cr src/compiler/ty
   build_selfhost_native.py tests/selfhost/test_compile.py tests/selfhost/test_type_engine.py \
   -m 'feat: R2 P0 Task 1：类型项表（DAG + 哈希去重）+ 构造 API + selftest-types 自测通道框架（checker 零改动）'
 ```
-（不含 `dyn_arr.cr`：扩容实现位于 `type_terms.cr`，见「文件结构」表注。）
+（不含 `dyn_arr.cr`：扩容实现位于 `type_terms.cr`，见“文件结构”表注。）
 
 ---
 
@@ -509,7 +509,7 @@ fn tt_is_dnf(i: int) -> int       // 自测辅助：检查项是否已是 DNF �
     total = total + 1; fails = fails + ts_check("norm.union_inter_dist",
         ty_equiv(tt_inter(tt_union(a_int, a_str), a_int), a_int), 1);
 ```
-（`tt_intersect_union_probe()` 是构造 `(int ∪ string) ∩ bool` 的探针函数，Task 2 一并加上；它测的是「∩ 分配到 ∪ 后 DNF 不丢项」。）
+（`tt_intersect_union_probe()` 是构造 `(int ∪ string) ∩ bool` 的探针函数，Task 2 一并加上；它测的是“∩ 分配到 ∪ 后 DNF 不丢项”。）
 
 - [ ] Step 2: 运行确认失败
 
@@ -610,7 +610,7 @@ fn tt_is_product_chain(i: int) -> int:
         return tt_is_product_chain(tt_b(i))
     return tt_is_literal(i)
 ```
-（`tt_is_literal` 已在 Task 3 Step 3 定义，依赖顺序如下：Task 2 实施时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义必须一致。）
+（`tt_is_literal` 已在 Task 3 Step 3 定义，依赖顺序如下：Task 2 实施时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义需要一致。）
 
 - [ ] Step 5: 跑测试确认通过
 
@@ -948,7 +948,7 @@ fn ty_exhaustive(domain: int, patterns: int) -> int:
 2. 用例表加入索引扩容守门（Task 1 实测：5 例 << 初始容量 1024，扩容路径在检查下不可达，只能靠一次性压力程序验证；长期守门须有常规用例）：
    新增自测函数（`type_selftest.cr`）：先把 `g_tt_index` 预置为 8 槽（直接 `grow_tt_index` 前先手动置 `g_tt_index_cap = 0` 再调 `grow_tt_index(2)`，或按实现时可用的最小触发路径），随后构造 ~40 个互异项逼出装填因子守卫扩容 + `tt_reindex` + 同轮重试，最后断言：
    - `tt_count()` 等于期望项数（无重复插入、无丢项）
-   - 一组「扩容前构造的项」在扩容后行号不变（DAG 键跨重建稳定）
+   - 一组“扩容前构造的项”在扩容后行号不变（DAG 键跨重建稳定）
    - 新项插入后 `tt_tag/tt_a` 读回正确
    断言写成 `ts_check("grow.*", …)` 若干例（≥3）。
 
@@ -995,7 +995,7 @@ nice -n 19 python3 tests/bootstrap/test_generics.py
 
 - [ ] Step 2: 零产物变化检查（P0 的关键检查）
 
-P0 前后各构建同一「无新能力程序」样本，产物必须逐字节相同：
+P0 前后各构建同一“无新能力程序”样本，产物需要逐字节相同：
 
 ```bash
 # 在本批第一个任务提交之前的基点捕获基线（若未捕获，用 jj 取父修订重建编译器的做法不可行，
@@ -1035,6 +1035,6 @@ jj commit docs/superpowers/specs/2026-09-10-type-interface-unification-design.md
 
 - spec 覆盖：spec 第 4 节步 1（建层：类型项表 + 引擎 + 查询 API + 用例表；checker 不动）对应 Task 1-4；第 3.2 节判定 API 五函数对应 Task 3（三态）和 Task 4（witness）；第 3.3 节规范化/记忆化/位集合快路径/预算守卫对应 Task 2（规范化）和 Task 3（memo 加预算），位集合快路径不在 P0（属 P3 穷尽性快路径，已在本计划 Task 4 用判定实现穷尽性）；第 8 节用例表分层对应 Task 4；第 9 节 P0 检查对应 Task 5
 - P0 边界守住：checker/ir_gen/后端/解释器零改动（清单仅加三文件）；查询 API（`iface_*`）= P2 的接线面，P0 只出判定 API（`ty_*`）。spec 第 3.2 节与第 2.5 节的分工在计划里明确（`iface_*` 属 P2）
-- 占位符扫描：无 TBD/TODO；Task 2 Step 4 的 `tt_is_dnf` 与 Task 3 Step 4 的 `prod_covered` 给了语义级框架 + 明确要求（实现者补完辅助函数），非「稍后填」
+- 占位符扫描：无 TBD/TODO；Task 2 Step 4 的 `tt_is_dnf` 与 Task 3 Step 4 的 `prod_covered` 给了语义级框架 + 明确要求（实现者补完辅助函数），非“稍后填”
 - 命名一致性：`tt_*`（构造/访问/规范化）、`ty_*`（判定/预算）、`ak_*`/`AK_*`（原子类）、`ts_check`（自测）在四任务间签名一致；`AK_NAMED` 的两处引用（Task 3 Step 3 与 Step 5）语义一致
 - 风险注记：Task 1 的开放寻址索引在扩容时用 `tt_reindex()` 重建（O(n)），实现者须保证 `grow_tt_index` 后 `tt_reindex` 被调用（计划代码已含）；预算用例依赖 `g_ty_steps` 全局。多例连续跑时每例前须 `ty_budget_reset`（用例表已按此写）

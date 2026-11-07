@@ -1,6 +1,6 @@
 # 仓库治理实施计划
 
-> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 定位：受众 = 执行本计划的 agentic worker；状态 = 历史记录；出处 = 本页。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
 目标：实施已批准的仓库治理设计（spec `docs/superpowers/specs/2026-08-09-repo-governance-design.md`），包括本地 jj 保护与签名、hook、develop 集成分支、GitHub 双 ruleset、签名密钥注册和端到端验证。
 
@@ -10,7 +10,7 @@
 
 ## 全局约束
 
-- 版本控制：全面 jj，禁止 git（CLAUDE.md 铁律 #2；任务 3 实施 hook 后自动拦截。本计划内所有"提交"步骤一律用 `jj describe`/`jj git push`，写 `git` 命令即违规）
+- 版本控制：全面 jj，不使用 git（CLAUDE.md 铁律 #2；任务 3 实施 hook 后自动拦截。本计划内所有"提交"步骤一律用 `jj describe`/`jj git push`，写 `git` 命令即违规）
 - 编译限速（铁律 #6）：本计划无长时间编译任务；若验证步骤意外触发构建，加 `cpulimit -l 10` 或 `nice -n 19`
 - ruleset 目标（规格第 3.1 节 M1-M7、第 3.2 节 D1-D11）：main 仅维护者可更新（update 规则 + bypass_actors 不含 Admin）、禁强推、禁删、PR 要求（≥1 审批 + 对话解决 + stale 作废）、签名提交、无管理员绕过、protected tags `release/*`；develop：PR 唯一通道、审批限维护者、merge queue（SQUASH）、CI 状态检查（CI / check、CI / bootstrap-tests、CI / selfhost-tests）、squash only + 自动删分支、核心路径保护（src/compiler/ 与 src/arch/ 下的全部文件）
 - 过渡：两个 ruleset 先设为 `enforcement: evaluate`，验证无干扰后转为 `active`
@@ -164,7 +164,7 @@ jj log -r @ --no-graph -T 'signature.format()'
 - [ ] 步骤 5：验证 hook 在会话内拦截
 
 在 Claude Code 会话中执行 `git status`（作为测试）：
-预期：工具调用被 PreToolUse hook 阻断，反馈显示"铁律 #2：全面使用 jj，禁止 git"。
+预期：工具调用被 PreToolUse hook 阻断，反馈显示"铁律 #2：全面使用 jj，不使用 git"。
 
 ### 任务 4：清理 settings.local.json（移除 git 允许项）
 
@@ -437,7 +437,7 @@ bash tools/gh_setup_ruleset.sh
    - Require status checks：勾选 CI / check、CI / bootstrap-tests、CI / selfhost-tests（若 PR CI 尚未运行则稍后回填）
    - Require merge queue（squash merge、60min 超时）
    - Block force pushes / Restrict deletions
-6. 核对第 3.3 节的机制限制（没有"禁止 PR 指向 main"开关，规则保障已由审批限制实现）
+6. 核对第 3.3 节的机制限制（没有"不允许 PR 指向 main"开关，规则保障已由审批限制实现）
 
 - [ ] 步骤 6：验证 ruleset 已存在
 
@@ -460,7 +460,7 @@ gh api "repos/dslsdzc/core/rulesets" --jq '.[] | {name, enforcement, target}' 2>
 
 - [ ] 步骤 1：网页版注册 Signing key
 
-操作路径（gh 故障期，必须手动）：
+操作路径（gh 故障期，需要手动）：
 1. 打开 GitHub 的 Settings，进入 SSH and GPG keys
 2. 选择 New SSH key，Key type 选 Signing Key（不是 Authentication）
 3. Title 填 `core-signing`；Key 内容填 `cat /home/DslsDZC/.ssh/id_ed25519.pub` 的完整输出

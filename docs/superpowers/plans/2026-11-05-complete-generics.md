@@ -1,5 +1,7 @@
 # Complete Generics Implementation Plan
 
+> 定位：受众 = 维护者；状态 = 已完成；出处 = 本页。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement the design in `docs/superpowers/specs/2026-11-05-complete-generics-design.md`: inferred generic parameters, interface constraints, primitive impls, deterministic solving, monomorphization, exported summaries, and generic `print`/`println`.

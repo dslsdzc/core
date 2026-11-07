@@ -1,5 +1,7 @@
 # 仓库治理与分支保护
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页。
+
 ## 概述
 
 Core 的开发流程按最终形态制定规则，执行按当前规模放宽。治理模型参考 Rust 和 Linux：`main` 是正式版线，任何人包括维护者都不能直接推送。所有改动通过 PR、审查和合入要求进入 `main`。
@@ -22,32 +24,32 @@ Core 的开发流程按最终形态制定规则，执行按当前规模放宽。
 - feature 到 `develop` 走 PR，经过审查、CI 和合入要求。
 - `develop` 到 `main` 只有维护者可以执行。
 - 维护者自己的改动也走 PR。由于 GitHub 不允许作者批准自己的 PR，维护者自己的 PR 使用临时豁免流程。
-- 硬性规则由 hook 执行。`CLAUDE.md` 禁止 `git`，全部使用 `jj`，由 hook 拦截。
+- 硬性规则由 hook 执行。`CLAUDE.md` 要求全部使用 `jj`，不使用 `git`，由 hook 拦截。
 
-机制限制：GitHub 没有原生开关禁止以 `main` 为 base 创建 PR。规则组合和 `CONTRIBUTING` 约定共同实现：PR 一律指向 `develop`，指向 `main` 的 PR 没有维护者批准就无法合入。
+机制限制：GitHub 没有原生开关阻止以 `main` 为 base 创建 PR。规则组合和 `CONTRIBUTING` 约定共同实现：PR 一律指向 `develop`，指向 `main` 的 PR 没有维护者批准就无法合入。
 
 ## main ruleset
 
 | # | 规则 | 配置 |
 |---|---|---|
 | M1 | 推送限定 | 仅 DslsDZC 可以推送或合入 |
-| M2 | 禁止强推 | Block force pushes |
-| M3 | 禁止删除分支 | Block deletions |
-| M4 | 合入要求 | 必须走 PR，required reviewers 仅 DslsDZC，至少 1 个批准 |
+| M2 | 拒绝强推 | Block force pushes |
+| M3 | 拒绝删除分支 | Block deletions |
+| M4 | 合入要求 | 走 PR，required reviewers 仅 DslsDZC，至少 1 个批准 |
 | M5 | 强制签名提交 | Require signed commits，使用 SSH 签名 |
 | M6 | 管理员无绕过 | 规则对管理员同样生效 |
-| M7 | 保护标签 | `release/*` 标签禁止强推和删除 |
+| M7 | 保护标签 | `release/*` 标签拒绝强推和删除 |
 
 ## develop ruleset
 
 | # | 规则 | 配置 |
 |---|---|---|
-| D1 | 禁止直推 | 必须走 PR |
-| D2 | 禁止强推 | Block force pushes |
+| D1 | 拒绝直推 | 走 PR |
+| D2 | 拒绝强推 | Block force pushes |
 | D3 | 强制审阶段 | 1 个批准，required reviewers 仅 DslsDZC |
 | D4 | 过时审阶段作废 | 新提交推送后作废旧批准 |
-| D5 | 对话必须解决 | 合入前解决全部对话 |
-| D6 | 合并前更新分支 | 分支必须是最新的 |
+| D5 | 对话解决 | 合入前解决全部对话 |
+| D6 | 合并前更新分支 | 分支保持最新 |
 | D7 | 核心路径限制 | `src/compiler/` 和 `src/arch/` 的变更需要审阶段 |
 | D8 | merge queue | 要求合并队列，入口是审阶段通过且 PR CI 通过 |
 | D9 | 合并策略 | 只允许 squash merge，自动删除源分支 |
@@ -56,10 +58,10 @@ Core 的开发流程按最终形态制定规则，执行按当前规模放宽。
 
 ## 机制限制
 
-- GitHub 没有原生开关禁止以 `main` 为 base 创建 PR。`M4` 使指向 `main` 的 PR 无法由维护者以外的人合入。
+- GitHub 没有原生开关阻止以 `main` 为 base 创建 PR。`M4` 使指向 `main` 的 PR 无法由维护者以外的人合入。
 - 两个 ruleset 原计划先用 evaluate 模式试运行。免费计划不支持 evaluate，规则直接 active。
 - `merge_queue` 规则在免费计划被 API 拒绝，降级为手动合入。审阶段和 CI 状态检查保留，自动串行合入由人工点击替代。
-- GitHub 禁止作者批准自己的 PR。维护者自己的 PR 合入时，临时禁用对应 ruleset，squash 合并，然后恢复。
+- GitHub 不允许作者批准自己的 PR。维护者自己的 PR 合入时，临时禁用对应 ruleset，squash 合并，然后恢复。
 - 贡献者的审阶段要计入 required approvals，需要 write 权限。fork 贡献者的审阶段不满足要求。
 - `M7` 标签保护和 `D7` 路径限制暂缓，列入后续项。
 
@@ -84,7 +86,7 @@ PR 层 job 在 merge 下也运行。
 
 已知风险：
 
-- `full-bootstrap` 涉及自举 tokenizer 死循环和 1GiB bump heap 峰值，完整层按 TODO 逐个启用。
+- `full-bootstrap` 涉及自举 tokenizer 无限循环和 1GiB bump heap 峰值，完整层按 TODO 逐个启用。
 - `opt-regress` 是 O0 和 O1 回归，预留位置。
 
 ## 本地配置
@@ -140,7 +142,7 @@ gh pr create --base main --fill
 | 文件 | 内容 |
 |---|---|
 | `.github/pull_request_template.md` | 变更描述、测试、语义保留影响、已知限制 |
-| `.github/CONTRIBUTING.md` | fork、PR、审查、queue 流程、禁用 git、构建测试命令、编码约定 |
+| `.github/CONTRIBUTING.md` | fork、PR、审查、queue 流程、不使用 git、构建测试命令、编码约定 |
 | `.github/SECURITY.md` | 漏洞报告路径和响应承诺 |
 | `.github/CODE_OF_CONDUCT.md` | 贡献者行为规范 |
 
