@@ -3759,7 +3759,7 @@ fn gen_expr(node: int) -> int:
         body := ast_b(node)
         range_node := ast_data(node)  // 0 = single, EXPR_RANGE node = range go
         if range_node <= 0:
-            // Single go: emit call to conc_go(@addr(f), arg)
+            // Single go: emit call to conc_go(fn.f, arg)
             // conc_go creates a conc activation on the CP-4 scheduler and returns a channel
             if ast_kind(body) == EXPR_CALL:
                 func_node := ast_a(body)
@@ -4080,19 +4080,6 @@ fn gen_expr(node: int) -> int:
                 name_ni := ast_int_val(name_expr)
                 track_str(name_ni)
                 emit(IR_SECTION, -1, name_ni, 0, 0, 0)
-                return -1
-
-            // @addr(fn): get function address (patched at ELF link time)
-            if str_eq(name, "addr") != 0:
-                fn_expr := ast_a(first_arg)
-                if ast_kind(fn_expr) == EXPR_IDENT:
-                    fn_ni : ., mut = ast_int_val(fn_expr)
-                    ffi := find_func(fn_ni)
-                    if ffi >= 0:
-                        fn_ni = func_link(ffi)
-                    v := new_ir_var("_fnaddr", TI_INT)
-                    emit(IR_FNADDR, v, fn_ni, 0, 0, 0)
-                    return v
                 return -1
 
             // ── 2(a) 视图内建：真直通（零指令、零新变量），同一个 64 位字，只换看法 ──
@@ -5784,12 +5771,16 @@ fn gen_expr(node: int) -> int:
         return -1
 
     if ast_kind(node) == EXPR_FNREF:
-        fi := find_func(ast_int_val(node))
-        if fi < 0:
+        ni := ast_int_val(node)
+        fi := find_func(ni)
+        if fi < 0 && prelude_builtin_return_ti(ni) < 0 && find_so_fn(ni) < 0:
             check_error(EC_N_FUNC, "Undefined function reference", ast_line(node), ast_col(node))
             return -1
+        name_ni := ni
+        if fi >= 0:
+            name_ni = func_link(fi)
         rv := new_ir_var("_fnref", TI_INT)
-        emit(IR_FNADDR, rv, fi_name(fi), 0, 0, 0)
+        emit(IR_FNADDR, rv, name_ni, 0, 0, 0)
         return rv
     if ast_kind(node) == EXPR_LAMBDA || ast_kind(node) == EXPR_COMPOSE:
         fi := ast_int_val(node) - 1

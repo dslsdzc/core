@@ -44,10 +44,6 @@ fn main() -> int:
     if p <= 0:
         return 6
 
-    addr := @addr(main)
-    if addr <= 0:
-        return 7
-
     arr := [x, x + 1, x + 2]
     base := &arr[1]
     next := base + 1

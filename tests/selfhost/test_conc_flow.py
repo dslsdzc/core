@@ -23,7 +23,7 @@ flow fn gen(x: int) -> int:
 fn main() -> int:
     sched_init()
     out := alloc(16 * 8)
-    n := conc_flow_run(@addr(gen), 10, out)
+    n := conc_flow_run(fn.gen, 10, out)
     if n != 2:
         return n
     if cell_load(out, 0) != 11:
@@ -49,7 +49,7 @@ flow fn counter(n: int) -> int:
 fn main() -> int:
     sched_init()
     out := alloc(16 * 8)
-    n := conc_flow_run(@addr(counter), 3, out)
+    n := conc_flow_run(fn.counter, 3, out)
     if n != 3:
         return n
     if cell_load(out, 0) != 0:
@@ -83,13 +83,13 @@ flow fn once(x: int) -> int:
 
 fn drive1(x: int) -> int:
     out := alloc(4096)
-    r := conc_flow_run_token(@addr(endless), 0, out, g_t1)
+    r := conc_flow_run_token(fn.endless, 0, out, g_t1)
     chan_send(g_r1, r)
     return 0
 
 fn drive2(x: int) -> int:
     out := alloc(4096)
-    r := conc_flow_run_token(@addr(once), 0, out, g_t2)
+    r := conc_flow_run_token(fn.once, 0, out, g_t2)
     chan_send(g_r2, r)
     return 0
 
@@ -132,7 +132,7 @@ fn main() -> int:
     sched_init()
     g_ch = chan_make(8, 0)
     out := alloc(64)
-    r := conc_flow_run_timeout(@addr(stuck), 0, out, 20)
+    r := conc_flow_run_timeout(fn.stuck, 0, out, 20)
     if r != CONC_RESULT_TIMEOUT:
         return r
     conc_flow_reset()
@@ -166,7 +166,7 @@ fn main() -> int:
     conc_flow_reset()
     c := go canceler(0)
     out := alloc(8192)
-    r := conc_flow_run(@addr(gen), 0, out)
+    r := conc_flow_run(fn.gen, 0, out)
     if r != CONC_RESULT_CANCELLED:
         return r
     if conc_flow_cancelled() == 0:
@@ -194,7 +194,7 @@ flow fn f(n: int) -> int:
 fn main() -> int:
     sched_init()
     out := alloc(16 * 8)
-    n := conc_flow_run(@addr(f), 6, out)
+    n := conc_flow_run(fn.f, 6, out)
     if n != 3:
         return n
     if cell_load(out, 0) != 0:

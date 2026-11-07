@@ -4857,7 +4857,20 @@ fn infer_call_args(first_arg: int):
         if an < 0:
             break
         anode := ast_a(an)
-        infer_expr(anode)
+        // A subgraph reference is the value form of `fn.name`. It is allowed
+        // in call-argument position so runtime/FFI boundaries can receive the
+        // reference; ir_gen lowers it to IR_FNADDR. Other value positions are
+        // still rejected by infer_expr.
+        if ast_kind(anode) == EXPR_FNREF:
+            fni := ast_int_val(anode)
+            fi := find_func(fni)
+            if fi < 0:
+                if prelude_builtin_return_ti(fni) < 0 && find_so_fn(fni) < 0:
+                    check_error(EC_N_FUNC, "Undefined function reference", ast_line(anode), ast_col(anode))
+            else if fn_sig_of_func(fi) < 0:
+                check_error(EC_TF_ARG_TYPE, "Only non-generic functions can be passed as subgraph references", ast_line(anode), ast_col(anode))
+        else:
+            infer_expr(anode)
         // fail-closed 护栏：实参位的调用若是 EXPR_FIELD，且 ast_data 仍为 0，说明被调名
         // 从未回填。ir_gen 会读出错误函数名，后端按名解析失败后触发外部位重定向并崩溃。
         // 此处报错并终止编译，由 check_all 之后的 fail-closed 检查阻断，不产生错误产物。
@@ -6751,11 +6764,6 @@ fn infer_expr(node: int) -> int:
             if ti < 0:
                 check_error(EC_N_UNDEFINED, "@sizeOf: unknown type", ast_line(node), ast_col(node))
                 return ti_error()
-            return TI_INT
-
-        // @addr(fn) — function address, type int
-        if str_eq(name, "addr") != 0:
-            ast_set_type_val(node, TI_INT)  // function address is an int
             return TI_INT
 
         // @alignOf(T) — 1 type argument

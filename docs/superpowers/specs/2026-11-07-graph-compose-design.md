@@ -37,8 +37,9 @@ g : fn(B) -> C
 - The value is materialized with `IR_FNADDR` into a local variable of the graph
   alias. Calls are still rewritten to direct calls to the hidden/original
   function, so no indirect-call ABI is needed.
-- `@addr(fn)` remains a raw `int` and is not interchangeable with a function
-  type.
+- The language has no address expression. A subgraph reference is lowered to
+  `IR_FNADDR` at runtime/FFI boundaries; `fn.name` is a function type and is
+  not interchangeable with `int`.
 
 ## Restrictions (v1)
 

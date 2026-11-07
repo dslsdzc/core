@@ -787,6 +787,17 @@ class Parser:
         return node
 
     def parse_primary(self) -> Expr:
+        if self.check(TokenType.FN):
+            # `fn.name` is a subgraph reference in the self-hosted frontend.
+            # The Python bootstrap only needs to consume compiler/runtime source
+            # that passes such a reference to a runtime ABI call, so lower it to
+            # the existing internal address builtin here.
+            self.advance()
+            if self.check(TokenType.DOT):
+                self.advance()
+                name = self.expect(TokenType.IDENT).lexeme
+                return Builtin("addr", [Ident(name)])
+            self.error("Unexpected 'fn' in expression")
         if self.check(TokenType.AT):
             # 三种形态（按下一 token 判，互不吞并）：
             #   `@name(args)` / `@name`  → 内建（Builtin；2(a) 视图内建阶段新增）

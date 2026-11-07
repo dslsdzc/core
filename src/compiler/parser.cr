@@ -1247,7 +1247,7 @@ fn skip_nested_fn():
 //   @preferredDomain(gpu), @executionDomain(name)
 //   @NoBoundsCheck
 //   @fast, @unroll(4), @section("text.hot")
-// Query annotations, @addr, and @inline are not included because they appear in
+// Query annotations and @inline are not included because they appear in
 // expression position. Unknown names are not consumed here; they stay expressions
 // and the checker rejects them.
 // The list is based on documented and tested usage, not chapter numbers. Do not
@@ -2281,7 +2281,7 @@ fn parse_declaration():
     //   @preferredDomain(gpu) before fn
     //   @executionDomain(fpgaA) before flow
     // Any other name reports V02 here. A typo such as @hotpach must not be silently
-    // dropped. @inline, @section, @fast, @NoBoundsCheck, @addr, and @sizeOf are
+    // dropped. @inline, @section, @fast, @NoBoundsCheck, and @sizeOf are
     // expression or statement annotations and do not belong in this position.
     loop:
         if !check(T_AT):

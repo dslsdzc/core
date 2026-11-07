@@ -198,10 +198,10 @@ fn conc_preempt_signal():
 // handler outlives this call.
 fn _conc_preempt_install():
     act := _conc_sched_alloc(32)
-    cell_store(act, 0, @addr(conc_preempt_signal))
+    cell_store(act, 0, fn.conc_preempt_signal)
     // SA_RESTART | SA_RESTORER
     cell_store(act, 8, 335544320)
-    cell_store(act, 16, @addr(rt_sigreturn_stub))
+    cell_store(act, 16, fn.rt_sigreturn_stub)
     cell_store(act, 24, 0)
     r := syscall4(13, 14, _conc_addr(act), 0, 8)
 
@@ -1510,7 +1510,7 @@ fn conc_schedule() -> int, pub:
                     cell_store(a, 8, CONC_ACT_DEAD)
                     _conc_free_push(id)
                     continue
-                sp := fiber_init(stack + CONC_SCHED_STACK - 8, @addr(_conc_activation_entry))
+                sp := fiber_init(stack + CONC_SCHED_STACK - 8, fn._conc_activation_entry)
                 cell_store(a, 16, sp)
                 cell_store(a, 24, stack)
                 cell_store(a, 64, aidp)
@@ -2344,7 +2344,7 @@ fn conc_plan_run_timeout(plan: int, root: int, channels: string,
     arg : ., mut = 0
     unsafe:
         arg = @ptr_of(ctx)
-    h := conc_spawn(@addr(_conc_plan_timeout_entry), arg, "")
+    h := conc_spawn(fn._conc_plan_timeout_entry, arg, "")
     if h < 0:
         return -1
     deadline := _conc_now_ms() + timeout_ms

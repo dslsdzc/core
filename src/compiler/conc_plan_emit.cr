@@ -106,7 +106,7 @@ fn _conc_emit_const_before(var: int, call_ii: int, func_start: int) -> int:
         k = k + 1
     return CONC_EMIT_UNKNOWN
 
-// Resolve the function-name index of the `@addr(f)` argument used by
+// Resolve the function-name index of the `fn.f` argument used by
 // sched_go. Same unique-definition discipline as _conc_emit_const_before.
 fn _conc_emit_fnaddr_before(var: int, call_ii: int, func_start: int) -> int:
     v : ., mut = var

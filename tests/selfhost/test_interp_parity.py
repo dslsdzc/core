@@ -231,14 +231,7 @@ CASES = [
         "return putchar(65)",
         "loud", 2, SIGSEGV,
     ),
-    # —— 48 FNADDR / 51 IR_APPROX ——
-    (
-        # 解释器无真实地址（FNADDR 恒 0）——显式近似：只断言 callee ≡ main
-        "fnaddr_callee_approx",
-        "fn square(x: int) -> int:\n    return x * x\n",
-        "p := @addr(square)\nif p == 0:\n    return 1\nreturn 0\n",
-        "approx", 1, 0,
-    ),
+    # —— 51 IR_APPROX ——
     (
         # IR_APPROX (51)：apx 标注（`apx dex` 不是合法语法——真形式是 `dex, apx`
         # 标签）。先前写成 `d : apx dex = 2.0` 时 checker 发 N01/TA01、IR_APPROX
@@ -286,7 +279,6 @@ EXPECT_OPS = {
     "yield_in_callee": {"yield"},
     "await_in_callee": {"await"},
     "extern_call_callee_loud": {"call_extern"},
-    "fnaddr_callee_approx": {"fnaddr"},
     "approx_apx_dex_callee": {"approx"},
 }
 

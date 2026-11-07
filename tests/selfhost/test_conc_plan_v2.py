@@ -20,7 +20,7 @@ fn square(x: int) -> int:
 
 fn main() -> int:
     tbl := alloc(8)
-    cell_store(tbl, 0, @addr(square))
+    cell_store(tbl, 0, fn.square)
     text := "v 2\\nentries 1\\ntarget cpu 2 1\\nslot 0 THREAD -1 2\\nslot 1 FIBER 0 4\\nlayout 0 16 4660\\nspace 0 DEVICE 1048576\\nbody 0 PAR 0 16\\nchannel 0 8 0 MPMC\\nrange 0 0 16\\nxfer 0 MOVE 0 0 16 0 0\\ntransfer 0 MOVE 0 0 16\\nbudget 0 COUNT 100 PROVED\\ncert 0 1 UNKNOWN\\n"
     plan := conc_plan_load(text, tbl)
     if plan < 0:
@@ -198,7 +198,7 @@ fn pipe_stage(ch: string) -> int:
 
 fn main() -> int:
     tbl := alloc(8)
-    cell_store(tbl, 0, @addr(stage))
+    cell_store(tbl, 0, fn.stage)
     plan := conc_plan_load("v 2\\nentries 1\\nbody 0 PIPE 0 0\\n", tbl)
     if plan < 0:
         return 1
@@ -207,7 +207,7 @@ fn main() -> int:
     if conc_run_body(plan, 0, "") != 7:
         return 3
     tbl2 := alloc(8)
-    cell_store(tbl2, 0, @addr(pipe_stage))
+    cell_store(tbl2, 0, fn.pipe_stage)
     p2 := conc_plan_load("v 2\\nentries 1\\nbody 0 PIPE 0 1\\nstage 0 0 -1 -1 BLOCKING\\n", tbl2)
     if p2 < 0:
         return 4
@@ -242,15 +242,15 @@ fn main() -> int:
         return 2
     if conc_plan_add_channel(p, 8, 4, CONC_PC_MPMC) != 0:
         return 3
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 0) != 0:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.producer, 0) != 0:
         return 4
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 1) != 1:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.producer, 1) != 1:
         return 5
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(producer), 1) != 2:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.producer, 1) != 2:
         return 6
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(consumer), 1) != 3:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.consumer, 1) != 3:
         return 7
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(consumer), 1) != 4:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.consumer, 1) != 4:
         return 8
     if conc_plan_bind_param(p, 1, 0, 0) < 0:
         return 9
@@ -313,11 +313,11 @@ fn main() -> int:
         if conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC) != i:
             return 3
         i = i + 1
-    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s1), 1) != 0:
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.s1, 1) != 0:
         return 4
-    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s2), 1) != 1:
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.s2, 1) != 1:
         return 5
-    if conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(s3), 1) != 2:
+    if conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.s3, 1) != 2:
         return 6
     if conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED) != 0:
         return 7
@@ -402,7 +402,7 @@ fn main() -> int:
     p := conc_plan_new()
     if conc_plan_set_version(p, 2) != 0:
         return 1
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(seven), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.seven, 1)
     if conc_plan_validate(p) != 1:
         return 2
     cht := alloc(8)
@@ -432,8 +432,8 @@ fn main() -> int:
     if conc_plan_set_version(p, 2) != 0:
         return 1
     conc_plan_add_channel(p, 8, 0, CONC_PC_MPMC)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(wait), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.dummy, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.wait, 1)
     conc_plan_bind_param(p, 1, 0, 0)
     conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
     if conc_plan_validate(p) != 1:
@@ -464,7 +464,7 @@ fn main() -> int:
         return 1
     conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC)
     conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC)
-    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.stage, 1)
     conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED)
     if conc_plan_validate(p) != 1:
         return 2
@@ -516,9 +516,9 @@ fn main() -> int:
         if conc_plan_add_channel(p, 8, 1, CONC_PC_SPSC) != i:
             return 3
         i = i + 1
-    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
-    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
-    conc_plan_add_body(p, CONC_BODY_PIPELINE, @addr(stage), 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.stage, 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.stage, 1)
+    conc_plan_add_body(p, CONC_BODY_PIPELINE, fn.stage, 1)
     conc_plan_add_stage(p, 0, 0, 1, CONC_STAGE_BOUNDED)
     conc_plan_add_stage(p, 1, 1, 2, CONC_STAGE_BOUNDED)
     conc_plan_add_stage(p, 2, 2, 3, CONC_STAGE_BOUNDED)
@@ -564,10 +564,10 @@ fn main() -> int:
     p := conc_plan_new()
     if conc_plan_set_version(p, 2) != 0:
         return 1
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage1), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage2), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage3), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(stage1), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.stage1, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.stage2, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.stage3, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.stage1, 1)
     conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
     conc_plan_add_edge(p, 1, 2, CONC_EDGE_SPAWN)
     conc_plan_add_edge(p, 2, 3, CONC_EDGE_SPAWN)
@@ -604,9 +604,9 @@ fn main() -> int:
     p := conc_plan_new()
     if conc_plan_set_version(p, 2) != 0:
         return 1
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(first), 1)
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(second), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.dummy, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.first, 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.second, 1)
     conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
     conc_plan_add_edge(p, 1, 2, CONC_EDGE_JOIN)
     if conc_plan_validate(p) != 1:
@@ -635,8 +635,8 @@ fn main() -> int:
     p := conc_plan_new()
     if conc_plan_set_version(p, 2) != 0:
         return 1
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(dummy), 1)
-    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(square), 4)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.dummy, 1)
+    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, fn.square, 4)
     if conc_plan_add_range(p, 1, 0, 4) != 0:
         return 2
     conc_plan_add_edge(p, 0, 1, CONC_EDGE_SPAWN)
@@ -679,7 +679,7 @@ fn main() -> int:
     if conc_target_profile_scheduling(prof) != 1:
         return 9
     tbl := alloc(8)
-    cell_store(tbl, 0, @addr(worker))
+    cell_store(tbl, 0, fn.worker)
     plan_text := "v 2\\nentries 1\\ntarget cpu 2 1\\nslot 0 THREAD -1 2\\nslot 1 FIBER 0 4\\nspace 0 DEVICE 1048576\\nbody 0 TASK 0 0\\nxfer 0 MOVE 0 0 16 0 0\\n"
     plan := conc_plan_load(plan_text, tbl)
     if plan < 0:
@@ -741,7 +741,7 @@ fn worker(x: int) -> int:
 fn main() -> int:
     sched_init()
     tbl := alloc(8)
-    cell_store(tbl, 0, @addr(worker))
+    cell_store(tbl, 0, fn.worker)
     text := "v 2\\nentries 1\\nbody 0 TASK 0 1\\nbudget 0 WAIT 0 UNKNOWN\\n"
     plan := conc_plan_load(text, tbl)
     if plan < 0:
@@ -771,8 +771,8 @@ fn f1() -> int:
 fn main() -> int:
     sched_init()
     tbl := alloc(16)
-    cell_store(tbl, 0, @addr(f0))
-    cell_store(tbl, 8, @addr(f1))
+    cell_store(tbl, 0, fn.f0)
+    cell_store(tbl, 8, fn.f1)
     text := "v 2\\nentries 2\\nbody 0 TASK 0 0\\nbody 1 TASK 1 0\\n"
     plan := conc_plan_load(text, tbl)
     if plan < 0:
@@ -852,8 +852,8 @@ fn square(x: int) -> int:
     return x * x
 fn main() -> int:
     tbl := alloc(16)
-    cell_store(tbl, 0, @addr(square))
-    cell_store(tbl, 8, @addr(square))
+    cell_store(tbl, 0, fn.square)
+    cell_store(tbl, 8, fn.square)
     plan := conc_plan_load("{escaped}", tbl)
     if plan < 0:
         return 1
@@ -936,8 +936,8 @@ fn stage(ch: string) -> int:
 fn main() -> int:
     sched_init()
     tbl := alloc(16)
-    cell_store(tbl, 0, @addr(stage))
-    cell_store(tbl, 8, @addr(stage))
+    cell_store(tbl, 0, fn.stage)
+    cell_store(tbl, 8, fn.stage)
     plan := conc_plan_load("{escaped}", tbl)
     if plan < 0:
         return 1

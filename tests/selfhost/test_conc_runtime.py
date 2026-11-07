@@ -281,7 +281,7 @@ fn main() -> int:
     req := conc_channel_new(r, 8, 1)
     g_out = conc_channel_new(r, 8, 1)
     p := conc_plan_new()
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(worker), 1)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.worker, 1)
     v := conc_alloc(r, 8)
     cell_store(v, 0, 41)
     conc_send(req, v)
@@ -307,7 +307,7 @@ fn zero() -> int:
 
 fn main() -> int:
     p := conc_plan_new()
-    conc_plan_add_body(p, CONC_BODY_TASK, @addr(zero), 0)
+    conc_plan_add_body(p, CONC_BODY_TASK, fn.zero, 0)
     if conc_run_host(p, "") != 0:
         return 1
     if g_hit != 1:
@@ -328,7 +328,7 @@ fn main() -> int:
     r := conc_region_new(65536)
     g_arr = conc_alloc(r, 8 * 16)
     p := conc_plan_new()
-    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, @addr(par), 16)
+    conc_plan_add_body(p, CONC_BODY_DATA_PARALLEL, fn.par, 16)
     if conc_run_host(p, "") != 0:
         return 1
     i : ., mut = 0
@@ -451,7 +451,7 @@ fn main() -> int:
     p := conc_plan_new()
     if conc_plan_add_body(p, 99, 0, 0) != -1:
         return 4
-    if conc_plan_add_body(p, CONC_BODY_TASK, @addr(task), 1) != 0:
+    if conc_plan_add_body(p, CONC_BODY_TASK, fn.task, 1) != 0:
         return 5
     if conc_run_lanes(p, 0, 1) != -1:
         return 6
