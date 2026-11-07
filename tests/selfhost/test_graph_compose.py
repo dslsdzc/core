@@ -224,6 +224,14 @@ fn main() -> int:
     f : fn(int) -> int = @addr(square)
     return 0
 """, "Function type annotation requires"))
+    # Graph references must obey library visibility: fpow2i is a private stdlib
+    # helper, so `fn.fpow2i` must not resolve even though the function-table
+    # fallback can find it by name.
+    ok.append(check_rejected("private_function_ref", """\
+fn main() -> int:
+    f := fn.fpow2i
+    return f(1)
+""", "Undefined function 'fpow2i'"))
     passed = sum(1 for x in ok if x)
     print(f"{passed}/{len(ok)} passed")
     return 0 if passed == len(ok) else 1

@@ -197,9 +197,9 @@ fn parse_type() -> int:
         // Function/graph signature: fn(T, ...) -> R. The return type is parsed
         // recursively, so `fn(int) -> fn(int) -> int` is right-associative.
         advance_tok()
-        first := -1
-        prev := -1
-        pc := 0
+        first : ., mut = -1
+        prev : ., mut = -1
+        pc : ., mut = 0
         if !check(T_LPAREN):
             check_error(EC_P_EXPECTED, "expected '(' after 'fn' in function type", line, col)
             return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
@@ -608,8 +608,8 @@ fn parse_fn_value() -> int:
         add_error("expected '.' or '(' after 'fn' in expression")
         return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
     advance_tok() // (
-    first := -1
-    pc := 0
+    first : ., mut = -1
+    pc : ., mut = 0
     if !check(T_RPAREN):
         loop:
             pt := cur_tok()
@@ -618,7 +618,7 @@ fn parse_fn_value() -> int:
                 break
             advance_tok()
             pni := str_intern(tok_lx(pt))
-            typ := -1
+            typ : ., mut = -1
             if check(T_COLON_DECL):
                 advance_tok()
                 typ = parse_type()
@@ -630,8 +630,8 @@ fn parse_fn_value() -> int:
                 break
             advance_tok()
     advance_tok() // )
-    body := -1
-    ret_node := -1
+    body : ., mut = -1
+    ret_node : ., mut = -1
     if check(T_FATARROW):
         advance_tok()
         want := g_want_value

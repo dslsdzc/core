@@ -247,7 +247,7 @@ fn fn_sig_of_func(func_ni: int) -> int:
         return -1
     params := alloc((pc + 1) * 8)
     pi : ., mut = 0
-    pn := ast_b(fn_node)
+    pn : ., mut = ast_b(fn_node)
     loop:
         if pi >= pc || pn < 0:
             break
@@ -1438,6 +1438,26 @@ fn graph_ret_code(ti: int) -> int:
         return get_type_data(ti)
     return 0
 
+// Compiler-generated graph functions are the only call targets allowed to
+// resolve through the function-table fallback when their scope symbol is gone.
+// User-visible names can never contain '$', so the prefix is unambiguous.
+fn is_graph_hidden_name(name: string) -> bool:
+    if str_len(name) < 8:
+        return false
+    return str_eq(str_sub(name, 0, 8), "__graph$") != 0
+
+// A graph reference may resolve through the function table only when the name
+// is a visible declaration or a compiler-generated hidden graph function.
+// `find_func` has a link-name fallback that intentionally ignores source
+// visibility; graph syntax must not use that fallback for user names.
+fn graph_func_resolvable(name_ni: int) -> bool:
+    si := find_gsym(name_ni)
+    if si >= 0 && sym_kind(si) == SYM_FN:
+        return true
+    if is_graph_hidden_name(istr_get(name_ni)):
+        return find_func(name_ni) >= 0
+    return false
+
 // Create a hidden top-level function for a lambda or a composition. It is a
 // normal direct-call target; no runtime function value is produced.
 fn make_graph_func(prefix: string, param_names: string, param_tis: string, pc: int, ret_ti: int, body: int, src: int) -> int:
@@ -1492,7 +1512,7 @@ fn resolve_graph_func(node: int, expected_ti: int, src: int) -> int:
     if k == EXPR_FNREF:
         name_ni := ast_int_val(node)
         fi := find_func(name_ni)
-        if fi < 0:
+        if fi < 0 || !graph_func_resolvable(name_ni):
             check_error(EC_N_FUNC, "Undefined function '" + istr_get(name_ni) + "'", ast_line(src), ast_col(src))
             return -1
         sig := fn_sig_of_func(fi)
@@ -1516,7 +1536,7 @@ fn resolve_graph_func(node: int, expected_ti: int, src: int) -> int:
                 return fi
         if si >= 0 && sym_kind(si) == SYM_FN:
             fi := find_func(name_ni)
-            if fi >= 0:
+            if fi >= 0 && graph_func_resolvable(name_ni):
                 sig := fn_sig_of_func(fi)
                 if sig >= 0:
                     if expected_ti >= 0 && !graph_type_equal(sig, expected_ti):
@@ -1583,8 +1603,8 @@ fn make_lambda_func(node: int, expected_ti: int, src: int) -> int:
     names := alloc((pc + 1) * 8)
     tis := alloc((pc + 1) * 8)
     pi : ., mut = 0
-    pn := first
-    exp_pc := -1
+    pn : ., mut = first
+    exp_pc : ., mut = -1
     if expected_ti >= 0 && is_fn_ti(expected_ti):
         exp_pc = fn_sig_param_count(expected_ti)
     loop:
@@ -1612,7 +1632,7 @@ fn make_lambda_func(node: int, expected_ti: int, src: int) -> int:
         check_error(EC_TF_ARG_TYPE, "Malformed lambda parameter list", ast_line(src), ast_col(src))
         return -1
     ret_ti : ., mut = TI_UNIT
-    block_body := -1
+    block_body : ., mut = -1
     if ret_node >= 0:
         ret_ti = res_type_node(ret_node)
         if ast_kind(body) == EXPR_BLOCK:
@@ -1666,7 +1686,7 @@ fn res_fn_type_node(node: int, func_fi: int) -> int:
     ret_node := ast_c(node)
     params := alloc((pc + 1) * 8)
     i : ., mut = 0
-    cur := ast_a(node)
+    cur : ., mut = ast_a(node)
     loop:
         if i >= pc || cur < 0:
             break
@@ -5270,7 +5290,7 @@ fn infer_expr(node: int) -> int:
         return infer_expr(ast_a(node))
 
     if ast_kind(node) == EXPR_CALL:
-        func_node := ast_a(node)
+        func_node : ., mut = ast_a(node)
         first_arg := ast_b(node)
         arg_count := ast_c(node)
         func_ni : ., mut = -1
@@ -5651,7 +5671,7 @@ fn infer_expr(node: int) -> int:
             // been popped by the time another hidden body is checked. Fall back
             // to the function table before reporting an undefined function.
             hfi := find_func(func_ni)
-            if hfi >= 0 && fi_generic_count(hfi) == 0:
+            if hfi >= 0 && fi_generic_count(hfi) == 0 && is_graph_hidden_name(istr_get(func_ni)):
                 infer_call_args(first_arg)
                 hret : ., mut = -2
                 if hfi < g_func_ret_count:
@@ -6049,7 +6069,7 @@ fn infer_expr(node: int) -> int:
             ann_ti = res_type_node(type_node)
             if is_fn_ti(ann_ti):
                 annot_fn = 1
-        val_k := -1
+        val_k : ., mut = -1
         if val_node >= 0:
             val_k = ast_kind(val_node)
         graph_expr : ., mut = 0
@@ -6069,7 +6089,7 @@ fn infer_expr(node: int) -> int:
             if ast_data(node) != 0:
                 check_error(EC_TF_ARG_TYPE, "Function alias cannot be mutable", ast_line(node), ast_col(node))
                 return TI_UNIT
-            expected := -1
+            expected : ., mut = -1
             if annot_fn != 0:
                 expected = ann_ti
             fi := resolve_graph_func(val_node, expected, val_node)

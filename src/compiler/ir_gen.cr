@@ -5619,7 +5619,7 @@ fn gen_expr(node: int) -> int:
         if ast_type_val(node) == LET_FLAG_FN_ALIAS:
             var := new_ir_var(istr_get(var_ni), TI_INT)
             if val_node >= 0:
-                vv := gen_expr(val_node)
+                vv : ., mut = gen_expr(val_node)
                 vv = force_if_thunk(vv)
                 if vv >= 0:
                     emit(IR_STORE, -1, var, vv, 0, 0)
