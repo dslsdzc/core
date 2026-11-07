@@ -1,3 +1,4 @@
+// === conc_plan_emit.cr ===
 // CP-2 restricted concurrency-plan emitter.
 //
 // Recognizes one vertical slice: exactly one `go`/`conc_go` in `main`, with
@@ -151,6 +152,9 @@ fn _conc_emit_fnaddr_before(var: int, call_ii: int, func_start: int) -> int:
         k = k + 1
     return -1
 
+// Classify a call argument against the spawn target's parameter variable.
+// Returns 1 when the argument resolves to that parameter through stores,
+// 2 when the resolution chain exceeds 8 steps, and 0 otherwise.
 fn _conc_emit_uses_param(arg: int, param_var: int, call_ii: int, func_start: int) -> int:
     if arg == param_var:
         return 1
@@ -195,6 +199,9 @@ fn _conc_emit_uses_param(arg: int, param_var: int, call_ii: int, func_start: int
         k = k + 1
     return 0
 
+// Find the store that binds a chan_make result to its handle. The store must
+// follow the call and precede the next call or 8 instructions; returns the
+// instruction index, or -1 when the handle cannot be identified.
 fn _conc_emit_handle_after(call_ii: int, end: int) -> int:
     j : ., mut = call_ii + 1
     k : ., mut = 0
@@ -212,6 +219,9 @@ fn _conc_emit_handle_after(call_ii: int, end: int) -> int:
         k = k + 1
     return -1
 
+// Locate the single non-alloc definition of `var` before `call_ii` and reject
+// references taken from it or definitions inside a nested region. Returns the
+// defining instruction index, or -1 when the definition is not unique.
 fn _conc_emit_unique_def(var: int, call_ii: int, func_start: int) -> int:
     i : ., mut = func_start
     defs : ., mut = 0
@@ -239,6 +249,9 @@ fn _conc_emit_unique_def(var: int, call_ii: int, func_start: int) -> int:
         return -1
     return def_at
 
+// Resolve a spawn argument to an index in cvars/cstores by following stores
+// back to a chan_make handle. The handle's unique definition must equal the
+// store recorded for that channel; returns the channel index or -1.
 fn _conc_emit_arg_channel(var: int, call_ii: int, func_start: int, cvars: string, cstores: string, nchan: int) -> int:
     v : ., mut = var
     limit : ., mut = call_ii
@@ -294,6 +307,9 @@ fn _conc_emit_error(msg: string) -> int:
     println(msg)
     return 1
 
+// Emit a target-neutral concurrency plan for the restricted slice recognized
+// in `main`. Fails closed: any unsupported shape returns 1 without an artifact,
+// so a plan exists only when every check passes.
 fn conc_plan_emit_write(path: string) -> int:
     _conc_emit_remove(path)
 
@@ -382,6 +398,9 @@ fn conc_plan_emit_write(path: string) -> int:
             return _conc_emit_error("cannot find range target function")
         if cell_load(g_ir_func_param_count, target_fi * 8) != 1:
             return _conc_emit_error("range target must take one int parameter")
+        // Range-go plan: body/target/slot records describe one parallel body
+        // over [range_start, range_start + range_count), followed by budget,
+        // obligation, cert, and edge records.
         out2 : ., mut = "v 2\n"
         out2 = out2 + "entries 2\n"
         out2 = out2 + "body 0 TASK 0 0\n"
@@ -465,6 +484,8 @@ fn conc_plan_emit_write(path: string) -> int:
             pipe_mode = 1
             break
         pi = pi + 1
+    // A spawning worker that yields is a pipeline stage (v 2, PIPE body); one
+    // without IR_YIELD is a single task (v 1, TASK body).
     out : ., mut = "v 1\n"
     if pipe_mode != 0:
         out = "v 2\n"

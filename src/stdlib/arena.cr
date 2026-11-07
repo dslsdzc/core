@@ -91,6 +91,8 @@ g_alloc_home_idx : int, mut = 0
 
 // Shared scalar cells. Both the allocator stub and the library see raw machine
 // words; the getter uses load64 and the setter uses cell_store.
+// Read a raw scalar cell. Only offsets 0 through 40 are valid; any other offset
+// reads 0.
 fn arena_scalar_get(off: int) -> int:
     // load64 keeps the access raw: cell_load converts the offset through the
     // big-int runtime, which can allocate and re-enter the arena.
@@ -108,6 +110,7 @@ fn arena_scalar_get(off: int) -> int:
         return load64(g_arena_scalars, 40)
     return 0
 
+// Write a raw scalar cell. Unknown offsets are ignored.
 fn arena_scalar_set(off: int, val: int):
     if off == 0:
         cell_store(g_arena_scalars, 0, val)
@@ -141,6 +144,9 @@ fn arena_set_current(val: int):
 fn arena_set_zero_on_reset(v: int), pub:
     g_arena_zero_on_reset = v
 
+// Zero the used prefix of each slot in ai's chain when zero-on-reset is
+// enabled. The current slot uses the live cursor; older slots are treated as
+// fully used 1 MiB segments.
 fn _arena_zero_reset_slots(ai: int):
     if g_arena_zero_on_reset == 0:
         return
@@ -175,6 +181,9 @@ fn arena_current_unchecked() -> int, pub:
 fn arena_set_current_unchecked(v: int), pub:
     arena_set_current(v)
 
+// Grow every per-arena metadata array to at least needed entries, preserving
+// existing contents and zeroing new cells. The current arena is saved and
+// restored around the metadata allocation.
 fn _grow_arena_meta(needed: int):
     if needed < g_arena_cap:
         return
@@ -320,6 +329,9 @@ fn _grow_arena_meta(needed: int):
 
 // 0A: preallocate one metadata partition per M. Gs are pinned to their home
 // M, so no two threads write the same arena/slot/free-list cell.
+// Initialize the per-M metadata partitions and the size-class tables. m_count
+// is clamped to at least 1; pool_size is a minimum for the whole pool;
+// arena_size is accepted but slots are fixed at 1 MiB.
 fn arena_init_m(pool_size: int, arena_size: int, m_count: int), pub:
     if m_count < 1:
         m_count = 1
@@ -471,6 +483,8 @@ fn arena_shared_m() -> int:
         m = 0
     return m
 
+// Create the shared metadata arena in the reserved partition if it does not
+// exist yet, then restore the caller's partition and current arena.
 fn arena_shared_init(), pub:
     if g_arena_shared_arena >= 0:
         return
@@ -502,6 +516,8 @@ fn arena_shared_alloc(size: int) -> string, pub:
     rt_set_m_idx(saved_m)
     return p
 
+// Copy nbytes of cell data in 8-byte units; nbytes is expected to be a multiple
+// of 8.
 fn _arena_copy_cells(src: string, nbytes: int, dst: string):
     i : ., mut = 0
     loop:
@@ -510,6 +526,9 @@ fn _arena_copy_cells(src: string, nbytes: int, dst: string):
         cell_store(dst, i, cell_load(src, i))
         i = i + 8
 
+// Append one 64 MiB segment to partition m's pool, respecting the pool limit.
+// Returns early when the partition already owns all of its segments or the
+// mapping fails.
 fn arena_grow_pool_m(m: int), pub:
     if m < 0:
         m = 0
@@ -540,6 +559,10 @@ fn arena_grow_pool_m(m: int), pub:
 fn arena_grow_pool(), pub:
     arena_grow_pool_m(rt_m_idx())
 
+// Allocate an arena id from partition m's free list or bump its local count.
+// peak > 0 selects a static peak; otherwise the default chunk size applies.
+// The new arena becomes current. Returns -1 when the partition or slot pool is
+// exhausted.
 fn arena_new_sized(peak: int) -> int, pub:
     if peak > arena_scalar_get(8):
         peak = 0
@@ -595,6 +618,9 @@ fn arena_new_sized(peak: int) -> int, pub:
 fn arena_new() -> int, pub:
     return arena_new_sized(0)
 
+// Return ai to its home partition's free lists: unmap large extents, release
+// its slot chain, clear size-class metadata, and restore the parent arena as
+// current. When zero-on-reset is enabled, used slot ranges are zeroed first.
 fn arena_reset(ai: int), pub:
     if ai < 0 || ai >= g_arena_cap:
         return
@@ -695,18 +721,23 @@ fn arena_clear(ai: int), pub:
 // class/slot rules. The interpreter's `alloc` builtin calls this function only
 // while an arena is active; metadata and >1MiB extents go to the host heap.
 
+// Convert a raw address to a string pointer without allocating.
 fn _arena_ptr(v: int) -> string:
     p : ., mut = ""
     unsafe:
         p = @str_of(v)
     return p
 
+// Read the raw address of a string pointer.
 fn _arena_word(s: string) -> int:
     v : ., mut = 0
     unsafe:
         v = @ptr_of(s)
     return v
 
+// Compute the host address of a slot: segment base plus the slot's offset
+// within the 64-slot segment. Returns the null pointer when the segment is
+// missing.
 fn _arena_slot_base(slot: int) -> string:
     seg := load_str_ptr(g_segment_base, (slot / 64) * 8)
     if _arena_word(seg) == 0:
@@ -727,6 +758,9 @@ fn _memzero(buf: string, nbytes: int):
 fn _arena_zero(p: string, n: int):
     _memzero(p, n)
 
+// Take a slot from partition m's free list or append a new one to its slot
+// count. The slot is pushed onto ai's chain and the slot cursor is reset.
+// Returns -1 when the partition or segment limit is exhausted.
 fn _arena_get_slot(ai: int, size: int) -> int:
     m : ., mut = rt_m_idx()
     if m < 0:
@@ -756,6 +790,8 @@ fn _arena_get_slot(ai: int, size: int) -> int:
     cell_store(g_arena_slot_cursor, ai * 8, 0)
     return slot
 
+// Allocate a dedicated large extent with a 24-byte header: next extent, total
+// bytes, and requested bytes. Returns a pointer past the header.
 fn _arena_alloc_extent(size: int, aligned: int, ai: int) -> string:
     base := alloc(aligned + 16)
     if _arena_word(base) == 0:
@@ -770,6 +806,10 @@ fn _arena_alloc_extent(size: int, aligned: int, ai: int) -> string:
                cell_load(g_arena_large_count, ai * 8) + 1)
     return _arena_ptr(_arena_word(base) + 24)
 
+// Interpreter allocation entry. Returns a pointer with an 8-byte size header,
+// or the null pointer when no arena is active, metadata is suspended, or space
+// is exhausted. Static arenas bump one cursor; dynamic arenas use size classes
+// and fall back to dedicated extents above 1 MiB.
 fn arena_alloc(size: int) -> string:
     if size < 0:
         return _arena_ptr(0)
@@ -804,6 +844,9 @@ fn arena_alloc(size: int) -> string:
         return _arena_alloc_extent(size, aligned, ai)
 
     max_size := arena_scalar_get(8)
+    // Select a size class for aligned bytes and carve from its chunk. When the
+    // chunk is full, drop the base and retry; a new slot is taken when the
+    // active slot lacks room.
     loop:
         lookup := aligned / 16
         cls : ., mut = 25
@@ -855,6 +898,9 @@ fn arena_alloc(size: int) -> string:
 
     return _arena_ptr(0)
 
+// Return default_chunk_size minus the slot cursor for ai; an invalid arena id
+// yields 0. This is slot-level headroom, not a guarantee that an allocation of
+// that size succeeds.
 fn arena_avail(ai: int) -> int, pub:
     if ai < 0 || ai >= g_arena_cap:
         return 0

@@ -13,6 +13,8 @@ CRC32_POLY_ISO_HDLC : int, pub = 3988292384
 CRC32_INIT_ISO_HDLC : int, pub = 4294967295
 CRC32_XOROUT_ISO_HDLC : int, pub = 4294967295
 
+// Concatenate two strings into a newly allocated byte buffer with a trailing
+// NUL.
 fn hashConcat2(a: string, b: string) -> string:
     la := str_len(a)
     lb := str_len(b)
@@ -26,18 +28,21 @@ fn hashConcat3(a: string, b: string, c: string) -> string:
     ab := hashConcat2(a, b)
     return hashConcat2(ab, c)
 
+// Encode the low byte of value as a NUL-terminated one-byte string.
 fn hashU8(value: int) -> string:
     out := alloc(2)
     byteStore(out, 0, value % 256)
     byteStore(out, 1, 0)
     return out
 
+// Encode the low 32 bits of value as four big-endian bytes plus a NUL.
 fn hashU32BE(value: int) -> string:
     out := alloc(5)
     byteStoreU32BE(out, 0, value)
     byteStore(out, 4, 0)
     return out
 
+// Lowercase hexadecimal encoding: two characters per byte plus a trailing NUL.
 fn hashHex(bytes: string) -> string:
     n := str_len(bytes)
     out := alloc(n * 2 + 1)
@@ -62,6 +67,8 @@ fn hashHex(bytes: string) -> string:
 
 // ── CRC-32 ──────────────────────────────────────────────────────────────────
 
+// One reflected CRC-32 step: mix the byte into the low 8 bits, then shift eight
+// times, XORing the polynomial whenever the low bit is set.
 fn crc32Byte(state: int, b: int, poly: int) -> int:
     c : ., mut = wordXor(state, b, 32)
     i : ., mut = 0
@@ -78,6 +85,7 @@ fn crc32Byte(state: int, b: int, poly: int) -> int:
 fn crc32Init(seed: int) -> int, pub:
     return seed
 
+// Feed each byte of data through crc32Byte in order.
 fn crc32Update(state: int, data: string, poly: int) -> int, pub:
     c : ., mut = state
     i : ., mut = 0
@@ -88,9 +96,12 @@ fn crc32Update(state: int, data: string, poly: int) -> int, pub:
         i = i + 1
     return c
 
+// Apply the ISO-HDLC final XOR to the running state.
 fn crc32Final(state: int) -> int, pub:
     return wordXor(state, CRC32_XOROUT_ISO_HDLC, 32)
 
+// Default entry point uses the ISO-HDLC init value and polynomial; crc32With
+// exposes both parameters.
 fn crc32(data: string) -> int, pub:
     return crc32With(data, CRC32_INIT_ISO_HDLC, CRC32_POLY_ISO_HDLC)
 
@@ -102,6 +113,9 @@ fn crc32Hex(data: string) -> string, pub:
 
 // ── SHA-256 ─────────────────────────────────────────────────────────────────
 
+// Process one 64-byte block: build the 64-word message schedule, run 64
+// compression rounds, and add the working state back into state. The caller
+// guarantees at least 64 readable bytes at off.
 fn sha256Compress(state: [int; 8], block: string, off: int):
     // Local, not a global constant: dynamic subscript on a global array
     // currently reads 0 in the backend (separate defect). Keep K here until
@@ -157,6 +171,8 @@ fn sha256Compress(state: [int; 8], block: string, off: int):
     state[6] = wordAdd(state[6], g, 32)
     state[7] = wordAdd(state[7], h, 32)
 
+// Hash data with SHA-256. The padded tail is 64 or 128 bytes depending on
+// whether the 9-byte padding fits; the output is a 32-byte digest plus a NUL.
 fn sha256(data: string) -> string, pub:
     state : [int; 8] = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]
     slen := str_len(data)
@@ -199,6 +215,8 @@ fn sha256Hex(data: string) -> string, pub:
 
 // ── HMAC-SHA-256 ────────────────────────────────────────────────────────────
 
+// HMAC-SHA-256 with a 64-byte block. Keys longer than the block are hashed
+// first; shorter keys are zero-padded.
 fn hmacSha256(key: string, msg: string) -> string, pub:
     block : ., mut = 64
     k : ., mut = alloc(block + 1)
@@ -232,9 +250,13 @@ fn hmacSha256Hex(key: string, msg: string) -> string, pub:
 
 // ── HKDF-SHA-256 (RFC 5869) ─────────────────────────────────────────────────
 
+// RFC 5869 extract step: HMAC-SHA-256 with salt as the key and ikm as the
+// message.
 fn hkdfSha256Extract(ikm: string, salt: string) -> string, pub:
     return hmacSha256(salt, ikm)
 
+// RFC 5869 expand step: emit length bytes by chaining HMAC blocks. Each block
+// covers the previous output T, the info string, and a one-byte counter.
 fn hkdfSha256Expand(prk: string, info: string, length: int) -> string, pub:
     out := alloc(length + 1)
     t : ., mut = ""
@@ -261,6 +283,8 @@ fn hkdfSha256Hex(ikm: string, salt: string, info: string, length: int) -> string
 
 // ── PBKDF2-HMAC-SHA-256 (RFC 8018) ──────────────────────────────────────────
 
+// PBKDF2-HMAC-SHA-256 (RFC 8018). Each output block starts from
+// salt||block_index and iterates the HMAC; the XOR of all U values forms T.
 fn pbkdf2Sha256(password: string, salt: string, iterations: int, length: int) -> string, pub:
     out := alloc(length + 1)
     blocks := (length + 31) / 32

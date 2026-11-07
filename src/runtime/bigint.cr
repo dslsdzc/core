@@ -59,6 +59,8 @@ fn bi_tag_ptr(p: string) -> int:
         q = @ptr_of(p)
     return q + 1
 
+// Allocate a BigInt object with n digit slots. Sign, length, and digits are left
+// for the caller to initialize.
 fn bi_new(n: int) -> string:
     return alloc(BI_DIGITS + n * 8)
 
@@ -80,6 +82,8 @@ fn bi_set_len(p: string, n: int):
 fn bi_set_digit(p: string, i: int, d: int):
     cell_store(p, BI_DIGITS + i * 8, d)
 
+// Strip high zero digits and force sign 0 when no digits remain. bi_result relies
+// on this normalization before checking whether the value fits an immediate.
 fn bi_normalize(p: string) -> string:
     n : ., mut = bi_len_of(p)
     loop:
@@ -93,6 +97,8 @@ fn bi_normalize(p: string) -> string:
         bi_set_sign(p, 0)
     return p
 
+// Box a raw machine int as a BigInt. INT64_MIN is special-cased because negating
+// it in a raw machine int would overflow back to itself.
 fn bi_from_imm(x: int) -> string:
     if x == -9223372036854775808:
         // -2^63 = -8 * 2^60.  Negating INT64_MIN in a raw machine int
@@ -121,11 +127,14 @@ fn bi_from_imm(x: int) -> string:
     bi_set_len(p, i)
     return p
 
+// View any tagged value as a BigInt object, boxing immediates.
 fn bi_as_big(v: int) -> string:
     if bi_is_big(v) != 0:
         return bi_big_ptr(v)
     return bi_from_imm(bi_imm(v))
 
+// Normalize and return a tagged result: an immediate when the value fits
+// BI_IMM_MIN..BI_IMM_MAX, otherwise a tagged pointer to the BigInt object.
 fn bi_result(p: string) -> int:
     bi_normalize(p)
     n := bi_len_of(p)
@@ -182,6 +191,8 @@ fn bi_cmp_abs(a: string, b: string) -> int:
             return 1
     return 0
 
+// Compare two tagged values. Sign mismatches return raw -1/1; equal-sign
+// magnitudes return a tagged -2/0/2. Callers only compare the result against 0.
 fn bi_cmp(a: int, b: int) -> int:
     pa := bi_as_big(a)
     pb := bi_as_big(b)
@@ -227,6 +238,8 @@ fn bi_add_abs(a: string, b: string) -> string:
     bi_set_sign(r, 1)
     return bi_normalize(r)
 
+// Subtract magnitudes; requires |a| >= |b|. The result is non-negative and
+// normalized.
 fn bi_sub_abs(a: string, b: string) -> string:
     la := bi_len_of(a)
     lb := bi_len_of(b)
@@ -252,6 +265,8 @@ fn bi_sub_abs(a: string, b: string) -> string:
     bi_set_sign(r, 1)
     return bi_normalize(r)
 
+// Signed addition: equal signs add magnitudes, opposite signs subtract the
+// smaller magnitude from the larger and keep the larger operand's sign.
 fn bi_add(a: int, b: int) -> int:
     if a == 0:
         return b
@@ -337,6 +352,7 @@ fn bi_is_zero(a: int) -> int:
         return 1
     return 0
 
+// 2^k by repeated doubling. Callers use k < 30, a bit offset within one digit.
 fn bi_pow2(k: int) -> int:
     v : ., mut = 1
     i : ., mut = 0
@@ -366,6 +382,8 @@ fn bi_bit(p: string, pos: int) -> int:
         return 0
     return (bi_digit(p, di) / bi_pow2(pos % 30)) % 2
 
+// Set bit pos in p. There is no growth: a bit beyond the current length is
+// ignored.
 fn bi_set_bit(p: string, pos: int):
     di := pos / 30
     if di >= bi_len_of(p):
@@ -373,6 +391,8 @@ fn bi_set_bit(p: string, pos: int):
     d := bi_digit(p, di) + bi_pow2(pos % 30)
     bi_set_digit(p, di, d)
 
+// Double the magnitude by one bit. The result is always non-negative; callers
+// handle the sign separately.
 fn bi_shl1(p: string) -> string:
     n := bi_len_of(p)
     r := bi_new(n + 1)
@@ -423,6 +443,8 @@ fn bi_mul_small(a: int, m: int) -> int:
     bi_set_sign(r, bi_sign_of(p))
     return bi_result(r)
 
+// Divide a by d, store the remainder in g_bi_rem, and return the quotient. A
+// zero divisor sets g_bi_error and returns 0 instead of trapping.
 fn bi_div_small(a: int, d: int) -> int:
     if d == 0:
         g_bi_error = 1
@@ -449,6 +471,8 @@ fn bi_div_small(a: int, d: int) -> int:
     g_bi_rem = rem
     return bi_result(r)
 
+// Parse the leading decimal digits of s, with an optional leading '-'. Parsing
+// stops at the first non-digit; the value grows through bi_mul_small/bi_add_small.
 fn bi_from_dec(s: string) -> int:
     n := str_len(s)
     i : ., mut = 0
@@ -470,6 +494,8 @@ fn bi_from_dec(s: string) -> int:
         r = bi_neg(r)
     return r
 
+// Decimal text for a tagged value. A base-2^30 digit contributes at most ten
+// decimal digits, hence the n * 10 + 4 temporary buffer.
 fn bi_to_dec(a: int) -> string:
     if a == 0:
         z := alloc(2)
@@ -506,6 +532,10 @@ fn bi_to_dec(a: int) -> string:
         j = j + 1
     return out
 
+// Truncating division: g_bi_rem receives the remainder and the return value is
+// the quotient. Division by zero calls bi_runtime_error. The magnitude is
+// divided by binary long division, one bit at a time, and the signs follow the
+// operands (quotient sa*sb, remainder sa).
 fn bi_divmod(a: int, b: int) -> int:
     if b == 0:
         bi_runtime_error("division by zero\n")
@@ -555,10 +585,14 @@ fn bi_div(a: int, b: int) -> int:
     q := bi_divmod(a, b)
     return q
 
+// Remainder side channel from bi_divmod.
 fn bi_mod(a: int, b: int) -> int:
     q := bi_divmod(a, b)
     return g_bi_rem
 
+// Raw-word conversions. The from_* forms tag values in the immediate range and
+// box the rest; the checked to_* forms trap when the value does not fit the
+// destination machine word.
 fn bi_from_word(raw: int) -> int:
     if raw >= BI_IMM_MIN && raw <= BI_IMM_MAX:
         return bi_tag(raw)
@@ -569,6 +603,8 @@ fn bi_from_uword(raw: int) -> int:
         return bi_tag(raw)
     return bi_result(bi_from_imm(raw))
 
+// Convert to a raw signed machine word, trapping through bi_runtime_error when
+// the value does not fit. Even words are immediates; odd words are BigInts.
 fn bi_to_word_checked(a: int) -> int:
     g_bi_error = 0
     // Fast path: even words in the immediate range are tagged small ints.
@@ -604,6 +640,8 @@ fn bi_to_word_checked(a: int) -> int:
         x = -x
     return x
 
+// Convert to a raw unsigned machine word: first check the signed range, then
+// reject negative values.
 fn bi_to_uword_checked(a: int) -> int:
     x := bi_to_word_checked(a)
     if g_bi_error != 0:

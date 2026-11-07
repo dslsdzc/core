@@ -116,6 +116,8 @@ fn lib_dep_at(lid: int, i: int) -> int:
     arr := cell_load_str(g_libs, lid * LIB_REC + OFF_LIB_DEPS)
     return cell_load(arr, i * 8)
 
+// Transitive dependency reachability. Depth is capped at 32 so a malformed
+// cycle cannot recurse forever.
 fn lib_reaches(from_lid: int, to_lid: int, depth: int) -> int:
     if from_lid < 0 || to_lid < 0 || depth > 32:
         return 0
@@ -241,6 +243,8 @@ fn lib_export_add(lid: int, name_ni: int, sym_kind: int, node: int):
     cell_store(arr, eoff + OFF_LIB_EXP_NODE, node)
     cell_store(g_libs, off + OFF_LIB_EXP_COUNT, cnt + 1)
 
+// Binary search for an exact (name, kind) export row. Relies on the ordering
+// invariant maintained by lib_export_add.
 fn lib_export_find_kind(lid: int, name_ni: int, kind: int) -> int:
     c := lib_export_count(lid)
     lo : ., mut = 0
@@ -284,6 +288,8 @@ fn lib_export_node(lid: int, i: int) -> int:
         return -1
     return cell_load(lib_export_arr(lid), i * LIB_EXPORT_REC + OFF_LIB_EXP_NODE)
 
+// Linear lookup by name alone; returns the first row with this name regardless
+// of symbol kind. Use lib_export_find_kind when the kind is part of the key.
 fn lib_export_find(lid: int, name_ni: int) -> int:
     c := lib_export_count(lid)
     i : ., mut = 0
@@ -361,6 +367,9 @@ fn lib_relative_path(path: string) -> string:
                 return str_sub(path, str_len(pre2), str_len(path) - str_len(pre2))
     return path
 
+// Map a path to a library: longest matching root wins, then paths under the
+// compiler implementation prefixes fall back to @core, and everything else is
+// @user.
 fn lib_lookup_path(path: string) -> int:
     lib_init_defaults_once()
     if g_lib_inited == 0:
@@ -479,6 +488,8 @@ fn lib_export_reset():
         cell_store(g_libs, i * LIB_REC + OFF_LIB_EXP_COUNT, 0)
         i = i + 1
 
+// Registered path for a fileid; returns "" when the fileid is unknown or has
+// no path (virtual files).
 fn file_path_by_fni(fni: int) -> string:
     i : ., mut = 0
     loop:
@@ -510,6 +521,8 @@ fn lib_of_node(node: int) -> int:
         return -1
     return sm_file_lib(id)
 
+// Check ownership lookup, import direction, DAG rejection, and export storage.
+// Returns the failure count and prints the summary line.
 fn lib_selftest() -> int:
     lib_reset()
     lib_enable()

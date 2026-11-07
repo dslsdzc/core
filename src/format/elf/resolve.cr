@@ -13,6 +13,9 @@
 // The backend's emit_instr() can then write jumps using the pre-computed
 // offsets, no label table lookup needed.
 
+// Resolve labels for every function: measure instruction sizes with the real
+// encoder, record label offsets, patch IR_JUMP with byte deltas, and turn
+// IR_LABEL into IR_NOP. Label state and the scratch buffer are per function.
 fn res_labels():
     print("    res_labels: ")
     print(int_str(g_ir_func_count))

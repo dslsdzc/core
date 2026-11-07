@@ -13,6 +13,8 @@ fn srs_bool(b: bool) -> int:
         return 1
     return 0
 
+// Print a named failure and return 1, or return 0 on success. Cases sum the
+// results so one failing assertion does not hide the others.
 fn srs_expect(name: string, got: int, want: int) -> int:
     if got == want:
         return 0
@@ -24,6 +26,8 @@ fn srs_expect(name: string, got: int, want: int) -> int:
     println(int_str(want))
     return 1
 
+// Account one case in the totals and print PASS or FAIL. The summary line at
+// the end reports passed/total and the exit code depends on g_srs_fails.
 fn srs_case(name: string, fails: int):
     g_srs_total = g_srs_total + 1
     if fails == 0:
@@ -251,6 +255,8 @@ fn srs_cag_second_chance() -> int:
     f = f + srs_expect("cag_second.new_assigned", srs_bool(a.assigned(2) >= 0), 1)
     return f
 
+// Run every case and print the passed/total summary. Returns 1 when any case
+// failed, 0 otherwise.
 fn stub_regalloc_selftest_run() -> int:
     g_srs_total = 0
     g_srs_fails = 0

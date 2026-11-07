@@ -230,6 +230,9 @@ fn _conc_copy(dst: string, src: string, n: int):
 
 // ── Owner regions ─────────────────────────────────────────────────────────
 
+// Grow the four parallel region arrays. They must stay index-aligned; a
+// failed allocation returns -1 without raising the recorded capacity, so the
+// old table remains usable.
 fn _conc_region_ensure(needed: int) -> int:
     if needed <= g_conc_region_array_cap:
         return 0
@@ -272,6 +275,9 @@ fn _conc_region_valid(region: int) -> int:
         return 0
     return 1
 
+// Create a process-lifetime owner region. The block is oversized by 16 bytes
+// so the payload base can be rounded up to 16-byte alignment; the bump cursor
+// starts at zero and the epoch at 1.
 fn conc_region_new(size: int) -> int, pub:
     // A region smaller than one message header is not useful and makes
     // capacity tests confusing.
@@ -301,6 +307,9 @@ fn conc_region_new(size: int) -> int, pub:
 //   0 magic, 8 region id, 16 epoch, 24 string length (payload size + 1).
 // The length word is also the Core string header for the returned payload, so
 // str_len(payload) == requested size and normal string ops stay valid.
+// The bump cursor only moves forward until conc_region_reset; messages are not
+// reclaimed individually. A full or invalid region returns a null payload
+// instead of wrapping or overwriting earlier allocations.
 fn conc_alloc(region: int, size: int) -> string, pub:
     if _conc_region_valid(region) == 0:
         return _conc_ptr(0)
@@ -333,6 +342,9 @@ fn conc_alloc(region: int, size: int) -> string, pub:
     cell_store(g_conc_region_cursor, region * 8, cursor + total)
     return _conc_ptr(_conc_addr(hdr) + CONC_MSG_HEADER)
 
+// Reset the bump cursor and advance the region epoch. Every payload allocated
+// before the reset fails the epoch check afterwards, so stale pointers are
+// rejected rather than reading reused bytes.
 fn conc_region_reset(region: int) -> int, pub:
     if _conc_region_valid(region) == 0:
         return -1
@@ -419,6 +431,12 @@ fn conc_alloc_failures() -> int, pub:
 fn conc_last_error() -> int, pub:
     return g_conc_last_error
 
+// ── Memory spaces, transfers, and loans ──────────────────────────────────
+
+// Lazily allocate the seven parallel space table arrays. They are indexed by
+// space id and must stay aligned. Allocation is keyed off g_conc_space_kind
+// alone, so a failure after that table is installed leaves the remaining
+// tables null.
 fn _conc_space_ensure() -> int:
     if _conc_is_null(g_conc_space_kind) != 0:
         g_conc_space_kind = _conc_global_alloc(CONC_MAX_SPACES * 8)
@@ -444,6 +462,9 @@ fn _conc_space_ensure() -> int:
             return -1
     return 0
 
+// A space owns exactly one region. Capacity is reserved up front; `used` is
+// the cumulative bytes handed out by conc_ref_alloc_space, while `bytes` and
+// `in`/`out` track physical transfer traffic.
 fn conc_space_create(kind: int, capacity: int) -> int, pub:
     if kind != CONC_SPACE_HOST && kind != CONC_SPACE_DEVICE && kind != CONC_SPACE_REMOTE:
         return -1
@@ -573,6 +594,9 @@ fn _conc_loan_can() -> int:
         return 0
     return 1
 
+// Record the source/loan descriptor pair with a fresh nonce written into both
+// headers. A return must present the same nonce, so a stale loan cannot be
+// matched against a newer transfer of the same pair.
 fn _conc_loan_add(src: string, loan: string) -> int:
     if _conc_loan_can() == 0:
         return 0
@@ -587,6 +611,8 @@ fn _conc_loan_add(src: string, loan: string) -> int:
     g_conc_loan_count = i + 1
     return nonce
 
+// Drop the matching loan entry and clear both nonces. The swap-with-last keeps
+// the table dense; a missing or nonce-mismatched pair is not removed.
 fn _conc_loan_take(src: string, loan: string) -> int:
     if _conc_loans_ensure() != 0:
         return 0
@@ -619,6 +645,8 @@ fn _conc_loan_take(src: string, loan: string) -> int:
         i = i + 1
     return 0
 
+// Resolve a descriptor's space. A shared-map descriptor carries its target
+// space in the descriptor; a normal ref derives it from the owning region.
 fn conc_ref_space(ref: string) -> int, pub:
     if conc_ref_ok(ref) == 0:
         return -1
@@ -626,6 +654,8 @@ fn conc_ref_space(ref: string) -> int, pub:
         return cell_load(ref, CONC_REF_SPACE_OFF)
     return conc_space_of_region(cell_load(ref, 8))
 
+// Allocate the payload and its descriptor in the space's region, then account
+// the requested size as used. Accounting happens only on success.
 fn conc_ref_alloc_space(space: int, size: int, layout: int) -> string, pub:
     if conc_space_ok(space) == 0:
         return _conc_ptr(0)
@@ -660,6 +690,9 @@ fn conc_shared_map(ref: string, dst_space: int) -> string, pub:
 fn conc_shared_map_count() -> int, pub:
     return g_conc_shared_maps
 
+// Account one physical transfer. Global totals and per-kind byte counters are
+// cumulative, so copying the same payload N times counts N times. An invalid
+// space id still counts globally but has no per-space row to update.
 fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int,
                          kind: int):
     g_conc_transfer_bytes = g_conc_transfer_bytes + size
@@ -686,6 +719,9 @@ fn _conc_space_note_xfer(src_space: int, dst_space: int, size: int,
         cell_store(g_conc_space_out, src_space * 8,
                    cell_load(g_conc_space_out, src_space * 8) + size)
 
+// Shared move/copy/loan path: allocate in the destination space and copy the
+// full payload, then invalidate the source for MOVE/LOAN only after the copy
+// succeeded. Failure leaves the source untouched and bumps the failure count.
 fn _conc_ref_space_xfer(ref: string, dst_space: int, mode: int) -> string:
     if conc_ref_ok(ref) == 0:
         return _conc_xfer_fail()
@@ -714,6 +750,8 @@ fn conc_space_move(ref: string, dst_space: int) -> string, pub:
 fn conc_space_copy(ref: string, dst_space: int) -> string, pub:
     return _conc_ref_space_xfer(ref, dst_space, CONC_TRANSFER_COPY)
 
+// A loan is a transfer that records a return obligation. The source is
+// invalidated as LOAN; only a matching return restores it.
 fn conc_space_loan(ref: string, dst_space: int) -> string, pub:
     if _conc_loan_can() == 0:
         return _conc_xfer_fail()
@@ -799,6 +837,9 @@ fn conc_space_copy_set(ref: string, dst_space: int) -> string, pub:
     _conc_space_note_xfer(src_space, dst_space, copied, CONC_TRANSFER_COPY)
     return dst
 
+// MoveSet copies declared fields into zeroed destination bytes, then
+// invalidates the source. Accounting uses the number of fields actually
+// copied, not the descriptor size.
 fn conc_space_move_set(ref: string, dst_space: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_xfer_fail()
@@ -841,6 +882,9 @@ fn conc_space_move_set(ref: string, dst_space: int) -> string, pub:
     _conc_space_note_xfer(src_space, dst_space, copied, CONC_TRANSFER_MOVE)
     return dst
 
+// Split copies one contiguous slice into the destination space. Only the last
+// slice invalidates the source, so requesting it first makes the remaining
+// slices unavailable.
 fn conc_space_split_part(ref: string, dst_space: int, index: int,
                          count: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
@@ -866,6 +910,9 @@ fn conc_space_split_part(ref: string, dst_space: int, index: int,
     _conc_space_note_xfer(src_space, dst_space, part, CONC_TRANSFER_SPLIT)
     return dst
 
+// Allocate a payload in `region` plus a fixed-size descriptor outside it. The
+// descriptor stores the region id, payload offset, size, layout, and region
+// epoch; the offset is relative to the region base, not the message header.
 fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:
     if _conc_region_valid(region) == 0:
         return _conc_ptr(0)
@@ -885,6 +932,9 @@ fn conc_ref_alloc(region: int, size: int, layout: int) -> string, pub:
     cell_store(ref, 40, cell_load(g_conc_region_epoch, region * 8))
     return ref
 
+// A normal descriptor is valid only while its region is live and its captured
+// epoch matches; a shared-map descriptor instead validates the aliased payload
+// and reported size. Both paths must pass before any payload access.
 fn conc_ref_ok(ref: string) -> int, pub:
     if _conc_is_null(ref) != 0:
         return 0
@@ -925,6 +975,8 @@ fn conc_ref_ok(ref: string) -> int, pub:
         return 0
     return 1
 
+// Resolve a validated descriptor to its payload without allocating. The result
+// points into the owning region; for a shared map, that is the source payload.
 fn conc_ref_payload(ref: string) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_ptr(0)
@@ -959,6 +1011,10 @@ fn conc_ref_layout(ref: string) -> int, pub:
         return -1
     return cell_load(ref, 32)
 
+// ── Layout identity table ────────────────────────────────────────────────
+
+// Declare or overwrite one layout id. The table is fixed at CONC_MAX_LAYOUTS
+// entries; fields are appended separately by conc_layout_add_field.
 fn conc_layout_declare(layout: int, size: int, hash: int) -> int, pub:
     if layout < 0 || layout >= CONC_MAX_LAYOUTS:
         return -1
@@ -1014,6 +1070,9 @@ fn conc_layout_set_version(v: int) -> int, pub:
     g_conc_layout_version = v
     return v
 
+// Append a field to the layout's fixed-size field array. Offsets and sizes are
+// user supplied; the only structural check is that the field fits inside the
+// declared layout size.
 fn conc_layout_add_field(layout: int, offset: int, size: int) -> int, pub:
     if conc_layout_ok(layout) == 0:
         return -1
@@ -1091,6 +1150,8 @@ fn conc_ref_copy_set(ref: string, dst_region: int) -> string, pub:
         i = i + 1
     return dst
 
+// Move = CopySet followed by source invalidation. If the copy fails, the
+// source stays valid and the null destination is returned.
 fn conc_ref_move_set(ref: string, dst_region: int) -> string, pub:
     dst := conc_ref_copy_set(ref, dst_region)
     if _conc_is_null(dst) != 0:
@@ -1108,9 +1169,14 @@ fn conc_ref_layout_check(ref: string) -> int, pub:
         return 0
     return 1
 
+// Invalidate by changing the magic word only. Payload bytes stay in the region
+// until a reset, so old pointers must be rejected by magic and epoch checks,
+// not by unmapping.
 fn _conc_ref_invalidate(ref: string, magic: int):
     cell_store(ref, 0, magic)
 
+// Full-payload move: copy first, invalidate second. A failed destination
+// allocation leaves the source valid.
 fn conc_ref_move(ref: string, dst_region: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_ptr(0)
@@ -1126,6 +1192,8 @@ fn conc_ref_move(ref: string, dst_region: int) -> string, pub:
     _conc_ref_invalidate(ref, CONC_REF_MOVED_MAGIC)
     return dst
 
+// Full-payload copy into another region. The destination gets its own
+// descriptor and captures the destination region's epoch.
 fn conc_ref_copy(ref: string, dst_region: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_ptr(0)
@@ -1140,6 +1208,9 @@ fn conc_ref_copy(ref: string, dst_region: int) -> string, pub:
     _conc_copy(conc_ref_payload(dst), src, size)
     return dst
 
+// Loan a full payload into another region: copy, invalidate the source as
+// LOAN, and register the return pair. A failed bookkeeping add is counted but
+// the copied destination is still returned.
 fn conc_ref_loan(ref: string, dst_region: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
         return _conc_xfer_fail()
@@ -1159,6 +1230,9 @@ fn conc_ref_loan(ref: string, dst_region: int) -> string, pub:
         g_conc_transfer_failures = g_conc_transfer_failures + 1
     return dst
 
+// Return a loan by copying the payload back into the source region and
+// restoring the source magic. Both descriptors must carry the same nonce and
+// the source epoch must still match; otherwise the return fails.
 fn conc_ref_return(src_ref: string, loan: string) -> int, pub:
     if _conc_is_null(src_ref) != 0:
         return _conc_xfer_fail_i()
@@ -1182,6 +1256,8 @@ fn conc_ref_return(src_ref: string, loan: string) -> int, pub:
     cell_store(src_ref, 0, CONC_REF_MAGIC)
     return 0
 
+// Split one payload slice into another region. The last slice invalidates the
+// source; earlier slices leave it valid.
 fn conc_ref_split_part(ref: string, dst_region: int, index: int,
                        count: int) -> string, pub:
     if conc_ref_ok(ref) == 0:
@@ -1210,6 +1286,8 @@ fn conc_ref_fill(dst_region: int, size: int, layout: int) -> string, pub:
     // conc_ref_payload(ref).
     return conc_ref_alloc(dst_region, size, layout)
 
+// Compare raw payload addresses only. Equal addresses mean the same object;
+// region and epoch are not consulted.
 fn conc_same(a: string, b: string) -> int, pub:
     if _conc_addr(a) == _conc_addr(b):
         return 1
@@ -1236,6 +1314,10 @@ fn _conc_msg_valid(p: string) -> int:
 //   48 owner_region, 56 owner_epoch.
 // The buffer is the payload tail after the 64-byte header.
 
+// Validate a channel against its expected magic. Besides the normal message
+// header, this checks the owning region's epoch, the ring bounds
+// (len <= cap, head < cap), and that the buffer is exactly the 64-byte tail of
+// the channel allocation.
 fn _conc_channel_valid_magic(ch: string, magic: int) -> int:
     if _conc_msg_valid(ch) == 0:
         return 0
@@ -1285,6 +1367,9 @@ fn _conc_channel_valid(ch: string) -> int:
 fn _conc_ref_channel_valid(ch: string) -> int:
     return _conc_channel_valid_magic(ch, CONC_CHANNEL_REF_MAGIC)
 
+// Allocate the header and ring buffer as one region payload. The buffer is the
+// payload tail at +64 and never moves; capacity is fixed at creation, so a
+// later send can fail with FULL but never reallocates.
 fn conc_channel_new(region: int, elem_size: int, cap: int) -> string, pub:
     if _conc_region_valid(region) == 0:
         return _conc_ptr(0)
@@ -1325,6 +1410,8 @@ fn conc_channel_elemsize(ch: string) -> int, pub:
         return -1
     return cell_load(ch, 40)
 
+// A ref channel stores fixed-size 64-byte descriptors instead of arbitrary
+// elements; only the magic differs from a normal channel.
 fn conc_channel_new_ref(region: int, cap: int) -> string, pub:
     ch := conc_channel_new(region, CONC_REF_SIZE, cap)
     if _conc_is_null(ch) != 0:
@@ -1337,6 +1424,8 @@ fn conc_channel_is_ref(ch: string) -> int, pub:
         return 1
     return 0
 
+// Enqueue a descriptor by value. The slot is (head + len) % cap, so len is the
+// occupancy counter and head is the oldest element.
 fn conc_send_ref(ch: string, ref: string) -> int, pub:
     g_conc_last_error = CONC_ERR_INVALID
     if _conc_ref_channel_valid(ch) == 0:
@@ -1359,6 +1448,9 @@ fn conc_send_ref(ch: string, ref: string) -> int, pub:
     g_conc_last_error = CONC_OK
     return CONC_OK
 
+// Dequeue into a fresh descriptor allocated outside the channel region. The
+// copied descriptor is revalidated before it is returned, so a ref that went
+// stale while queued is reported as invalid instead of being handed out.
 fn conc_recv_ref(ch: string) -> string, pub:
     g_conc_last_error = CONC_ERR_INVALID
     if _conc_ref_channel_valid(ch) == 0:
@@ -1386,6 +1478,8 @@ fn conc_recv_ref(ch: string) -> string, pub:
     g_conc_last_error = CONC_OK
     return out
 
+// Enqueue one fixed-size element. Channel, message, and element size are all
+// validated before the ring is touched; on FULL the queue is unchanged.
 fn conc_send(ch: string, msg: string) -> int, pub:
     g_conc_last_error = CONC_ERR_INVALID
     if _conc_channel_valid(ch) == 0:
@@ -1411,6 +1505,9 @@ fn conc_send(ch: string, msg: string) -> int, pub:
     g_conc_last_error = CONC_OK
     return CONC_OK
 
+// Dequeue one element by allocating a new message in the channel's owning
+// region, then advancing head/len. Allocation failure reports NOMEM and leaves
+// the queue unchanged.
 fn conc_recv(ch: string) -> string, pub:
     g_conc_last_error = CONC_ERR_INVALID
     if _conc_channel_valid(ch) == 0:
@@ -1446,6 +1543,10 @@ fn conc_recv(ch: string) -> string, pub:
 // Body/channel/edge records are 32 bytes each and contain structure only:
 // no target-specific slot/memory values.
 
+// Grow the plan pointer table and its parallel profile table. New plan ids are
+// initialized to unbound (-1). If the second allocation fails, the plan table
+// may already have been replaced; the recorded capacity is not raised, so the
+// extra slots stay unreachable.
 fn _conc_plan_ensure(needed: int) -> int:
     if needed <= g_conc_plan_array_cap:
         return 0
@@ -1492,6 +1593,8 @@ fn _conc_plan_at(plan: int) -> string:
         return _conc_ptr(0)
     return load_str_ptr(g_conc_plans, plan * 8)
 
+// Per-plan descriptor arrays grow by doubling. The old contents are copied
+// into the new array and the old array is simply abandoned on success.
 fn _conc_plan_grow_bodies(p: string, cap: int) -> int:
     nc : ., mut = cap * 2
     if nc < 8:
@@ -1534,6 +1637,10 @@ fn _conc_plan_grow_edges(p: string, cap: int) -> int:
     cell_store(p, 40, nc)
     return 0
 
+// Create a plan with fixed-capacity sidecar arrays. All arrays are owned by
+// the plan for process lifetime; v2 records follow the 80-byte v1 header at
+// fixed offsets. Failure to allocate any sidecar returns -1 before the plan is
+// published in the plan table.
 fn conc_plan_new() -> int, pub:
     if _conc_plan_ensure(g_conc_plan_count + 1) != 0:
         return -1
@@ -1616,6 +1723,8 @@ fn conc_plan_new() -> int, pub:
     g_conc_plan_count = id + 1
     return id
 
+// Append a body record. TASK and PIPELINE are limited to one parameter;
+// DATA_PARALLEL may carry many. Body ids are assigned in append order.
 fn conc_plan_add_body(plan: int, kind: int, entry: int, params: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -1646,6 +1755,8 @@ fn conc_plan_add_body(plan: int, kind: int, entry: int, params: int) -> int, pub
     cell_store(p, 0, n + 1)
     return n
 
+// Append a channel descriptor. SPSC requires a positive capacity; MPMC may be
+// unbuffered (cap 0). No buffer is allocated here; the plan is structural only.
 fn conc_plan_add_channel(plan: int, elem_size: int, cap: int, pc: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -1676,6 +1787,8 @@ fn conc_plan_add_channel(plan: int, elem_size: int, cap: int, pc: int) -> int, p
     cell_store(p, 8, n + 1)
     return n
 
+// Append an edge. SEND/RECV carry a channel id; SPAWN/JOIN must use -1, which
+// _conc_plan_validate_edges enforces later. Both endpoints must already exist.
 fn _conc_plan_add_edge_ch(plan: int, from_body: int, to_body: int, kind: int, channel: int) -> int:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -1795,6 +1908,9 @@ fn conc_plan_acyclic(plan: int) -> int, pub:
         return 1
     return 0
 
+// Full structural validation. Every referenced index, count, kind, and status
+// is range-checked, then SPAWN cycles are rejected by conc_plan_acyclic. A
+// return of 0 means the plan must not be executed at all.
 fn conc_plan_validate(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return 0
@@ -2053,6 +2169,9 @@ fn conc_plan_bind_count(plan: int) -> int, pub:
         return 0
     return cell_load(binds, 0)
 
+// Bind one body parameter to a channel. A (body, param) pair may be bound only
+// once; a duplicate is rejected rather than overwritten. The bind table has a
+// fixed capacity set at plan creation.
 fn conc_plan_bind_param(plan: int, body: int, param: int, channel: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2105,6 +2224,8 @@ fn conc_plan_param_channel(plan: int, body: int, param: int) -> int, pub:
         i = i + 1
     return -1
 
+// Deep-copy a string into owner-region memory. Plan records must not retain
+// pointers into a caller's function arena, which dies when that call returns.
 fn _conc_global_str(s: string) -> string:
     n := str_len(s)
     p := _conc_global_alloc(n + 1)
@@ -2127,6 +2248,8 @@ fn conc_plan_set_version(plan: int, ver: int) -> int, pub:
     cell_store(_conc_plan_at(plan), 80, ver)
     return 0
 
+// Copy the target name into owner memory and store the slot/memory request.
+// Retargeting drops the previous name (owner regions are never reclaimed).
 fn conc_plan_set_target(plan: int, name: string, slots: int, memory: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2198,6 +2321,10 @@ fn _conc_profile_at(id: int) -> string:
         return _conc_ptr(0)
     return load_str_ptr(g_conc_profiles, id * 8)
 
+// Parse one profile text into a fixed record (8 slot rows, 8 space rows, 16
+// transfer rows). Parsing uses the shared cursor, so only one text may be
+// loaded at a time. On a malformed token the partially built profile is not
+// published; its owner-region allocations remain until process exit.
 fn conc_target_profile_load(text: string) -> int, pub:
     if g_conc_profile_count >= 8:
         return -1
@@ -2457,6 +2584,10 @@ fn _conc_profile_space_cap_for(profile: int, kind: int) -> int:
             return cell_load(base, i * 24 + 8)
         i = i + 1
 
+// Compatibility is a conjunction of static checks: every requested slot kind
+// exists and fits its max, every space kind exists and fits capacity, every
+// concrete transfer pair is supported, and the target thread/memory request
+// fits the profile. Any mismatch returns 0.
 fn conc_target_profile_compatible(profile: int, plan: int) -> int, pub:
     if _conc_profile_valid(profile) == 0:
         return 0
@@ -2514,6 +2645,8 @@ fn conc_target_profile_compatible(profile: int, plan: int) -> int, pub:
         return 0
     return 1
 
+// Bind a validated profile to a plan id. The plan stays target-neutral; the
+// binding lives in the parallel profile table.
 fn conc_plan_bind_profile(plan: int, profile: int) -> int, pub:
     if conc_target_profile_compatible(profile, plan) == 0:
         return -1
@@ -2539,6 +2672,8 @@ fn _conc_mapping_valid(id: int) -> int:
         return 0
     return 1
 
+// Create a MappingPlan only for a compatible plan/profile pair. The record
+// stores the pair and an applied flag; the plan binding is a side effect.
 fn conc_mapping_plan_new(plan: int, profile: int) -> int, pub:
     if conc_target_profile_compatible(profile, plan) == 0:
         return -1
@@ -2684,6 +2819,15 @@ fn conc_mapping_plan_export(id: int) -> string, pub:
     p := load_str_ptr(g_conc_mappings, id * 8)
     return "mapping " + _conc_num_str(cell_load(p, 0)) + " " + _conc_num_str(cell_load(p, 8)) + "\n"
 
+// ── Plan v2 records ──────────────────────────────────────────────────────
+//
+// Ranges, slots, transfers, budgets, certificates, stages, layouts, spaces,
+// and physical transfers are fixed-capacity sidecar arrays. Add functions
+// validate before writing; accessors return -1 for an invalid plan or index.
+
+// Range rows bind a DATA_PARALLEL body to an index interval
+// [start, start+count). The executor runs exactly that interval, not the
+// body's full param count.
 fn conc_plan_add_range(plan: int, body: int, start: int, count: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2732,6 +2876,8 @@ fn conc_plan_range_len(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 136), i * 32 + 16)
 
+// Slot rows describe the logical execution hierarchy. A parent must refer to an
+// earlier row, so the array is a forest in creation order.
 fn conc_plan_add_slot(plan: int, kind: int, parent: int, count: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2782,6 +2928,9 @@ fn conc_plan_slot_len(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 144), i * 32 + 16)
 
+// Logical transfer rows move a body's result from src to dst. Physical space
+// ids are added separately by conc_plan_add_xfer; this row stays
+// target-neutral.
 fn conc_plan_add_transfer(plan: int, kind: int, src: int, dst: int, size: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2847,6 +2996,9 @@ fn conc_plan_transfer_size(plan: int, i: int) -> int, pub:
 fn conc_plan_add_budget(plan: int, kind: int, bound: int, status: int) -> int, pub:
     return _conc_plan_add_budget_body(plan, kind, bound, status, -1)
 
+// Scoped budget row: body >= 0 makes the budget an execution obligation for
+// that body; body == -1 keeps it global/advisory. The bound must be
+// non-negative.
 fn _conc_plan_add_budget_body(plan: int, kind: int, bound: int, status: int,
                               body: int) -> int:
     if _conc_plan_valid(plan) == 0:
@@ -2914,6 +3066,8 @@ fn conc_plan_budget_status(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 160), i * 40 + 16)
 
+// Record an observed value and switch the row to MEASURED. This is evidence
+// produced by an executor, not a proof.
 fn conc_plan_budget_measure(plan: int, i: int, value: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -2935,6 +3089,9 @@ fn conc_plan_budget_value(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 160), i * 40 + 24)
 
+// Certificate rows are appended with the caller-supplied status.
+// conc_plan_cert_prove later re-derives known kinds and updates the matching
+// row in place.
 fn conc_plan_add_cert(plan: int, kind: int, status: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3033,6 +3190,8 @@ fn conc_plan_cert_prove(plan: int, kind: int) -> int, pub:
                             st = CONC_STATUS_PROVED
                         else:
                             st = CONC_STATUS_UNKNOWN
+    // Store the derived status back into the certificate table: update the
+    // first row of the same kind, or append a new row when none exists.
     i := _conc_plan_cert_find(plan, kind)
     if i >= 0:
         p := _conc_plan_at(plan)
@@ -3107,6 +3266,8 @@ fn conc_plan_explain_full(plan: int) -> string, pub:
         x = x + 1
     return out
 
+// Declare one logical memory space. Capacity is a planning constraint; no
+// runtime region is created until conc_plan_apply_spaces runs.
 fn conc_plan_add_space(plan: int, kind: int, capacity: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3148,6 +3309,9 @@ fn conc_plan_space_capacity(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 232), i * 32 + 8)
 
+// Physical transfer row: kind, src/dst bodies, byte count, and optional source
+// and destination space ids. A space id of -1 means the transfer is not bound
+// to a concrete space yet.
 fn conc_plan_add_xfer(plan: int, kind: int, src: int, dst: int, size: int,
                       src_space: int, dst_space: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -3218,6 +3382,8 @@ fn conc_plan_xfer_dst_space(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 248), i * 56 + 40)
 
+// Sum the declared transfer sizes. This is the planner's byte-cost estimate,
+// not a measurement of actual physical movement.
 fn conc_plan_xfer_bytes(plan: int) -> int, pub:
     n := conc_plan_xfer_count(plan)
     total : ., mut = 0
@@ -3229,6 +3395,9 @@ fn conc_plan_xfer_bytes(plan: int) -> int, pub:
         i = i + 1
     return total
 
+// Materialize the plan's spaces in declaration order. Runtime space ids must
+// match plan ids exactly; a mismatch aborts, leaving any earlier spaces
+// created.
 fn conc_plan_apply_spaces(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3247,6 +3416,8 @@ fn conc_plan_apply_spaces(plan: int) -> int, pub:
         i = i + 1
     return n
 
+// A stage binds a PIPE body to optional input/output channels and a blocking
+// policy. The body must already exist and take exactly one parameter.
 fn conc_plan_add_stage(plan: int, body: int, in_ch: int, out_ch: int,
                         policy: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
@@ -3314,6 +3485,8 @@ fn conc_plan_stage_policy(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 200), i * 32 + 24)
 
+// Layout rows must be appended with id == current count, so the plan's layout
+// ids form a dense 0..n-1 sequence that conc_plan_apply_layouts can install.
 fn conc_plan_add_layout(plan: int, layout: int, size: int, hash: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3363,6 +3536,8 @@ fn conc_plan_layout_hash(plan: int, i: int) -> int, pub:
         return -1
     return cell_load(load_str_ptr(p, 216), i * 32 + 16)
 
+// Install the plan's layouts into the runtime layout table. Declaration order
+// and ids must match; a mismatch aborts before the plan executes.
 fn conc_plan_apply_layouts(plan: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3430,6 +3605,8 @@ fn conc_plan_edge_kind(plan: int, edge: int) -> int, pub:
     base := load_str_ptr(p, 64)
     return cell_load(base, edge * 32 + 16)
 
+// Edge-kind rules: SEND/RECV must name an existing channel; SPAWN/JOIN must
+// use -1. Unknown kinds are rejected.
 fn _conc_plan_validate_edges(plan: int) -> int:
     p := _conc_plan_at(plan)
     n := cell_load(p, 16)
@@ -3465,6 +3642,9 @@ fn _conc_body_at(plan: int, idx: int) -> string:
 // is a single logical slot with a serial fallback for DATA_PARALLEL; lanes are a host-side
 // index-domain mapping. Neither executor invents target capabilities.
 
+// Host call table: one 8-byte word holding the current entry address. The host
+// executor runs bodies serially on this thread, so the table is reused without
+// a lock; concurrent mappings must not share this path.
 fn _conc_call_ready() -> int:
     if _conc_is_null(g_conc_call_table) != 0:
         g_conc_call_table = _conc_global_alloc(8)
@@ -3496,6 +3676,9 @@ fn _conc_call_int(entry: int, arg: int) -> int:
     cell_store(g_conc_call_table, 0, entry)
     return sched_call_1(_conc_addr(g_conc_call_table), 0, arg)
 
+// Serial host executor. Bodies run in plan order; TASK/PIPELINE take zero or
+// one string argument, and DATA_PARALLEL fans the same entry out over
+// 0..params-1. The first non-zero body result aborts the run.
 fn conc_run_host(plan: int, arg: string) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3535,6 +3718,8 @@ fn conc_run_host(plan: int, arg: string) -> int, pub:
         i = i + 1
     return 0
 
+// Execute exactly one body. The body kind selects the argument convention;
+// unsupported parameter counts and kinds return -1.
 fn conc_run_body(plan: int, body: int, arg: string) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3563,6 +3748,8 @@ fn conc_run_body(plan: int, body: int, arg: string) -> int, pub:
         return 0
     return -1
 
+// Like conc_run_body, but a one-parameter TASK/PIPELINE body receives the
+// channel handle bound to param 0. An unbound or missing handle is an error.
 fn conc_run_body_bound(plan: int, body: int, channels: string) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3599,6 +3786,9 @@ fn conc_run_body_bound(plan: int, body: int, channels: string) -> int, pub:
         return 0
     return -1
 
+// Index-domain lane executor: every body must be DATA_PARALLEL, and the same
+// [start, end) interval is run on each body's entry. This is a mapping, not a
+// second semantics; bodies still execute serially here.
 fn conc_run_lanes(plan: int, start: int, end: int) -> int, pub:
     if _conc_plan_valid(plan) == 0:
         return -1
@@ -3746,6 +3936,8 @@ fn conc_run_range(plan: int, body: int, start: int, end: int,
 // address. Unsupported or malformed input returns -1; the caller must not
 // execute a partially loaded plan.
 
+// Strict decimal token check: optional leading '-', then at least one digit.
+// Returns 1 for a valid integer token and 0 otherwise.
 fn _conc_int_token(t: string) -> int:
     n := str_len(t)
     if n <= 0:
@@ -3767,6 +3959,8 @@ fn _conc_int_token(t: string) -> int:
         i = i + 1
     return 1
 
+// Whitespace tokenizer over the shared parse cursor. Returns "" at end of
+// input; the cursor is left on the terminating whitespace.
 fn _conc_plan_next(text: string) -> string:
     n := str_len(text)
     p : ., mut = g_conc_plan_parse_pos
@@ -3797,6 +3991,9 @@ fn _conc_plan_read_int(text: string) -> int:
         return -1
     return str_int(t)
 
+// Dispatch one v2 keyword. Every record-producing branch consumes its operands
+// in a fixed order and requires ids to match the current table length, so a
+// plan text cannot skip or reorder records.
 fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
     if tok == "target":
         name := _conc_plan_next(text)
@@ -4024,6 +4221,10 @@ fn _conc_plan_v2_token(p: int, text: string, tok: string) -> int:
         return 0
     return -1
 
+// Load a v1/v2 plan text. Body entry addresses come from the `entries` table.
+// The loader is single-plan-at-a-time because the tokenizer cursor is global.
+// Any malformed token returns -1; a partially built plan remains in the plan
+// table and must not be executed.
 fn conc_plan_load(text: string, entries: string) -> int, pub:
     g_conc_plan_parse_pos = 0
     if _conc_plan_next(text) != "v":
@@ -4150,6 +4351,8 @@ fn conc_plan_load(text: string, entries: string) -> int, pub:
     cell_store(_conc_plan_at(p), 80, ver)
     return p
 
+// Measure the plan's total declared transfer bytes into one budget row. The
+// value is the same structural estimate as conc_plan_xfer_bytes.
 fn conc_plan_measure_xfers(plan: int, i: int) -> int, pub:
     bytes := conc_plan_xfer_bytes(plan)
     if bytes < 0:

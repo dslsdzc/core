@@ -22,6 +22,7 @@ fn max(a: int, b: int) -> int, pub:
         return a
     return b
 
+// Clamp val into [lo, hi]. When lo > hi, the low check returns lo first.
 fn clamp(val: int, lo: int, hi: int) -> int, pub:
     if val < lo:
         return lo
@@ -29,6 +30,8 @@ fn clamp(val: int, lo: int, hi: int) -> int, pub:
         return hi
     return val
 
+// Repeated multiplication. A negative exp returns 1 because the loop body never
+// runs.
 fn pow(base: int, exp: int) -> int, pub:
     r : ., mut = 1
     i : ., mut = 0
@@ -39,6 +42,7 @@ fn pow(base: int, exp: int) -> int, pub:
         i = i + 1
     return r
 
+// Euclid's algorithm: replace (x, y) with (y, x % y) until y is 0.
 fn gcd(a: int, b: int) -> int, pub:
     x : ., mut = a
     y : ., mut = b
@@ -50,6 +54,8 @@ fn gcd(a: int, b: int) -> int, pub:
         x = t
     return x
 
+// Return 0 when either input is 0. Divide before multiplying to reduce the
+// chance of overflow.
 fn lcm(a: int, b: int) -> int, pub:
     if a == 0 || b == 0:
         return 0

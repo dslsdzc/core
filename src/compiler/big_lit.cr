@@ -39,6 +39,8 @@ fn big_lit_decimal(s: string) -> string:
     sl := str_len(s)
     base : ., mut = 10
     start : ., mut = 0
+    // Recognize 0x/0X, 0o/0O, and 0b/0B base prefixes; anything else is decimal
+    // and is scanned from the first byte.
     if sl >= 2 && cell_load_byte(s, 0) == 48:
         pfx := cell_load_byte(s, 1)
         if pfx == 120 || pfx == 88:
@@ -72,6 +74,8 @@ fn big_lit_decimal(s: string) -> string:
         dec_len = g_big_dec_len
         i = i + 1
 
+    // dec is little-endian. Find the highest non-zero digit, then copy in
+    // reverse so the result is ordinary big-endian decimal text.
     n := dec_len
     last : ., mut = n - 1
     loop:

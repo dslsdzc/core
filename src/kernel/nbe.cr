@@ -29,6 +29,8 @@ D_ENV_BASE : int = 22  // empty base environment
 D_ENV_EXT : int = 23   // {D_ENV_EXT, parent, d, 0, 0}: x=0 maps to d, otherwise parent(x-1)
 D_ENV_DROP : int = 24  // {D_ENV_DROP, parent, 0, 0, 0}: x maps to parent(x+1)
 
+// Domain constructors. Fields follow the D_* layout above; only mk_d_natrec
+// spans two allocation groups.
 fn mk_d_nat() -> int:
     return kern_new(D_NAT)
 fn mk_d_univ(i: int) -> int:
@@ -84,6 +86,7 @@ fn mk_d_natrec(m: int, rho: int, p: int, mz: int, ms: int) -> int:
     return n
 fn d_natrec_ms(n: int) -> int:
     return kern_get(n, 6)
+// Pair a type and a value for readback.
 fn mk_d_dom(a: int, m: int) -> int:
     n := kern_new(D_DOM)
     kern_set(n, 1, a)
@@ -217,6 +220,8 @@ fn kern_eval_sub(s: int, rho: int) -> int:
 // convert to de Bruijn indexes with #(s-x-1).
 
 // read_nf
+// Read a domain pair back to nf. The Pi case eta-expands at the fresh name s,
+// so the output is canonical.
 fn kern_read_nf(d: int, s: int) -> int:
     a := kern_get(d, 1)
     m := kern_get(d, 2)                                    // type and value pair
@@ -254,6 +259,8 @@ fn kern_read_nf(d: int, s: int) -> int:
     return -1
 
 // read_ne
+// Read a neutral value back to ne. D_VAR converts an absolute name to
+// #(s - x - 1).
 fn kern_read_ne(ne: int, s: int) -> int:
     k := kern_kind(ne)
     if k == D_VAR:
@@ -283,6 +290,7 @@ fn kern_read_ne(ne: int, s: int) -> int:
     return -1
 
 // read_typ
+// Read a type domain back to nf. Pi extends the depth for the codomain only.
 fn kern_read_typ(a: int, s: int) -> int:
     k := kern_kind(a)
     if k == D_UNIV:

@@ -1,6 +1,9 @@
+// === fmt.cr ===
 // fmt — String formatting and conversion utilities.
 // All functions are pure (no side effects).
 
+// Length in bytes excluding the null terminator. The allocator stores the total
+// allocation size (including the terminator) in the 8-byte header at s - 8.
 fn str_len(s: string) -> int, pub:
     hdr := load64(s, -8)  // total bytes allocated (includes null)
     if hdr <= 0:
@@ -23,6 +26,8 @@ fn get_char(s: string, idx: int) -> string, pub:
     store8(res, 1, 0)
     return res
 
+// Substring of at most len bytes starting at start. The length is clamped to the
+// end of s; an out-of-range start or non-positive effective length returns "".
 fn str_sub(s: string, start: int, len: int) -> string, pub:
     slen := str_len(s)
     if start < 0 || start >= slen:
@@ -57,6 +62,8 @@ fn str_eq(a: string, b: string) -> int, pub:
         i = i + 1
     return 0
 
+// Lexicographic comparison of null-terminated bytes: -1, 0, or 1. Bytes are
+// compared unsigned, and a shorter string that is a prefix sorts first.
 fn str_cmp(a: string, b: string) -> int, pub:
     i : ., mut = 0
     loop:
@@ -98,6 +105,8 @@ fn concat(a: string, b: string) -> string, pub:
     store8(res, lena + lenb, 0)
     return res
 
+// Decimal text for a signed int. Digits are produced least-significant first and
+// written back to front; a negative sign shifts the digit buffer right by one.
 fn int_str(n: int) -> string, pub:
     if n == 0:
         return "0"
@@ -137,6 +146,8 @@ fn int_str(n: int) -> string, pub:
     store8(buf, end, 0)
     return buf
 
+// Parse an optional leading '-' followed by decimal digits. Parsing stops at the
+// first non-digit; an empty or sign-only string yields 0.
 fn str_int(s: string) -> int, pub:
     slen := str_len(s)
     if slen == 0:
@@ -203,6 +214,8 @@ fn format(fmt_str: string, a0: string) -> string, pub:
     store8(out_buf, ri, 0)
     return out_buf
 
+// Two-argument form: a1 is unused because the implementation delegates to
+// format, which substitutes only {0}.
 fn format2(fmt_str: string, a0: string, a1: string) -> string, pub:
     return format(fmt_str, a0)  // the one-argument form handles only {0}
 
@@ -214,6 +227,7 @@ fn format_int(fmt_str: string, val: int) -> string, pub:
 // digits. This is a pure integer implementation: extract sign, exponent, and
 // mantissa, normalize, then split the integer part and long-divide the fraction.
 
+// 2^k by repeated doubling. Callers use small k (at most 53 in float_str_bits).
 fn fpow2i(k: int) -> int:
     v : int, mut = 1
     i : ., mut = 0
@@ -224,6 +238,8 @@ fn fpow2i(k: int) -> int:
         i = i + 1
     return v
 
+// Format IEEE 754 double bits as decimal text with at most six fractional
+// digits. The seventh fractional digit is computed only to round the sixth.
 fn float_str_bits(bits: int) -> string, pub:
     // Sign bit.
     neg : int, mut = 0

@@ -47,6 +47,8 @@ fn sm_reset():
     g_sm_byte_total = 0
     g_prelude_sm = -1
 
+// Grow the file records and the parallel library-owner table together: row
+// indices in both arrays must stay aligned.
 fn grow_sm_files(needed: int):
     if needed <= g_sm_file_cap:
         return
@@ -179,6 +181,8 @@ fn fileid_of_line(line: int) -> int:
         i = i + 1
     return -1
 
+// Byte offset of a 1-based line start. The line is clamped to [1, count] so
+// callers can pass 0 or past-the-end values without a separate check.
 fn sm_line_start(id: int, line: int) -> int:
     if id < 0 || id >= g_sm_file_count:
         return 0
@@ -193,6 +197,8 @@ fn sm_line_start(id: int, line: int) -> int:
         ln = cnt
     return cell_load(g_sm_line_starts, (base + ln - 1) * 8)
 
+// 0-based index of the line containing a file-local byte offset. Uses binary
+// search over the line-start table; offsets past EOF clamp to the last line.
 fn sm_line_index(id: int, off: int) -> int:
     if id < 0 || id >= g_sm_file_count:
         return 0
@@ -224,6 +230,8 @@ fn sm_location_col(id: int, off: int) -> int:
         return 1
     return off - st + 1
 
+// Source text of a 1-based line without its trailing newline or CR. Returns ""
+// when the file id or line is out of range.
 fn sm_line_text(id: int, line: int) -> string:
     if id < 0 || id >= g_sm_file_count:
         return ""
@@ -314,6 +322,8 @@ fn ast_col(n: int) -> int:
     b := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_BYTE_BASE)
     return sm_location_col(id, lo - 1 - b)
 
+// Exercise line/column mapping, line text, and virtual files. Each failed
+// assertion increments the count; returns the number of failures.
 fn sm_selftest() -> int:
     sm_reset()
     fails : ., mut = 0

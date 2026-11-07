@@ -14,6 +14,8 @@ g_self_host_mode : int, mut = 0
 BUILTIN_VIS_PUBLIC : int = 0
 BUILTIN_VIS_INTERNAL : int = 1
 
+// Read the CORE_S1P switch once at process start. g_s1p_seen records that
+// initialization ran even when the switch is off.
 fn prelude_init():
     g_s1p_seen = 1
     g_s1p_on = 0
@@ -21,6 +23,8 @@ fn prelude_init():
     if str_len(ev2) > 0 && ev2 == "1":
         g_s1p_on = 1
 
+// Reset the builtin tables and let the target's frontend_abi.cr register its
+// ABI names. CORE_SELF_HOST is latched once and only from "1".
 fn prelude_builtin_init():
     if g_self_host_mode == 0:
         if get_env("CORE_SELF_HOST") == "1":
@@ -31,6 +35,8 @@ fn prelude_builtin_init():
     g_rt_builtin_vis = alloc(8 * 8)
     target_builtin_register()
 
+// Append one builtin to the three parallel tables (name, return type,
+// visibility). Each table grows independently.
 fn prelude_builtin_add(name: string, ret_ti: int, vis: int):
     ni := str_intern(name)
     if g_rt_builtin_count * 8 + 8 > str_len(g_rt_builtin_names):
@@ -77,6 +83,9 @@ fn prelude_builtin_visible_to_current_lib(vis: int) -> int:
         return 1
     return 0
 
+// Declared return type index for a builtin. Unknown names fall back to the
+// target's builtin table; a local entry that is not visible to the current
+// library returns -1.
 fn prelude_builtin_return_ti(name_ni: int) -> int:
     bi := prelude_builtin_find(name_ni)
     if bi >= 0:

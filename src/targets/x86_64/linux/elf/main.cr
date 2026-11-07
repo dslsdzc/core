@@ -12,6 +12,7 @@
 // only and rejects table and debug channels with a message pointing to the concat
 // entry.
 
+// Reset per-run backend counters and the stack map before loading a .ccr.
 fn init_backend_arrays():
     g_x86_var_count = 0
     g_x86_stack_size = 0
@@ -21,6 +22,8 @@ fn init_backend_arrays():
     g_x86_is_enum_cap = 0
     g_stack_map = ""
 
+// Split a comma-separated .so list and register each non-empty path with the
+// linker context.
 fn split_links(val: string):
     sl := str_len(val)
     start : ., mut = 0
@@ -35,6 +38,8 @@ fn split_links(val: string):
             start = i + 1
         i = i + 1
 
+// Whether the command line requests a table or debug channel. This entry emits
+// ELF only and rejects these flags up front.
 fn backend_has_extended_flags() -> int:
     if str_len(cli_get("table")) > 0:
         return 1
@@ -74,6 +79,9 @@ fn backend_has_extended_flags() -> int:
         return 1
     return 0
 
+// Project-mode backend entry: parse flags, load the .ccr, rebuild the linear
+// schedule, and emit an ELF, a static link, or a shared object. Returns 0 on
+// success and 1 on a usage, input, or emission error.
 fn corearch_main() -> int:
     cli_init("corearch", "Core architecture backend")
     register_backend_flags()

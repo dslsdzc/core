@@ -114,6 +114,7 @@ g_conc_cancel_b : string, mut
 g_conc_cancel_n : string, mut
 g_conc_cancel_mode : string, mut
 
+// ── Shared allocation and preemption plumbing ────────────────────────────
 fn _conc_sched_alloc(size: int) -> string:
     // Scheduler arrays are shared across Ms; allocate them from the reserved
     // shared partition. The shared arena allocator is not reentrant, and callers
@@ -135,6 +136,8 @@ fn _conc_sched_alloc(size: int) -> string:
     rt_atomic_store(g_conc_arena_lock, 0, 0)
     return p
 
+// Signal-context clock: uses the preallocated g_conc_sig_ts scratch instead of
+// allocating, because this path may run from the SIGALRM handler.
 fn _conc_now_ms_sig() -> int:
     if _conc_raw(g_conc_sig_ts) == 0:
         return -1
@@ -145,6 +148,8 @@ fn _conc_now_ms_sig() -> int:
         return -1
     return cell_load(g_conc_sig_ts, 0) * 1000 + cell_load(g_conc_sig_ts, 8) / 1000000
 
+// Record the worst pending-to-handling delay. The pending marker is cleared
+// after one measurement; a clock that has not advanced leaves it in place.
 fn _conc_preempt_latency_record():
     if g_conc_preempt_pending_ms <= 0:
         return
@@ -188,6 +193,9 @@ fn conc_preempt_signal():
                                             _conc_yield_try(1)
                                             _conc_preempt_latency_record()
 
+// Install conc_preempt_signal for SIGALRM with SA_RESTART and the runtime's
+// restorer stub. The sigaction block lives in shared arena memory because the
+// handler outlives this call.
 fn _conc_preempt_install():
     act := _conc_sched_alloc(32)
     cell_store(act, 0, @addr(conc_preempt_signal))
@@ -197,6 +205,9 @@ fn _conc_preempt_install():
     cell_store(act, 24, 0)
     r := syscall4(13, 14, _conc_addr(act), 0, 8)
 
+// Arm one 5 ms per-M timer with SIGEV_THREAD_ID so the signal lands on the M
+// that owns the activation. Ms that already have a timer are skipped. If no
+// per-thread timer could be armed, fall back to a process-wide interval timer.
 fn _conc_preempt_timers_start():
     if _conc_raw(g_conc_tid_m) == 0 || _conc_raw(g_conc_timer_m) == 0:
         return
@@ -238,9 +249,12 @@ fn _conc_preempt_timers_start():
         cell_store(iv, 24, 5000000)
         syscall3(38, 0, _conc_addr(iv), 0)
 
+// ── Tunables and metrics ─────────────────────────────────────────────────
 fn conc_set_signal_preempt(on: int), pub:
     g_conc_signal_preempt = on
 
+// The quantum is stored twice per M: the live countdown and the configured
+// reload value. This writes both for every M.
 fn conc_set_quantum(n: int), pub:
     if n < 1:
         n = 1
@@ -275,6 +289,8 @@ fn conc_get_quantum_m(m: int) -> int, pub:
 fn _conc_seq_addr(m: int) -> int:
     return _conc_addr(g_conc_seq_m) + m * 8
 
+// Wake M0 only if it is parked as the main thread. The sequence bump precedes
+// the futex wake so the waiter cannot miss the notification.
 fn _conc_wake_main_seq():
     if g_conc_m_count <= 1:
         return
@@ -410,6 +426,8 @@ fn conc_metrics_explain() -> string, pub:
     out = out + " wait_max=" + _conc_num_str(g_conc_wait_ms_max)
     return out
 
+// Diagnostic queue length. The walk runs under the M's queue lock and treats a
+// link cycle as fatal (exit 77) instead of looping forever.
 fn conc_ready_len(m: int) -> int, pub:
     if m < 0 || m >= 64:
         return -1
@@ -478,6 +496,8 @@ fn conc_plan_target_compatible(plan: int) -> int, pub:
         return 0
     return 1
 
+// Human-readable snapshot. Counters are read without a global lock, so the
+// result is a point-in-time approximation, not a consistent transaction.
 fn conc_state_explain() -> string, pub:
     out : ., mut = "ms=" + _conc_num_str(g_conc_m_count)
     out = out + " acts=" + _conc_num_str(g_conc_act_count)
@@ -513,6 +533,9 @@ fn conc_workers_started() -> int, pub:
 fn conc_worker_failures() -> int, pub:
     return g_conc_worker_failures
 
+// Wait a bounded number of spins for workers to announce startup, record any
+// shortfall, then arm the per-M preemption timers. This runs after the clones
+// are created and before the caller relies on worker progress.
 fn conc_check_workers(expected: int):
     spins : ., mut = 0
     loop:
@@ -940,6 +963,11 @@ fn _conc_ready_pop() -> int:
         vk = vk + 1
     return -1
 
+// ── Activation table ─────────────────────────────────────────────────────
+
+// Grow the activation pointer table. New slots are zeroed; existing control
+// block pointers are copied by value. Callers hold the table lock, so the
+// table is replaced atomically with respect to other table users.
 fn _conc_acts_grow():
     if g_conc_act_count < g_conc_act_cap:
         return
@@ -985,6 +1013,7 @@ fn _conc_set_cur(id: int):
 fn _conc_sched_sp_cell() -> string:
     return _conc_ptr(_conc_addr(g_conc_sched_sp_m) + _conc_m() * 8)
 
+// ── Runtime locks ────────────────────────────────────────────────────────
 fn _conc_lock():
     // Disable direct signal preemption while waiting for or holding the global
     // scheduler lock. The depth is per-M and read by the signal handler.
@@ -1013,6 +1042,8 @@ fn _conc_unlock():
         if d > 0:
             cell_store(g_conc_preempt_disable_m, m * 8, d - 1)
 
+// Channel-state lock: protects g_conc_ch_states and every channel wait list.
+// Acquisition raises the per-M preemption-disable depth like the global lock.
 fn _conc_ch_lock():
     cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
@@ -1039,6 +1070,8 @@ fn _conc_ch_unlock():
         if d > 0:
             cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
 
+// Owner-region lock: serializes region creation and the global channel region,
+// because conc_region_new mutates process-wide region arrays.
 fn _conc_region_lock():
     cur := _conc_m()
     if _conc_raw(g_conc_preempt_disable_m) != 0:
@@ -1065,6 +1098,8 @@ fn _conc_region_unlock():
         if d > 0:
             cell_store(g_conc_preempt_disable_m, cur * 8, d - 1)
 
+// Nested per-M preemption-disable counter. While nonzero,
+// conc_preempt_signal publishes a pending flag but does not switch directly.
 fn conc_preempt_disable(), pub:
     if g_conc_inited == 0:
         conc_sched_init()
@@ -1113,6 +1148,10 @@ fn conc_sched_set_slots(n: int), pub:
         n = 1
     g_conc_slots = n
 
+// ── Initialization ───────────────────────────────────────────────────────
+
+// Startup populates every shared table and publishes g_conc_inited last.
+// Repeated calls after initialization return immediately.
 fn conc_sched_init():
     arena_ensure_init()
     arena_shared_init()
@@ -1249,6 +1288,10 @@ fn _conc_table_unlock():
     else:
         rt_atomic_store(g_conc_table_lock, 0, 0)
 
+// ── Activation free list ─────────────────────────────────────────────────
+
+// LIFO free list protected by its own lock. Reusing an activation avoids the
+// table lock and the shared allocation on the spawn path.
 fn _conc_free_push(id: int):
     if _conc_raw(g_conc_free) == 0:
         return
@@ -1282,6 +1325,11 @@ fn _conc_free_pop() -> int:
     _conc_free_unlock()
     return id
 
+// ── Activation lifecycle ─────────────────────────────────────────────────
+
+// Initialize a control block in place. `home` is derived from the logical
+// slot, and both ready links start at -1. The caller owns the id (free list or
+// table lock) while these fields are written.
 fn _conc_act_init(id: int, a: string, entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int, forced_slot: int):
     slots : ., mut = g_conc_slots
     if slots < 1:
@@ -1344,6 +1392,9 @@ fn _conc_act_new(entry: int, arg: int, result_ch: string, yield_ch: string, toke
     _conc_table_unlock()
     return id
 
+// Spawn path: reuse a free id when available, otherwise allocate a new one,
+// then push the activation onto its home ready queue. The result channel is
+// owned by the caller; the activation only stores the handle.
 fn _conc_spawn_common(entry: int, arg: int, result_ch: string, yield_ch: string, token: int, priority: int, forced_slot: int) -> int:
     conc_sched_init()
     id : ., mut = _conc_free_pop()
@@ -1394,6 +1445,8 @@ fn conc_spawn_flow_token(entry: int, arg: int, result_ch: string,
                         yield_ch: string, token: int) -> int, pub:
     return _conc_spawn_common(entry, arg, result_ch, yield_ch, token, 0, -1)
 
+// Spawn pinned to a logical slot and return the one-element result channel.
+// An empty return means channel creation or spawn failed.
 fn conc_go_slot(entry: int, arg: int, slot: int) -> string, pub:
     conc_sched_init()
     out := _conc_global_channel(8, 1)
@@ -1415,6 +1468,12 @@ fn conc_current_slot() -> int, pub:
         return -1
     return cell_load(a, 128)
 
+// ── Scheduling ───────────────────────────────────────────────────────────
+
+// In scheduler context, drain ready activations until the queue is empty or
+// the M0 fairness limit is reached. When called from inside a running
+// activation (yield/preempt), it saves that activation and returns to the
+// scheduler fiber instead.
 fn conc_schedule() -> int, pub:
     ran : ., mut = 0
     // M0 is the main/caller thread. With multiple Ms it must return after a
@@ -1478,6 +1537,9 @@ fn conc_schedule() -> int, pub:
                     rt_atomic_store(g_conc_yield_claim_m, _conc_m() * 8, 0)
                     cell_store(a, 8, CONC_ACT_RUNNABLE)
             _conc_set_cur(-1)
+    // Called from inside a running activation: store its arena and switch back
+    // to this M's scheduler fiber. The activation stays linked in the ready
+    // queue in YIELDING state.
     else:
         a := _conc_act_at(_conc_cur_id())
         if _conc_word(a) == 0:
@@ -1493,6 +1555,9 @@ fn _conc_ptr_addr(s: string) -> int:
         v = @ptr_of(s)
     return v
 
+// Cooperative yield: claim the per-M yield word, mark the activation YIELDING,
+// re-queue it, and switch to the scheduler. A missing claim or a missing
+// current activation returns 0 without switching.
 fn _conc_yield_try(claimed: int) -> int:
     if g_conc_inited == 0:
         return 0
@@ -1522,6 +1587,8 @@ fn conc_yield(), pub:
 // Write the observed wall time back into every WAIT budget of the plan. This
 // is evidence, not a proof: status becomes MEASURED, and only the executor can
 // produce it. Plans without WAIT rows are untouched.
+
+// ── Plan executors ───────────────────────────────────────────────────────
 fn _conc_plan_measure_wait(plan: int, t0: int):
     n := conc_plan_budget_count(plan)
     i : ., mut = 0
@@ -1568,6 +1635,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
         i = i + 1
     // Reachability follows every edge kind; only SPAWN/JOIN impose start
     // ordering. SEND/RECV are channel bindings.
+    // BFS from root over all edge kinds. `reach` gates both in-degree accounting
+    // and execution, so unreachable bodies are never spawned.
     q := alloc(n * 8)
     qh : ., mut = 0
     qt : ., mut = 0
@@ -1613,6 +1682,9 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
                 if cell_load(reach, f * 8) != 0 && cell_load(reach, t * 8) != 0:
                     cell_store(indeg, t * 8, cell_load(indeg, t * 8) + 1)
         ie = ie + 1
+    // Deterministic topological order: repeatedly take the lowest-numbered
+    // reachable body with zero in-degree. A cycle leaves no pick and aborts
+    // before any body is spawned.
     order := alloc(n * 8)
     on : ., mut = 0
     cell_store(order, 0, root)
@@ -1656,6 +1728,8 @@ fn conc_plan_run(plan: int, root: int, channels: string) -> int, pub:
                     if t >= 0 && t < n && cell_load(reach, t * 8) != 0:
                         cell_store(indeg, t * 8, cell_load(indeg, t * 8) - 1)
             te = te + 1
+    // Execute in topological order. JOIN edges consume the source activation's
+    // result before the target body starts; the root is never waited on.
     total : ., mut = 0
     oi : ., mut = 1
     loop:
@@ -1911,9 +1985,13 @@ fn conc_plan_run_mapped(mapping_id: int, channels: string) -> int, pub:
     _conc_plan_measure_wait(plan, wait_t0)
     return total
 
+// ── Cancellation ─────────────────────────────────────────────────────────
 fn conc_flow_cancelled() -> int, pub:
     return g_conc_flow_cancel
 
+// Cancel the active flow by setting the flag and closing its yield/result
+// channels, which wakes any blocked yield or join. The handles come from the
+// single set stored by conc_flow_run.
 fn conc_flow_cancel() -> int, pub:
     g_conc_flow_cancel = 1
     if _conc_word(g_conc_flow_ych) != 0:
@@ -1922,6 +2000,8 @@ fn conc_flow_cancel() -> int, pub:
         conc_sched_close(g_conc_flow_rch)
     return 0
 
+// Clear the flow cancel flag and handle slots. This does not close or drain
+// the channels; conc_flow_cancel is expected to have done that.
 fn conc_flow_reset() -> int, pub:
     g_conc_flow_cancel = 0
     g_conc_flow_ych = ""
@@ -1931,6 +2011,8 @@ fn conc_flow_reset() -> int, pub:
 fn conc_pipeline_cancelled() -> int, pub:
     return g_conc_pipeline_cancel
 
+// Cancel a pipeline run and close every channel handle in `channels`, so
+// blocked stage sends and receives return through the close path.
 fn conc_pipeline_cancel(plan: int, channels: string) -> int, pub:
     g_conc_pipeline_cancel = 1
     if conc_plan_validate(plan) != 0 && _conc_is_null(channels) == 0:
@@ -1992,6 +2074,11 @@ fn conc_deadlock_suspect() -> int, pub:
         return 0
     return 1
 
+// ── Pipeline and flow drivers ────────────────────────────────────────────
+
+// Token-aware pipeline: spawn every stage with a 16-byte context holding its
+// optional in/out channel handles, then join stage results in order. A token
+// cancellation aborts between stages and during the join.
 fn conc_pipeline_run_token(plan: int, channels: string,
                            token: int) -> int, pub:
     if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
@@ -2199,6 +2286,8 @@ fn conc_flow_run_timeout(entry: int, arg: int, out: string,
 fn conc_plan_cancelled() -> int, pub:
     return g_conc_plan_cancel
 
+// Plan cancellation mirrors pipeline cancellation: set the flag, then close
+// every plan channel handle to unblock waiting bodies.
 fn conc_plan_cancel(plan: int, channels: string) -> int, pub:
     g_conc_plan_cancel = 1
     if conc_plan_validate(plan) != 0 && _conc_is_null(channels) == 0:
@@ -2217,6 +2306,8 @@ fn conc_plan_reset() -> int, pub:
     g_conc_plan_cancel = 0
     return 0
 
+// Activation entry for conc_plan_run_timeout. It runs the plan and reports the
+// result on the caller's result channel; the channel is owned by the caller.
 fn _conc_plan_timeout_entry(ctx: string) -> int:
     plan := cell_load(ctx, 0)
     root := cell_load(ctx, 8)
@@ -2227,6 +2318,9 @@ fn _conc_plan_timeout_entry(ctx: string) -> int:
         conc_sched_send_int(rch, rc)
     return 0
 
+// Run a plan on a separate activation and wait for its result with a deadline.
+// On timeout the plan's channels are closed; the spawned activation observes
+// cancellation through the normal close path.
 fn conc_plan_run_timeout(plan: int, root: int, channels: string,
                          timeout_ms: int) -> int, pub:
     if timeout_ms <= 0:
@@ -2269,6 +2363,8 @@ fn conc_plan_run_timeout(plan: int, root: int, channels: string,
             _conc_sleep_ms(1)
     return CONC_RESULT_TIMEOUT
 
+// Spawn one TASK/PIPELINE body from a plan, passing the handle bound to param
+// 0 when present. Returns the result channel, or "" on any validation failure.
 fn conc_plan_spawn(plan: int, body: int, channels: string) -> string, pub:
     if conc_plan_validate(plan) == 0:
         return ""
@@ -2393,6 +2489,11 @@ fn conc_pipeline_run(plan: int, channels: string) -> int, pub:
         return CONC_RESULT_CANCELLED
     return total
 
+// ── Cancellation tokens ──────────────────────────────────────────────────
+
+// Allocate one of 64 cancellation tokens and initialize all of its slots. A
+// token is a host-side index, not a pointer; -1 means the table is full or was
+// never initialized.
 fn conc_cancel_new() -> int, pub:
     if _conc_raw(g_conc_cancel_used) == 0:
         return -1
@@ -2441,6 +2542,8 @@ fn conc_cancelled(token: int) -> int, pub:
         return 0
     return cell_load(g_conc_cancel_flags, token * 8)
 
+// Mark a token cancelled and close its bound channels according to the stored
+// mode (flow pair or pipeline channel array). Closing wakes blocked waiters.
 fn conc_cancel_token(token: int) -> int, pub:
     if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
         return -1
@@ -2467,6 +2570,9 @@ fn conc_cancel_token(token: int) -> int, pub:
                 i = i + 1
     return 0
 
+// Yield one value from the current activation. If the activation carries a
+// cancelled token, or the global flow is cancelled for tokenless flows, close
+// the yield channel and abort the activation instead of yielding.
 fn conc_flow_yield(v: int), pub:
     id := _conc_cur_id()
     if id < 0:
@@ -2491,6 +2597,8 @@ fn conc_flow_yield(v: int), pub:
         conc_sched_send_int(ych, v)
     conc_yield()
 
+// Treat an invalid channel as closed, then read the registered close flag under
+// the channel lock. A channel that was never registered gets a state row.
 fn conc_sched_is_closed(ch: string) -> int, pub:
     conc_sched_init()
     if conc_channel_len(ch) < 0:
@@ -2533,6 +2641,8 @@ fn conc_flow_run(entry: int, arg: int, out: string) -> int, pub:
         return CONC_RESULT_CANCELLED
     return n
 
+// Token-aware flow driver: binds the token to this flow's channels before
+// spawning, so conc_cancel_token can close them from another M.
 fn conc_flow_run_token(entry: int, arg: int, out: string,
                        token: int) -> int, pub:
     if token < 0 || token >= 64 || _conc_raw(g_conc_cancel_used) == 0:
@@ -2592,6 +2702,8 @@ fn conc_preempt_tick(), pub:
     else:
         cell_store(g_conc_quantum_m, m * 8, q)
 
+// The started counter is published under the global lock before the
+// schedule/park loop; the done counter is published when shutdown is seen.
 fn conc_worker_run(m_idx: int), pub:
     // The clone trampoline already installs the per-worker TLS block; set the
     // index again so this loop is correct even on a runtime that starts a
@@ -2632,6 +2744,9 @@ fn _conc_abort_current():
         conc_schedule()
     return
 
+// Fiber entry: run the activation's entry with its saved argument, close the
+// yield channel, send the result on the result channel, then mark the
+// activation dead. _conc_abort_current never returns.
 fn _conc_activation_entry():
     id := _conc_cur_id()
     a := _conc_act_at(id)
@@ -2651,6 +2766,11 @@ fn _conc_activation_entry():
     _conc_abort_current()
     return
 
+// ── Channel state table ──────────────────────────────────────────────────
+
+// Grow the channel-state table. Records are copied bytewise; each
+// CONC_CH_STATE_SIZE record holds the channel pointer, close flag, and the
+// SEND/RECV wait-list heads and tails.
 fn _conc_ch_grow():
     if g_conc_ch_count < g_conc_ch_cap:
         return
@@ -2667,6 +2787,9 @@ fn _conc_ch_grow():
     g_conc_ch_states = nb
     g_conc_ch_cap = nc
 
+// Find or register a channel state row by pointer identity. A new row starts
+// with a zero close flag and empty wait lists. The caller holds the channel
+// lock.
 fn _conc_ch_slot_locked(ch: string) -> int:
     i : ., mut = 0
     loop:
@@ -2694,6 +2817,9 @@ fn _conc_ch_slot(ch: string) -> int:
     _conc_ch_unlock()
     return slot
 
+// Append an activation to the channel's SEND or RECV wait list. Wait lists are
+// singly linked through activation field 56; the state row stores head and
+// tail. The caller holds the channel lock.
 fn _conc_wait_push(slot: int, kind: int, id: int):
     base := slot * CONC_CH_STATE_SIZE
     head_off : ., mut = 16
@@ -2712,6 +2838,9 @@ fn _conc_wait_push(slot: int, kind: int, id: int):
         cell_store(t, 56, id)
         cell_store(g_conc_ch_states, base + tail_off, id)
 
+// Pop the oldest waiter of one kind and fix up the tail when the list empties.
+// A dead table entry is still popped; the caller rechecks the activation. The
+// caller holds the channel lock.
 fn _conc_wait_pop(slot: int, kind: int) -> int:
     base := slot * CONC_CH_STATE_SIZE
     head_off : ., mut = 16
@@ -2730,6 +2859,8 @@ fn _conc_wait_pop(slot: int, kind: int) -> int:
         cell_store(g_conc_ch_states, base + tail_off, -1)
     return head
 
+// Move one waiter to RUNNABLE and enqueue it. This path holds the channel lock
+// while _conc_ready_push takes the target M's queue lock.
 fn _conc_wake_one(slot: int, kind: int):
     id := _conc_wait_pop(slot, kind)
     if id < 0:
@@ -2771,6 +2902,11 @@ fn _conc_ch_buf(ch: string) -> string:
 fn _conc_ch_esize(ch: string) -> int:
     return cell_load(ch, 40)
 
+// ── Global channel region ────────────────────────────────────────────────
+
+// Lazily create the process-wide 1 MiB region used for runtime channels. The
+// caller holds the region lock. A failed creation leaves the sentinel at -1 so
+// a later call can retry.
 fn _conc_global_region_get_locked() -> int:
     if g_conc_global_region >= 0:
         return g_conc_global_region
@@ -2785,6 +2921,10 @@ fn _conc_global_region_get() -> int:
     _conc_region_unlock()
     return r
 
+// Allocate a channel in the global region while holding the region lock. If
+// the current region is too small for the requested ring, a dedicated region
+// sized to the request replaces it; the old region stays alive because
+// existing channels still point into it.
 fn _conc_global_channel(elemsize: int, cap: int) -> string:
     _conc_region_lock()
     out : ., mut = ""
@@ -2803,6 +2943,8 @@ fn _conc_global_channel(elemsize: int, cap: int) -> string:
     _conc_region_unlock()
     return out
 
+// Public channel creation: validates element size and capacity, rejecting
+// capacities whose byte size would exceed CONC_MAX_ALLOC.
 fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
     conc_sched_init()
     if elemsize <= 0:
@@ -2813,6 +2955,14 @@ fn conc_chan_make(elemsize: int, cap: int) -> string, pub:
         return ""
     return _conc_global_channel(elemsize, cap)
 
+// ── Channel operations ───────────────────────────────────────────────────
+
+// Blocking send. A zero-capacity channel is a rendezvous: hand the value
+// directly to a waiting receiver or park the sender on the SEND wait list. A
+// buffered channel enqueues at (head + len) % cap and wakes one receiver. A
+// closed channel returns 0 without enqueuing. A caller with no current
+// activation schedules ready work instead of joining the wait list, so a
+// single-M idle send returns 0.
 fn conc_sched_send_int(ch: string, val: int) -> int, pub:
     if _conc_raw(g_conc_metric_send) != 0:
         rt_atomic_fetch_add(g_conc_metric_send, 0, 1)
@@ -2888,6 +3038,11 @@ fn conc_sched_send_int(ch: string, val: int) -> int, pub:
         conc_schedule()
         _conc_wait_record(t0)
 
+// Blocking receive. Rendezvous channels take the value from a waiting sender
+// and wake it; buffered channels pop head and wake one sender. A closed channel
+// returns 0 after its buffered elements are drained. A caller with no current
+// activation schedules ready work instead of joining the wait list, so a
+// single-M idle receive returns 0.
 fn conc_sched_recv_int(ch: string) -> int, pub:
     if _conc_raw(g_conc_metric_recv) != 0:
         rt_atomic_fetch_add(g_conc_metric_recv, 0, 1)
@@ -3015,6 +3170,7 @@ fn conc_sched_try_recv_int(ch: string) -> int, pub:
     _conc_ch_unlock()
     return CONC_TRY_EMPTY
 
+// ── Time and wait accounting ─────────────────────────────────────────────
 fn _conc_now_ms() -> int:
     // Per-M scratch timespec: this is called from every worker in park/wait
     // accounting, so allocating here both raced and polluted the bump heap.
@@ -3030,6 +3186,8 @@ fn _conc_now_ms() -> int:
         return -1
     return cell_load(ts, 0) * 1000 + cell_load(ts, 8) / 1000000
 
+// Accumulate one wait interval in the global counters. Negative or backwards
+// timestamps are ignored; the max is updated only when the interval grows.
 fn _conc_wait_record(t0: int):
     if t0 < 0:
         return
@@ -3054,6 +3212,10 @@ fn _conc_sleep_ms(ms: int):
     r := syscall3(35, ts, 0, 0)  // nanosleep
     return
 
+// ── Status wrappers and close ────────────────────────────────────────────
+
+// Status form of send: invalid and closed channels are reported without
+// blocking; a successful send returns CONC_CHAN_OK.
 fn conc_sched_send_int_status(ch: string, val: int) -> int, pub:
     if conc_channel_len(ch) < 0:
         return CONC_CHAN_INVALID
@@ -3062,6 +3224,8 @@ fn conc_sched_send_int_status(ch: string, val: int) -> int, pub:
     conc_sched_send_int(ch, val)
     return CONC_CHAN_OK
 
+// Status form of receive: a closed channel still drains buffered elements and
+// reports CONC_CHAN_CLOSED only once the buffer is empty.
 fn conc_sched_recv_int_status(ch: string, out: string) -> int, pub:
     if conc_channel_len(ch) < 0:
         return CONC_CHAN_INVALID
@@ -3072,6 +3236,8 @@ fn conc_sched_recv_int_status(ch: string, out: string) -> int, pub:
     cell_store(out, 0, v)
     return CONC_CHAN_OK
 
+// Mark the channel closed and wake every sender and receiver waiter. Channel
+// storage is not freed; the state row keeps the close flag for later readers.
 fn conc_sched_close(ch: string), pub:
     g_conc_close_count = g_conc_close_count + 1
     conc_sched_init()
@@ -3085,6 +3251,8 @@ fn conc_sched_close(ch: string), pub:
     _conc_wake_all(slot, CONC_WAIT_RECV)
     _conc_ch_unlock()
 
+// Spawn an activation and return its one-element result channel. The caller
+// owns the returned handle; an empty result means spawn or allocation failed.
 fn conc_go(entry: int, arg: int) -> string, pub:
     conc_sched_init()
     out := _conc_global_channel(8, 1)

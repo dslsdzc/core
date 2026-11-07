@@ -5,6 +5,8 @@
 // wraps modulo 2^bits. No new IR opcodes are involved; the operations are
 // expressed with /, %, * and conditionals so they run on the existing HIT core.
 
+// Return 2^bits by repeated doubling. A non-positive width returns 1 because
+// the loop body never runs.
 fn wordTwoPow(bits: int) -> int:
     r : ., mut = 1
     i : ., mut = 0
@@ -15,6 +17,7 @@ fn wordTwoPow(bits: int) -> int:
         i = i + 1
     return r
 
+// Reduce value into [0, 2^bits); a non-positive width returns 0.
 fn wordNorm(value: int, bits: int) -> int:
     if bits <= 0:
         return 0
@@ -24,11 +27,13 @@ fn wordNorm(value: int, bits: int) -> int:
         r = r + modulus
     return r
 
+// Return 2^bits - 1; a non-positive width returns 0.
 fn wordMask(bits: int) -> int:
     if bits <= 0:
         return 0
     return wordTwoPow(bits) - 1
 
+// Return bit `bit` of value, or 0 when the index is outside [0, bits).
 fn wordBit(value: int, bit: int, bits: int) -> int:
     if bit < 0 || bit >= bits:
         return 0
@@ -37,6 +42,8 @@ fn wordBit(value: int, bit: int, bits: int) -> int:
 fn wordNot(a: int, bits: int) -> int:
     return wordMask(bits) - wordNorm(a, bits)
 
+// Bitwise operations loop over exactly `bits` low bits; inputs are normalized
+// first, so negative values behave as unsigned words.
 fn wordAnd(a: int, b: int, bits: int) -> int:
     x : ., mut = wordNorm(a, bits)
     y : ., mut = wordNorm(b, bits)
@@ -88,6 +95,7 @@ fn wordXor(a: int, b: int, bits: int) -> int:
         i = i + 1
     return r
 
+// Shift count is reduced modulo bits; a non-positive width returns 0.
 fn wordShl(a: int, n: int, bits: int) -> int:
     if bits <= 0:
         return 0
@@ -114,6 +122,8 @@ fn wordShr(a: int, n: int, bits: int) -> int:
         i = i + 1
     return r
 
+// Rotate by combining a shift in each direction; k == 0 returns the normalized
+// input unchanged.
 fn wordRotl(a: int, n: int, bits: int) -> int:
     if bits <= 0:
         return 0

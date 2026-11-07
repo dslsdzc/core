@@ -16,6 +16,8 @@
 // Depends on mctt.cr, nbe.cr, term_io.cr, fmt.cr, io.cr, and rt.cr.
 
 // Structural equality for nf and ne nodes, used by convert.
+// Compare substitutions structurally. S_ID and S_WEAKEN have no children, so
+// any two nodes with the same tag are equal.
 fn nf_sub_eq(a: int, b: int) -> int:
     if a < 0 || b < 0:
         return 0
@@ -35,6 +37,8 @@ fn nf_sub_eq(a: int, b: int) -> int:
         return nf_sub_eq(kern_get(a, 1), kern_get(b, 1)) != 0 && nf_eq(kern_get(a, 2), kern_get(b, 2)) != 0
     return 0
 
+// Structural equality on nf nodes. K_NAT and K_ZERO carry no children, so any
+// two nodes of the same tag are equal.
 fn nf_eq(a: int, b: int) -> int:
     if a < 0 || b < 0:
         return 0
@@ -59,6 +63,7 @@ fn nf_eq(a: int, b: int) -> int:
     return 0
 
 // Line handling.
+// Number of malformed query lines; kernel_main exits 1 when this is nonzero.
 g_kernel_malformed : int, mut = 0
 
 // Parse (ctx exp*) and push bindings in order. The first expression is the newest
@@ -202,6 +207,7 @@ fn kernel_main() -> int:
             break
         txt := read_file(a)
         tl := str_len(txt)
+        // Split the file on LF; a final line without LF is still processed.
         pos : ., mut = 0
         loop:
             if pos >= tl:

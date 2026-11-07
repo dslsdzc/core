@@ -6,6 +6,8 @@
 // type_infer(m) returns an inferred nf node, or -1 for reject.
 // Every failed premise returns -1, and inferred results are normalized.
 
+// Drop the newest context binding. Callers must pop exactly as many times as
+// they extend; a pop on an empty context is silently ignored.
 fn ctx_pop():
     if g_ctx_len > 0:
         g_ctx_len = g_ctx_len - 1

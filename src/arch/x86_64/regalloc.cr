@@ -447,6 +447,8 @@ fn inject_read_gap() -> int:
 // docs/regalloc-cache-mapping.md is not wired yet; allocation and verification
 // share the lexical interval model.
 
+// Linear scan of the parallel (lab_id, lab_ps) arrays; returns the instruction
+// position of label id, or -1 when the label is absent.
 fn label_pos_of(id: int, lab_id: string, lab_ps: string, n: int) -> int:
     i : ., mut = 0
     loop:
@@ -457,6 +459,10 @@ fn label_pos_of(id: int, lab_id: string, lab_ps: string, n: int) -> int:
         i = i + 1
     return -1
 
+// Allocate callee-saved registers per function and write OPT_KEY_REG_ASSIGN
+// pairs plus the verifier location registry. Allocation is skipped below opt
+// level 1. Excluded vars and vars that cannot get a register stay in their
+// frame slots.
 fn alloc_registers():
     reg_map_reset()
     if g_opt_level < 1:

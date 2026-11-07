@@ -77,6 +77,8 @@ fn count_newlines(s: string) -> int:
         i = i + 1
     return n
 
+// Extract `fileid "..."` from raw source text before tokenizing. Returns "" when
+// the declaration is missing or its string is unterminated.
 fn get_fileid(s: string) -> string:
     slen := str_len(s)
     i : ., mut = 0
@@ -104,6 +106,8 @@ fn get_fileid(s: string) -> string:
         i = i + 1
     return ""
 
+// Directory prefix including the trailing "/", or "" when the path has no
+// slash. Callers concatenate paths directly onto the result.
 fn dirname(path: string) -> string:
     slen := str_len(path)
     last_slash : ., mut = -1
@@ -118,6 +122,8 @@ fn dirname(path: string) -> string:
         return str_sub(path, 0, last_slash + 1)
     return ""
 
+// Final path component. Trailing slashes are ignored and the root path yields
+// "/"; returns "" only for an empty input.
 fn basename(path: string) -> string:
     slen := str_len(path)
     if slen == 0:
@@ -145,6 +151,8 @@ fn basename(path: string) -> string:
         return str_sub(path, last_slash + 1, end - last_slash - 1)
     return str_sub(path, 0, end)
 
+// Parent directory including its trailing "/". Returns "" for a path with no
+// parent directory; a trailing slash on the input is ignored.
 fn parent_dir(dir: string) -> string:
     slen := str_len(dir)
     if slen <= 1:
@@ -176,6 +184,8 @@ fn load_imports(dir_path: string) -> string:
 fn reg_fileid(fileid_str: string, path: string) -> int:
     return reg_fileid_sm(fileid_str, path, -1)
 
+// Intern a fileid and upsert its g_files row. A non-negative sm_id records the
+// SourceManager file; re-registering refreshes that id.
 fn reg_fileid_sm(fileid_str: string, path: string, sm_id: int) -> int:
     fni := str_intern(fileid_str)
     fi : ., mut = 0
@@ -204,6 +214,9 @@ fn file_sm_id(fni: int) -> int:
         fi = fi + 1
     return -1
 
+// Parse a shared-object index file, one `name: params -> ret, tags` entry per
+// line, into the side table. Entries are not interned or added to the symbol
+// table here; so_materialize does that on first lookup.
 fn reg_so_funcs(index_content: string, so_name: string):
     sl := str_len(index_content)
     line_start : ., mut = 0
@@ -472,6 +485,8 @@ fn import_known_fid(fni: int) -> int:
         i = i + 1
     return 0
 
+// Register one imported file and queue it for scanning. Returns -1 when the
+// fileid is the main file or already loaded, otherwise the SourceManager id.
 fn import_add(path: string, fid_str: string, content: string, alias_str: string) -> int:
     fni := str_intern(fid_str)
     if fni == g_main_fni:
@@ -629,6 +644,10 @@ fn import_scan_ancestors(dir: string):
     if str_len(ic) > 0:
         import_scan_text(dir + "_import.cr", ic)
 
+// Resolve the import graph for a fresh compilation: reset module/file state,
+// register the main file, scan ancestor manifests, the stdlib manifest, the
+// prelude, and the main file, then scan queued imports in order. Finishes by
+// rebinding the globals to the main file's SourceManager record.
 fn res_imports():
     lib_export_reset()
     g_mod_count = 0

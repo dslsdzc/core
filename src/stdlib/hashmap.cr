@@ -21,6 +21,7 @@ struct IntMap, pub:
     seed: int
     hash_kind: int
 
+// Smallest power of two greater than or equal to n; n <= 1 returns 1.
 fn intMapNextPow2(n: int) -> int:
     c : ., mut = 1
     loop:
@@ -29,6 +30,8 @@ fn intMapNextPow2(n: int) -> int:
         c = c * 2
     return c
 
+// Hash key to a 32-bit bucket selector. kind chooses the mixer; kind 3 is a
+// deliberately weak seven-bucket hash used by the linear-probing tests.
 fn intMapHash(key: int, seed: int, kind: int) -> int:
     x : ., mut = wordNorm(key + seed, 32)
     if kind == 0:
@@ -48,6 +51,9 @@ fn intMapHash(key: int, seed: int, kind: int) -> int:
     // kind 3: heavy collisions (7 buckets) for linear-probing tests
     return wordNorm(key, 32) % 7
 
+// Build a larger table and reinsert every live entry. Tombstones are dropped,
+// and count is rebuilt from the live entries. The configured growth ratio
+// applies first; if it does not increase capacity, the table doubles.
 fn intMapGrow(m: IntMap) -> IntMap:
     old_cap := m.cap
     old_keys := m.keys
@@ -86,6 +92,9 @@ fn intMapGrow(m: IntMap) -> IntMap:
         i = i + 1
     return out
 
+// Allocate a map with at least initial_cap buckets, rounded up to a power of
+// two and clamped to 4. growth_num/growth_den control resizing, and
+// load_num/load_den control the maximum fill ratio before a grow.
 fn intMapWith(initial_cap: int, growth_num: int, growth_den: int, load_num: int, load_den: int, seed: int, hash_kind: int) -> IntMap, pub:
     cap : ., mut = intMapNextPow2(initial_cap)
     if cap < 4:
@@ -102,10 +111,13 @@ fn intMapWith(initial_cap: int, growth_num: int, growth_den: int, load_num: int,
     byteStore(used, cap, 0)
     return IntMap { keys = keys, values = values, used = used, cap = cap, count = 0, growth_num = growth_num, growth_den = growth_den, load_num = load_num, load_den = load_den, seed = seed, hash_kind = hash_kind }
 
+// Default map: 16 buckets, 2x growth, 3/4 load factor, kind 0 hash.
 fn intMap() -> IntMap, pub:
     return intMapWith(16, 2, 1, 3, 4, 0, 0)
 
 impl IntMap:
+    // Return the slot holding key, or -1. An empty slot ends the probe;
+    // tombstones are skipped.
     fn findKey(&self, key: int) -> int:
         idx : ., mut = intMapHash(key, self.seed, self.hash_kind) % self.cap
         i : ., mut = 0
@@ -121,6 +133,9 @@ impl IntMap:
             i = i + 1
         return -1
 
+    // Return a slot for insertion or update. The first tombstone is reused; an
+    // empty slot ends the probe. Returns -1 when the table is full and has no
+    // tombstone.
     fn findSlot(&self, key: int) -> int:
         idx : ., mut = intMapHash(key, self.seed, self.hash_kind) % self.cap
         tomb : ., mut = -1
@@ -145,6 +160,8 @@ impl IntMap:
             i = i + 1
         return tomb
 
+    // Insert or update. Grow before inserting when the next entry would exceed
+    // the load factor; a zero load_den is treated as 1.
     fn put(&mut self, key: int, value: int), pub:
         if self.load_den <= 0:
             self.load_den = 1
@@ -165,6 +182,8 @@ impl IntMap:
             byteStore(self.used, slot, 1)
             self.count = self.count + 1
 
+    // Return 0 for a missing key. The map cannot distinguish a missing key from
+    // a stored value of 0.
     fn get(&self, key: int) -> int, pub:
         slot := self.findKey(key)
         if slot < 0:
@@ -174,6 +193,7 @@ impl IntMap:
     fn has(&self, key: int) -> bool, pub:
         return self.findKey(key) >= 0
 
+    // Mark the slot as a tombstone so later probes keep going; decrement count.
     fn remove(&mut self, key: int), pub:
         slot := self.findKey(key)
         if slot >= 0:
@@ -186,6 +206,8 @@ impl IntMap:
     fn capacity(&self) -> int, pub:
         return self.cap
 
+    // Mark every bucket empty and reset count. Key and value cells are left
+    // untouched because occupancy controls lookup.
     fn clear(&mut self), pub:
         i : ., mut = 0
         loop:

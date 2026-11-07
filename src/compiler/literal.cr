@@ -50,6 +50,8 @@ fn str_to_f64_bits(s: string) -> int:
             ip_digits = ip_digits + 1
             if ip_digits <= 19:
                 digit_ip := c - 48
+                // The integer part must fit in int64; the negative bound lets
+                // the final digit be one larger for the minimum value.
                 if ip > 922337203685477580 || (ip == 922337203685477580 && digit_ip > 7 + neg):
                     too_wide = 1
                 else:
