@@ -8,7 +8,7 @@
 
 Core 前端以 HDFG 为唯一真相源。类型是图节点上的标注，类型推导是图推导的一种，接口是图上的契约。前端不建立独立于图的类型环境，也不把类型系统作为第二个语义来源。
 
-`.ccr` 是 corec 到 corearch 的稳定契约。类型系统实现可以替换，但 `.ccr` 的结构和语义必须保持；语义升级必须显式升版本。
+`.ccr` 是 corec 到 corearch 的稳定契约。类型系统实现可以替换，但 `.ccr` 的结构和语义保持不变；语义升级显式升版本。
 
 ## 总则
 
@@ -18,8 +18,8 @@ Core 前端以 HDFG 为唯一真相源。类型是图节点上的标注，类型
 4. 表面语法参照 Core 的现有设定。Core 没有显式泛型参数或类型实参语法。
 5. `.` 和 `auto` 是编译器补全占位，用于类型位置。每个 `.` 初始是独立未知类型，由上下文和程序关系约束。
 6. 函数类型是 effect-opaque。effect、region、ownership 不进入函数类型。
-7. 未知和不可判状态不得当作成功。`Unknown`、`Unsupported`、`-1` 必须显式传播。
-8. McTT 是最终验证信任根。类型系统 soundness 不在 McTT 内核中被自动证明；信任边界必须写明。
+7. 未知和不可判状态不视为成功。`Unknown`、`Unsupported`、`-1` 显式传播。
+8. McTT 是最终验证信任根。类型系统 soundness 不在 McTT 内核中被自动证明；信任边界写明。
 
 ## 类型项与子类型
 
@@ -36,7 +36,7 @@ Core 前端以 HDFG 为唯一真相源。类型是图节点上的标注，类型
 
 - 核心类型项采用 Boolean algebra：支持 `∪`、`∩`、`¬` 和等递归类型。
 - 默认实现使用 BAS 风格的集合语义。
-- 受限否定保留为可判定子集：`¬μ`、`¬函数`、`¬接口` 不能编码时输出 `Unsupported` 或验证义务，不能静默通过。
+- 受限否定保留为可判定子集：`¬μ`、`¬函数`、`¬接口` 无法编码时输出 `Unsupported` 或验证义务，不静默通过。
 - 类型项、判定和序列化使用稳定的 TypeTerm 接口；BAS 内部状态不进入 `.ccr`。
 
 ### 变型
@@ -73,7 +73,7 @@ Core 前端以 HDFG 为唯一真相源。类型是图节点上的标注，类型
 - `impl` 只能实现接口声明的方法；固有方法放在类型自己的实现中。
 - 不支持 specialization、negative impl、裸类型变量 blanket impl、接口继承、default method、associated type、泛型方法和 `Self` 类型。
 - 不支持 `dyn I`、接口值、存在类型和运行期字典。运行期多态使用 `dyn`、标签或枚举。
-- 同一方法名来自多个接口时需要显式限定，否则是歧义错误。
+- 同一方法名来自多个接口时需要显式限定；缺少限定是歧义错误。
 
 ## 推断与多态
 
@@ -88,11 +88,11 @@ Core 前端以 HDFG 为唯一真相源。类型是图节点上的标注，类型
 infer(graph) -> Solved | NeedAnnotation | Ambiguous | Unknown
 ```
 
-- `Solved` 必须满足图约束。
-- `NeedAnnotation` 不得猜默认类型。
-- `Ambiguous` 不得选择候选。
-- `Unknown` 不得当作成功。
-- 不允许隐式接口搜索。
+- `Solved` 满足图约束。
+- `NeedAnnotation` 不猜默认类型。
+- `Ambiguous` 不选择候选。
+- `Unknown` 不视为成功。
+- 不做隐式接口搜索。
 - 自动泛化只在约束可解时发生；方案由推断变量和约束生成，不引入源码级类型参数。
 - 类型推断的代数实现可替换；MLstruct 风格 Boolean algebra 是首选，局部/双向推断作为补全和回退。
 - `MAX_GENERICS` 之类的固定上限是内部护栏，不是语言语义。
@@ -107,8 +107,8 @@ infer(graph) -> Solved | NeedAnnotation | Ambiguous | Unknown
 - `T?? = T?`；需要嵌套可选时使用独立的用户定义类型，不引入内建 `Option<T>`。
 - `T?` 对 `T` 协变。
 - `T?` 不自动满足命名接口；需要 `T <: I` 且 `Null <: I`。
-- 有值类型使用 tag；指针和引用可以使用 null niche；不得出现裸值与包装对象双表示。
-- 模式匹配中 `none` 覆盖空值；非空分支的类型精化规则必须一致。
+- 有值类型使用 tag；指针和引用可以使用 null niche；不出现裸值与包装对象双表示。
+- 模式匹配中 `none` 覆盖空值；非空分支的类型精化规则保持一致。
 - 不支持字节索引、`s[i]` 返回整数、`char` 类型、`u8` 前端类型或 `*char` 前端类型。
 
 ### 文本
@@ -133,7 +133,7 @@ infer(graph) -> Solved | NeedAnnotation | Ambiguous | Unknown
 - ABI 宽度、立即数、BigInt、binary64 和 FFI 边界属于映射层。
 - 不引入隐式数值提升；转换显式。
 - `int -> dex` 是精确注入；`dex -> int` 使用显式规则。
-- `apx` 只授权后端近似；优化器不得自行扩大近似范围。
+- `apx` 只授权后端近似；优化器不自行扩大近似范围。
 
 ## 模式匹配
 
@@ -141,11 +141,11 @@ infer(graph) -> Solved | NeedAnnotation | Ambiguous | Unknown
 - 支持 `_`、绑定、整数字面量、字符串字面量、bool、unit、枚举、tuple、struct、`T?` 的 `none`。
 - 不支持 char 模式、字节模式、guard、range 或 or-pattern。
 - `|` 是 match arm 分隔符，不是 or-pattern。
-- 无限域 `int` 和 `string` 必须有 `_` 或绑定。
-- `T?` 需要 `none` 加非空分支；非空分支的类型精化必须一致。
+- 无限域 `int` 和 `string` 需要 `_` 或绑定。
+- `T?` 需要 `none` 加非空分支；非空分支的类型精化保持一致。
 - 空枚举和 `never` 使用零 arm 即穷尽。
 - 冗余 arm 是硬错。
-- 字符串、struct 和 tuple 模式必须有实际判定路径；不得静默命中首个 arm。
+- 字符串、struct 和 tuple 模式需要实际判定路径；不静默命中首个 arm。
 - 标准接口：
 
 ```text
@@ -154,14 +154,14 @@ coverage(scrutinee, arms) -> Exhaustive | Missing | Redundant | Unknown
 
 - `.` 在进入 coverage 前已被补全；`_` 归一化为值域全集。
 - 决策 DAG 由 pattern matrix 和类型项生成，保持首匹配语义。
-- `.ccr` 的 CASE 段记录分支、判别式和默认路径；`.cir` 缓存必须包含 CASE 信息。
+- `.ccr` 的 CASE 段记录分支、判别式和默认路径；`.cir` 缓存包含 CASE 信息。
 
 ## 效应与纯度
 
 状态：草案。以下为当前基线，不是完整定案。
 
 - 效应、纯度和 state 是图事实，不是类型语义。
-- `purity_op_effect` 是 effectful opcode 的单一依据；新增 opcode 必须同步。
+- `purity_op_effect` 是 effectful opcode 的单一依据；新增 opcode 同步更新。
 - 纯度使用 `compute_all_purity` 和 `fi_ispure`；不使用第二套启发式。
 - state edge 使用 DFEdge `kind=1`；来源是副作用序列和循环终止依赖。
 - 当前 state 链每个函数重置，跨函数不连接；跨函数连接是待补缺口。
@@ -180,17 +180,17 @@ effect_equiv(a, b) -> bool | unknown
 
 ## 并发
 
-- 未显式声明的调度差异不得改变值、效应、控制去向、终止类别和预算向量。
+- 未显式声明的调度差异不改变值、效应、控制去向、终止类别和预算向量。
 - 默认 share-nothing；没有跨执行体的共享可变状态。
 - 源语言没有 lock、mutex、atomic 或 ownership 语法。
 - 传输 primitive 是 MOVE、LOAN、SPLIT、FILL、COPY；STREAM 是调度策略，SHARE 不是 primitive。
 - 未声明的冲突访问是数据竞争，拒绝编译。
-- 显式 `race(k)` 和 `select_any` 的结果集必须确定；不可枚举时高安全模式拒绝。
-- 弱内存映射必须保持 race-free 程序的顺序一致性观测。
+- 显式 `race(k)` 和 `select_any` 的结果集确定；不可枚举时高安全模式拒绝。
+- 弱内存映射保持 race-free 程序的顺序一致性观测。
 - G 级弱公平；全部阻塞且无外部事件属于 nontermination。
-- 默认路径没有用户数据锁；实验 shared mapping 的内部同步只在映射层，必须证明观测等价和无死锁。
+- 默认路径没有用户数据锁；实验 shared mapping 的内部同步只在映射层，需要证明观测等价和无死锁。
 - `select` 首版即 W2：未标注的 `select` 拒绝；不保留“最早到达”语义。
-- 多 M 启用前必须完成 wait list 无锁正确性验证；channel 强制 SPSC，直到有无锁 MPMC 实现。
+- 多 M 启用前完成 wait list 无锁正确性验证；channel 固定为 SPSC，直到有无锁 MPMC 实现。
 - 跨执行体消息使用子区域或句柄加值移动。
 
 ## 内存、区域与指针
@@ -205,7 +205,7 @@ effect_equiv(a, b) -> bool | unknown
 - 指针安全由 PointerAnalysis、RegionCheck、BytePermission 和 ProvenanceVerify 四个 pass 负责。
 - 字节权限只有两个独立位：`readable` 和 `writable`。
 - 权限状态是 `none`、read-only、write-only、read-write；只允许下降。
-- 可执行属性不是字节权限；可执行代码必须可读。
+- 可执行属性不是字节权限；可执行代码可读。
 - `Nonempty`/`Empty` 归 ENT/REG；`Freeable` 归区域所有权；`shared`/`volatile` 归区域、effect 或 HIT。
 - 当前实现差距包括流不敏感 points-to、字节权限的持久化/运行期表示和 split/merge/share。
 
@@ -231,8 +231,8 @@ effect_equiv(a, b) -> bool | unknown
 - `pub` 是声明标签，不参与类型身份/布局/ABI。结构体字段默认库内私有；`pub` 结构体的字段需要 `, pub` 才能跨库读写。非 `pub` 结构体整体不可见。
 - 跨库同名声明按声明/库限定身份：类型唯一名进入 `TYP_NAMED`，函数/方法使用 link 名，全局槽按 `(name, owner)` 区分。查找先本库，再唯一可见的 `pub` 导入。
 - `pub` 函数/全局的签名暴露同库私有类型时输出 warning（不阻断构建）；接口 `impl` 执行孤儿与重复检查。
-- 库依赖方向显式：`@core` 与 `@user` 可读取 `@std`；`@std`/`@user` 不得读取 `@core` 内部（即使符号带 `pub`）。库依赖图必须是无环 DAG；自环与回边拒绝。
-- 模块依赖图必须是无环 DAG；循环导入拒绝：导入主文件报 cycle，已加载兄弟文件按路径去重。
+- 库依赖方向显式：`@core` 与 `@user` 可读取 `@std`；`@std`/`@user` 不读取 `@core` 内部（即使符号带 `pub`）。库依赖图是无环 DAG；自环与回边拒绝。
+- 模块依赖图是无环 DAG；循环导入拒绝：导入主文件报 cycle，已加载兄弟文件按路径去重。
 - 初始化顺序按模块依赖拓扑序；循环初始化拒绝。
 - 模块摘要包含模块 ID、依赖、全部顶层导出、签名/类型/接口、错误摘要、效应摘要、初始化依赖、FFI 边界和摘要哈希。
 - v1 的前端单独编译只生成模块摘要；最终仍构建全程序 HDFG 和 `.ccr`。
@@ -253,7 +253,7 @@ effect_equiv(a, b) -> bool | unknown
 - 成功值直接通过；未匹配错误继续传播。
 - handler 内 `return Err e` 重抛。
 - 错误集合自动推断：`Err` 加入类型，调用加入被调函数错误集合，`catch` 移除已匹配错误。
-- 有限错误集可检查覆盖性；开放错误必须有 catch-all。
+- 有限错误集可检查覆盖性；开放错误需要 catch-all。
 - `main` 未处理错误运行期 abort。
 - 顶层声明默认属于当前库内部，外部不可见；跨库导出使用 `pub`。
 - V4 语法文档和 EBNF 已同步；LEXER、parser、checker 的 Ok/Err 和 catch 语义仍待实现。
@@ -267,12 +267,12 @@ effect_equiv(a, b) -> bool | unknown
 - FFI 错误进入 `Err` 摘要；编组失败也是错误。
 - `extern` 不默认 pure。
 - 所有权由图内 provenance、region、liveness 和 escape 自动判断。
-- 外部指针和 FFI 返回值没有图内 provenance，属于信任边界，必须走 unsafe、alloc_at 或边界契约。
+- 外部指针和 FFI 返回值没有图内 provenance，属于信任边界，通过 unsafe、alloc_at 或边界契约处理。
 - 无法证明时拒绝或返回 `Unknown`。
 - `dyn` 是编译期类型集合或静态 union，不是运行时 tagged value。
 - 图内全知；转换和分派在编译期完成；运行时使用具体类型原表示。
 - 不支持运行时 tag、vtable、boxing 或 16 字节 `(tag, value)` 对。
-- 类型集合未知或开放时编译错误或 `Unknown`；不得回退到运行时 dispatch。
+- 类型集合未知或开放时编译错误或 `Unknown`；不回退到运行时 dispatch。
 - 旧 `IR_DYN_PACK` 和 `IR_DYN_DISPATCH` 的 tagged 表示不是 dyn 语义。
 - FFI 边界的 `dyn` 是外部 opaque 句柄，由 ABI 映射层编组，和内部编译期 dyn 不混用。
 - `@` 内建统一分类为查询、编译控制、映射控制和边界；用户不可定义 `@`。
@@ -288,8 +288,8 @@ effect_equiv(a, b) -> bool | unknown
 - `.csr` 是规约约束 sidecar，不改变 `.ccr`。
 - VC 状态是 `proved`、`unproven`、`failed`、`unsupported`。
 - `#check(常量假)` 是硬错；默认未证不阻断，strict 模式阻断。
-- SMT 只作搜索器；证书能编码时由 McTT 检查，否则登记 `External`。
-- 循环和递归必须有结构递减或 `#variant`；推导失败是 `Unsupported` 或编译错误。
+- SMT 只作搜索器；证书能编码时由 McTT 检查，无法编码时登记 `External`。
+- 循环和递归需要结构递减或 `#variant`；推导失败是 `Unsupported` 或编译错误。
 - FFI 外部实现不证明；只检查 IO 契约合法性，外部实现登记为 `Axiom` 或 `External`。
 - `docs/maintainer/design/spec-design.md` 是本节的详细设计。
 
@@ -300,10 +300,10 @@ effect_equiv(a, b) -> bool | unknown
 - `never` 是底类型：`never <: T` 恒真；`T <: never` 仅 `T = never`。
 - `bool` 和 `int` 不同；`if`、`while` 条件只接受 `bool`；取消 `bool ⊆ int` 隐式。
 - `&x` 和 `&mut x` 产生引用；`*T` 是原始指针；REF 和 PTR 不隐式互转。
-- `*T` 形参必须解析为指针，不得退化为 `unit`。
-- 类型判定严格三态；`-1` 不得当 0 或 1；`-1` 触发 `ICE04` 或显式 `Unknown`。
+- `*T` 形参解析为指针，不退化为 `unit`。
+- 类型判定严格三态；`-1` 不作 0 或 1 使用；`-1` 触发 `ICE04` 或显式 `Unknown`。
 - 除声明的子类型和显式转换外，不自动转换。
-- checker 和类型引擎对同一判定不得给出相反结论。
+- checker 和类型引擎对同一判定不给出相反结论。
 - 信任边界包括 McTT、parser/checker、`.ccr`/`.csr`、后端、runtime、FFI/asm 和显式公理。自举 stage2 与 stage3 相同只是经验证据，不是 soundness 证明。
 
 ## 实现状态

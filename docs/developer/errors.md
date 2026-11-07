@@ -1,6 +1,8 @@
 # Core 错误码参考
 
-错误码数值和注释名来自 `src/compiler/ast.cr` 的 `EC_*` 常量。每个码对应唯一的检查点，注释中带有本文编号，例如 `EC_P_EXPECTED = 1001 // P001`。词法族的 L 码是本文档侧的编号，因为 `lexer.cr` 的 `add_error` 只传消息文本，不带码。修改码值时，要同步修改 `ast.cr` 的注释和本文。
+> 定位：受众 = 开发者；状态 = active；出处 = 本页（码值以 `src/compiler/ast.cr` 为准）。
+
+错误码数值和注释名来自 `src/compiler/ast.cr` 的 `EC_*` 常量。每个码对应唯一的检查点，注释中带有本文编号，例如 `EC_P_EXPECTED = 1001 // P001`。词法族的 L 码是本文档侧的编号，因为 `lexer.cr` 的 `add_error` 只传消息文本，不带码。码值与 `ast.cr` 的注释、本文编号保持同步。
 
 诊断默认阻断。任何不在豁免登记表内的类型诊断都会使 `rc=1`，并且不产生任何产物，不写目标 ELF，也不写本次的 `<out>.ccr`。豁免表是 `src/compiler/diag.cr::diag_gate_exempt`，码级共 8 条：TF07、TB01、TM04、TK01、B04 属于 build 命令，N01、N06、N11 属于 check 命令并且只登记。每条都带位点证据、理由和退出条件，条目只减不增。
 
@@ -274,7 +276,7 @@ TF01 已从豁免表移除。原因是 `alloc: () -> string` 模型与三处 han
 | V03 | 标注形态错：缺 `(` / 未闭合 `)` | `Expected '(' after '#{name}'` / `Expected ')' to close '#{name}' annotation` |
 | V04 | `#ensure` 的 `result` 绑定与既有作用域名冲突（编译错误，有提示选择其中一个，也有提示遮蔽） | `'result' is already bound in this scope (#ensure binding would shadow it)` |
 | V05 | 标注表达式类型不是 bool。当前子集要求恰为 `TI_BOOL`；`infer_expr` 给不出 bool 时报编译错误，未知不当作通过 | `annotation expression must be bool` |
-| V06 | 标注表达式含调用。C1 子集禁止调用，以避开纯度与时序问题 | `annotation expression must not contain calls (C1 subset)` |
+| V06 | 标注表达式含调用。C1 子集不允许调用，以避开纯度与时序问题 | `annotation expression must not contain calls (C1 subset)` |
 
 ---
 
@@ -301,7 +303,7 @@ TF01 已从豁免表移除。原因是 `alloc: () -> string` 模型与三处 han
 | ICE | ICE01–ICE04 | 4 | 编译器内部 |
 | 总计 | | 150 | 计数约定见下注 |
 
-> 错误码数量有三种数法，引用时必须说明按哪一种：
+> 错误码数量有三种数法，引用时需要说明按哪一种：
 > 1. 本表加和 = 150（17 族的编号容量之和）；2. 本文档中的明细码行 = 149；
 > 3. `src/compiler/ast.cr` 实际定义的 `EC_*` 常量 = 137（`grep -cE '^EC_[A-Z_]+ *: *int *='`）。
 > 三者不等的已知原因：L 族（11 个）没有数值常量（`lexer.cr::add_error` 只传消息文本，见本文件开头的“L 族例外”），

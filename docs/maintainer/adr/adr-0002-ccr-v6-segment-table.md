@@ -1,5 +1,7 @@
 # ADR-0002: .ccr v6 段表架构 + ENT 存在结构段 + REG 坐标化
 
+> 定位：受众 = 维护者；状态 = accepted；出处 = 本页。
+
 - 日期：2026-09-05
 - 状态：accepted（v11 起 REG 不落盘；历史决策保留）
 - 决策者：DslsDZC
@@ -15,12 +17,12 @@
 - ENT 存在结构段：声明存在哪些对象，供后续各段使用；loader 侧有 `entries_coexist` 上界校验等一致性检查（GC 阶段）。
 - REG 坐标化：REG 记录带 `kind`/`parent`/`enter`/`exit`/`first`/`last`；`root_region` span 派生函数边界。
 - SYM 归并：`vars` 并入函数记录声明区，`globals` 带 type。
-- 写读两端（`ccr_io.cr`）与格式 spec 同步演进。
+- 写读两端（`ccr_io.cr`）与格式 spec 同步修改。
 
 ## 后果
 
 - 正面：v5 之前的 `.ccr` 线性形态由结构化段表取代，dump、验证和 loader 都有明确的格式依据；REG 坐标让寄存器分配元数据可以序列化、可以对照验证（`regalloc-consistency` 三层定位）。
-- 负面：v5 之前的 `.ccr` 文件不兼容，格式边界直接切断；ELF 发射层需要在保持不变的前提下适配，v6 实施时已验证发射零变化。
+- 负面：v5 之前的 `.ccr` 文件不兼容；ELF 发射层需要在保持不变的前提下适配，v6 实施时已验证发射零变化。
 
 ## 关联
 

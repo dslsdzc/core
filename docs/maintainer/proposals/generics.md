@@ -143,7 +143,7 @@ arr := make_array<int, 10>();
 // N 是编译时已知的，在实例化时展开
 ```
 
-编译器处理方式：`N` 被约束为 `int`，且在调用处必须是 `@comptime` 已知的编译时值。
+编译器处理方式：`N` 被约束为 `int`，且在调用处需要是 `@comptime` 已知的编译时值。
 
 ```core
 make_array<int, user_input>();  //  编译错误：泛型参数 N 需要编译时已知

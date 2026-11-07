@@ -1,5 +1,7 @@
 # Core Programming Language
 
+> 定位：受众 = 所有读者；状态 = active；出处 = 本页。
+
 English | [中文](README.zh-CN.md)
 
 ![self-hosted](https://img.shields.io/badge/self--hosted-yes-blue)
@@ -12,7 +14,7 @@ The compiler is self-hosted, emits native x86-64 ELF directly, and keeps regions
 state relations, provenance, and other program semantics through its IR instead of
 reducing them early to a conventional machine model.
 
-Core's compilation model is organized around graph → lattice → encoding: computation
+Core's compilation model is organized around graph, lattice, and encoding: computation
 is represented as relations first, state/storage is mapped separately, and machine
 representation comes last.
 
@@ -36,7 +38,7 @@ Core is under active development.
 - Self-hosting compiler with a reproducible three-stage bootstrap
 - Native x86-64 ELF generation without an external assembler or linker
 - Semantic graph IR with explicit regions, state edges, and provenance
-- Graph → lattice → target encoding compilation model
+- Graph, lattice, and target encoding compilation model
 - Raw pointers with compile-time pointer, region, and provenance analysis
 - Arena-based memory management tied to program regions
 - Cooperative fibers and channels

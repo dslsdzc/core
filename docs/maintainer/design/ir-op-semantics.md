@@ -1,12 +1,14 @@
 # Core IR 操作语义
 
+> 定位：受众 = 维护者（IR、后端与解释器实现者）；状态 = active；出处 = 本页与 `src/compiler/ast.cr`、`src/arch/x86_64/instr.cr`、`src/compiler/interp.cr`。
+
 本表定义 Core IR 每个 opcode 的语义，用于三方对照：本表语义、`src/arch/x86_64/instr.cr` 的 ELF 编码、`src/compiler/interp.cr` 的解释执行。三者不一致时以本表为语义基准，编码和解释器需要修正。
 
 `D` 表示 Core 有意不同于 CompCert，并附设计理由。`BC` 表示已知限制或未决问题；已经修复的项目不再列入本表。
 
 ## 0. 来源与引用
 
-表里的 CompCert 来源是仓库外的 `~/compcert` 树。行号只在对应版本上有效，CompCert 更新后行号会变化。使用本表时，先确认本机 CompCert 版本，再把语义结论和行号引用分开判断。
+表里的 CompCert 来源是仓库外的 `~/compcert` 树。行号只在对应版本上有效，CompCert 更新后行号会变化。语义结论和行号引用按本机 CompCert 版本分开判断。
 
 | 文件 | 内容 | 引用格式 |
 |---|---|---|
@@ -165,7 +167,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量）、`src/compiler/
 
 ### 2.4 内存与地址（对照 `Memory.v` 模型 + `Asm.v` 访问指令）
 
-分配（对照 CompCert `Pallocframe`（Asm.v:L948-958）/`Mem.alloc`（Memory.v:L348），L531 是 `store`，勿误引）：
+分配（对照 CompCert `Pallocframe`（Asm.v:L948-958）/`Mem.alloc`（Memory.v:L348），L531 是 `store`，不是 `alloc`）：
 
 - IR_ALLOC（6）：标量变量槽标记，后端不发射代码（栈槽由帧布局分配）；interp 置 `d := 0`。CompCert 无对照（帧是伪指令级概念）。
 - IR_ALLOC_STRUCT（7）：`d := alloc(fc·8)`，`fc` = 结构体字段数（`s3` = 结构体名 ni）；返回零初始化堆块（rt.s L72-103：8 字节长度头 + 数据区 `rep stosb` 清零；OOM，null）。对照 `Mem.alloc m 0 sz`（总是成功、零初始化、有界块），D：Core bump 分配器 OOM 返回 null（后续 deref 由边界检查捕获），CompCert 分配总是成功。
@@ -264,7 +266,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 | D8 | IR_YIELD/AWAIT/SPAWN/DYN_*/HOTPATCH/LAZY/FAST 等 | CompCert 无并发/动态类型/热补丁/惰性，无对照部分不强行映射 |
 | D9 | 移位量 ≥ 64：硬件掩码（mod 64）vs CompCert `Vundef` | Core 跟随硬件（机器语义），CompCert 保守未定义；OP_SHL/SHR 当前无发射方 |
 | D10 | dex/apx 精确-授权二分 | 范式通用性原则：默认精确（数学语义），近似需显式授权（apx 标签） |
-| D11 | 逻辑 `&&`/`||` 在 IR 层分支化短路（现用 IR_MATCH），IR_BINARY 的布尔 op（s3=12/13）无发射方 | 与 CompCert 前端分支化做法不同，结果相同；IR_BINARY s3=12/13 为死路径 |
+| D11 | 逻辑 `&&`/`||` 在 IR 层分支化短路（现用 IR_MATCH），IR_BINARY 的布尔 op（s3=12/13）无发射方 | 与 CompCert 前端分支化做法不同，结果相同；IR_BINARY s3=12/13 无发射路径 |
 
 ### 已知限制
 

@@ -1,19 +1,21 @@
 # 存在格：物化层的定义
 
+> 定位：受众 = 维护者（ccr_io、分配器与验证器实现者）；状态 = active（层定义定稿，字段实现部分完成）；出处 = 本页与 [2026-09-20 审计](../../superpowers/implementation/2026-09-20-materialization-space-audit.md)。
+
 Core 的存储语义本体是存在格（Materialization Space，也叫 Existence Space）。它不绑定字节内存，也不绑定寄存器。缓存、寄存器、RAM 和 VRAM 都是这一层的映射实例。
 
 本文件定义层的四个问题、核心对象、七个字段、归类规则、不变量和边界。修订记录、逐文件扫描和源码核对见 `docs/superpowers/implementation/2026-09-20-materialization-space-audit.md`。
 
 ## 四个问题
 
-存在格只回答四个问题：
+存在格只涉及四个问题：
 
 1. 对某一条 Entry，允许存在哪些物化形态。
 2. 两份物化能否同时成立，也就是能否共存。
 3. 两份物化是否表示同一个 Entry 和同一个版本。
 4. 从一种物化变到另一种物化时，可观测语义是否不变。
 
-层不回答“什么时候驱逐”“放寄存器还是 RAM”“是否预取”这类问题。这些属于 mapper 的策略。
+层不涉及“什么时候驱逐”“放寄存器还是 RAM”“是否预取”这类问题。这些属于 mapper 的策略。
 
 ## 核心对象
 
@@ -46,9 +48,9 @@ recipe = unrecomputable    =>  persistence 属于 {transfer-required, externally
 replicability = forbidden  =>  authority = single
 ```
 
-两条约束都可以机械检查，逐条比对字段值即可。违反是编译错误，不能降级为警告，也不能当作有效输入接受。
+两条约束都可以机械检查，逐条比对字段值即可。违反按编译错误处理，不降级为警告，也不作为有效输入接受。
 
-反向不成立。可重算的物化也可能带 `transfer-required` 的状态。例如一个持锁的临时物化，值可以重算，但锁必须在物化消失前转移。
+反向不成立。可重算的物化也可能带 `transfer-required` 的状态。例如一个持锁的临时物化，值可以重算，但锁在物化消失前转移。
 
 `evictable` 不是第八个字段。它是派生量：
 
@@ -73,7 +75,7 @@ evictable = (recipe = recomputable) 或 persistence 已满足
 | 随机数 | unrecomputable | Entry | 不适用 | single | 熵源端点 | transfer-required | free |
 | 外部输入 | unrecomputable | Entry | 不适用 | single | 外部 | externally-owned | free |
 
-MMIO 读有一个附加约定：volatile 读每次产生一条新 Entry。否则两次读会被合并成一条，读清零类寄存器会在不报错的情况下出错。
+MMIO 读有一个附加约定：volatile 读每次产生一条新 Entry。两次读如果合并成一条，读清零类寄存器会在不报错的情况下出错。
 
 spill 和 CPU 到 GPU 的迁移不是形态，而是物化之间的转换。它们属于第 4 个问题，不属于第 1 个问题。
 
@@ -87,8 +89,8 @@ spill 和 CPU 到 GPU 的迁移不是形态，而是物化之间的转换。它�
 
 放不进的是“必须恰好消费一次”。
 
-- `replicability = forbidden` 只表示不允许有多份，不表示必须被使用。
-- `persistence = transfer-required` 只表示消失前要转移状态，不表示不许不消失。
+- `replicability = forbidden` 只表示不允许多份，不表示需要被使用。
+- `persistence = transfer-required` 只表示消失前要转移状态，不表示物化不能消失。
 
 缺少的维度是 Entry 上的使用义务，属于线性或仿射使用规则，不是物化的属性。存在格和使用规则是两条轴。使用义务应当显式记录，不能放进七个字段。
 
@@ -140,7 +142,7 @@ Evictable(x)  <=>  Recoverable(x) 或 PreserveRequiredState(x)
 ```
 
 - `Recoverable`：之后能重新得到等价状态。
-- `PreserveRequiredState`：消失前已经把必须保留的状态转移到其他合法物化。
+- `PreserveRequiredState`：消失前已经把需要保留的状态转移到其他合法物化。
 
 这条规则取代旧规则“所有东西都可以驱逐，只要能重算或写回”。旧规则把不可重算条目写成例外，新规则把它并入同一个检查。
 
@@ -153,13 +155,13 @@ Evictable(x)  <=>  Recoverable(x) 或 PreserveRequiredState(x)
 | 可重算，但移除本身有可观测副作用，例如物化持有锁或占用配额 | 旧规则只从值侧统计可观测变化 | `PreserveRequiredState` 为真，义务显式落在状态转移上 |
 | 多份副本表示同一个值，例如只读别名 | 旧规则没有陈述复制合法性 | 使用 `replicability = readonly-share` 和 `authority = shared-readonly` |
 
-新规则新增了一个失败模式：`PreserveRequiredState` 是义务，义务可以仅凭声明成立。因此必须配合失败关闭规则：
+新规则新增了一个失败模式：`PreserveRequiredState` 是义务，义务可以仅凭声明成立。因此采用失败关闭规则：
 
 ```text
 无法判定 => 不可移除。
 ```
 
-如果归属判定返回“未知”，判为不可移除，不判为可移除。否则“义务未满足”和“义务未被检查”在观测上无法区分，会破坏语义而不报错。
+如果归属判定返回“未知”，判为不可移除，不判为可移除。把“未知”判为可移除后，“义务未满足”和“义务未被检查”在观测上无法区分，语义会在不报错的情况下被破坏。
 
 ### 不可重算条目的移除
 
@@ -172,7 +174,7 @@ recipe = unrecomputable  => 只能走 PreserveRequiredState 支
 recipe 无法判定          => 不可移除
 ```
 
-这条约束来自存储规则 4b 的义务，不是新增规定。映射实例侧如果把存储位置整体当作优化，`unrecomputable` 条目会被当成可丢弃，结果是在不报错的情况下破坏语义。因此移除决策必须先按 `recipe` 分档。
+这条约束来自存储规则 4b 的义务，不是新增规定。映射实例侧如果把存储位置整体当作优化，`unrecomputable` 条目会被当成可丢弃，结果是在不报错的情况下破坏语义。因此移除决策先按 `recipe` 分档。
 
 ## 层与 mapper 的边界
 
@@ -180,7 +182,7 @@ recipe 无法判定          => 不可移除
 
 格层可以陈述由图唯一决定的时序坐标，例如存在区间和版本切分点。这些是图上已经确定的事实。
 
-格层不得陈述带自由参数的时序决策，例如何时移除、预取多远、驻留多久。这些依赖策略输入。
+格层不陈述带自由参数的时序决策，例如何时移除、预取多远、驻留多久。这些依赖策略输入。
 
 可机械检查的形式：
 
@@ -201,10 +203,10 @@ recipe 无法判定          => 不可移除
 | `version` | 部分实现 | 文件格式有 `version` 字段，内存表没有。版本在写入时按同变量定值顺序派生 |
 | `authority` | 无实现 | 源码和设计文档都没有对应物 |
 | `location` | 部分实现 | `home` 字段存在但恒为 -1，真实分配结果在实例侧旁路表中 |
-| `persistence` | 无独立字段 | 义务目前由“必须有 home，移除必写回”这句话承担 |
+| `persistence` | 无独立字段 | 义务目前由“需要 home，移除前写回”这句话承担 |
 | `replicability` | 无实现 | 有两套设计：消息标签 `{COPY, MOVE, SHARE}` 和并发原语 `{MOVE, LOAN, SPLIT, FILL, COPY}`，尚未统一 |
 
-`recipe` 的位已经预留，但语义没有实现。边界和执行标注还没有进入 `.ccr`，因此当前没有条目会被标记为无方法。这不是现存缺陷，但生产者实现时必须和移除规则同阶段完成，否则这类条目一旦进入 IR 就会在不报错的情况下被丢弃。
+`recipe` 的位已经预留，但语义没有实现。边界和执行标注还没有进入 `.ccr`，因此当前没有条目会被标记为无方法。这不是现存缺陷，但生产者实现时和移除规则同阶段完成；分开实现时，这类条目一旦进入 IR 就会在不报错的情况下被丢弃。
 
 ## 未决问题
 

@@ -2,7 +2,7 @@
 
 > 定位：受众 = 所有读者（开发者/维护者/学术）；状态 = active；本文件是愿景陈述，技术细节以各 design 文档为准。
 
-> 本文件是 Core 的长期目标陈述，回答“为什么存在”。技术细节见各设计文档；进度见 `TODO.md`。
+> 本文件陈述 Core 的长期目标与动机。技术细节见各设计文档；进度见 `TODO.md`。
 
 ---
 
@@ -12,23 +12,23 @@
 
 Core 的路径：语义保留。IR（HDFG）保留全部语义信息，与执行硬件解耦。范式迁移时语义不变，只更换后端映射；验证器、优化器、未来后端都从同一张图读取完整语义。
 
-状态：语义保留已实现（HDFG + region/state edge/provenance）；范式映射表中，存储部分已定稿（语义本体 = 存在格 / Materialization Space。格层回答四个问题：哪些 materialization 合法，哪些可以共存，哪些代表同一个 Entry/version，哪些转换保持语义；缓存语义与字节内存均为该层的映射实例，见 `docs/maintainer/design/materialization-space.md` 第 2.1 节），执行部分处于设计态（每个范式一张表）。
+状态：语义保留已实现（HDFG + region/state edge/provenance）；范式映射表中，存储部分已定稿（语义本体 = 存在格（Materialization Space）。格层涉及四个方面：哪些 materialization 合法，哪些可以共存，哪些代表同一个 Entry/version，哪些转换保持语义；缓存语义与字节内存均为该层的映射实例，见 `docs/maintainer/design/materialization-space.md` 第 2.1 节），执行部分处于设计态（每个范式一张表）。
 
-三层映射结构：范式、图、格、编码。图 = 关系空间（跨范式的统一表示：非因果、模糊分支、超图灵标注，见 `docs/maintainer/design/execution-annotation-space.md`），格 = 状态/存储空间（内存模型 = 中间存在空间，见 `docs/maintainer/design/memory-model.md` 与 `docs/archive/memory-model-capability-lattice.md` 第四节），编码 = 物理编码空间（把格编码到具体实现；2026-08-27 更名：原“二进制”硬编码经典惯例，违反零硬件惯例，量子、模拟和光学都不是二进制）。跨范式发生在图层；超图灵性属于图，不属于格；格的价值在于表达空间没有被有限范式设上限，不同范式各自寻找自己的格映射，格本身不需要知道范式是什么。v4 定稿原则（`docs/archive/memory-model-capability-lattice.md`）：规则封闭对象开放（层规则零签名）、无格承诺（格代数 = 映射参数）、能力不提升一等公民（语义还原到图上，授权归治理层）、寄存器分配 = 缓存语义映射实例（`docs/maintainer/design/regalloc-cache-mapping.md`）。
+三层映射结构：范式、图、格、编码。图 = 关系空间（跨范式的统一表示：非因果、模糊分支、超图灵标注，见 `docs/maintainer/design/execution-annotation-space.md`），格 = 状态与存储空间（内存模型 = 中间存在空间，见 `docs/maintainer/design/memory-model.md` 与 `docs/archive/memory-model-capability-lattice.md` 第四节），编码 = 物理编码空间（把格编码到具体实现；2026-08-27 更名：原“二进制”硬编码经典惯例，违反零硬件惯例，量子、模拟和光学都不是二进制）。跨范式发生在图层；超图灵性属于图，不属于格；格的价值在于表达空间没有被有限范式设上限，不同范式各自寻找自己的格映射，格本身不依赖具体范式。v4 定稿原则（`docs/archive/memory-model-capability-lattice.md`）：规则封闭对象开放（层规则零签名）、无格承诺（格代数 = 映射参数）、能力不提升一等公民（语义还原到图上，授权归治理层）、寄存器分配 = 缓存语义映射实例（`docs/maintainer/design/regalloc-cache-mapping.md`）。
 
 ## 目标二：形式化验证要求降到普通程序员可用
 
-现状问题：形式化验证（Coq/Lean 系）学习成本极高，五十年来局限在少数专家手中，正确性证明无法进入主流软件开发流程。
+现状问题：形式化验证（Coq/Lean 系）学习成本极高，五十年来只在少数专家中使用，正确性证明无法进入主流软件开发流程。
 
-Core 的路径：规约用 Core 语言本身书写（`#check`/`#ensure`/`spec fn`，不需要学数理逻辑），编译器经翻译桥自动编译进 CIC 项，健全性由 CIC 内核 + SMT 证书保证。用户写意图，编译器负责证明。
+Core 的路径：规约用 Core 语言本身书写（`#check`/`#ensure`/`spec fn`，不需要学数理逻辑），编译器经翻译桥自动编译进 CIC 项，健全性由 CIC 内核 + SMT 证书保证。用户写意图，证明由编译器完成。
 
 状态：设计完成（spec-design v2），0 实现。requires/ensures 语法已入 `.cr`（独立 `.corespec` 格式 2026-09 退役，见 `docs/maintainer/adr/adr-0001`），`.csr`、翻译桥、内核绑定待推进。
 
 ## 目标三：一门语言覆盖从零基础到系统编程的完整路径
 
-现状问题：教学语言与生产语言是两套，学了要重学；系统编程语言（C/Rust）学习曲线陡峭，与教学语言脱节。
+现状问题：教学语言与生产语言是两套，学了要重学；系统编程语言（C/Rust）学习成本高，与教学语言脱节。
 
-Core 的路径：渐进式学习路径。同一门语言从基础（DAG）到系统编程（字节级 + 并发 + 规约），概念只增不减，不需要切换模式（见 `docs/developer/tutorial.md`）。
+Core 的路径：渐进式学习路径。同一门语言从基础（DAG）到系统编程（字节级、并发与规约），概念只增不减，不需要切换模式（见 `docs/developer/tutorial.md`）。
 
 状态：语言本体已实现，包括自举成功、ELF 后端、apx 后端快路径（binary64）、并发、指针三 pass。
 

@@ -67,4 +67,4 @@ fn serialize(buf: &[u8], obj: any):
 | 代码段 | `@section` | `@section` |
 | 嵌入文件 | `@embedFile` | `read_file`（自动推导） |
 
-Zig 用 `@` 完成所有编译期工作。Core 的 `@` 只负责查询和控制，求值由图自动完成。
+Zig 用 `@` 完成所有编译期工作。Core 的 `@` 只用于查询和控制，求值由图自动完成。

@@ -42,7 +42,7 @@ y := random(uniform(0, 10))    // 均匀分布
 z := random(binomial(10, 0.5)) // 二项分布
 ```
 
-运行时 `random(normal(0, 1))` 返回一个 double。编译期的概率 pass 观察 `random(...)` 返回值的后续使用，但不影响运行时。
+运行时 `random(normal(0, 1))` 返回一个 double。编译期的概率 pass 分析 `random(...)` 返回值的后续使用，但不影响运行时。
 
 ## 观测（图上的约束）
 

@@ -105,16 +105,16 @@ Obligation =
 |---|---|
 | `Encoded` | 可翻译为 McTT 项，由内核检查 |
 | `Axiom` | 显式信任的公理/契约 |
-| `External` | 外部证书或 IO 契约；必须显式登记 |
-| `Unsupported` | 当前不能编码；不得静默通过 |
+| `External` | 外部证书或 IO 契约；需要显式登记 |
+| `Unsupported` | 当前不能编码；拒绝静默通过 |
 
-- 任何 `Unsupported` 不得标为 `proved`。
-- `Axiom`/`External` 必须出现在报告中。
-- 不允许求解器、优化器或插件隐式引入公理。
+- `Unsupported` 不标为 `proved`。
+- `Axiom`/`External` 出现在报告中。
+- 求解器、优化器或插件不隐式引入公理。
 
 ## 五、McTT 翻译边界
 
-McTT 能力有限，翻译必须显式分档：
+McTT 能力有限，翻译显式分档：
 
 | Core 构造 | 处理 |
 |---|---|
@@ -130,11 +130,11 @@ McTT 能力有限，翻译必须显式分档：
 | 归纳类型/一般归纳 | 不假设内核支持；需编码或外部证书 |
 | 函数外延性 | 不在内核；需要时显式 `Axiom` |
 
-不得把“CIC 能做”当作“McTT 能做”。
+不把“CIC 能做”当作“McTT 能做”。
 
 ## 六、终止
 
-循环和递归翻译为 McTT 递归定义时必须给出递减度量：
+循环和递归翻译为 McTT 递归定义时给出递减度量：
 
 - `#variant(expr)`：显式度量；
 - 编译器可自动推导结构递减时使用自动度量；
@@ -200,7 +200,7 @@ VC 状态：
 - 缓存键包含函数体、规约、编译器版本、内核版本。
 - `#check(常量假)` 硬错。
 - 默认 `unproven` 不阻断编译；strict 模式阻断。
-- 不得把 `unproven`/`unsupported` 写成 `proved`。
+- 不把 `unproven`/`unsupported` 写成 `proved`。
 - 证明状态是优化器使用该性质的唯一依据。
 
 ## 九、FFI / IO
@@ -212,7 +212,7 @@ VC 状态：
   - 读写/错误/所有权是否声明；
   - 是否违反纯函数约束。
 - IO 非法：拒绝。
-- IO 合法但实现未知：`External`，不得标 `proved`。
+- IO 合法但实现未知：`External`，不标 `proved`。
 - FFI 错误进入 Q16 的 `Err` 摘要。
 
 ## 十、管线

@@ -20,7 +20,7 @@
 
 ## 维护者（maintainer/）：编译器开发
 
-开始：[onboarding.md](maintainer/onboarding.md)（建议首先阅读），[testing.md](maintainer/testing.md)（回归操作）
+开始：[onboarding.md](maintainer/onboarding.md)（适合首先阅读），[testing.md](maintainer/testing.md)（回归操作）
 
 设计参考（maintainer/design/）：
 
@@ -53,6 +53,6 @@
 - [superpowers/](superpowers/)（specs、plans 和 implementation 工作目录。2026-09-16 新增：[compile-time-theorems](superpowers/specs/2026-09-16-compile-time-theorems.md)、[verification-slice](superpowers/plans/2026-09-16-verification-slice.md)、[preexisting-bug-ledger](superpowers/implementation/2026-09-16-preexisting-bug-ledger.md)）
 - [implementation/](superpowers/implementation/README.md)：计划的实施记录
 - 10K 以上 Markdown 清单与处理分类：[implementation/2026-10-23-md-over-10k-inventory.md](superpowers/implementation/2026-10-23-md-over-10k-inventory.md)
-- 文档与实现的核对（2026-09-16）：[implementation/2026-09-16-doc-reality-audit.md](superpowers/implementation/2026-09-16-doc-reality-audit.md)，列出与实现不符的文档断言（35 条：危险 7、陈旧 6、成立 20、无法判定 2），并给出逐条修订去向。修改文档或按文档设计前，先查这张表。
+- 文档与实现的核对（2026-09-16）：[implementation/2026-09-16-doc-reality-audit.md](superpowers/implementation/2026-09-16-doc-reality-audit.md)，列出与实现不符的文档断言（35 条：危险 7、陈旧 6、成立 20、无法判定 2），并给出逐条修订去向。修改文档或按文档设计前，这张表是核对依据。
 - [ir-schema/](ir-schema/)：[coreir-schema.md](ir-schema/coreir-schema.md)、[corespecir-schema.md](ir-schema/corespecir-schema.md)
 - [verifier/](verifier/)：[kernel-spec.md](verifier/kernel-spec.md)；[coq/](coq/README.md)：Coq 验证 stdlib 纯函数

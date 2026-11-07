@@ -1,5 +1,7 @@
 # Core 指针模型：图上的三个验证 pass
 
+> 定位：受众 = 维护者（指针分析、区域检查与权限验证实现者）；状态 = active（描述当前实现行为）；出处 = 本页与 [2026-09-20 审计](../../superpowers/implementation/2026-09-20-pointer-model-audit.md)。
+
 指针安全建立在 HDFG 上，不引入借用检查器和生命周期标注。地址语义是条目标识加偏移，见 `docs/academic/cache-semantics.md` 规则 6。层定义见 `docs/maintainer/design/materialization-space.md`，经典映射见 `docs/maintainer/design/region-model.md`。
 
 本文件描述当前实现行为。实现与文档冲突时以源码为准。实现核对的详细记录见 `docs/superpowers/implementation/2026-09-20-pointer-model-audit.md`。
@@ -49,7 +51,7 @@ unsafe:
 
 ## Pass 1：PointerAnalysis
 
-算法是在数据流图上运行**过程内** Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016）；`IR_CALL` 结果保守置空，过程间函数摘要尚未实现。
+算法是在数据流图上运行过程内 Andersen 风格约束求解，参考 SVF（Sui 和 Xue，CC 2016）；`IR_CALL` 结果保守置空，过程间函数摘要尚未实现。
 
 | 规则 | 触发 | 动作 |
 |---|---|---|
@@ -61,7 +63,7 @@ unsafe:
 
 实现要点：
 
-- pts 是**动态宽度位集**：分配预扫描决定每行的 64 位 lane 数（`g_pts_words`），`g_pts`/`g_alloc_pts` 按集合数扩容，不再有 64 个分配的硬上限。访问统一走 `pa_pts_has`/`pa_pts_add`/`pa_pts_empty`，不暴露位图布局。`grow_pa_alloc_nodes` 动态扩容。
+- pts 是动态宽度位集：分配预扫描决定每行的 64 位 lane 数（`g_pts_words`），`g_pts`/`g_alloc_pts` 按集合数扩容，不再有 64 个分配的硬上限。访问统一走 `pa_pts_has`/`pa_pts_add`/`pa_pts_empty`，不暴露位图布局。`grow_pa_alloc_nodes` 动态扩容。
 - alloc content 跟踪使用 `g_alloc_pts[alloc_id]` 记录存入该分配块的值集合。DEREF 读取它，这是 pointer-induced flow 的实现形式，不在图上物理加边。
 - `pa_in_unsafe` 使 `unsafe` 域内的指针不参与正常约束。
 
@@ -75,7 +77,7 @@ unsafe:
 
 1. 过期 DEREF（`IR_DEREF`），错误码 `B011`（`EC_B_LIFETIME`）。
 2. 返回值离开区域（`IR_RETURN`，`rc_return_escape`），错误码 `B010`（`EC_B_ESCAPE`）。错误信息见 `errors.md:245`，例子是 `return &x`。
-3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已死”外，还比较**目标寿命**：值的区域先于目标区域退出 ⇒ 目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿到达定义与声明区追踪；条件/PHI 定义逐 use 求值。直接 `IR_STORE` 到全局指针也检查（`global outlives the stored allocation`）。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
+3. 存储离开区域（`IR_STORE_PTR`，`rc_store_escape`），错误码 `B011`。除“值在 store 时已失效”外，还比较目标寿命：值的区域先于目标区域退出时，目标将来持有悬垂指针，报 `destination outlives the stored allocation`。目标寿命取 pts；无 pts 的 `&slot`/标量槽位沿到达定义与声明区追踪；条件/PHI 定义逐 use 求值。直接 `IR_STORE` 到全局指针也检查（`global outlives the stored allocation`）。全局/参数槽位无本地 `IR_ALLOC` 时按程序/函数级寿命。
 4. 参数离开区域（`IR_CALL`，`rc_call_check`）：按函数摘要判定。摘要标记可能被存入全局、另一个函数的指针参数或未知目标的参数；被调函数本地槽位（含 `&param` 参数槽）和 `alloc()` 本地堆目标不计逃逸。摘要用两个 32 位字覆盖 64 个形参，跳过 `unsafe` 节点，沿调用图传递（`rc_param_summaries` 固定点）。调用点若实参指向归还区，报 `parameter escape`。外部/未知被调函数不建摘要。
 
 区域活性语义：
@@ -83,7 +85,7 @@ unsafe:
 - 区间是半开区间 `[OFF_SG_NSTART, OFF_SG_EXIT)`。`OFF_SG_EXIT` 由 `sg_pop()` 写成当时的 `g_df_node_count`，即区域关闭后第一个节点的下标，见 `dataflow.cr:78-82`。因此使用点在区域外等价于 `ni >= EXIT`。
 - 只有出口归还内存的区域才是离开点。`SG_LOOP`、`SG_FOR` 和 `SG_UNSAFE` 在出口发射 `IR_ARENA_RESET`，后端 `src/arch/x86_64/instr.cr` 确实调用 `arena_new` 和 `arena_reset`。`SG_IF` 只做 `sg_push` 和 `sg_pop`，不建 arena，见 `ir_gen.cr:2414` 和 `ir_gen.cr:2437`。`SG_FUNC` 的 arena 在函数出口才重置，返回给调用者时仍然有效。分配点在 `if` 内时，沿父区域向上查找到真正归还内存的区域。
 - 类型门是 `TYP_PTR` 和 `TYP_REF` 的并集。当前实际生效的是 REF 一侧，因为 `&局部` 一律判为 REF，而 `&局部 as *T` 本身会触发 TF01。并集保留，PTR 一侧对 `alloc()` 和 FFI 派生值仍然有效。
-- 标量指针的到达定义：RegionCheck 为每个函数从 `IR_JUMP` 标签和 `IR_MATCH` CASE 目标构建 CFG，运行前向 may-reaching-definitions 数据流。在 use 点只评估真正到达的定义（分支/循环/PHI 按交汇），因此“if 两支都覆盖更早死定义”不会误报，嵌套条件拷贝也能递归追踪；循环第二次可能执行 0 次时仍会保留前一轮定义。实现见 `region_check.cr` 的 `rc_rd_*`。
+- 标量指针的到达定义：RegionCheck 为每个函数从 `IR_JUMP` 标签和 `IR_MATCH` CASE 目标构建 CFG，运行前向 may-reaching-definitions 数据流。在 use 点只评估真正到达的定义（分支/循环/PHI 按交汇），因此“if 两支都覆盖更早的已失效定义”不会误报，嵌套条件拷贝也能递归追踪；循环第二次可能执行 0 次时仍会保留前一轮定义。实现见 `region_check.cr` 的 `rc_rd_*`。
 - 堆指针的使用点同样走到达定义：先取该 use 的 reaching definitions，再对每个到达值检查其 pts/标量寿命。pts 内容集本身仍是包含式（不是流敏感 points-to）。没有到达定义时（参数/全局/未知值）才回退到 `[EXIT, ni)` 重赋值清除。
 - 跨过程摘要：`g_rc_ret_alias` 记录函数返回哪个形参，调用结果沿 lazy thunk/force 链继续求值；`g_rc_out_pairs` 把"源形参 j 可能经目标形参 i 写出"传回调用点，调用点用 `rc_store_outlives` 比较目标实参与源实参寿命，同区 out 参数不误报；`g_rc_param_content_alias`/`g_rc_param_content_escape` 处理 `gp = *pp` 的解引用加载内容；`g_rc_content_out_pairs` 把 `*dst = *pp` 的内容来源/目标配对传回调用点，按目标寿命比较。`STORE_INDEX`/`STORE_INDEX_VAR`/`STORE_FIELD` 与 `IR_STORE`/`IR_STORE_PTR` 同样接入摘要。FFI 边界按 `unsafe` 处理：非 `unsafe` 域的 `IR_CALL_EXTERN` 只要实参是归还区指针就报 B11；形参经包装函数转发给 extern 时，摘要把同一约束传回调用点。不单列"返回本地堆对象"摘要：`alloc()` 的返回类型是 `string`，走全局堆而非区域 arena；`IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT` 只能通过 `&` 引用逃逸，已由指针路径覆盖。
 
@@ -105,7 +107,7 @@ unsafe:
 
 | 场景 | 原因 |
 |---|---|
-| 外部硬件地址 | 直接写 `0x7fff0000 cast *int`，没有 ALLOC。整数转指针带 `asp=1`，解引用必须在 `unsafe` 域内，由 pa 和 pv 的 `unsafe` 感知处理 |
+| 外部硬件地址 | 直接写 `0x7fff0000 cast *int`，没有 ALLOC。整数转指针带 `asp=1`，解引用位于 `unsafe` 域内，由 pa 和 pv 的 `unsafe` 感知处理 |
 | FFI 返回值 | 外部指针没有 Core provenance |
 | inline asm | 输出指针没有来源 |
 
@@ -121,8 +123,8 @@ p := mmio + 4096        // 越界，编译错误或运行时检查
 
 实现（2026-10-29）：IR 节点 `IR_ALLOC_AT`（opcode 55，`s1`=地址、`s2`=字节大小、`s3`=对齐、`tk`=元素类型）。v1 约束：
 
-- 返回 `*int`；地址、大小、对齐必须是编译期整数字面量（部署配置值尚未接入）。
-- 大小必须是正的 8 字节倍数；IR 边界以 8 字节 cell 计，4096 字节 = 512 个 `*int` cell。
+- 返回 `*int`；地址、大小和对齐取编译期整数字面量（部署配置值尚未接入）。
+- 大小为 8 字节的正倍数；IR 边界以 8 字节 cell 计，4096 字节 = 512 个 `*int` cell。
 - 节点标记为 SYSTEM；固定地址为程序寿命，RegionCheck 不把所在循环/if 当作回收点，BytePermission 默认可读写。
 - ProvenanceVerify 复用分配边界：静态偏移编译期证明，动态偏移插入运行时边界检查；后端把地址常量写入结果指针。
 - 解释器不支持固定地址访问，`corec run` 明确报错，不伪造宿主指针。

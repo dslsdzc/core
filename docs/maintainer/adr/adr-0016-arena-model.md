@@ -1,5 +1,7 @@
 # ADR-0016: 多 Arena 内存模型（取代全局 bump 分配器）
 
+> 定位：受众 = 维护者；状态 = accepted；出处 = 本页。
+
 - 日期：2026-07-28
 - 状态：accepted（已实现）
 - 决策者：DslsDZC
@@ -12,7 +14,7 @@
 
 - 每个子图（function/loop/for/unsafe）有自己的 arena：子图入口调用 `arena_new`，出口调用 `arena_reset`（重置游标，整体清空）。
 - 新增 IR opcode：`IR_ARENA_NEW` = 32，`IR_ARENA_RESET` = 33（编译期预先计算大小）。
-- ELF 后端有两条 `alloc` 路径：arena 感知路径（`g_current_arena`）和全局 `bump` 回退；支持 mmap 堆扩展。
+- ELF 后端有两条 `alloc` 路径：按 arena 选择的路径（`g_current_arena`）和全局 `bump` 回退；支持 mmap 堆扩展。
 - stdlib `arena.cr` 提供完整生命周期（init/new/reset）、动态元数据、free list 和嵌套。
 
 ## 后果

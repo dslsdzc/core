@@ -3,7 +3,7 @@
 > 定位：受众 = 维护者/验证者；状态 = active（方向与入口）；本文件即入口（`coq/` 证明待建）。
 
 > 目标：用 Coq（Rocq）做程序验证，验证 Core 系统里几乎不随语言演进而改动的部分（stdlib 纯函数）。
-> 注意：这不是规约系统（`.corespec` / 翻译桥那套基础设施），而是直接用 Coq 验证程序本身的性质。
+> 注：这不是规约系统（`.corespec` / 翻译桥那套基础设施），而是直接用 Coq 验证程序本身的性质。
 
 ## 选取 stdlib 纯函数的依据
 
@@ -37,7 +37,7 @@
 
 ## 第 1 步：建模约定（已完成）
 
-关键概念：验证不是逐行翻译代码，而是用 Coq 的语言重新表达同一个算法语义。需要回答的问题是 `int_str` 的语义，即它把一个数字变成了什么，而不是它如何操作内存。
+关键概念：验证不是逐行翻译代码，而是用 Coq 的语言重新表达同一个算法语义。需要确认的问题是 `int_str` 的语义，即它把一个数字变成了什么，而不是它如何操作内存。
 
 对照 `fmt.cr:96` 的 `int_str`，逐项消去：
 
@@ -66,11 +66,11 @@ str_int(s) = 从左往右读 digits，每读一位 res = res*10 + d
 
 ## 进度
 
-- [x] 第1步 建模约定
-- [x] 第2步 翻译 int_str（循环改为递归）
-- [x] 第3步 声明性质
-- [x] 第4步 证明
-- [x] 第5步 coqc 验证：2026-08-11 编译通过
+1. 第 1 步 建模约定：已完成。
+2. 第 2 步 翻译 int_str（循环改为递归）：已完成。
+3. 第 3 步 声明性质：已完成。
+4. 第 4 步 证明：已完成。
+5. 第 5 步 coqc 验证：2026-08-11 编译通过。
 
 ## 成果
 
@@ -83,11 +83,11 @@ str_int(s) = 从左往右读 digits，每读一位 res = res*10 + d
 
 ## 实现过程中遇到的问题（Rocq 9.1 实测）
 
-1. 除法递归不被 Fixpoint 接受（guard condition）：`n / 10` 不是结构子项，需 `Function` + measure。
-2. `Function f (n : nat) {measure n}` 语法在 Rocq 9.1 失效，报 "Illegal application: n cannot be applied to n"；须写 `{measure (fun x => x) n}`。
+1. 除法递归不被 Fixpoint 接受（guard condition）：`n / 10` 不是结构子项，使用 `Function` + measure。
+2. `Function f (n : nat) {measure n}` 语法在 Rocq 9.1 失效，报 "Illegal application: n cannot be applied to n"；需要写成 `{measure (fun x => x) n}`。
 3. `simpl` 会展开 wf 包装、divmod 和乘法：`Function` 定义展开带证明项，`mod`/`div` 内部是 `divmod` fix，`10 * x` 展开成加法序列。解法：`Opaque Nat.div Nat.modulo Nat.mul` + 用 `digits_rev_equation` 精确展开。
 4. `rewrite` 替换所有匹配：`rewrite (Nat.div_mod (S m) 10) at 1` 限定只替换最外层。
-5. 归纳需要泛化累加器：`induction l in acc |- *`，否则 IH 里的 acc 与目标不匹配。
+5. 归纳需要泛化累加器：使用 `induction l in acc |- *`；不泛化时 IH 里的 acc 与目标不匹配。
 
 ## 下一步候选
 
@@ -100,4 +100,4 @@ str_int(s) = 从左往右读 digits，每读一位 res = res*10 + d
 ## 环境
 
 - Rocq Prover 9.1.1（opam，`~/.opam/default/bin/coqc`）
-- 无 coqide，用命令行 coqc 编译和编辑器
+- 不使用 coqide，使用命令行 coqc 编译和编辑。

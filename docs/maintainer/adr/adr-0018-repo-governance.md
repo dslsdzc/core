@@ -1,5 +1,7 @@
 # ADR-0018: 仓库治理：GitFlow 分支模型 + 双 ruleset + CI 要求
 
+> 定位：受众 = 维护者；状态 = accepted；出处 = 本页。
+
 - 日期：2026-08-09
 - 状态：accepted（已实施）
 - 决策者：DslsDZC（维护者）
@@ -12,7 +14,7 @@
 
 - 分支模型为 `feature`、`develop`、`main`：`main` 是正式版线（仅维护者可合入，update 规则 + 无管理员绕过）；`develop` 是集成分支（PR + 审阶段 + merge queue + CI 要求）；`feature` 分支每个改动独立。
 - 仓库治理四项：`CODE_OF_CONDUCT`/`CONTRIBUTING`/`SECURITY`/PR 模板，加 CI（`core-ci.yml`）。
-- 版本控制工具是 `jj`（禁止 `git` 写操作，仓库约定）；合并方式是手动 `squash` 合入 `develop`（merge queue 因免费计划降级）。
+- 版本控制工具是 `jj`，仓库约定不使用 `git` 写操作；合并方式是手动 `squash` 合入 `develop`（merge queue 因免费计划降级）。
 
 ## 后果
 

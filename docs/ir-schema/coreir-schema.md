@@ -1,10 +1,12 @@
 # Core IR Schema：HDFG（.cir / .ccr / .csr）
 
-本文件描述 Core 的中间表示格式。`.cir` 是程序图和规约约束的验证表示，`.ccr` 是格形态的落盘表示，`.csr` 是规约约束的序列化设计。
+> 定位：受众 = 维护者（IR 实现者）；状态 = active；出处 = `src/compiler/ccr_io.cr`、`src/compiler/ast.cr`（格式以源码为准）。
+
+Core 的中间表示有三种格式。`.cir` 是程序图和规约约束的验证表示，`.ccr` 是格形态的落盘表示，`.csr` 是规约约束的序列化设计。
 
 格式以源码为准：`.cir` 和 `.ccr` 的字段与版本以 `src/compiler/ccr_io.cr` 和 `src/compiler/ast.cr` 为准；`.csr` 当前没有实现，见 `docs/ir-schema/corespecir-schema.md` 头部的说明。
 
-`.ccr` 的当前版本是 11，版本常量在 `src/compiler/ccr_schema.cr`。本文件第六节保留段表架构的说明，里面的 `v7` 是架构代号，不是当前文件版本号。
+`.ccr` 的当前版本是 11，版本常量在 `src/compiler/ccr_schema.cr`。第六节保留段表架构的说明，其中的 `v7` 是架构代号，不是当前文件版本号。
 
 ## 概述
 
@@ -161,7 +163,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 
 ### ALLOC_AT 节点（声明式放置）
 
-固定地址放置的声明式进图节点（图绑定区域内存模型，见 `docs/maintainer/design/memory-model.md` 机制 #3）：
+固定地址放置使用声明式节点进入图（图绑定区域内存模型，见 `docs/maintainer/design/memory-model.md` 机制 #3）：
 
 | 字段 | 含义 |
 |------|------|
@@ -176,7 +178,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 
 ### 布局元数据（Layout Descriptor）
 
-struct 类型关联布局描述符。默认由编译器推导自然布局（字段顺序 + 自然对齐），用户 `layout(...)` 声明时显式给出（packed/强制对齐/硬件结构例外入口）：
+struct 类型关联一个布局描述符。默认由编译器推导自然布局（字段顺序 + 自然对齐），用户 `layout(...)` 声明时显式给出（packed/强制对齐/硬件结构例外入口）：
 
 | 字段 | 含义 |
 |------|------|
@@ -185,13 +187,13 @@ struct 类型关联布局描述符。默认由编译器推导自然布局（字�
 | field_count | 字段数 |
 | fields | 每字段：(name_idx, offset, width, align)，name_idx 索引字符串表 |
 
-布局元数据是图数据：后端与验证器消费同一来源（语义保留），DEREF 的偏移和宽度检查按布局执行。
+布局元数据是图数据：后端与验证器使用同一来源（语义保持一致），DEREF 的偏移和宽度检查按布局执行。
 
 ---
 
 ## 三、规约操作码（新增 DFNode opcode）
 
-原有指令节点 opcode 不变（0-29），新增规约相关 opcode：
+原有指令节点 opcode 不变（0 到 29），新增规约相关 opcode：
 
 | 编号 | 名称 | 语义 | dest | src1 | src2 | src3 |
 |------|------|------|------|------|------|------|
@@ -208,7 +210,7 @@ struct 类型关联布局描述符。默认由编译器推导自然布局（字�
 
 ## 四、自动推导标签
 
-编译器从图结构分析自动推导以下标签，写入 `.csr` 的 TagNode 数组（status=auto_proven）：
+编译器通过图结构分析自动推导以下标签，写入 `.csr` 的 TagNode 数组（status=auto_proven）：
 
 | 标签 | 图模式匹配规则 | 说明 |
 |------|---------------|------|
@@ -256,7 +258,7 @@ struct 类型关联布局描述符。默认由编译器推导自然布局（字�
 
 ## 六、图实现方式投影（HDFG 到 `.ccr`）
 
-`lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端消费。当前文件序是生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），执行序是图的投影，不再是文件唯一的语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
+`lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端使用。当前文件序是生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），执行序是图的投影，不再是文件唯一的语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
 
 ### `.ccr` 二进制序列化（v11，2026-11）
 
@@ -289,7 +291,7 @@ REG 不在 v11 落盘。`g_sgs` 仍是前端 region 表和 `.cir` 缓存的结�
 
 ## 七、文本 `.cir` 转储格式
 
-自托管编译器的 `corec cir` 命令通过 `cir_text_dump()` 生成人类可读的文本转储，扩展为显示规约约束：
+自托管编译器的 `corec cir` 命令通过 `cir_text_dump()` 生成人类可读的文本转储，并扩展显示规约约束：
 
 ```
 Function: sort
