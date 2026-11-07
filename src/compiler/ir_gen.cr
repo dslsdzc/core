@@ -5612,6 +5612,22 @@ fn gen_expr(node: int) -> int:
         var_ni := ast_a(node)
         type_node := ast_b(node)
         val_node := ast_c(node)
+        // Graph/function aliases materialize the typed callable address with
+        // IR_FNADDR. Calls are still specialized to the known target (the
+        // checker rewrites them), so this value is a linkable address, not an
+        // indirect-call ABI. The marker survives scope teardown.
+        if ast_type_val(node) == LET_FLAG_FN_ALIAS:
+            var := new_ir_var(istr_get(var_ni), TI_INT)
+            if val_node >= 0:
+                vv := gen_expr(val_node)
+                vv = force_if_thunk(vv)
+                if vv >= 0:
+                    emit(IR_STORE, -1, var, vv, 0, 0)
+            bind_local(var_ni, var)
+            return var
+        vsi := find_sym(var_ni)
+        if vsi >= 0 && sym_kind(vsi) == SYM_FN_ALIAS:
+            return -1
         is_apx := ast_int_val(node)  // apx 标签位（parser 存入 iv 字段）
         // Detect dyn variable (type annotation is `dyn`)
         is_dyn_var : ., mut = 0
@@ -5760,6 +5776,29 @@ fn gen_expr(node: int) -> int:
         if is_apx != 0:
             emit(IR_APPROX, -1, 0, 0, 0, 0)
         return var
+
+    // Graph expressions are compile-time only. The checker rewrites valid uses;
+    // reaching IR means the checker missed a value use, so fail closed.
+    if ast_kind(node) == EXPR_FN_TYPE:
+        check_error(EC_TF_ARG_TYPE, "A function type is not a runtime value", ast_line(node), ast_col(node))
+        return -1
+
+    if ast_kind(node) == EXPR_FNREF:
+        fi := find_func(ast_int_val(node))
+        if fi < 0:
+            check_error(EC_N_FUNC, "Undefined function reference", ast_line(node), ast_col(node))
+            return -1
+        rv := new_ir_var("_fnref", TI_INT)
+        emit(IR_FNADDR, rv, fi_name(fi), 0, 0, 0)
+        return rv
+    if ast_kind(node) == EXPR_LAMBDA || ast_kind(node) == EXPR_COMPOSE:
+        fi := ast_int_val(node) - 1
+        if fi < 0 || fi >= g_func_count:
+            check_error(EC_TF_ARG_TYPE, "Graph expression has no hidden function", ast_line(node), ast_col(node))
+            return -1
+        rv := new_ir_var("_graph", TI_INT)
+        emit(IR_FNADDR, rv, fi_name(fi), 0, 0, 0)
+        return rv
 
     // Return
     if ast_kind(node) == EXPR_YIELD:

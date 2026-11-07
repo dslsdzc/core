@@ -906,6 +906,11 @@ fn tokenize_impl(_src: string, layout_bypass: int):
             add_tok(T_LTEQ, -1, start_line, start_col)
             _pos = skip_ws(_src, _pos, _slen)
             continue
+        if c == 62    && peek_at(_src, _pos, _slen) == 124:
+            _pos = _pos + 2
+            add_tok(T_COMPOSE, -1, start_line, start_col)
+            _pos = skip_ws(_src, _pos, _slen)
+            continue
         if c == 62    && peek_at(_src, _pos, _slen) == 61:
             _pos = _pos + 2
             add_tok(T_GTEQ, -1, start_line, start_col)

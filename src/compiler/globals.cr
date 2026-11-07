@@ -31,6 +31,22 @@ g_sym_cap : int, mut
 g_types : string, mut
 g_type_count : int, mut
 g_type_cap : int, mut
+// Function/graph signature side table. Function types are represented as
+// TYP_NAMED rows with a canonical name; this table maps the row back to its
+// parameter/return types. Record = {ti, ret_ti, param_count, params...}.
+// It is checker-only: graph composition never becomes a runtime value.
+G_FN_SIG_REC : int = 35
+G_FN_SIG_MAX_PARAMS : int = 32
+g_fn_sig_ti : string, mut
+g_fn_sig_count : int, mut
+g_fn_sig_cap : int, mut
+// Hidden graph functions (lambdas/compositions) get unique names.
+g_fn_graph_seq : int, mut
+// Active lambda body inference: capture of an outer local/parameter is rejected.
+g_lambda_capture_active : int, mut
+g_lambda_param_names : string, mut
+g_lambda_param_count : int, mut
+g_lambda_param_cap : int, mut
 // Type row layout: 24 bytes per row, {kind, data, extra} as three i64 values.
 // alloc_type, grow_types, and TYPE-segment serialization all use these constants.
 ESZ_TYPE_ROW : int = 24

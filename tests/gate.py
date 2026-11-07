@@ -58,6 +58,7 @@ FAST = [
     "test_lib_manager.py",
     "test_generic_constraints.py",
     "test_generic_modules.py",
+    "test_graph_compose.py",
 ]
 
 

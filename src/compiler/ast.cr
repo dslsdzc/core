@@ -131,6 +131,9 @@ T_SPEC : int = 111
 // T_PIPE is the single vertical bar used as a match arm prefix or alternative.
 // It must be a real token to be recognized; `||` still uses T_PIPEPIPE.
 T_PIPE : int = 112
+// Function/graph composition `>|`. The lexer must distinguish it from `>` so
+// the parser can build EXPR_COMPOSE without lookahead.
+T_COMPOSE : int = 114
 
 
 // W_I8..W_F64 (1..10) were width-annotation values for the removed width-suffix
@@ -201,6 +204,9 @@ CALL_FLAG_INLINE : int = 2
 // "T.m" string. During instantiation, monomorph resolves the method through
 // iface_find_method using the concrete type.
 CALL_FLAG_IFACE_METHOD : int = 4
+// EXPR_LET type_val marker: the binding is a compile-time graph/function alias,
+// not a runtime variable. IR generation skips the whole node.
+LET_FLAG_FN_ALIAS : int = 1
 EXPR_BLOCK : int = 8    // a=g_block_stmts start, b=stmt count
 EXPR_IF : int = 9       // a=cond, b=then, c=else (-1 if none)
 EXPR_LOOP : int = 10    // a=body
@@ -256,6 +262,10 @@ EXPR_OPTIONAL : int = 49  // a=inner type node (T? 类型位置)
 EXPR_INTERP_HOLE : int = 50  // data=hole text ni（解析期）；checker 改写后本 kind 不再存在
 EXPR_BIGINT : int = 51       // a=canonical decimal string ni; type TY_INT
 EXPR_TUPLEPAT : int = 52     // tuple pattern: a=first wrapper（连续；wrapper kind=EXPR_NONE，a=子模式节点，b=元素下标）, b=element count
+EXPR_FN_TYPE : int = 53      // function/graph signature: a=first param wrapper (EXPR_ARG list of type nodes), b=param count, c=return type node
+EXPR_FNREF : int = 54        // `fn.name`: a=function name ni
+EXPR_LAMBDA : int = 55       // `fn(params) => expr` or `fn(params) -> T: block`: a=first param, b=param count, c=body, data=return type node (-1 = infer)
+EXPR_COMPOSE : int = 56      // `left >| right`: a=left graph expr, b=right graph expr
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
@@ -581,6 +591,9 @@ SYM_PARAM : int = 3
 SYM_GLOBAL : int = 4
 SYM_MODULE : int = 5
 SYM_SO_FN : int = 6
+// A local/lexical name that denotes a graph/function alias (`double := fn(x) => ...`).
+// It is not a runtime value: sym_node stores the hidden FuncInfo index.
+SYM_FN_ALIAS : int = 7
 
 // Parameter/function tag flags (stored in sym_type for SYM_SO_FN)
 TAG_VARIADIC : int = 1

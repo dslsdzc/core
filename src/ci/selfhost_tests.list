@@ -115,3 +115,4 @@ python3 tests/selfhost/test_stub_regalloc.py
 python3 tests/selfhost/test_bigint_boundaries.py
 python3 tests/selfhost/test_generic_constraints.py
 python3 tests/selfhost/test_generic_modules.py
+python3 tests/selfhost/test_graph_compose.py
