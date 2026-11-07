@@ -1,5 +1,7 @@
 # Core 执行模型
 
+> 定位：受众 = 维护者；状态 = active；出处 = 本页与 `src/compiler/dataflow.cr`。
+
 语义设计以本文件为准，实现以源码为准。图与区域见 `src/compiler/dataflow.cr`，并发见 `src/stdlib/sched.cr`、`goroutine.cr`、`chan.cr`，执行器见 `src/compiler/interp.cr`，语法见 `grammar/core.ebnf`。
 
 ## 执行语义：HDFG
