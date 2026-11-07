@@ -203,8 +203,8 @@ fn main() -> int:
     g_order = alloc(8)
     r1 := chan_make(8, 1)
     r2 := chan_make(8, 1)
-    conc_spawn_priority(@addr(low), 0, r1, 0)
-    conc_spawn_priority(@addr(high), 0, r2, 7)
+    conc_spawn_priority(fn.low, 0, r1, 0)
+    conc_spawn_priority(fn.high, 0, r2, 7)
     if chan_recv(r1) != 0:
         return 1
     if chan_recv(r2) != 0:

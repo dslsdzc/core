@@ -130,5 +130,5 @@ step @("n")     序列化当前上下文，传输到目标节点，恢复
 
 ## 当前状态
 
-更新（2026-07-31）：`go f(args)` 端到端可用。`sched_go(@addr(f), arg)` 调用 g_new，保存 saved_fn/saved_arg，ELF 后端内联发射 fiber_init/fiber_switch/goroutine_entry_wrapper，wrapper 调用 saved_fn(saved_arg)，结果经 result_ch 回传。主线程注册为 G 0，可以经 channel 阻塞或恢复执行；sched_yield 不再重排 Gwaiting。
+更新（2026-07-31）：`go f(args)` 端到端可用。`sched_go(fn.f, arg)` 调用 g_new，保存 saved_fn/saved_arg，ELF 后端内联发射 fiber_init/fiber_switch/goroutine_entry_wrapper，wrapper 调用 saved_fn(saved_arg)，结果经 result_ch 回传。主线程注册为 G 0，可以经 channel 阻塞或恢复执行；sched_yield 不再重排 Gwaiting。
 `walker` / `step` 未实现；多 M worker 线程的完整验证待补（见 `TODO.md` 预存 bug 第 2 条）。

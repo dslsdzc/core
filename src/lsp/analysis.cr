@@ -895,11 +895,6 @@ fn analysis_at_items(prefix: string) -> string:
             out = out + ","
         out = out + analysis_citem("sizeOf", 3)
         first = 0
-    if analysis_has_prefix("addr", prefix) != 0:
-        if first == 0:
-            out = out + ","
-        out = out + analysis_citem("addr", 3)
-        first = 0
     if analysis_has_prefix("alignOf", prefix) != 0:
         if first == 0:
             out = out + ","

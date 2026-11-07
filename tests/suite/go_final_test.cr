@@ -1,6 +1,6 @@
 // go_final_test.cr — end-to-end goroutine test.
 //
-// `go f(args)` → sched_go(@addr(f), args) → g_new stores the function
+// `go f(args)` → sched_go(fn.f, args) → g_new stores the function
 // address in G.saved_fn (offset 56) → goroutine_entry_wrapper calls
 // saved_fn(saved_arg) → result sent to result_ch → caller chan_recv gets it.
 import io

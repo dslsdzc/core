@@ -216,14 +216,14 @@ fn main() -> int:
     p : int = fn.square
     return 0
 """, "non-function type"))
-    ok.append(check_rejected("addr_is_not_callable", """\
+    ok.append(check_rejected("addr_removed", """\
 fn square(x: int) -> int:
     return x * x
 
 fn main() -> int:
-    f : fn(int) -> int = @addr(square)
+    x := @addr(square)
     return 0
-""", "Function type annotation requires"))
+""", "unknown @ builtin: addr"))
     # Graph references must obey library visibility: fpow2i is a private stdlib
     # helper, so `fn.fpow2i` must not resolve even though the function-table
     # fallback can find it by name.

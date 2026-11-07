@@ -1,7 +1,7 @@
 // go_e2e_test.cr — end-to-end goroutine test.
 //
 // Spawns square(21) via `go`, waits on the result channel, and checks 441.
-// Full runtime path: `go f(args)` → sched_go(@addr(f), arg) → g_new stores
+// Full runtime path: `go f(args)` → sched_go(fn.f, arg) → g_new stores
 // saved_fn/saved_arg in the G struct → fiber_switch → goroutine_entry_wrapper
 // (backend-emitted) calls saved_fn(saved_arg) → result sent to result_ch →
 // caller chan_recv gets the result.
