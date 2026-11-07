@@ -72,8 +72,8 @@ python3 build_selfhost_native.py       # 产出三个：build/corec、build/core
 # 数据流图 dump
 ./build/corec cir FILE.cr
 
-# 格形态 IR dump（v9 = 段表 8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)；
-# 版本定义以 src/compiler/ccr_io.cr::CCR_VERSION 为准，load 校验 ==9 且拒收 v8 及更早）
+# 格形态 IR dump（v11 = 8 段：STR/TYPE/IFACE/SYM/NOD/ENT/EDG/CASE；
+# 版本定义以 src/compiler/ccr_schema.cr::CCR_V11_VERSION 为准，load 校验 0x000B0000 且拒收 v10 及更早）
 ./build/corec ccr FILE.cr
 
 # Project mode：目录（Core.toml + main.cr + _import.cr）整体构建
@@ -100,6 +100,8 @@ python3 build_selfhost_native.py       # 产出三个：build/corec、build/core
    中的 `error[`）。两处检查互为补充，一处改动需要同步另一处。
 
 ### 本地复现 CI（首选入口，与 CI 运行同一条命令）
+
+> 2026-11-07 起 PR 层使用 `pr-gate`（compiler check + core tests + 变更 area），完整层使用 `full-gate`。本地按区域复现：`python3 src/ci/run_tests.py --area <area> --profile pr`。下列 `run.sh` job 名保留用于单 job 复现。
 
 CI 和本地使用同一条命令，唯一来源是 `src/ci/run.sh`（按 `CI_JOB_NAME` 的 case 分发，每一档都带
 计数说明）。workflow 只负责事件分层和 matrix 派发（`.github/workflows/core-ci.yml`）。PR 层包括
@@ -209,7 +211,7 @@ bootstrap/corec/frontend/type_checker.py 类型推断、类型检查和借用检
 bootstrap/corec/frontend/ir_gen.py     AST 到 Core IR
 
 bootstrap/corec/ir/cir.py              数据流图 IR 定义
-bootstrap/corec/ir/ccr.py              格形态 IR（注：该文件实际不存在。.ccr 只由自举编译器的 ccr_io.cr 读写；现行格式是 v9 八段段表（NOD 40B），见 specs/2026-09-09-lattice-ir-v7-format.md；v6 版历史设计见 archive/2026-09-05-lattice-ir-v6-format.md）
+bootstrap/corec/ir/ccr.py              格形态 IR（注：该文件实际不存在。.ccr 只由自举编译器的 ccr_io.cr 读写；现行格式是 v11 八段（NOD 40B，SYM 函数头 28B，无 REG），见 docs/ir-schema/coreir-schema.md；历史格式见 archive/ 与 specs/2026-09-09-lattice-ir-v7-format.md）
 bootstrap/corec/ir/base.py             IRNode 基类、IRVar、VarKind
 bootstrap/corec/ir/symbol_table.py     作用域符号表
 
@@ -420,9 +422,9 @@ tokenizer 参数化（`tokenize(_src: string)`）避开 `g_source` 全局变量�
 
 ## Key Conventions
 
-- 文件扩展名：`.cr`（源码）、`.cir`（数据流图 IR，图形态）、`.ccr`（格形态 IR，v9 是段表架构的
-  8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)。R2 P4 实现方式阶段起使用段表，R2 P6 T3 起为 v9，
-  NOD 40B 表示 TYPE 段项索引；版本以 `src/compiler/ccr_io.cr::CCR_VERSION` 为准；文件名和测试名
+- 文件扩展名：`.cr`（源码）、`.cir`（数据流图 IR，图形态）、`.ccr`（格形态 IR，v11 是段表架构的
+  8 段：STR/TYPE/IFACE/SYM/NOD/ENT/EDG/CASE。NOD 40B，SYM 函数头 28B 携带函数 NOD 范围；
+  v11 删除 REG；版本以 `src/compiler/ccr_schema.cr::CCR_V11_VERSION` 为准；文件名和测试名
   保留 v7，它是段表架构的代号，见 specs/2026-09-09-lattice-ir-v7-format.md。2026-09-16 审计修订：
   原文写 v8，已过时）、`.corespec`（2026-09-06 退役，规约并入 .cr 语法，见 grammar/core.ebnf
   迁移事项）
