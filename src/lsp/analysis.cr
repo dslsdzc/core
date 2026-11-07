@@ -1376,7 +1376,7 @@ fn analysis_tok_span(ti: int, st: int, sl: int) -> int:
     if lex >= 0:
         return str_len(istr_get(lex))
     // Operators and separators have lexeme -1; use the fixed length table, defaulting to one byte.
-    if k == T_EQEQ || k == T_BANGEQ || k == T_LTEQ || k == T_GTEQ || k == T_ANDAND || k == T_PIPEPIPE || k == T_ARROW || k == T_FATARROW || k == T_COLON_EQ || k == T_PATHSEP || k == T_PLUS_EQ || k == T_MINUS_EQ || k == T_STAR_EQ || k == T_SLASH_EQ || k == T_DOTDOT:
+    if k == T_EQEQ || k == T_BANGEQ || k == T_LTEQ || k == T_GTEQ || k == T_ANDAND || k == T_PIPEPIPE || k == T_ARROW || k == T_FATARROW || k == T_COLON_EQ || k == T_PATHSEP || k == T_PLUS_EQ || k == T_MINUS_EQ || k == T_STAR_EQ || k == T_SLASH_EQ || k == T_DOTDOT || k == T_COMPOSE:
         return 2
     if k == T_DOTDOTDOT:
         return 3

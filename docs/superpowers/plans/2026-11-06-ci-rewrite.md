@@ -61,7 +61,7 @@ CLI flags: `--profile pr|full|nightly`, `--changed-files PATH`, `--json`, `--git
 - [x] **Step 4: Validate coverage**
 
 Run `python3 src/ci/select_tests.py --validate`.
-Expected: `116 commands assigned` (the list had one duplicate), no `unassigned` entries, every area non-empty.
+Expected: `117 commands assigned` (the list had one duplicate, plus the graph-composition test), no `unassigned` entries, every area non-empty.
 
 - [x] **Step 5: Commit**
 

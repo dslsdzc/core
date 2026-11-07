@@ -149,6 +149,160 @@ fn alloc_named_type(name_idx: int) -> int:
     g_named_dedup_count = g_named_dedup_count + 1
     return ti
 
+// ─── Function/graph signatures ───
+// Function types are TYP_NAMED rows whose name is a canonical signature key.
+// This keeps `.ccr` serialization on the existing named-row path and avoids a
+// new TYP_* kind. Signatures are checker-only; graph composition never becomes
+// a runtime function value.
+fn grow_fn_sigs(needed: int):
+    if needed < g_fn_sig_cap:
+        return
+    nc : ., mut = g_fn_sig_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * G_FN_SIG_REC * 8)
+    cell_copy(g_fn_sig_ti, g_fn_sig_cap * G_FN_SIG_REC * 8, nb)
+    g_fn_sig_ti = nb
+    g_fn_sig_cap = nc
+
+fn fn_sig_find(ti: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_fn_sig_count:
+            break
+        if cell_load(g_fn_sig_ti, i * G_FN_SIG_REC) == ti:
+            return i
+        i = i + 1
+    return -1
+
+fn is_fn_ti(ti: int) -> bool:
+    return fn_sig_find(ti) >= 0
+
+// Structural equality for graph signatures. Function rows are synthetic named
+// rows, so they must not be sent through the named-type engine bridge.
+fn graph_type_equal(a: int, b: int) -> bool:
+    fa := is_fn_ti(a)
+    fb := is_fn_ti(b)
+    if fa || fb:
+        if !(fa && fb):
+            return false
+        if fn_sig_param_count(a) != fn_sig_param_count(b):
+            return false
+        i : ., mut = 0
+        loop:
+            if i >= fn_sig_param_count(a):
+                break
+            if !graph_type_equal(fn_sig_param_ti(a, i), fn_sig_param_ti(b, i)):
+                return false
+            i = i + 1
+        return graph_type_equal(fn_sig_ret_ti(a), fn_sig_ret_ti(b))
+    return type_equal(a, b)
+
+fn fn_sig_ret_ti(ti: int) -> int:
+    row := fn_sig_find(ti)
+    if row < 0:
+        return TI_UNIT
+    return cell_load(g_fn_sig_ti, row * G_FN_SIG_REC + 8)
+
+fn fn_sig_param_count(ti: int) -> int:
+    row := fn_sig_find(ti)
+    if row < 0:
+        return 0
+    return cell_load(g_fn_sig_ti, row * G_FN_SIG_REC + 16)
+
+fn fn_sig_param_ti(ti: int, i: int) -> int:
+    row := fn_sig_find(ti)
+    if row < 0:
+        return TI_UNIT
+    return cell_load(g_fn_sig_ti, row * G_FN_SIG_REC + 24 + i * 8)
+
+fn fn_sig_key(params: string, pc: int, ret_ti: int) -> string:
+    key : ., mut = "fn("
+    i : ., mut = 0
+    loop:
+        if i >= pc:
+            break
+        if i > 0:
+            key = key + ", "
+        key = key + type_display(cell_load(params, i * 8))
+        i = i + 1
+    key = key + ") -> " + type_display(ret_ti)
+    return key
+
+// Resolve the signature of a top-level function declaration. Returns -1 for
+// extern/method/flow declarations and for generic functions (not supported as
+// graph references in this version).
+fn fn_sig_of_func(func_ni: int) -> int:
+    if func_ni < 0 || func_ni >= g_func_count:
+        return -1
+    fn_node := fi_ast_node(func_ni)
+    if ast_kind(fn_node) != EXPR_FN:
+        return -1
+    if fi_generic_count(func_ni) > 0:
+        return -1
+    pc := ast_c(fn_node)
+    if pc > G_FN_SIG_MAX_PARAMS:
+        return -1
+    params := alloc((pc + 1) * 8)
+    pi : ., mut = 0
+    pn : ., mut = ast_b(fn_node)
+    loop:
+        if pi >= pc || pn < 0:
+            break
+        if ast_kind(pn) == EXPR_PARAM:
+            if ast_int_val(pn) != 0:
+                return -1
+            tn := ast_data(pn)
+            ti : ., mut = TI_UNIT
+            if tn >= 0:
+                ti = res_call_type(tn, func_ni)
+            else:
+                ti = ty_code_to_ti(ast_type_val(pn))
+            cell_store(params, pi * 8, ti)
+            pi = pi + 1
+        pn = pn + 1
+    if pi != pc:
+        return -1
+    ret_ti : ., mut = TI_UNIT
+    rt_node := ast_type_val(fn_node)
+    if rt_node > 0 && ast_kind(rt_node) != 0:
+        ret_ti = res_call_type(rt_node, func_ni)
+    else:
+        rr : ., mut = -2
+        if func_ni < g_func_ret_count:
+            rr = cell_load(g_func_ret_ti, func_ni * 8)
+        if rr != -2 && rr >= 0:
+            ret_ti = rr
+        else:
+            ret_ti = ty_code_to_ti(fi_return_type(func_ni))
+    if get_type_kind(ret_ti) == TYP_GENERIC_PARAM:
+        return -1
+    return fn_type_ti(params, pc, ret_ti)
+
+// Build (or reuse) the type row for a function signature.
+fn fn_type_ti(params: string, pc: int, ret_ti: int) -> int:
+    key := fn_sig_key(params, pc, ret_ti)
+    ni := str_intern(key)
+    ti := alloc_named_type(ni)
+    row := fn_sig_find(ti)
+    if row >= 0:
+        return ti
+    grow_fn_sigs(g_fn_sig_count + 1)
+    base := g_fn_sig_count * G_FN_SIG_REC
+    cell_store(g_fn_sig_ti, base, ti)
+    cell_store(g_fn_sig_ti, base + 8, ret_ti)
+    cell_store(g_fn_sig_ti, base + 16, pc)
+    i : ., mut = 0
+    loop:
+        if i >= pc || i >= G_FN_SIG_MAX_PARAMS:
+            break
+        cell_store(g_fn_sig_ti, base + 24 + i * 8, cell_load(params, i * 8))
+        i = i + 1
+    g_fn_sig_count = g_fn_sig_count + 1
+    return ti
+
 // 自测用（type_selftest.cr）：该名字当前在类型表里占的记录数（恒 0/1；0 = 尚未分配）。
 fn named_dedup_rows(name_idx: int) -> int:
     n : ., mut = 0
@@ -233,6 +387,10 @@ fn named_dedup_verify() -> int:
 
 fn init_types():
     g_type_count = 0
+    g_fn_sig_count = 0
+    g_fn_graph_seq = 0
+    g_lambda_capture_active = 0
+    g_lambda_param_count = 0
     g_alloc_at_ptr_ti = -1
     named_dedup_reset()   // 类型表重置 -> 侧表随之作废（陈旧 name->ti 不得跨重置复用）
     // 约束诊断去重侧表同理作废（键含 AST 节点下标：跨编译期复用会漏报/误报）
@@ -790,7 +948,7 @@ fn sym_visible(si: int) -> int:
     if g_cur_lib < 0:
         return 1
     k := sym_kind(si)
-    if k < SYM_FN || k > SYM_SO_FN:
+    if (k < SYM_FN || k > SYM_SO_FN) && k != SYM_FN_ALIAS:
         return 1
     owner := sym_owner_field(si)
     if owner < 0 || owner == g_cur_lib:
@@ -1225,9 +1383,334 @@ fn self_type_of_current_fn() -> int:
         return -1
     return sym_type(si)
 
+// ─── Graph/lambda helpers (composition is compile-time; no runtime fn values) ───
+fn grow_lambda_params(needed: int):
+    if needed < g_lambda_param_cap:
+        return
+    nc : ., mut = g_lambda_param_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * 8)
+    cell_copy(g_lambda_param_names, g_lambda_param_cap * 8, nb)
+    g_lambda_param_names = nb
+    g_lambda_param_cap = nc
+
+fn lambda_param_allowed(name_ni: int) -> bool:
+    i : ., mut = 0
+    loop:
+        if i >= g_lambda_param_count:
+            break
+        if cell_load(g_lambda_param_names, i * 8) == name_ni:
+            return true
+        i = i + 1
+    return false
+
+fn graph_block_one(stmt: int, src: int) -> int:
+    si := g_block_stmt_count
+    grow_block_stmts(si + 1)
+    cell_store(g_block_stmts, si * 8, stmt)
+    g_block_stmt_count = si + 1
+    return alloc_node(EXPR_BLOCK, si, 1, 0, 0, 0, 0, ast_lo(src), ast_hi(src))
+
+fn graph_ident(name_ni: int, src: int) -> int:
+    return alloc_node(EXPR_IDENT, 0, 0, 0, name_ni, 0, 0, ast_lo(src), ast_hi(src))
+
+fn graph_call1(func_ni: int, arg: int, src: int) -> int:
+    callee := graph_ident(fi_name(func_ni), src)
+    wrap := alloc_node(EXPR_ARG, arg, -1, 0, 0, 0, 0, ast_lo(src), ast_hi(src))
+    return alloc_node(EXPR_CALL, callee, wrap, 1, 0, 0, -1, ast_lo(src), ast_hi(src))
+
+// Base/named type row -> a syntax type node. Graph signatures are intentionally
+// limited to these two roots; aggregate callables are outside this version.
+fn graph_type_node(ti: int, src: int) -> int:
+    k := get_type_kind(ti)
+    if k == TYP_BASE:
+        return alloc_node(0, 0, 0, 0, 0, get_type_data(ti), 0, ast_lo(src), ast_hi(src))
+    if k == TYP_NAMED:
+        return alloc_node(EXPR_IDENT, 0, 0, 0, get_type_data(ti), 0, 0, ast_lo(src), ast_hi(src))
+    check_error(EC_TF_ARG_TYPE, "Unsupported graph signature type '" + type_display(ti) + "'", ast_line(src), ast_col(src))
+    return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, ast_lo(src), ast_hi(src))
+
+fn graph_ret_code(ti: int) -> int:
+    if get_type_kind(ti) == TYP_BASE:
+        return get_type_data(ti)
+    return 0
+
+// Compiler-generated graph functions are the only call targets allowed to
+// resolve through the function-table fallback when their scope symbol is gone.
+// User-visible names can never contain '$', so the prefix is unambiguous.
+fn is_graph_hidden_name(name: string) -> bool:
+    if str_len(name) < 8:
+        return false
+    return str_eq(str_sub(name, 0, 8), "__graph$") != 0
+
+// A graph reference may resolve through the function table only when the name
+// is a visible declaration or a compiler-generated hidden graph function.
+// `find_func` has a link-name fallback that intentionally ignores source
+// visibility; graph syntax must not use that fallback for user names.
+fn graph_func_resolvable(name_ni: int) -> bool:
+    si := find_gsym(name_ni)
+    if si >= 0 && sym_kind(si) == SYM_FN:
+        return true
+    if is_graph_hidden_name(istr_get(name_ni)):
+        return find_func(name_ni) >= 0
+    return false
+
+// Create a hidden top-level function for a lambda or a composition. It is a
+// normal direct-call target; no runtime function value is produced.
+fn make_graph_func(prefix: string, param_names: string, param_tis: string, pc: int, ret_ti: int, body: int, src: int) -> int:
+    g_fn_graph_seq = g_fn_graph_seq + 1
+    name := "__graph$" + int_str(g_fn_graph_seq) + "$" + prefix
+    name_ni := str_intern(name)
+    first_param : ., mut = -1
+    i : ., mut = 0
+    loop:
+        if i >= pc:
+            break
+        tn := graph_type_node(cell_load(param_tis, i * 8), src)
+        tv := unpack_type(tn)
+        pn := alloc_node(EXPR_PARAM, cell_load(param_names, i * 8), 0, 0, 0, tv, tn, ast_lo(src), ast_hi(src))
+        if first_param < 0:
+            first_param = pn
+        i = i + 1
+    ret_node := graph_type_node(ret_ti, src)
+    raw_ret := graph_ret_code(ret_ti)
+    fn_node := alloc_node(EXPR_FN, name_ni, first_param, pc, raw_ret, ret_node, body, ast_lo(src), ast_hi(src))
+    fi := add_func(name, pc, raw_ret, fn_node)
+    i = 0
+    loop:
+        if i >= pc:
+            break
+        fi_set_param_type(fi, i, graph_ret_code(cell_load(param_tis, i * 8)))
+        i = i + 1
+    if fi >= g_func_ret_count:
+        grow_func_ret(fi + 1)
+        if fi + 1 > g_func_ret_count:
+            g_func_ret_count = fi + 1
+    cell_store(g_func_ret_ti, fi * 8, ret_ti)
+    def_sym(name_ni, SYM_FN, ret_ti, fn_node)
+    si := g_sym_count - 1
+    sym_set_owner(si, lib_of_node(fn_node))
+    sym_set_pub(si, 0)
+    sym_set_mut(si, 0)
+    return fi
+
+// Resolve a graph expression to a direct-call function index. The expression is
+// compile-time only: a named function reference, a lambda, a local graph alias,
+// or a composition.
+fn resolve_graph_func(node: int, expected_ti: int, src: int) -> int:
+    if g_checker_current_fi >= 0 && g_checker_current_fi < g_func_count:
+        if fi_generic_count(g_checker_current_fi) > 0:
+            check_error(EC_TF_ARG_TYPE, "Graph composition/lambdas are not supported inside generic functions", ast_line(src), ast_col(src))
+            return -1
+    if node < 0:
+        check_error(EC_TF_ARG_TYPE, "Expected a function or lambda", ast_line(src), ast_col(src))
+        return -1
+    k := ast_kind(node)
+    if k == EXPR_FNREF:
+        name_ni := ast_int_val(node)
+        fi := find_func(name_ni)
+        if fi < 0 || !graph_func_resolvable(name_ni):
+            check_error(EC_N_FUNC, "Undefined function '" + istr_get(name_ni) + "'", ast_line(src), ast_col(src))
+            return -1
+        sig := fn_sig_of_func(fi)
+        if sig < 0:
+            check_error(EC_TF_ARG_TYPE, "Only non-generic top-level functions can be composed", ast_line(src), ast_col(src))
+            return -1
+        if expected_ti >= 0 && !graph_type_equal(sig, expected_ti):
+            check_error(EC_TF_ARG_TYPE, "Function signature mismatch: expected '" + type_display(expected_ti) + "', got '" + type_display(sig) + "'", ast_line(src), ast_col(src))
+            return -1
+        return fi
+    if k == EXPR_IDENT:
+        name_ni := ast_int_val(node)
+        si := find_sym(name_ni)
+        if si >= 0 && sym_kind(si) == SYM_FN_ALIAS:
+            fi := sym_node(si)
+            if fi >= 0 && fi < g_func_count:
+                sig := fn_sig_of_func(fi)
+                if expected_ti >= 0 && sig >= 0 && !graph_type_equal(sig, expected_ti):
+                    check_error(EC_TF_ARG_TYPE, "Function signature mismatch: expected '" + type_display(expected_ti) + "', got '" + type_display(sig) + "'", ast_line(src), ast_col(src))
+                    return -1
+                return fi
+        if si >= 0 && sym_kind(si) == SYM_FN:
+            fi := find_func(name_ni)
+            if fi >= 0 && graph_func_resolvable(name_ni):
+                sig := fn_sig_of_func(fi)
+                if sig >= 0:
+                    if expected_ti >= 0 && !graph_type_equal(sig, expected_ti):
+                        check_error(EC_TF_ARG_TYPE, "Function signature mismatch: expected '" + type_display(expected_ti) + "', got '" + type_display(sig) + "'", ast_line(src), ast_col(src))
+                        return -1
+                    return fi
+        check_error(EC_TF_ARG_TYPE, "'" + istr_get(name_ni) + "' is not a graph/function alias", ast_line(src), ast_col(src))
+        return -1
+    if k == EXPR_LAMBDA:
+        fi := make_lambda_func(node, expected_ti, node)
+        if fi >= 0:
+            ast_set_int_val(node, fi + 1)
+        return fi
+    if k == EXPR_COMPOSE:
+        left := resolve_graph_func(ast_a(node), -1, ast_a(node))
+        if left < 0:
+            return -1
+        right := resolve_graph_func(ast_b(node), -1, ast_b(node))
+        if right < 0:
+            return -1
+        fi := make_compose_func(left, right, node)
+        if fi >= 0:
+            ast_set_int_val(node, fi + 1)
+        return fi
+    check_error(EC_TF_ARG_TYPE, "Expected a function or lambda, got '" + type_display(infer_expr(node)) + "'", ast_line(src), ast_col(src))
+    return -1
+
+fn make_compose_func(left_fi: int, right_fi: int, src: int) -> int:
+    lsig := fn_sig_of_func(left_fi)
+    rsig := fn_sig_of_func(right_fi)
+    if lsig < 0 || rsig < 0:
+        check_error(EC_TF_ARG_TYPE, "Composition operands must be non-generic graph functions", ast_line(src), ast_col(src))
+        return -1
+    if fn_sig_param_count(lsig) != 1 || fn_sig_param_count(rsig) != 1:
+        check_error(EC_TF_ARG_TYPE, "Function composition requires two unary functions", ast_line(src), ast_col(src))
+        return -1
+    a := fn_sig_param_ti(lsig, 0)
+    b := fn_sig_ret_ti(lsig)
+    c := fn_sig_param_ti(rsig, 0)
+    d := fn_sig_ret_ti(rsig)
+    if !graph_type_equal(b, c):
+        check_error(EC_TF_ARG_TYPE, "Function composition type mismatch: '" + type_display(b) + "' does not match '" + type_display(c) + "'", ast_line(src), ast_col(src))
+        return -1
+    x_ni := str_intern("__graph$x")
+    names := alloc(8)
+    tis := alloc(8)
+    cell_store(names, 0, x_ni)
+    cell_store(tis, 0, a)
+    x := graph_ident(x_ni, src)
+    inner := graph_call1(left_fi, x, src)
+    outer := graph_call1(right_fi, inner, src)
+    ret := alloc_node(EXPR_RETURN, outer, 0, 0, 0, 0, 0, ast_lo(src), ast_hi(src))
+    body := graph_block_one(ret, src)
+    return make_graph_func("compose", names, tis, 1, d, body, src)
+
+fn make_lambda_func(node: int, expected_ti: int, src: int) -> int:
+    pc := ast_b(node)
+    first := ast_a(node)
+    body := ast_c(node)
+    ret_node := ast_data(node)
+    if pc > G_FN_SIG_MAX_PARAMS:
+        check_error(EC_TF_ARG_TYPE, "Too many lambda parameters", ast_line(src), ast_col(src))
+        return -1
+    names := alloc((pc + 1) * 8)
+    tis := alloc((pc + 1) * 8)
+    pi : ., mut = 0
+    pn : ., mut = first
+    exp_pc : ., mut = -1
+    if expected_ti >= 0 && is_fn_ti(expected_ti):
+        exp_pc = fn_sig_param_count(expected_ti)
+    loop:
+        if pi >= pc || pn < 0:
+            break
+        if ast_kind(pn) == EXPR_PARAM:
+            pname := ast_a(pn)
+            cell_store(names, pi * 8, pname)
+            tn := ast_data(pn)
+            ti : ., mut = TI_UNIT
+            if tn >= 0:
+                ti = res_type_node(tn)
+            else if exp_pc == pc:
+                ti = fn_sig_param_ti(expected_ti, pi)
+            else:
+                check_error(EC_TF_ARG_TYPE, "Cannot infer lambda parameter type for '" + istr_get(pname) + "'", ast_line(src), ast_col(src))
+                return -1
+            if exp_pc == pc && !graph_type_equal(ti, fn_sig_param_ti(expected_ti, pi)):
+                check_error(EC_TF_ARG_TYPE, "Lambda parameter type mismatch: expected '" + type_display(fn_sig_param_ti(expected_ti, pi)) + "', got '" + type_display(ti) + "'", ast_line(src), ast_col(src))
+                return -1
+            cell_store(tis, pi * 8, ti)
+            pi = pi + 1
+        pn = pn + 1
+    if pi != pc:
+        check_error(EC_TF_ARG_TYPE, "Malformed lambda parameter list", ast_line(src), ast_col(src))
+        return -1
+    ret_ti : ., mut = TI_UNIT
+    block_body : ., mut = -1
+    if ret_node >= 0:
+        ret_ti = res_type_node(ret_node)
+        if ast_kind(body) == EXPR_BLOCK:
+            block_body = body
+        else:
+            check_error(EC_TF_ARG_TYPE, "Block lambda requires an explicit return type", ast_line(src), ast_col(src))
+            return -1
+    else:
+        if ast_kind(body) == EXPR_BLOCK:
+            check_error(EC_TF_ARG_TYPE, "Block lambda requires an explicit return type", ast_line(src), ast_col(src))
+            return -1
+        // Infer the expression body in a temporary scope. Parameters are bound
+        // so the body can use them; any other local/parameter is a capture.
+        push_scope()
+        j : ., mut = 0
+        loop:
+            if j >= pc:
+                break
+            def_sym(cell_load(names, j * 8), SYM_PARAM, cell_load(tis, j * 8), -1)
+            j = j + 1
+        saved_active := g_lambda_capture_active
+        saved_count := g_lambda_param_count
+        g_lambda_capture_active = 1
+        g_lambda_param_count = 0
+        grow_lambda_params(pc)
+        j = 0
+        loop:
+            if j >= pc:
+                break
+            cell_store(g_lambda_param_names, j * 8, cell_load(names, j * 8))
+            j = j + 1
+        g_lambda_param_count = pc
+        bti := infer_expr(body)
+        g_lambda_capture_active = saved_active
+        g_lambda_param_count = saved_count
+        pop_scope()
+        if bti == ti_error():
+            return -1
+        ret_ti = bti
+        if expected_ti >= 0 && is_fn_ti(expected_ti) && !graph_type_equal(ret_ti, fn_sig_ret_ti(expected_ti)):
+            check_error(EC_TF_ARG_TYPE, "Lambda return type mismatch: expected '" + type_display(fn_sig_ret_ti(expected_ti)) + "', got '" + type_display(ret_ti) + "'", ast_line(src), ast_col(src))
+            return -1
+        rn := alloc_node(EXPR_RETURN, body, 0, 0, 0, 0, 0, ast_lo(src), ast_hi(src))
+        block_body = graph_block_one(rn, src)
+    return make_graph_func("lambda", names, tis, pc, ret_ti, block_body, src)
+
+// Resolve a function type node. The parameter wrappers are EXPR_ARG nodes
+// (a=type node, b=next); the return type is in c.
+fn res_fn_type_node(node: int, func_fi: int) -> int:
+    pc := ast_b(node)
+    ret_node := ast_c(node)
+    params := alloc((pc + 1) * 8)
+    i : ., mut = 0
+    cur : ., mut = ast_a(node)
+    loop:
+        if i >= pc || cur < 0:
+            break
+        tn := ast_a(cur)
+        ti : ., mut = TI_UNIT
+        if func_fi >= 0:
+            ti = res_call_type(tn, func_fi)
+        else:
+            ti = res_type_node(tn)
+        cell_store(params, i * 8, ti)
+        cur = ast_b(cur)
+        i = i + 1
+    ret_ti : ., mut = TI_UNIT
+    if func_fi >= 0:
+        ret_ti = res_call_type(ret_node, func_fi)
+    else:
+        ret_ti = res_type_node(ret_node)
+    return fn_type_ti(params, pc, ret_ti)
+
 fn res_type_node(node: int) -> int:
     if node < 0:
         return TI_UNIT
+    if ast_kind(node) == EXPR_FN_TYPE:
+        return res_fn_type_node(node, -1)
     if ast_kind(node) == 0:
         // Base type node: type_val = TY_*
         // 8 条内联分支改为单表 `ty_code_to_ti`（尾部回落显式写出，不藏表里）；
@@ -3454,6 +3937,19 @@ fn type_node_mentions_struct_param(si: int, tn: int) -> int:
 // 类型展示名（诊断措辞用）：具名/基型/泛型应用基名走 get_type_name，其余构造子递归拼装。
 // 未识别 -> "?"（不伪造名字）。
 fn type_display(ti: int) -> string:
+    if is_fn_ti(ti):
+        s : ., mut = "fn("
+        pc := fn_sig_param_count(ti)
+        i : ., mut = 0
+        loop:
+            if i >= pc:
+                break
+            if i > 0:
+                s = s + ", "
+            s = s + type_display(fn_sig_param_ti(ti, i))
+            i = i + 1
+        s = s + ") -> " + type_display(fn_sig_ret_ti(ti))
+        return s
     k := get_type_kind(ti)
     // 泛型应用先于 get_type_name 捷径处理：后者对
     // TYP_GENERIC_APPLY 只返回基名，因此实参全丢（expected Box, got Box，
@@ -3542,6 +4038,8 @@ fn res_call_type(node: int, func_fi: int) -> int:
     // Resolve a type node for call inference, treating generic params as TYP_GENERIC_PARAM
     if node < 0:
         return TI_UNIT
+    if ast_kind(node) == EXPR_FN_TYPE:
+        return res_fn_type_node(node, func_fi)
     if ast_kind(node) == 0:
         // 单表 ty_code_to_ti。本站点与 res_type_node 的唯一差别是 NEVER：ty_code_to_ti 没有
         // TY_NEVER 分支时落到 TI_UNIT。该差异显式保留：never 在调用位点按 unit 处理。
@@ -4017,6 +4515,9 @@ fn check_func(fi: int):
                     if self_mode == 3:
                         ann_mut = 1
                     ti = alloc_type(TYP_REF, base_ti, ann_mut)
+        if is_fn_ti(ti):
+            check_error(EC_TF_ARG_TYPE, "Callable parameters are not supported in this version; compose graphs at the call site", ast_line(pn), ast_col(pn))
+            ti = TI_UNIT
         def_sym(pname_idx, SYM_PARAM, ti, -1)
         pi = pi + 1
         // Params are not contiguous — type nodes are allocated between them
@@ -4040,6 +4541,9 @@ fn check_func(fi: int):
             ret_ti_mapped := ty_code_to_ti(return_type)
             if ret_ti_mapped >= 0 && ret_ti_mapped != TI_DYN:
                 ret_ti = ret_ti_mapped
+        if is_fn_ti(ret_ti):
+            check_error(EC_TF_ARG_TYPE, "Callable return types are not supported in this version", ast_line(fn_node), ast_col(fn_node))
+            ret_ti = TI_UNIT
         // The parser synthesizes `__ret` when `->` is omitted. Record that this
         // function needs body-derived return inference.
         ret_inferred : ., mut = 0
@@ -4603,6 +5107,16 @@ fn infer_expr(node: int) -> int:
     if ast_kind(node) == EXPR_CHAR:
         return iface_lit_ti(EXPR_CHAR)
 
+    if ast_kind(node) == EXPR_FNREF:
+        check_error(EC_TF_ARG_TYPE, "Function reference is only valid as a call target or a '>|' operand", ast_line(node), ast_col(node))
+        return ti_error()
+    if ast_kind(node) == EXPR_LAMBDA:
+        check_error(EC_TF_ARG_TYPE, "Lambda must be bound to a function alias before use", ast_line(node), ast_col(node))
+        return ti_error()
+    if ast_kind(node) == EXPR_COMPOSE:
+        check_error(EC_TF_ARG_TYPE, "Function composition must be bound to a function alias before use", ast_line(node), ast_col(node))
+        return ti_error()
+
     if ast_kind(node) == EXPR_IDENT:
         name_idx := ast_int_val(node)
         // Borrow check: can't use variable while it's borrowed
@@ -4611,6 +5125,15 @@ fn infer_expr(node: int) -> int:
             check_error(EC_B_USE_WHILE_BORROWED, "Cannot use '" + name + "' while it is borrowed", ast_line(node), ast_col(node))
         si := find_sym(name_idx)
         if si >= 0:
+            if sym_kind(si) == SYM_FN_ALIAS:
+                check_error(EC_TF_ARG_TYPE, "Function alias '" + istr_get(name_idx) + "' cannot be used as a value; call it or compose it with '>|'", ast_line(node), ast_col(node))
+                return ti_error()
+            if g_lambda_capture_active != 0 && (sym_kind(si) == SYM_LOCAL || sym_kind(si) == SYM_PARAM) && !lambda_param_allowed(name_idx):
+                check_error(EC_TF_ARG_TYPE, "Lambda/graph composition cannot capture local '" + istr_get(name_idx) + "'", ast_line(node), ast_col(node))
+                return ti_error()
+            if (sym_kind(si) == SYM_LOCAL || sym_kind(si) == SYM_PARAM) && is_fn_ti(sym_type(si)):
+                check_error(EC_TF_ARG_TYPE, "Callable values cannot be passed or stored; bind the graph to a function alias", ast_line(node), ast_col(node))
+                return ti_error()
             return sym_type(si)
         name := istr_get(name_idx)
         check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", ast_line(node), ast_col(node))
@@ -4767,10 +5290,33 @@ fn infer_expr(node: int) -> int:
         return infer_expr(ast_a(node))
 
     if ast_kind(node) == EXPR_CALL:
-        func_node := ast_a(node)
+        func_node : ., mut = ast_a(node)
         first_arg := ast_b(node)
         arg_count := ast_c(node)
         func_ni : ., mut = -1
+        // A callable graph expression is resolved to a direct function before
+        // the normal call paths. Runtime function values do not exist in this
+        // version: aliases/lambdas/compositions are compile-time call targets.
+        if func_node >= 0:
+            fk := ast_kind(func_node)
+            graph_callee : ., mut = 0
+            if fk == EXPR_FNREF || fk == EXPR_LAMBDA || fk == EXPR_COMPOSE:
+                graph_callee = 1
+            else if fk == EXPR_IDENT:
+                fsi := find_sym(ast_int_val(func_node))
+                if fsi >= 0 && sym_kind(fsi) == SYM_FN_ALIAS:
+                    graph_callee = 1
+                else if fsi >= 0 && (sym_kind(fsi) == SYM_LOCAL || sym_kind(fsi) == SYM_PARAM):
+                    if is_fn_ti(sym_type(fsi)):
+                        check_error(EC_TF_ARG_TYPE, "Callable values cannot be passed or stored; bind the graph to a function alias", ast_line(node), ast_col(node))
+                        return ti_error()
+            if graph_callee != 0:
+                target := resolve_graph_func(func_node, -1, func_node)
+                if target < 0:
+                    return ti_error()
+                new_callee := graph_ident(fi_name(target), ast_line(node), ast_col(node))
+                ast_set_a(node, new_callee)
+                func_node = new_callee
 
         // Method call: obj.method(args) or module.func(args)
         if ast_kind(func_node) == EXPR_FIELD:
@@ -5120,6 +5666,19 @@ fn infer_expr(node: int) -> int:
                         is_ext2 = 1
                     s1p_arg_ring(fi, first_arg, arg_count, 0, is_ext2)
                 return sym_type(si)  // return type
+            // Hidden graph functions are registered in g_funcs but their
+            // symbols live in the enclosing function's scope, which may have
+            // been popped by the time another hidden body is checked. Fall back
+            // to the function table before reporting an undefined function.
+            hfi := find_func(func_ni)
+            if hfi >= 0 && fi_generic_count(hfi) == 0 && is_graph_hidden_name(istr_get(func_ni)):
+                infer_call_args(first_arg)
+                hret : ., mut = -2
+                if hfi < g_func_ret_count:
+                    hret = cell_load(g_func_ret_ti, hfi * 8)
+                if hret >= 0:
+                    return hret
+                return ty_code_to_ti(fi_return_type(hfi))
             // Builtins were already resolved by prelude_builtin_return_ti
             // above, with the visibility filter applied. Reaching this point
             // means neither a symbol nor a visible ABI name matched.
@@ -5502,6 +6061,55 @@ fn infer_expr(node: int) -> int:
         var_ni := ast_a(node)
         type_node := ast_b(node)
         val_node := ast_c(node)
+        // Graph/function aliases are compile-time call targets, not runtime
+        // values. Recognize them before the normal let inference path.
+        ann_ti : ., mut = -1
+        annot_fn : ., mut = 0
+        if type_node >= 0:
+            ann_ti = res_type_node(type_node)
+            if is_fn_ti(ann_ti):
+                annot_fn = 1
+        val_k : ., mut = -1
+        if val_node >= 0:
+            val_k = ast_kind(val_node)
+        graph_expr : ., mut = 0
+        if val_k == EXPR_FNREF || val_k == EXPR_LAMBDA || val_k == EXPR_COMPOSE:
+            graph_expr = 1
+        else if val_k == EXPR_IDENT:
+            vsi := find_sym(ast_int_val(val_node))
+            if vsi >= 0 && sym_kind(vsi) == SYM_FN_ALIAS:
+                graph_expr = 1
+        if annot_fn != 0 || graph_expr != 0:
+            if graph_expr == 0:
+                check_error(EC_TF_ARG_TYPE, "Function type annotation requires a function, lambda, or composition", ast_line(node), ast_col(node))
+                return TI_UNIT
+            if type_node >= 0 && annot_fn == 0:
+                check_error(EC_TF_ARG_TYPE, "Function alias cannot be annotated with a non-function type", ast_line(node), ast_col(node))
+                return TI_UNIT
+            if ast_data(node) != 0:
+                check_error(EC_TF_ARG_TYPE, "Function alias cannot be mutable", ast_line(node), ast_col(node))
+                return TI_UNIT
+            expected : ., mut = -1
+            if annot_fn != 0:
+                expected = ann_ti
+            fi := resolve_graph_func(val_node, expected, val_node)
+            if fi < 0:
+                return TI_UNIT
+            sig := fn_sig_of_func(fi)
+            if sig < 0:
+                check_error(EC_TF_ARG_TYPE, "Function alias has no concrete signature", ast_line(node), ast_col(node))
+                return TI_UNIT
+            if annot_fn != 0 && !graph_type_equal(sig, ann_ti):
+                check_error(EC_TF_ARG_TYPE, "Function alias signature mismatch", ast_line(node), ast_col(node))
+                return TI_UNIT
+            ast_set_type_val(node, LET_FLAG_FN_ALIAS)
+            if istr_get(var_ni) != "_":
+                def_sym(var_ni, SYM_FN_ALIAS, sig, fi)
+                si := g_sym_count - 1
+                sym_set_owner(si, g_cur_lib)
+                sym_set_pub(si, 0)
+                sym_set_mut(si, 0)
+            return TI_UNIT
         val_ti : ., mut = TI_UNIT
         if val_node >= 0:
             val_ti = infer_expr(val_node)

@@ -193,6 +193,37 @@ fn parse_type() -> int:
         // `dyn` is a keyword with token kind T_DYN and type code TI_DYN.
         advance_tok()
         res = alloc_node(0, 0, 0, 0, 0, TI_DYN, 0, line, col)
+    else if tok_k(t) == T_FN:
+        // Function/graph signature: fn(T, ...) -> R. The return type is parsed
+        // recursively, so `fn(int) -> fn(int) -> int` is right-associative.
+        advance_tok()
+        first : ., mut = -1
+        prev : ., mut = -1
+        pc : ., mut = 0
+        if !check(T_LPAREN):
+            check_error(EC_P_EXPECTED, "expected '(' after 'fn' in function type", line, col)
+            return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
+        advance_tok()
+        if !check(T_RPAREN):
+            loop:
+                pt := parse_type()
+                wrapper := alloc_node(EXPR_ARG, pt, -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
+                if first < 0:
+                    first = wrapper
+                if prev >= 0:
+                    ast_set_b(prev, wrapper)
+                prev = wrapper
+                pc = pc + 1
+                if !check(T_COMMA):
+                    break
+                advance_tok()
+        advance_tok() // )
+        if !check(T_ARROW):
+            check_error(EC_P_EXPECTED, "expected '->' in function type", line, col)
+            return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
+        advance_tok()
+        ret := parse_type()
+        res = alloc_node(EXPR_FN_TYPE, first, pc, ret, 0, 0, 0, line, col)
     else if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE:
         lex := tok_lx(t)
         advance_tok()
@@ -278,6 +309,8 @@ fn prec(k: int) -> int:
         return 6
     if k == T_STAR || k == T_SLASH || k == T_PERCENT:
         return 7
+    if k == T_COMPOSE:
+        return 1
     return -1
 
 fn tok2op(k: int) -> int:
@@ -351,6 +384,8 @@ fn parse_binary(mp: int) -> int:
         // Convert assignment to EXPR_ASSIGN
         else if k == T_EQ:
             left = alloc_node(EXPR_ASSIGN, left, right, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
+        else if k == T_COMPOSE:
+            left = alloc_node(EXPR_COMPOSE, left, right, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         else:
             left = alloc_node(EXPR_BINARY, left, right, op, 0, 0, 0, tok_lo(t), tok_hi(t))
     return left
@@ -556,6 +591,62 @@ fn interp_parse_holes():
                     check_error(EC_P_INTERP_UNCLOSED, "trailing tokens in string interpolation hole", ast_line(i), ast_col(i))
         i = i + 1
 
+// `fn.name` graph reference or `fn(params) => expr` / `fn(params) -> T: block`
+// anonymous graph. These are compile-time graph expressions: they become hidden
+// functions and are called directly. They are not runtime function values.
+fn parse_fn_value() -> int:
+    t := advance_tok() // fn
+    if check(T_DOT):
+        advance_tok()
+        nt := cur_tok()
+        if tok_k(nt) != T_IDENT:
+            add_error("expected function name after 'fn.'")
+            return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
+        advance_tok()
+        return alloc_node(EXPR_FNREF, 0, 0, 0, str_intern(tok_lx(nt)), 0, 0, tok_lo(t), tok_hi(t))
+    if !check(T_LPAREN):
+        add_error("expected '.' or '(' after 'fn' in expression")
+        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
+    advance_tok() // (
+    first : ., mut = -1
+    pc : ., mut = 0
+    if !check(T_RPAREN):
+        loop:
+            pt := cur_tok()
+            if tok_k(pt) != T_IDENT && tok_k(pt) != T_UNDERSCORE:
+                add_error("expected lambda parameter name")
+                break
+            advance_tok()
+            pni := str_intern(tok_lx(pt))
+            typ : ., mut = -1
+            if check(T_COLON_DECL):
+                advance_tok()
+                typ = parse_type()
+            pnode := alloc_node(EXPR_PARAM, pni, 0, 0, 0, unpack_type(typ), typ, tok_lo(pt), tok_hi(pt))
+            if first < 0:
+                first = pnode
+            pc = pc + 1
+            if !check(T_COMMA):
+                break
+            advance_tok()
+    advance_tok() // )
+    body : ., mut = -1
+    ret_node : ., mut = -1
+    if check(T_FATARROW):
+        advance_tok()
+        want := g_want_value
+        g_want_value = 1
+        body = parse_expr()
+        g_want_value = want
+    else if check(T_ARROW):
+        advance_tok()
+        ret_node = parse_type()
+        body = parse_block()
+    else:
+        add_error("expected '=>' or '->' after lambda parameters")
+        body = alloc_node(EXPR_BLOCK, g_block_stmt_count, 0, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
+    return alloc_node(EXPR_LAMBDA, first, pc, body, 0, 0, ret_node, tok_lo(t), tok_hi(t))
+
 fn parse_primary() -> int:
     t := cur_tok()
     if tok_k(t) == T_INT:
@@ -602,6 +693,8 @@ fn parse_primary() -> int:
             return alloc_node(EXPR_AT, name_ni, -1, 0, 0, 0, 0, tok_lo(t), tok_hi(t))
         add_error("expected identifier after @")
         return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_lo(t), tok_hi(t))
+    if tok_k(t) == T_FN:
+        return parse_fn_value()
     if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE:
         advance_tok()
         name := tok_lx(t)

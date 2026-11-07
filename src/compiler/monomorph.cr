@@ -784,6 +784,32 @@ fn gen_clone_tree(node: int) -> int:
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
         gen_dedup_add(node, n)
         return n
+    // Function/graph nodes are compile-time only; clone their structural
+    // children so a generic body containing one cannot corrupt the clone.
+    if k == EXPR_FN_TYPE:
+        a2 := gen_clone_tree(a)
+        c2 := gen_clone_tree(c)
+        n := ast_alloc(k, a2, b, c2, iv, tv, d, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+    if k == EXPR_FNREF:
+        n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+    if k == EXPR_LAMBDA:
+        a2 := gen_clone_tree(a)
+        c2 := gen_clone_tree(c)
+        d2 := gen_clone_tree(d)
+        n := ast_alloc(k, a2, b, c2, iv, tv, d2, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+    if k == EXPR_COMPOSE:
+        a2 := gen_clone_tree(a)
+        b2 := gen_clone_tree(b)
+        n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+
     // T? has the inner type node in a. Its generic parameters are substituted by the
     // EXPR_IDENT branch, so clone only a here. This explicit branch avoids the
     // fallback treating d (=0) as a child node.

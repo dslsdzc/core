@@ -18,6 +18,7 @@ match = [
   "test_ccr_types\\.py",
   "test_merge_copy\\.py",
   "test_region_escape\\.py",
+  "test_graph_compose\\.py",
   "test_generic_constraints\\.py",
   "test_generic_modules\\.py",
 ]
