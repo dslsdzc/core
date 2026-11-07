@@ -96,6 +96,51 @@ fn meta_reg_pair_off(var_idx: int) -> int:
         mi = mi + 1
     return -1
 
+// Direct var -> register projection. Allocation writes one location per global
+// var, so the first pair in file order is authoritative (the same rule as
+// get_reg_for_var's scan). Rebuild after allocation or after an injection has
+// changed g_opt_meta; emission then performs O(1) lookups per operand.
+fn reg_map_reset():
+    g_var_reg_ready = 0
+    g_var_reg_count = 0
+
+fn reg_map_build():
+    need : ., mut = g_ir_var_count
+    if need < 0:
+        need = 0
+    if need > g_var_reg_cap:
+        if need > 0:
+            nb := alloc(need * 8)
+            g_var_reg = nb
+            g_var_reg_cap = need
+    g_var_reg_count = need
+    zi : ., mut = 0
+    loop:
+        if zi >= need:
+            break
+        cell_store(g_var_reg, zi * 8, -1)
+        zi = zi + 1
+    mi : ., mut = 0
+    loop:
+        if mi >= g_opt_meta_count:
+            break
+        mo := mi * OPT_META_STRIDE
+        if r32(g_opt_meta, mo) == OPT_KEY_REG_ASSIGN:
+            data_len : ., mut = r32(g_opt_meta, mo + 4)
+            if data_len > OPT_META_STRIDE - 8:
+                data_len = OPT_META_STRIDE - 8
+            di : ., mut = 4
+            loop:
+                if di >= data_len:
+                    break
+                vi := r32(g_opt_meta, mo + 8 + di)
+                if vi >= 0 && vi < need:
+                    if cell_load(g_var_reg, vi * 8) < 0:
+                        cell_store(g_var_reg, vi * 8, r32(g_opt_meta, mo + 8 + di + 4))
+                di = di + 8
+        mi = mi + 1
+    g_var_reg_ready = 1
+
 // Registry pairing.
 // The verifier reads the location registry through kern_loc_assign,
 // kern_loc_clear, and kern_loc_of (ent_kernel.cr). Every write to g_opt_meta
@@ -128,6 +173,7 @@ fn reg_clear_var_entries(var_idx: int):
 // Force var -> reg. If a pair exists, rewrite it in place; otherwise append a
 // pair. Append takes effect only when no earlier pair matches.
 fn meta_set_reg(var_idx: int, reg: int):
+    g_var_reg_ready = 0
     po := meta_reg_pair_off(var_idx)
     if po >= 0:
         w32(g_opt_meta, po, reg)
@@ -139,6 +185,7 @@ fn meta_set_reg(var_idx: int, reg: int):
 // block is removed. The var becomes stack resident: its entries have home = -1,
 // so it does not participate in the rule 1 sweep.
 fn meta_remove_var(var_idx: int):
+    g_var_reg_ready = 0
     mi : ., mut = 0
     loop:
         if mi >= g_opt_meta_count:
@@ -200,6 +247,7 @@ fn meta_reg_assign_total() -> int:
 // var that real allocation did not cover. The backend get_reg_for_var uses the
 // same rule.
 fn meta_append_reg_assign(var_idx: int, reg: int):
+    g_var_reg_ready = 0
     grow_opt_meta(g_opt_meta_count + 1)
     eo := g_opt_meta_count * OPT_META_STRIDE
     store8(g_opt_meta, eo, 0)
@@ -231,6 +279,7 @@ fn meta_append_reg_assign(var_idx: int, reg: int):
 // covered the var. Coexisting entries in the same group then violate rule 1.
 // This injection only runs in the cir debug branch.
 fn try_inject_reg_conflict(func_i: int) -> int:
+    g_var_reg_ready = 0
     es := entry_start(func_i)
     ec := entry_count(func_i)
     if ec < 2:
@@ -409,6 +458,7 @@ fn label_pos_of(id: int, lab_id: string, lab_ps: string, n: int) -> int:
     return -1
 
 fn alloc_registers():
+    reg_map_reset()
     if g_opt_level < 1:
         return
     // 先计算存在区间表，尾部重建版本条目表，判定消费同源数据。
@@ -879,6 +929,7 @@ fn alloc_registers():
                     ej = ej + 1
                 ai = ai + 1
         fi = fi + 1
+    reg_map_build()
 
 // ── v10 target-fact reconstruction ────────────────────────────────────────
 // The .ccr carries semantic facts only. Access widths, array strides, and

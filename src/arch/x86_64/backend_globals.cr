@@ -9,6 +9,14 @@ g_ni_syscall6 : int, mut
 // IR variable index to shared stack slot variable (-1 = own slot).
 g_stack_map : string, mut
 
+// Direct var -> physical-register lookup built from g_opt_meta after
+// alloc_registers. get_reg_for_var is called for every emitted operand; scanning
+// the metadata blocks there is quadratic in the number of variables.
+g_var_reg : string, mut
+g_var_reg_cap : int, mut
+g_var_reg_count : int, mut
+g_var_reg_ready : int, mut
+
 // Backend arrays (all dynamic byte buffers)
 g_x86_str_offs : string, mut
 g_x86_str_count : int, mut
