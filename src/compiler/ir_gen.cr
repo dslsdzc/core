@@ -1567,7 +1567,7 @@ fn gen_enum_pattern_test(pat: int, val: int, fall: int, val_ti: int) -> int:
 // projections. The scrutinee variable normally carries the struct/tuple row; a
 // pattern-only row falls back to the declared struct name.
 fn emit_pat_struct_field(fv: int, val: int, name_ni: int, fi: int):
-    sti := irv_type(val)
+    sti : ., mut = irv_type(val)
     if get_type_kind(sti) != TYP_NAMED && get_type_kind(sti) != TYP_GENERIC_APPLY:
         sti = alloc_named_type(name_ni)
     off := target_introspect_field_offset(sti, fi)
@@ -2764,13 +2764,13 @@ fn dt_specialize(rows: string, pats: string, cols: string, tis: string,
         if ck == 1:
             offset = i + 1
         else if ck == 2:
-            sti := val_ti
+            sti : ., mut = val_ti
             if get_type_kind(sti) != TYP_NAMED && get_type_kind(sti) != TYP_GENERIC_APPLY:
                 sti = irv_type(val)
             offset = target_introspect_field_offset(sti, i)
             fw = target_introspect_field_width(sti, i)
         else if ck == 3:
-            tti := val_ti
+            tti : ., mut = val_ti
             if get_type_kind(tti) != TYP_TUPLE:
                 tti = irv_type(val)
             offset = target_introspect_tuple_field_offset(tti, i)
@@ -3773,7 +3773,7 @@ fn gen_expr(node: int) -> int:
                 if is_slice_hdr(arr_var) != 0:
                     arr_data_addr = slice_hdr_data(arr_var)
                 v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)))
-                asz := X86_MP_WORD_BYTES
+                asz : ., mut = X86_MP_WORD_BYTES
                 if elem_ti >= 0:
                     asz = target_introspect_storage_size(elem_ti)
                 if irv_type(arr_var) == TI_STR:
@@ -5865,7 +5865,7 @@ fn gen_expr(node: int) -> int:
         if fi < 0 && prelude_builtin_return_ti(ni) < 0 && find_so_fn(ni) < 0:
             check_error(EC_N_FUNC, "Undefined function reference", ast_line(node), ast_col(node))
             return -1
-        name_ni := ni
+        name_ni : ., mut = ni
         if fi >= 0:
             name_ni = func_link(fi)
         rv := new_ir_var("_fnref", TI_INT)
@@ -6425,7 +6425,7 @@ fn gen_expr(node: int) -> int:
         // （复合元素值节点不连续，须经 wrapper 解引用，见 checker.cr EXPR_TUPLE 注）。
         elem_idx := ast_a(node)
         ec : ., mut = ast_b(node)
-        tti := ast_ti_get(node)
+        tti : ., mut = ast_ti_get(node)
         if get_type_kind(tti) != TYP_TUPLE:
             tti = alloc_type(TYP_TUPLE, ec, get_type_extra(tti))
         tv := new_ir_var("tuple", tti)

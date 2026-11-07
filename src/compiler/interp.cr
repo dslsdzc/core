@@ -950,7 +950,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 stride2 : ., mut = t2
                 if stride2 <= 0:
                     stride2 = interp_ptr_stride()
-                w2 := stride2
+                w2 : ., mut = stride2
                 if w2 > interp_ptr_stride():
                     w2 = interp_ptr_stride()
                 cell_store(g_ir_vals, d2 * 8, interp_mem_load(av2, t3 * stride2, w2))
@@ -963,7 +963,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 stride2 : ., mut = d2
                 if stride2 <= 0:
                     stride2 = interp_ptr_stride()
-                w2 := stride2
+                w2 : ., mut = stride2
                 if w2 > interp_ptr_stride():
                     w2 = interp_ptr_stride()
                 interp_mem_store(av2, t3 * stride2, w2, cell_load(g_ir_vals, t2 * 8))
@@ -977,7 +977,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 stride2 : ., mut = t3
                 if stride2 <= 0:
                     stride2 = interp_ptr_stride()
-                w2 := stride2
+                w2 : ., mut = stride2
                 if w2 > interp_ptr_stride():
                     w2 = interp_ptr_stride()
                 cell_store(g_ir_vals, d2 * 8, interp_mem_load(av2, ix2 * stride2, w2))
@@ -991,7 +991,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 stride2 : ., mut = t3
                 if stride2 <= 0:
                     stride2 = interp_ptr_stride()
-                w2 := stride2
+                w2 : ., mut = stride2
                 if w2 > interp_ptr_stride():
                     w2 = interp_ptr_stride()
                 interp_mem_store(av2, ix2 * stride2, w2, cell_load(g_ir_vals, d2 * 8))
@@ -1028,7 +1028,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             // IR_ALLOC_STRUCT. s2 carries the baked allocation extent; the old
             // field-count fallback remains for compiler-internal rows without a
             // semantic struct type.
-            need3 := t2
+            need3 : ., mut = t2
             if need3 <= 0:
                 si2 := find_struct(t3)
                 fc2 : ., mut = 0
@@ -1386,7 +1386,7 @@ fn ir_interpret() -> int:
         if op == 7:
             // IR_ALLOC_STRUCT. s2 is the baked allocation extent.
             if d >= 0:
-                need2 := s2
+                need2 : ., mut = s2
                 if need2 <= 0:
                     si := find_struct(s3)
                     fc : ., mut = 0
@@ -1472,7 +1472,7 @@ fn ir_interpret() -> int:
                     stride3 : ., mut = s2
                     if stride3 <= 0:
                         stride3 = interp_ptr_stride()
-                    w3 := stride3
+                    w3 : ., mut = stride3
                     if w3 > interp_ptr_stride():
                         w3 = interp_ptr_stride()
                     cell_store(g_ir_vals, d * 8, interp_mem_load(arr_value, s3 * stride3, w3))
@@ -1486,7 +1486,7 @@ fn ir_interpret() -> int:
                     stride3 : ., mut = d
                     if stride3 <= 0:
                         stride3 = interp_ptr_stride()
-                    w3 := stride3
+                    w3 : ., mut = stride3
                     if w3 > interp_ptr_stride():
                         w3 = interp_ptr_stride()
                     interp_mem_store(arr_value, s3 * stride3, w3, cell_load(g_ir_vals, s2 * 8))
@@ -1501,7 +1501,7 @@ fn ir_interpret() -> int:
                     stride3 : ., mut = s3
                     if stride3 <= 0:
                         stride3 = interp_ptr_stride()
-                    w3 := stride3
+                    w3 : ., mut = stride3
                     if w3 > interp_ptr_stride():
                         w3 = interp_ptr_stride()
                     cell_store(g_ir_vals, d * 8, interp_mem_load(arr_value, idx * stride3, w3))
@@ -1516,7 +1516,7 @@ fn ir_interpret() -> int:
                     stride3 : ., mut = s3
                     if stride3 <= 0:
                         stride3 = interp_ptr_stride()
-                    w3 := stride3
+                    w3 : ., mut = stride3
                     if w3 > interp_ptr_stride():
                         w3 = interp_ptr_stride()
                     interp_mem_store(arr_value, idx * stride3, w3, cell_load(g_ir_vals, d * 8))

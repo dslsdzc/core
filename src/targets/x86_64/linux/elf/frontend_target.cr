@@ -140,7 +140,7 @@ fn layout_struct_of(ti: int) -> int:
     if ti < 0 || ti >= g_type_count:
         return -1
     k := get_type_kind(ti)
-    base := ti
+    base : ., mut = ti
     if k == TYP_GENERIC_APPLY:
         base = get_type_data(ti)
         if base < 0 || base >= g_type_count:

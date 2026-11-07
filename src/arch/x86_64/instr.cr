@@ -147,7 +147,7 @@ fn emit_sib(buf: string, pos: int, scale: int, index: int, base: int) -> int:
 // zero-extended into the destination register for 1/4-byte loads.
 fn e2_load_mem_w(buf: string, pos: int, base: int, dst: int, off: int, width: int) -> int:
     cp : ., mut = 0
-    w := width
+    w : ., mut = width
     if w != 1 && w != 4:
         w = 8
     cp = cp + emit_rex(buf, pos+cp, w/8, dst/8, 0, base/8)
@@ -164,7 +164,7 @@ fn e2_load_mem_w(buf: string, pos: int, base: int, dst: int, off: int, width: in
 
 fn e2_store_mem_w(buf: string, pos: int, base: int, src: int, off: int, width: int) -> int:
     cp : ., mut = 0
-    w := width
+    w : ., mut = width
     if w != 1 && w != 4:
         w = 8
     cp = cp + emit_rex(buf, pos+cp, w/8, src/8, 0, base/8)
@@ -2641,7 +2641,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
             cp = cp + e2_w32(buf, pos+cp, idx)
         else:
-            w := stride
+            w : ., mut = stride
             if w > 8:
                 w = 8
             cp = cp + e2_load_mem_w(buf, pos+cp, 10, 10, idx * stride, w)
@@ -2665,7 +2665,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8)
             cp = cp + e2_w32(buf, pos+cp, idx)
         else:
-            w := stride
+            w : ., mut = stride
             if w > 8:
                 w = 8
             cp = cp + e2_store_mem_w(buf, pos+cp, 10, 11, idx * stride, w)
@@ -2697,7 +2697,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         else:
-            w := stride
+            w : ., mut = stride
             if w > 8:
                 w = 8
             cp = cp + emit_rex(buf, pos+cp, w/8, 10/8, 11/8, 10/8)
@@ -2745,7 +2745,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else:
             if stride != 1:
                 cp = cp + e2_imul_imm(buf, pos+cp, 11, stride)
-            w := stride
+            w : ., mut = stride
             if w > 8:
                 w = 8
             if g_x86_big_enabled != 0:
