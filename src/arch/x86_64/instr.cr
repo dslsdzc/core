@@ -25,6 +25,13 @@ fn g2_init():
 // O0 and O1 leave it empty, so all vars use stack slots.
 
 fn get_reg_for_var(var_idx: int) -> int:
+    // Normal emission consumes the direct map built at the end of allocation.
+    // The scan below remains as the fallback for paths that query before the map
+    // exists or after a debug injection has invalidated it.
+    if g_var_reg_ready != 0:
+        if var_idx >= 0 && var_idx < g_var_reg_count:
+            return cell_load(g_var_reg, var_idx * 8)
+        return -1
     mi : ., mut = 0
     loop:
         if mi >= g_opt_meta_count:

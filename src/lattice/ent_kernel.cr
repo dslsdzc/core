@@ -912,73 +912,175 @@ fn rl_report_rule2(func_i: int, gv: int, inst: int):
 fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: int) -> int:
     // vs/vc is the variable window [vs, vs+vc). nst/nc is the node window
     // [nst, nst+nc), taken from g_ir_func_instr_start/count.
+    //
+    // The verifier used to rescan every entry and every node once per resident
+    // variable: O(vc * (ec + nc)). This pass builds var-indexed version and read
+    // lists once, then walks each variable's reads in ascending order. The
+    // diagnostic order (variable order, then instruction order) is unchanged.
     violations : ., mut = 0
+    if vc <= 0 || nc <= 0:
+        return 0
+    resident := alloc(vc * 8)
+    ver_cnt := alloc((vc + 1) * 8)
+    read_cnt := alloc((vc + 1) * 8)
+    zi : ., mut = 0
+    loop:
+        if zi >= vc:
+            break
+        cell_store(resident, zi * 8, 0)
+        cell_store(ver_cnt, zi * 8, 0)
+        cell_store(read_cnt, zi * 8, 0)
+        zi = zi + 1
+    cell_store(ver_cnt, vc * 8, 0)
+    cell_store(read_cnt, vc * 8, 0)
+
+    // Count version entries per variable and mark resident variables. A variable
+    // is resident when any of its entries has a registered location, which is
+    // exactly meta_reg_for_var(gv) >= 0.
+    total_ver : ., mut = 0
+    ei : ., mut = 0
+    loop:
+        if ei >= ec:
+            break
+        e := es + ei
+        gv := ent_var(e)
+        if gv >= vs && gv < vs + vc:
+            lv := gv - vs
+            if kern_loc_of(e) >= 0:
+                cell_store(resident, lv * 8, 1)
+            if ent_def(e) >= 0:
+                cell_store(ver_cnt, lv * 8, cell_load(ver_cnt, lv * 8) + 1)
+                total_ver = total_ver + 1
+        ei = ei + 1
+
+    ver_start := alloc((vc + 1) * 8)
+    ver_cur := alloc(vc * 8)
+    acc : ., mut = 0
     lv : ., mut = 0
+    loop:
+        if lv > vc:
+            break
+        cell_store(ver_start, lv * 8, acc)
+        if lv < vc:
+            acc = acc + cell_load(ver_cnt, lv * 8)
+            cell_store(ver_cur, lv * 8, cell_load(ver_start, lv * 8))
+        lv = lv + 1
+    vers : string, mut = ""
+    if total_ver > 0:
+        vers = alloc(total_ver * 8)
+    ei = 0
+    loop:
+        if ei >= ec:
+            break
+        e := es + ei
+        gv := ent_var(e)
+        if gv >= vs && gv < vs + vc && ent_def(e) >= 0:
+            lv = gv - vs
+            pos := cell_load(ver_cur, lv * 8)
+            cell_store(vers, pos * 8, e)
+            cell_store(ver_cur, lv * 8, pos + 1)
+        ei = ei + 1
+
+    // Count reads per variable. IR_STORE s1 is a write target; IR_MATCH s2 is a
+    // CASE table index. If one node reads the same variable through both
+    // operands, it is one read obligation, matching the old rd flag.
+    total_rd : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= nc:
+            break
+        inst := nst + ii
+        op := nod_op(inst)
+        s1 := nod_s1(inst)
+        s2 := nod_s2(inst)
+        r1 : ., mut = 0
+        if op != IR_STORE && s1 >= vs && s1 < vs + vc:
+            r1 = 1
+        if r1 != 0:
+            lv = s1 - vs
+            cell_store(read_cnt, lv * 8, cell_load(read_cnt, lv * 8) + 1)
+            total_rd = total_rd + 1
+        if op != IR_MATCH && s2 >= vs && s2 < vs + vc:
+            if r1 == 0 || s2 != s1:
+                lv = s2 - vs
+                cell_store(read_cnt, lv * 8, cell_load(read_cnt, lv * 8) + 1)
+                total_rd = total_rd + 1
+        ii = ii + 1
+
+    read_start := alloc((vc + 1) * 8)
+    read_cur := alloc(vc * 8)
+    acc = 0
+    lv = 0
+    loop:
+        if lv > vc:
+            break
+        cell_store(read_start, lv * 8, acc)
+        if lv < vc:
+            acc = acc + cell_load(read_cnt, lv * 8)
+            cell_store(read_cur, lv * 8, cell_load(read_start, lv * 8))
+        lv = lv + 1
+    reads : string, mut = ""
+    if total_rd > 0:
+        reads = alloc(total_rd * 8)
+    ii = 0
+    loop:
+        if ii >= nc:
+            break
+        inst := nst + ii
+        op := nod_op(inst)
+        s1 := nod_s1(inst)
+        s2 := nod_s2(inst)
+        r1 : ., mut = 0
+        if op != IR_STORE && s1 >= vs && s1 < vs + vc:
+            r1 = 1
+        if r1 != 0:
+            lv = s1 - vs
+            pos := cell_load(read_cur, lv * 8)
+            cell_store(reads, pos * 8, inst)
+            cell_store(read_cur, lv * 8, pos + 1)
+        if op != IR_MATCH && s2 >= vs && s2 < vs + vc:
+            if r1 == 0 || s2 != s1:
+                lv = s2 - vs
+                pos := cell_load(read_cur, lv * 8)
+                cell_store(reads, pos * 8, inst)
+                cell_store(read_cur, lv * 8, pos + 1)
+        ii = ii + 1
+
+    // Variable-major obligation check. Reads for each variable are already in
+    // ascending instruction order, so the version cursor only moves forward.
+    lv = 0
     loop:
         if lv >= vc:
             break
-        gv := vs + lv
-        if meta_reg_for_var(gv) < 0:
-            lv = lv + 1
-            continue
-        // Collect this variable's version entries with def >= 0. Count first, then collect.
-        m : ., mut = 0
-        ei : ., mut = 0
-        loop:
-            if ei >= ec:
-                break
-            e := es + ei
-            if ent_var(e) == gv && ent_def(e) >= 0:
-                m = m + 1
-            ei = ei + 1
-        if m <= 0:
-            lv = lv + 1
-            continue
-        // No versioned definition: the obligation range is empty.
-        vers : string, mut = alloc(m * 8)
-        vj : ., mut = 0
-        ei = 0
-        loop:
-            if ei >= ec:
-                break
-            e := es + ei
-            if ent_var(e) == gv && ent_def(e) >= 0:
-                cell_store(vers, vj * 8, e)
-                vj = vj + 1
-            ei = ei + 1
-        // Scan reads in ascending node order through nod_op/nod_s1/nod_s2. The
-        // version cursor advances monotonically. ent_def and ent_live_end store
-        // global node coordinates, so comparisons must use inst, not the local ii.
-        cursor : ., mut = 0
-        first_def := cell_load(vers, 0 * 8)
-        ii : ., mut = 0
-        loop:
-            if ii >= nc:
-                break
-            inst := nst + ii
-            op := nod_op(inst)
-            rd : ., mut = 0
-            s1 := nod_s1(inst)
-            s2 := nod_s2(inst)
-            if s1 == gv && op != IR_STORE:
-                rd = 1
-            if op != IR_MATCH && s2 == gv:
-                rd = 1
-            if rd != 0 && inst >= ent_def(first_def):
-                // 推进游标至最后一个 def ≤ inst 的版本
+        if cell_load(resident, lv * 8) != 0:
+            vstart := cell_load(ver_start, lv * 8)
+            vend := cell_load(ver_start, (lv + 1) * 8)
+            if vend > vstart:
+                first := cell_load(vers, vstart * 8)
+                first_def := ent_def(first)
+                cursor : ., mut = 0
+                m := vend - vstart
+                r0 := cell_load(read_start, lv * 8)
+                r1 := cell_load(read_start, (lv + 1) * 8)
+                ri : ., mut = r0
                 loop:
-                    if cursor + 1 >= m:
+                    if ri >= r1:
                         break
-                    nx := cell_load(vers, (cursor + 1) * 8)
-                    if ent_def(nx) > inst:
-                        break
-                    cursor = cursor + 1
-                cv := cell_load(vers, cursor * 8)
-                if ent_live_end(cv) < inst:
-                    if violations < RPT_MAX:
-                        rl_report_rule2(func_i, gv, inst)
-                    violations = violations + 1
-            ii = ii + 1
+                    inst := cell_load(reads, ri * 8)
+                    if inst >= first_def:
+                        loop:
+                            if cursor + 1 >= m:
+                                break
+                            nx := cell_load(vers, (vstart + cursor + 1) * 8)
+                            if ent_def(nx) > inst:
+                                break
+                            cursor = cursor + 1
+                        cv := cell_load(vers, (vstart + cursor) * 8)
+                        if ent_live_end(cv) < inst:
+                            if violations < RPT_MAX:
+                                rl_report_rule2(func_i, vs + lv, inst)
+                            violations = violations + 1
+                    ri = ri + 1
         lv = lv + 1
     return violations
 
