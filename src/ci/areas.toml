@@ -70,6 +70,7 @@ paths = [
   "src/compiler/opt.cr",
   "src/format/",
   "src/arch/",
+  "src/lattice/",
 ]
 match = [
   "test_ccr_v11_",
@@ -191,6 +192,7 @@ paths = [
   "tools/baseline/",
   "src/format/",
   "src/arch/",
+  "src/lattice/",
 ]
 match = [
   "canary",
