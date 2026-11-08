@@ -195,6 +195,29 @@ g_si_layout_align : string, mut
 // Per-AST-node inferred type row. Only expression nodes whose type must survive
 // into IR generation are written (struct literals, array literals, tuples).
 g_ast_ti : string, mut
+// Inferred type-variable solver. Each omitted generic struct field gets a
+// fresh TYP_GENERIC_PARAM row; the apply-data slot it occupies is registered
+// here so a later binding updates every alias of the same value.
+g_solve_rows : string, mut
+g_solve_slots : string, mut
+g_solve_used : string, mut
+g_solve_lines : string, mut
+g_solve_cols : string, mut
+g_solve_count : int, mut
+g_solve_cap : int, mut
+g_solve_seq : int, mut
+// Method-body constraints: `self.field = value` recorded while checking the
+// template. At a call site they bind the receiver's solver slots.
+g_rel_fi : string, mut
+g_rel_struct : string, mut
+g_rel_field : string, mut
+g_rel_val : string, mut
+g_rel_count : int, mut
+g_rel_cap : int, mut
+// Receiver type row for a method-call AST node. ir_gen passes it to
+// monomorphization so the instance's `self` parameter is the concrete apply.
+g_call_recv : string, mut
+g_call_recv_cap : int, mut
 // Enum variant side tables, the same shape as struct fields. The OFF_EI_VARIANTS
 // slot now holds variant_base. Three tables describe variants (name, payload base,
 // payload count) and two describe payloads (raw code, type node).

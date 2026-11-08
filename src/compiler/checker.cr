@@ -4102,9 +4102,327 @@ fn res_call_type(node: int, func_fi: int) -> int:
         return alloc_type(TYP_OPTIONAL, inner, 0)
     return TI_UNIT
 
+// ─── Deferred type-variable solver ───────────────────────────────────────
+// A missing generic struct field is represented by a fresh TYP_GENERIC_PARAM
+// row whose name starts with `__solve`. The apply-data slot that holds the row
+// is registered here. Binding writes the concrete row into every registered
+// slot, so every alias of the same value sees the same solution.
+fn solve_grow(needed: int):
+    if needed <= g_solve_cap:
+        return
+    nc : ., mut = g_solve_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    rb := alloc(nc * 8)
+    cell_copy(g_solve_rows, g_solve_cap * 8, rb)
+    g_solve_rows = rb
+    sb := alloc(nc * 8)
+    cell_copy(g_solve_slots, g_solve_cap * 8, sb)
+    g_solve_slots = sb
+    ub := alloc(nc * 8)
+    cell_copy(g_solve_used, g_solve_cap * 8, ub)
+    g_solve_used = ub
+    lb := alloc(nc * 8)
+    cell_copy(g_solve_lines, g_solve_cap * 8, lb)
+    g_solve_lines = lb
+    cb := alloc(nc * 8)
+    cell_copy(g_solve_cols, g_solve_cap * 8, cb)
+    g_solve_cols = cb
+    g_solve_cap = nc
+
+fn solve_is_var(ti: int) -> int:
+    if ti < 0:
+        return 0
+    if get_type_kind(ti) != TYP_GENERIC_PARAM:
+        return 0
+    ni := get_type_data(ti)
+    if ni < 0:
+        return 0
+    name := istr_get(ni)
+    if str_len(name) < 7:
+        return 0
+    if str_sub(name, 0, 7) == "__solve":
+        return 1
+    return 0
+
+fn solve_new(line: int, col: int) -> int:
+    g_solve_seq = g_solve_seq + 1
+    ni := str_intern("__solve" + int_str(g_solve_seq))
+    ti := alloc_type(TYP_GENERIC_PARAM, ni, 0)
+    // The row is registered by solve_register_slot once the apply-data block
+    // exists. Creation without a slot is a compiler bug; keep it out of the
+    // live table.
+    return ti
+
+fn solve_register_slot(row: int, slot: int, line: int, col: int):
+    solve_grow(g_solve_count + 1)
+    n := g_solve_count
+    cell_store(g_solve_rows, n * 8, row)
+    cell_store(g_solve_slots, n * 8, slot)
+    cell_store(g_solve_used, n * 8, 0)
+    cell_store(g_solve_lines, n * 8, line)
+    cell_store(g_solve_cols, n * 8, col)
+    g_solve_count = n + 1
+
+fn solve_mark_used(ti: int):
+    if ti < 0:
+        return
+    k := get_type_kind(ti)
+    if k == TYP_GENERIC_PARAM:
+        if solve_is_var(ti) == 0:
+            return
+        i : ., mut = 0
+        loop:
+            if i >= g_solve_count:
+                break
+            if cell_load(g_solve_rows, i * 8) == ti:
+                cell_store(g_solve_used, i * 8, 1)
+            i = i + 1
+        return
+    if k == TYP_ARRAY || k == TYP_SLICE || k == TYP_REF || k == TYP_PTR || k == TYP_OPTIONAL:
+        solve_mark_used(get_type_data(ti))
+        return
+    if k == TYP_GENERIC_APPLY:
+        st := get_type_extra(ti)
+        cnt := cell_load(g_gen_apply_data, st * 8)
+        i2 : ., mut = 0
+        loop:
+            if i2 >= cnt:
+                break
+            solve_mark_used(cell_load(g_gen_apply_data, (st + 1 + i2) * 8))
+            i2 = i2 + 1
+        return
+    if k == TYP_TUPLE:
+        st2 := get_type_extra(ti)
+        cnt2 := get_type_data(ti)
+        i3 : ., mut = 0
+        loop:
+            if i3 >= cnt2:
+                break
+            solve_mark_used(cell_load(g_gen_apply_data, (st2 + i3) * 8))
+            i3 = i3 + 1
+
+fn solve_resolve(ti: int) -> int:
+    if solve_is_var(ti) == 0:
+        return ti
+    i : ., mut = 0
+    loop:
+        if i >= g_solve_count:
+            return ti
+        if cell_load(g_solve_rows, i * 8) == ti:
+            cur := cell_load(g_gen_apply_data, cell_load(g_solve_slots, i * 8))
+            if solve_is_var(cur) == 0:
+                return cur
+        i = i + 1
+    return ti
+
+fn ti_has_solver(ti: int) -> int:
+    if ti < 0:
+        return 0
+    k := get_type_kind(ti)
+    if k == TYP_GENERIC_PARAM:
+        return solve_is_var(ti)
+    if k == TYP_ARRAY || k == TYP_SLICE || k == TYP_REF || k == TYP_PTR || k == TYP_OPTIONAL:
+        return ti_has_solver(get_type_data(ti))
+    if k == TYP_GENERIC_APPLY:
+        st := get_type_extra(ti)
+        cnt := cell_load(g_gen_apply_data, st * 8)
+        i : ., mut = 0
+        loop:
+            if i >= cnt:
+                break
+            if ti_has_solver(cell_load(g_gen_apply_data, (st + 1 + i) * 8)) != 0:
+                return 1
+            i = i + 1
+    if k == TYP_TUPLE:
+        st2 := get_type_extra(ti)
+        cnt2 := get_type_data(ti)
+        i2 : ., mut = 0
+        loop:
+            if i2 >= cnt2:
+                break
+            if ti_has_solver(cell_load(g_gen_apply_data, (st2 + i2) * 8)) != 0:
+                return 1
+            i2 = i2 + 1
+    return 0
+
+fn solve_bind(row: int, concrete: int) -> bool:
+    if solve_is_var(row) == 0:
+        return false
+    if concrete < 0:
+        return false
+    if solve_is_var(concrete) != 0:
+        // Two unbound variables stay independent (the language rule); accepting
+        // them is not a binding.
+        return true
+    found : ., mut = 0
+    conflict : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= g_solve_count:
+            break
+        if cell_load(g_solve_rows, i * 8) == row:
+            slot := cell_load(g_solve_slots, i * 8)
+            cur := cell_load(g_gen_apply_data, slot)
+            if cur == row || solve_is_var(cur) != 0:
+                cell_store(g_gen_apply_data, slot, concrete)
+                cell_store(g_solve_used, i * 8, 1)
+                found = 1
+            else:
+                if type_compat_strict(concrete, cur) != 1:
+                    conflict = 1
+                found = 1
+        i = i + 1
+    if conflict != 0:
+        return false
+    return found != 0
+
+fn solve_finalize():
+    i : ., mut = 0
+    loop:
+        if i >= g_solve_count:
+            return
+        row := cell_load(g_solve_rows, i * 8)
+        slot := cell_load(g_solve_slots, i * 8)
+        cur := cell_load(g_gen_apply_data, slot)
+        if solve_is_var(cur) != 0:
+            if cell_load(g_solve_used, i * 8) != 0:
+                check_error(EC_TG_BOUND, "type variable of an omitted generic field is still unbound at scope end", cell_load(g_solve_lines, i * 8), cell_load(g_solve_cols, i * 8))
+            else:
+                // An unused type-variable field is a witness. A concrete unit
+                // binding keeps unbound rows out of the .ccr TYPE segment.
+                cell_store(g_gen_apply_data, slot, TI_UNIT)
+        i = i + 1
+
+fn rel_grow(needed: int):
+    if needed <= g_rel_cap:
+        return
+    nc : ., mut = g_rel_cap * 2
+    if nc < 32:
+        nc = 32
+    if nc < needed:
+        nc = needed + 32
+    a := alloc(nc * 8)
+    cell_copy(g_rel_fi, g_rel_cap * 8, a)
+    g_rel_fi = a
+    b := alloc(nc * 8)
+    cell_copy(g_rel_struct, g_rel_cap * 8, b)
+    g_rel_struct = b
+    c := alloc(nc * 8)
+    cell_copy(g_rel_field, g_rel_cap * 8, c)
+    g_rel_field = c
+    d := alloc(nc * 8)
+    cell_copy(g_rel_val, g_rel_cap * 8, d)
+    g_rel_val = d
+    g_rel_cap = nc
+
+fn rel_add(fi: int, struct_ni: int, field_idx: int, val_ti: int):
+    if fi < 0 || struct_ni < 0 || field_idx < 0 || val_ti < 0:
+        return
+    rel_grow(g_rel_count + 1)
+    n := g_rel_count
+    cell_store(g_rel_fi, n * 8, fi)
+    cell_store(g_rel_struct, n * 8, struct_ni)
+    cell_store(g_rel_field, n * 8, field_idx)
+    cell_store(g_rel_val, n * 8, val_ti)
+    g_rel_count = n + 1
+
+fn call_recv_grow(needed: int):
+    if needed <= g_call_recv_cap:
+        return
+    nc : ., mut = g_call_recv_cap * 2
+    if nc < 32:
+        nc = 32
+    if nc < needed:
+        nc = needed + 32
+    nb := alloc(nc * 8)
+    i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        cell_store(nb, i * 8, -1)
+        i = i + 1
+    cell_copy(g_call_recv, g_call_recv_cap * 8, nb)
+    g_call_recv = nb
+    g_call_recv_cap = nc
+
+fn call_recv_set(node: int, ti: int):
+    if node < 0:
+        return
+    call_recv_grow(node + 1)
+    cell_store(g_call_recv, node * 8, ti)
+
+fn call_recv_get(node: int) -> int:
+    if node < 0 || node >= g_call_recv_cap:
+        return -1
+    return cell_load(g_call_recv, node * 8)
+
+// Apply the template's `self.field = param` relations to a concrete receiver
+// application. `g_gen_map` already holds the method's argument bindings.
+fn rel_apply(fi: int, recv_ti: int, line: int, col: int):
+    if fi < 0 || recv_ti < 0:
+        return
+    if get_type_kind(recv_ti) != TYP_GENERIC_APPLY:
+        return
+    base := get_type_data(recv_ti)
+    if get_type_kind(base) != TYP_NAMED:
+        return
+    struct_ni := get_type_data(base)
+    si := find_struct(struct_ni)
+    if si < 0:
+        return
+    start := get_type_extra(recv_ti)
+    cnt := cell_load(g_gen_apply_data, start * 8)
+    i : ., mut = 0
+    loop:
+        if i >= g_rel_count:
+            return
+        if cell_load(g_rel_fi, i * 8) == fi && cell_load(g_rel_struct, i * 8) == struct_ni:
+            fld := cell_load(g_rel_field, i * 8)
+            v : ., mut = cell_load(g_rel_val, i * 8)
+            if get_type_kind(v) == TYP_GENERIC_PARAM:
+                vn := get_type_data(v)
+                found : ., mut = -1
+                mi : ., mut = 0
+                loop:
+                    if mi >= g_gen_map_count:
+                        break
+                    if cell_load(g_gen_map_names, mi * 8) == vn:
+                        found = cell_load(g_gen_map_types, mi * 8)
+                        break
+                    mi = mi + 1
+                v = found
+            if v >= 0 && fld < si_field_count(si):
+                tn := si_field_type_node(si, fld)
+                gi : ., mut = -1
+                if tn >= 0 && ast_kind(tn) == EXPR_IDENT:
+                    gname := ast_int_val(tn)
+                    g : ., mut = 0
+                    loop:
+                        if g >= si_generic_count(si):
+                            break
+                        if si_generic_name(si, g) == gname:
+                            gi = g
+                            break
+                        g = g + 1
+                if gi >= 0 && gi < cnt:
+                    slot := (start + 1 + gi) * 8
+                    cur := cell_load(g_gen_apply_data, slot)
+                    if solve_is_var(cur) != 0:
+                        if !solve_bind(cur, v):
+                            check_error(EC_TG_BOUND, "generic field solution conflicts with an earlier solution", line, col)
+                    else:
+                        if type_compat_strict(v, cur) != 1:
+                            check_error(EC_TG_BOUND, "generic field solution conflicts with an earlier solution", line, col)
+        i = i + 1
+
 fn unify_types(pattern: int, concrete: int) -> bool:
     if pattern == concrete:
         return true
+    if solve_is_var(pattern) != 0:
+        return solve_bind(pattern, concrete)
     pk := get_type_kind(pattern)
     ck := get_type_kind(concrete)
     if pk < 0 || ck < 0:
@@ -4244,7 +4562,10 @@ fn infer_gen_call_recv(fi: int, call_node: int, first_arg: int, arg_count: int, 
             pn = pn + 1
         pi = 1
     loop:
-        if pi >= param_count || pi >= arg_count:
+        ai_guard : ., mut = pi
+        if recv_ti >= 0:
+            ai_guard = pi - 1
+        if pi >= param_count || ai_guard >= arg_count:
             break
         if pn < 0 || an < 0:
             break
@@ -4290,6 +4611,13 @@ fn infer_gen_call_recv(fi: int, call_node: int, first_arg: int, arg_count: int, 
                 break
             pn = pn + 1
         an = ast_b(an)  // next EXPR_ARG
+
+    if recv_ti >= 0:
+        recv_base : ., mut = recv_ti
+        if get_type_kind(recv_base) == TYP_REF:
+            recv_base = get_type_data(recv_base)
+        call_recv_set(call_node, recv_base)
+        rel_apply(fi, recv_base, ast_line(call_node), ast_col(call_node))
 
     // Check generic constraints (if any)
     gc := fi_generic_count(fi)
@@ -4370,6 +4698,8 @@ fn infer_gen_call_recv(fi: int, call_node: int, first_arg: int, arg_count: int, 
                                 rr = ty_code_to_ti(fi_return_type(fi))
                             if rr >= 0:
                                 tv_b = substitute_return_type(rr)
+                if tv_b >= 0:
+                    tv_b = solve_resolve(tv_b)
                 cell_store(g_gen_binds, (bstart + 1 + gi_b) * 8, tv_b)
                 gi_b = gi_b + 1
             g_gen_binds_count = bstart + 1 + gc_b
@@ -6325,7 +6655,9 @@ fn infer_expr(node: int) -> int:
                                         if si_generic_name(si, gpi) == ft_name_idx:
                                                 // Use the corresponding arg from the generic apply
                                             if gpi < ga_count:
-                                                return cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
+                                                fti := cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
+                                                solve_mark_used(fti)
+                                                return solve_resolve(fti)
                                             break
                                         gpi = gpi + 1
                             return res_type_node(ft_node)
@@ -6433,6 +6765,16 @@ fn infer_expr(node: int) -> int:
                 check_error(EC_TA_IMMUTABLE, "Cannot assign to immutable variable '" + istr_get(ast_int_val(target)) + "'", ast_line(node), ast_col(node))
         tt := infer_expr(target)
         vt := infer_expr(val)
+        // A generic method body often relates a receiver field to a parameter:
+        // `self.values = v`. The template defers the assignment, but the
+        // relation is recorded so a call site can solve the receiver's type
+        // variables from the bound argument type.
+        if ast_kind(target) == EXPR_FIELD:
+            objn := ast_a(target)
+            if objn >= 0 && ast_kind(objn) == EXPR_IDENT:
+                if str_eq(istr_get(ast_int_val(objn)), "self") != 0:
+                    if cur_fn_is_generic() != 0:
+                        rel_add(g_checker_current_fi, ast_c(target), ast_data(target), vt)
         if tt == TI_DYN:
             // dyn assignment: track the RHS type, skip strict type check
             if ast_kind(target) == EXPR_IDENT:
@@ -6444,10 +6786,16 @@ fn infer_expr(node: int) -> int:
             // Generic templates defer assignment compatibility to the
             // monomorphized instance, where element/field types are concrete.
             if cur_fn_is_generic() == 0:
-                // 参序归一：赋值 = 目标(tt) ← 值(vt)，因此源 = vt，目标 = tt
-                compat := type_compat_strict(vt, tt)
-                if compat != 1:
-                    diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node))
+                if ti_has_solver(tt) != 0:
+                    // The target still contains a solver variable: this write is
+                    // a constraint, not a strict compatibility check.
+                    if !unify_types(tt, vt):
+                        check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node))
+                else:
+                    // 参序归一：赋值 = 目标(tt) ← 值(vt)，因此源 = vt，目标 = tt
+                    compat := type_compat_strict(vt, tt)
+                    if compat != 1:
+                        diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node))
         return vt
 
     if ast_kind(node) == EXPR_STRUCT:
@@ -6606,14 +6954,15 @@ fn infer_expr(node: int) -> int:
                             bind = cell_load(g_gen_map_types, mi * 8)
                             break
                         mi = mi + 1
-                    // A missing binding is a witness candidate. Bind it to
-                    // unit so the application is fully instantiated: unbound
-                    // type variables must not enter the .ccr TYPE segment. If
-                    // the field turns out to be used, IR generation reports the
-                    // unbound construction instead of laying it out.
+                    // A missing binding becomes a deferred solver variable.
+                    // Later use points (field projection/assignment, method
+                    // calls) bind it; aliases share the same apply-data slot.
                     if bind < 0:
-                        bind = TI_UNIT
-                    cell_store(g_gen_apply_data, (ds + 1 + found) * 8, bind)
+                        bind = solve_new(ast_line(node), ast_col(node))
+                    slot := (ds + 1 + found) * 8
+                    cell_store(g_gen_apply_data, slot, bind)
+                    if solve_is_var(bind) != 0:
+                        solve_register_slot(bind, slot, ast_line(node), ast_col(node))
                     found = found + 1
                     g = g + 1
                 cell_store(g_gen_apply_data, ds * 8, found)
@@ -7061,6 +7410,24 @@ fn check_all():
     g_gen_apply_data_cap = 0
     g_gen_param_count = 0
     g_gen_param_cap = 0
+    // Solver and method-relation state is per check. LSP re-runs check_all on
+    // every request; stale rows would point into the old apply-data table.
+    g_solve_rows = ""
+    g_solve_slots = ""
+    g_solve_used = ""
+    g_solve_lines = ""
+    g_solve_cols = ""
+    g_solve_count = 0
+    g_solve_cap = 0
+    g_solve_seq = 0
+    g_rel_fi = ""
+    g_rel_struct = ""
+    g_rel_field = ""
+    g_rel_val = ""
+    g_rel_count = 0
+    g_rel_cap = 0
+    g_call_recv = ""
+    g_call_recv_cap = 0
     g_dyn_type_set_count = 0
     g_dyn_type_set_cap = 0
     g_dyn_type_sets = ""
@@ -7141,6 +7508,11 @@ fn check_all():
     // witnesses. It must run after every function body and impl method has been
     // checked, because a single read or write makes the field a data field.
     mark_witness_fields()
+
+    // Every live solver variable must have a solution by the end of checking.
+    // Unused ones belong to witness fields and are normalized to unit so they
+    // never enter the .ccr TYPE segment.
+    solve_finalize()
 
 // ─── 规约标注（`#check` / `#ensure`）────────────────────────────────────
 // 约束检查边界：

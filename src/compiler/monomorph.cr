@@ -1331,43 +1331,52 @@ fn gen_raise_instance_constraint(func_ni: int, line: int, col: int):
 // solution is recomputed from the current tables, so swapping an impl cannot
 // reuse a body specialized against the old one.
 // Returns the specialized function index, or -1 if not found.
-fn gen_find_cached(func_ni: int, type_args: string, bstart: int) -> int:
+fn gen_recv_key(type_args: string, recv_ti: int) -> string:
+    if recv_ti < 0:
+        return type_args
+    return type_args + "|R|" + inst_key_of_ti(recv_ti)
+
+fn gen_find_cached_recv(func_ni: int, type_args: string, bstart: int, recv_ti: int) -> int:
     gen_build_subst(func_ni, type_args)
     gen_build_subst_tis(func_ni, bstart)
     sol := gen_compute_solution_key(func_ni)
     if g_gen_solution_ok == 0:
         return -1
+    key_args := gen_recv_key(type_args, recv_ti)
     i : ., mut = 0
     loop:
         if i >= g_gen_instance_count:
             break
         if cell_load(g_gen_instances, i * GEN_INSTANCE_REC) == func_ni:
             cached_args_ni := cell_load(g_gen_instances, i * GEN_INSTANCE_REC + 8)
-            if istr_eq(cached_args_ni, type_args) != 0:
+            if istr_eq(cached_args_ni, key_args) != 0:
                 cached_sol := cell_load_str(g_gen_instances, i * GEN_INSTANCE_REC + 24)
                 if str_eq(cached_sol, sol) != 0:
                     return cell_load(g_gen_instances, i * GEN_INSTANCE_REC + 16)
         i = i + 1
     return -1
 
+fn gen_find_cached(func_ni: int, type_args: string, bstart: int) -> int:
+    return gen_find_cached_recv(func_ni, type_args, bstart, -1)
+
 // Find or create a specialized instance of a generic function.
 // func_ni: the original generic FuncInfo index
 // type_args: comma-separated concrete type names (e.g. "int,string")
 // Returns the specialized function index.
 fn gen_find_or_create(func_ni: int, type_args: string) -> int:
-    cached := gen_find_cached(func_ni, type_args, -1)
-    if cached >= 0:
-        return cached
-    return gen_create_instance(func_ni, type_args, -1)
+    return gen_find_or_create_bind_recv(func_ni, type_args, -1, -1)
 
 // Find or create an instance with a call-site binding block. ir_gen supplies the
 // canonical key and the block start. The key is the joined structural type string,
 // so different instances get different keys.
 fn gen_find_or_create_bind(func_ni: int, type_args: string, bstart: int) -> int:
-    cached := gen_find_cached(func_ni, type_args, bstart)
+    return gen_find_or_create_bind_recv(func_ni, type_args, bstart, -1)
+
+fn gen_find_or_create_bind_recv(func_ni: int, type_args: string, bstart: int, recv_ti: int) -> int:
+    cached := gen_find_cached_recv(func_ni, type_args, bstart, recv_ti)
     if cached >= 0:
         return cached
-    return gen_create_instance(func_ni, type_args, bstart)
+    return gen_create_instance_recv(func_ni, type_args, bstart, recv_ti)
 
 // Create a specialized copy of a generic function:
 //   1. build generic-parameter to concrete-type substitutions;
@@ -1376,6 +1385,9 @@ fn gen_find_or_create_bind(func_ni: int, type_args: string, bstart: int) -> int:
 //   4. cache the new function index;
 //   5. return the new index.
 fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
+    return gen_create_instance_recv(func_ni, type_args, bstart, -1)
+
+fn gen_create_instance_recv(func_ni: int, type_args: string, bstart: int, recv_ti: int) -> int:
     // Build substitution mappings. The name table is the fallback; under canonical
     // keys its names are not declaration names for composite types, so it is used
     // only when the type-row path fails. The type-row table is the preferred path
@@ -1398,9 +1410,10 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
         gen_raise_instance_constraint(func_ni, ast_line(orig_fn_node), ast_col(orig_fn_node))
         return -1
 
-    // Re-entering the same (generic, type args, solution) while it is being
-    // created has no structural decrease. Fail closed instead of recursing.
-    create_key := int_str(func_ni) + "|" + type_args + "|" + sol_key
+    // Re-entering the same (generic, type args, receiver, solution) while it is
+    // being created has no structural decrease. Fail closed instead of recursing.
+    key_args := gen_recv_key(type_args, recv_ti)
+    create_key := int_str(func_ni) + "|" + key_args + "|" + sol_key
     if gen_creating_contains(create_key) != 0:
         check_error(EC_TG_NONTERM, "Non-terminating generic instance chain for '" + istr_get(fi_name(func_ni)) + "[" + type_args + "]'", ast_line(orig_fn_node), ast_col(orig_fn_node))
         return -1
@@ -1443,6 +1456,10 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
                 nd2 : ., mut = -1
                 if nd >= 0:
                     nd2 = gen_clone_tree(nd)
+                if ast_int_val(opn) > 0 && recv_ti >= 0:
+                    recv_node := inst_type_node_of_ti(recv_ti)
+                    if recv_node >= 0:
+                        nd2 = recv_node
                 ntv : ., mut = 0
                 if nd2 >= 0 && ast_kind(nd2) == 0:
                     ntv = ast_type_val(nd2)
@@ -1457,7 +1474,7 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
 
     // Compute mangled name: "orig_name[type_args]" for unique identification
     orig_name := istr_get(fi_name(func_ni))
-    mangled_name : ., mut = orig_name + "[" + type_args + "]"
+    mangled_name : ., mut = orig_name + "[" + key_args + "]"
     mangled_ni := str_intern(mangled_name)
     // Update the cloned AST node's name to the mangled name
     ast_set_a(new_fn_node, mangled_ni)
@@ -1471,7 +1488,7 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     fi_set_name(new_fi, mangled_ni)
     parent_link := func_link(func_ni)
     if parent_link != fi_name(func_ni):
-        func_set_link(new_fi, str_intern(istr_get(parent_link) + "[" + type_args + "]"))
+        func_set_link(new_fi, str_intern(istr_get(parent_link) + "[" + key_args + "]"))
     else:
         func_set_link(new_fi, mangled_ni)
 
@@ -1506,7 +1523,7 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     check_func(new_fi)
 
     // 4. Cache the new function together with its impl solution identity.
-    type_args_ni := str_intern(type_args)
+    type_args_ni := str_intern(key_args)
     grow_gen_instances(g_gen_instance_count + 1)
     cell_store(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC, func_ni)
     cell_store(g_gen_instances, g_gen_instance_count * GEN_INSTANCE_REC + 8, type_args_ni)
