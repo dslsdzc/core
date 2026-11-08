@@ -72,6 +72,7 @@ python3 tests/selfhost/test_v4_for_sequence.py # V4 序列迭代：数组/切片
 python3 tests/selfhost/test_v4_auto_constraint.py # V4 自动约束推断：`fn f(a): a.show()` 从方法名反推接口约束；调用未实现接口 -> TG02；顺序无关；3 例
 python3 tests/selfhost/test_v4_no_generic_syntax.py # V3 显式泛型语法删除：`fn f[T]` / `struct S[T]` / `Box[int]` / `interface I[T]` 均拒绝；数组/切片/下标保留；5 例
 python3 tests/selfhost/test_v4_return_inference.py # V4 返回推断：`fn identity(x): return x` / 索引返回 / 无参返回；4 例
+python3 tests/selfhost/test_solver_propagation.py # deferred type-variable solver: use-point binding, immutable rebinding, alias propagation, method-body relations, scope-end unbound check, witness fallback; 7 cases
 python3 tests/selfhost/test_layout_semantics.py # size(T) / packed named struct / align(n) / witness fields / bool·char arrays / tuples / unbound type variable; 11 cases
 python3 tests/selfhost/test_v4_field_inference.py # V4 字段投影：模板宽松 + monomorph 实例重查；正例/缺方法/错 struct；3 例
 python3 tests/selfhost/test_v4_generic_enum.py   # V4 泛型 enum：payload `.`，int/string 两实例；2 例

@@ -4393,12 +4393,15 @@ fn gen_expr(node: int) -> int:
                         else:
                             type_args = type_args + "int"
                         ai = ai + 1
-                // Find or create specialized function instance
+                // Find or create specialized function instance. A method
+                // instance also carries its receiver type so `self` field types
+                // are concrete inside the specialized body.
+                recv_ti := call_recv_get(node)
                 spec_ni : ., mut = -1
                 if bstart >= 0:
-                    spec_ni = gen_find_or_create_bind(gen_fi, type_args, bstart)
+                    spec_ni = gen_find_or_create_bind_recv(gen_fi, type_args, bstart, recv_ti)
                 else:
-                    spec_ni = gen_find_or_create(gen_fi, type_args)
+                    spec_ni = gen_find_or_create_bind_recv(gen_fi, type_args, -1, recv_ti)
                 if spec_ni >= 0:
                     func_ni = func_link(spec_ni)
                     // 泛型声明的形参是 `T?`（inner = 泛型参数 -> 条件为假）-> 上面的环
@@ -6214,36 +6217,6 @@ fn gen_expr(node: int) -> int:
                     emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0)
                 fn2 = fn2 + 1
             fi = fi + 1
-        // A construction may omit a type-variable field only when that field is
-        // a witness. If it is read anywhere, the whole-program pass cleared the
-        // witness mark and the type variable has no binding at this point.
-        if si >= 0:
-            fc0 := si_field_count(si)
-            fi0 : ., mut = 0
-            loop:
-                if fi0 >= fc0:
-                    break
-                if si_field_witness(si, fi0) == 0:
-                    tn0 := si_field_type_node(si, fi0)
-                    is_gp : ., mut = 0
-                    if tn0 >= 0 && ast_kind(tn0) == EXPR_IDENT:
-                        if is_struct_generic(si, ast_int_val(tn0)) != 0:
-                            is_gp = 1
-                    if is_gp != 0:
-                        present : ., mut = 0
-                        fn3 : ., mut = ast_b(node)
-                        k3 : ., mut = 0
-                        loop:
-                            if k3 >= ast_c(node):
-                                break
-                            if fn3 >= 0:
-                                if struct_field_index_by_name(si, ast_b(fn3)) == fi0:
-                                    present = 1
-                            k3 = k3 + 1
-                            fn3 = fn3 + 1
-                        if present == 0:
-                            check_error(EC_TG_BOUND, "cannot instantiate " + istr_get(name_ni) + ": type variable of field '" + istr_get(si_field_name(si, fi0)) + "' is unbound", ast_line(node), ast_col(node))
-                fi0 = fi0 + 1
         return s
 
     // Array literal
